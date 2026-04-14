@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import GoalSettingForm from "@/components/GoalSettingForm";
@@ -17,45 +18,12 @@ const TrainingPlanWidget = dynamic(() => import("@/components/TrainingPlanWidget
   ssr: false,
 });
 
-const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
-  loading: () => <div className="h-80 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
-  ssr: false,
-});
-
-const RaceDashboard = dynamic(() => import("@/components/RaceDashboard"), {
-  loading: () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <div className="h-64 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />
-      <div className="h-64 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />
-    </div>
-  ),
-  ssr: false,
-});
-
-const TrendChart = dynamic(() => import("@/components/TrendChart"), {
-  loading: () => <div className="h-64 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
-  ssr: false,
-});
-
-const GoalHistoryPanel = dynamic(() => import("@/components/GoalHistoryPanel"), {
-  loading: () => (
-    <div className="space-y-5">
-      <div className="h-56 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />
-      <div className="h-40 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />
-    </div>
-  ),
-  ssr: false,
-});
-
 export default function Dashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isStravaConnected, setIsStravaConnected] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [period, setPeriod] = useState<"weekly" | "monthly">("monthly");
-  const [showFitnessChart, setShowFitnessChart] = useState(false);
-  const [showRaceAnalysis, setShowRaceAnalysis] = useState(false);
-  const [showTrend, setShowTrend] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [activityMonth, setActivityMonth] = useState(new Date().getMonth());
 
@@ -184,8 +152,8 @@ export default function Dashboard() {
                 <h2 className="text-lg font-bold text-white">跑步记录</h2>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => setActivityMonth(m => Math.min(m + 1, new Date().getMonth()))}
-                    disabled={activityMonth >= new Date().getMonth()}
+                    onClick={() => setActivityMonth(m => Math.max(m - 1, 0))}
+                    disabled={activityMonth <= 0}
                     className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
                   >
                     <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
@@ -194,8 +162,8 @@ export default function Dashboard() {
                     {new Date().getFullYear()}年{activityMonth + 1}月
                   </span>
                   <button
-                    onClick={() => setActivityMonth(m => Math.max(m - 1, 0))}
-                    disabled={activityMonth <= 0}
+                    onClick={() => setActivityMonth(m => Math.min(m + 1, new Date().getMonth()))}
+                    disabled={activityMonth >= new Date().getMonth()}
                     className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
                   >
                     <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
@@ -209,68 +177,29 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Fitness Trend — on-demand only */}
+        {/* Analysis entry — link to dedicated page */}
         {isStravaConnected && user && (
-          <section>
-            {!showFitnessChart ? (
-              <button
-                onClick={() => setShowFitnessChart(true)}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/30 text-zinc-400 hover:text-white rounded-2xl transition-all flex items-center justify-center gap-3 group"
-              >
-                <svg className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="font-semibold text-sm">查看体能 / 疲劳 / 状况指数 (CTL · ATL · TSB)</span>
-              </button>
-            ) : (
-              <div className="min-h-[400px]">
-                <FitnessChart uid={user.uid} />
+          <Link
+            href="/dashboard/analysis"
+            className="block w-full py-5 bg-gradient-to-r from-white/5 to-white/[0.02] hover:from-white/10 hover:to-white/5 border border-white/10 hover:border-[#FC4C02]/30 rounded-2xl transition-all group"
+          >
+            <div className="flex items-center justify-center gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center group-hover:bg-blue-500/25 transition-colors">
+                  <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm">深度分析</p>
+                  <p className="text-zinc-500 text-xs">体能趋势 · 跑力诊断 · 月度统计 · 目标回顾</p>
+                </div>
               </div>
-            )}
-          </section>
-        )}
-
-        {/* Race Analysis + Training Zones — auto load, non-blocking */}
-        {isStravaConnected && user && (
-          <section>
-            {!showRaceAnalysis ? (
-              <button
-                onClick={() => setShowRaceAnalysis(true)}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-green-500/30 text-zinc-400 hover:text-white rounded-2xl transition-all flex items-center justify-center gap-3 group"
-              >
-                <svg className="w-5 h-5 text-green-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="font-semibold text-sm">查看跑力分析：比赛预测 + 训练区间 (VDOT)</span>
-              </button>
-            ) : (
-              <RaceDashboard uid={user.uid} />
-            )}
-          </section>
-        )}
-
-        {/* Monthly Trend Chart */}
-        {isStravaConnected && user && (
-          <section>
-            {!showTrend ? (
-              <button
-                onClick={() => setShowTrend(true)}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-purple-500/30 text-zinc-400 hover:text-white rounded-2xl transition-all flex items-center justify-center gap-3 group"
-              >
-                <svg className="w-5 h-5 text-purple-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                </svg>
-                <span className="font-semibold text-sm">查看月度跑量趋势（近 6 个月）</span>
-              </button>
-            ) : (
-              <TrendChart uid={user.uid} />
-            )}
-          </section>
-        )}
-
-        {/* Goal History + Annual Summary */}
-        {isStravaConnected && user && (
-          <GoalHistoryPanel uid={user.uid} />
+              <svg className="w-5 h-5 text-zinc-500 group-hover:text-[#FC4C02] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
         )}
 
         {/* Dash Grid: Goal Setting + AI Coach */}
