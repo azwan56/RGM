@@ -65,12 +65,13 @@ def _build_runs_str(acts: list) -> str:
     return " | ".join(lines)
 
 _FALLBACK = {
-    "status": "Keep Going",
-    "summary": "Great consistency! Focus on form and build gradually.",
+    "status": "继续加油 💪",
+    "summary": "你的训练保持了很好的一致性！继续专注跑姿，循序渐进地提升吧。",
+    "encouragement": "每一步都是进步，坚持就是胜利！",
     "actionable_tips": [
-        "Keep 80% of runs at an easy, conversational pace.",
-        "Hydrate well and prioritize sleep for recovery.",
-        "Increase weekly mileage by no more than 10%.",
+        "80% 的跑步保持轻松配速，能聊天的节奏最好",
+        "注意补水和睡眠，恢复和训练同样重要",
+        "每周跑量增幅不超过 10%，循序渐进",
     ]
 }
 
@@ -79,51 +80,88 @@ _FALLBACK = {
 @router.post("/analyze")
 async def generate_coach_feedback(req: CoachRequest):
     """
-    Returns structured AI coaching feedback.
-    Parallel Firestore reads + new google-genai SDK.
+    Returns structured AI coaching feedback in Chinese.
+    Parallel Firestore reads + personalized, encouraging tone.
     """
     loop = asyncio.get_event_loop()
-    stats, goal_data, activities = await asyncio.gather(
+    stats, goal_data, activities, profile = await asyncio.gather(
         loop.run_in_executor(None, _fetch_leaderboard, req.uid),
         loop.run_in_executor(None, _fetch_goal, req.uid),
         loop.run_in_executor(None, _fetch_recent_activities, req.uid),
+        loop.run_in_executor(None, _fetch_profile, req.uid),
     )
 
     if not stats:
         return {"feedback": {
-            "status": "No Data",
-            "summary": "Sync your Strava data to get personalised coaching!",
+            "status": "等待数据 📊",
+            "summary": "同步你的 Strava 数据，即可获得 AI 教练的专属建议！",
+            "encouragement": "跑步之旅从第一步开始 🏃",
             "actionable_tips": []
         }}
 
-    goal_str = "No specific target set."
+    # Build rich context for personalized coaching
+    goal_str = "暂未设定具体目标"
     if goal_data:
+        period_cn = {"weekly": "每周", "monthly": "每月"}.get(goal_data.get("period", "monthly"), "每月")
         goal_str = (
-            f"Target {goal_data.get('target_distance',0)} km/"
-            f"{goal_data.get('period','monthly')}, "
-            f"pace goal: {goal_data.get('target_pace','N/A')}."
+            f"目标 {goal_data.get('target_distance', 0)} 公里/{period_cn}，"
+            f"配速目标：{goal_data.get('target_pace', '未设')}"
         )
 
+    # Profile context
+    runner_name = (
+        profile.get("display_name") or profile.get("strava_name")
+        or profile.get("email", "").split("@")[0] or "跑者"
+    ) if profile else "跑者"
+    training_goal = profile.get("training_goal", "fitness") if profile else "fitness"
+    years_running = profile.get("years_running", 0) if profile else 0
+    age = profile.get("age", "") if profile else ""
+
+    goal_cn = {
+        "fitness": "健康健身", "5k": "5K 突破", "10k": "10K 提升",
+        "half": "半马训练", "full": "全马备赛", "ultra": "超马挑战",
+    }.get(training_goal, training_goal)
+
     runs_str = _build_runs_str(activities)
+    completion_pct = stats.get('goal_completion_percentage', 0)
 
     prompt = (
-        "You are a professional running coach. Reply with ONLY a JSON object, no markdown.\n"
-        f"Athlete overview ({stats.get('period','monthly')}): "
-        f"{stats.get('total_distance_km',0)} km total, avg pace {stats.get('avg_pace','?')}/km, "
-        f"avg HR {stats.get('avg_heart_rate',0)} bpm, goal {stats.get('goal_completion_percentage',0)}% done. "
-        f"Goal: {goal_str}\n"
-        f"Recent runs: {runs_str}\n\n"
-        "Return JSON with exactly these keys:\n"
-        '{"status":"<one of: Excellent|Good Base|Pacing Issue|Needs Rest|Keep Going>",'
-        '"summary":"<2 concise sentences>",'
-        '"actionable_tips":["tip1","tip2","tip3"]}'
+        "你是一位热情、专业、善于鼓励的中文跑步教练。"
+        "请根据以下跑者信息，给出温暖、正面、具有激励性的个性化训练建议。"
+        "回复必须是纯 JSON，不含 markdown 标记。\n\n"
+        f"【跑者档案】\n"
+        f"- 称呼：{runner_name}\n"
+        f"- 年龄：{age or '未知'}\n"
+        f"- 跑龄：{years_running} 年\n"
+        f"- 训练目标：{goal_cn}\n"
+        f"- 当前目标：{goal_str}\n\n"
+        f"【本期训练数据（{stats.get('period', 'monthly')}）】\n"
+        f"- 总里程：{stats.get('total_distance_km', 0)} 公里\n"
+        f"- 平均配速：{stats.get('avg_pace', '?')}/km\n"
+        f"- 平均心率：{stats.get('avg_heart_rate', 0)} bpm\n"
+        f"- 跑步次数：{stats.get('run_count', 0)} 次\n"
+        f"- 目标完成度：{completion_pct}%\n\n"
+        f"【近期跑步记录】\n{runs_str}\n\n"
+        "【输出要求】\n"
+        "全部使用中文。语气要温暖、正面、充满鼓励。"
+        "根据跑者的实际数据给出有针对性的分析，不要泛泛而谈。"
+        "先肯定跑者的付出和进步，再给出改进建议。\n\n"
+        "返回 JSON 格式如下：\n"
+        '{\n'
+        '  "status": "<状态标签，如：状态出色 🔥|稳步提升 📈|基础扎实 💪|建议休息 😴|继续加油 🏃>",\n'
+        '  "summary": "<2-3 句话的训练总结，先肯定再分析，温暖鼓励的语气>",\n'
+        '  "encouragement": "<一句短小有力的鼓励金句，像教练对你说的话>",\n'
+        '  "actionable_tips": ["建议1", "建议2", "建议3"]\n'
+        '}\n\n'
+        "建议要具体、可操作，结合跑者的配速/心率/跑量数据给出。"
     )
 
     if not _api_key:
         return {"feedback": {
-            "status": "Offline",
-            "summary": "AI Coach is offline – Gemini API key not configured.",
-            "actionable_tips": ["Keep easy runs easy.", "Consistency beats intensity.", "Rest is part of training."]
+            "status": "离线模式 🔌",
+            "summary": "AI 教练暂时离线，但你的努力不会被辜负！",
+            "encouragement": "坚持训练，胜利属于每一个不放弃的人！",
+            "actionable_tips": ["轻松跑保持能聊天的配速", "坚持比速度更重要", "休息也是训练的一部分"]
         }}
 
     try:
@@ -131,13 +169,13 @@ async def generate_coach_feedback(req: CoachRequest):
         client = _get_client()
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            temperature=0.4,
-            max_output_tokens=512,
+            temperature=0.6,
+            max_output_tokens=800,
         )
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=config,
             )
@@ -152,7 +190,7 @@ async def generate_coach_feedback(req: CoachRequest):
         print(f"Coach generation failed: {e}")
         return {"feedback": {
             **_FALLBACK,
-            "summary": f"Distance so far: {stats.get('total_distance_km',0)} km. Keep it up!"
+            "summary": f"{runner_name}，你已经跑了 {stats.get('total_distance_km', 0)} 公里，非常棒！继续保持！"
         }}
 
 

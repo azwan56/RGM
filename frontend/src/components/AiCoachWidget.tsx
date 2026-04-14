@@ -6,6 +6,7 @@ import axios from "@/lib/apiClient";
 interface CoachFeedback {
   status: string;
   summary: string;
+  encouragement?: string;
   actionable_tips: string[];
 }
 
@@ -45,7 +46,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         }
       } catch (error: any) {
         console.error("Coach API error:", error?.message || error);
-        setErrorStr("Please connect Strava and sync your data first to receive AI coaching.");
+        setErrorStr("请先连接 Strava 并同步数据，即可获得 AI 教练的专属建议。");
       }
       setLoading(false);
     };
@@ -68,18 +69,19 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         }
      } catch (err: any) {
         console.error("Sync API error:", err?.message || err);
-        setErrorStr("Failed to sync. Make sure Strava is connected and network is stable.");
+        setErrorStr("同步失败，请确认 Strava 已连接且网络稳定。");
      }
      setLoading(false);
   };
 
   // Determine badge color based on status
   const getBadgeColor = (status: string) => {
-    const s = status.toLowerCase();
-    if (s.includes("excellent") || s.includes("great") || s.includes("keep going") || s.includes("good")) return "bg-green-500/20 text-green-400 border-green-500/30";
-    if (s.includes("rest") || s.includes("recovery") || s.includes("offline")) return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30";
-    if (s.includes("issue") || s.includes("warning") || s.includes("too high")) return "bg-red-500/20 text-red-500 border-red-500/30";
-    return "bg-blue-500/20 text-blue-400 border-blue-500/30"; // default
+    const s = status;
+    if (s.includes("出色") || s.includes("🔥")) return "bg-green-500/20 text-green-400 border-green-500/30";
+    if (s.includes("提升") || s.includes("📈") || s.includes("扎实") || s.includes("💪")) return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    if (s.includes("休息") || s.includes("😴") || s.includes("离线")) return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30";
+    if (s.includes("加油") || s.includes("🏃")) return "bg-[#FC4C02]/20 text-[#FC4C02] border-[#FC4C02]/30";
+    return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
   };
 
   return (
@@ -123,8 +125,17 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
       ) : feedback ? (
         // Rich Content
         <div className="flex-1 flex flex-col space-y-5 z-10 relative">
+          {/* Encouragement Banner */}
+          {feedback.encouragement && (
+            <div className="bg-gradient-to-r from-[#FC4C02]/10 to-orange-500/5 border border-[#FC4C02]/20 p-3.5 rounded-2xl">
+              <p className="text-[#FC4C02] text-sm font-semibold text-center">
+                {feedback.encouragement}
+              </p>
+            </div>
+          )}
+
           {/* Summary Quote */}
-          <div className="relative bg-black/20 border border-white/5 p-4 rounded-2xl text-zinc-300 text-sm leading-relaxed italic">
+          <div className="relative bg-black/20 border border-white/5 p-4 rounded-2xl text-zinc-300 text-sm leading-relaxed">
             <svg className="w-6 h-6 text-white/10 absolute -top-2 -left-2" fill="currentColor" viewBox="0 0 24 24">
               <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
             </svg>
@@ -133,11 +144,11 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
 
           {/* Actionable Tips */}
           <div className="space-y-2.5 flex-1">
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">ACTIONABLE TIPS</h4>
+            <h4 className="text-xs font-semibold text-zinc-500 tracking-wider mb-3">📋 训练建议</h4>
             {feedback.actionable_tips.map((tip, idx) => (
               <div key={idx} className="flex gap-3 items-start group">
-                <div className="w-5 h-5 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:bg-blue-500/20 transition-colors">
-                  <svg className="w-3 h-3 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                <div className="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:bg-emerald-500/20 transition-colors">
+                  <svg className="w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
@@ -164,7 +175,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           )}
-          {loading ? "Analyzing..." : "Sync & Refresh Analysis"}
+          {loading ? "分析中..." : "同步数据并刷新分析"}
         </button>
       </div>
     </div>
