@@ -13,6 +13,8 @@ interface VdotAnalysis {
   max_aerobic_vel: number;
   scatter: { hrr: number; gap: number }[];
   regression_line: { x: number[]; y: number[] };
+  error?: string;
+  low_confidence?: boolean;
 }
 
 interface Props {
@@ -142,7 +144,7 @@ export default function VdotChart({ data }: Props) {
                contentStyle={{ backgroundColor: '#18181b', borderColor: '#ffffff20', borderRadius: '12px' }}
                itemStyle={{ fontSize: '12px' }}
                labelStyle={{ display: 'none' }}
-               formatter={(value: number, name: string) => {
+               formatter={(value: any, name: any) => {
                  if (name === "scatter_gap") return [formatPace(value) + " /km", "等价配速"];
                  if (name === "line_gap") return [formatPace(value) + " /km", "回归预测"];
                  return [value, name];
