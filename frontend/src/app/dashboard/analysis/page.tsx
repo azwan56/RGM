@@ -36,6 +36,21 @@ const GoalHistoryPanel = dynamic(() => import("@/components/GoalHistoryPanel"), 
   ssr: false,
 });
 
+const GoalSettingForm = dynamic(() => import("@/components/GoalSettingForm"), {
+  loading: () => <div className="h-48 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
+
+const AiCoachWidget = dynamic(() => import("@/components/AiCoachWidget"), {
+  loading: () => <div className="h-40 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
+
+const TrainingPlanWidget = dynamic(() => import("@/components/TrainingPlanWidget"), {
+  loading: () => <div className="h-40 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
+
 export default function AnalysisPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -112,7 +127,29 @@ export default function AnalysisPage() {
             <GoalHistoryPanel uid={user.uid} />
           </section>
         )}
+
+        {/* ── AI Coach & Training Section ─────────────────────────────── */}
+        <div id="coach" className="pt-2">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+              <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">AI 教练</h2>
+              <p className="text-zinc-500 text-sm">目标设定 · 训练建议 · 周计划</p>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <GoalSettingForm />
+            {user && <AiCoachWidget uid={user.uid} />}
+            {user && <TrainingPlanWidget uid={user.uid} />}
+          </div>
+        </div>
       </main>
     </div>
   );
 }
+
