@@ -98,7 +98,7 @@ export default function TrendChart({ uid }: { uid: string }) {
             <Tooltip
               contentStyle={{ backgroundColor: "#18181b", borderColor: "#ffffff20", borderRadius: "12px", fontSize: "12px" }}
               labelStyle={{ color: "#a1a1aa", marginBottom: "4px" }}
-              formatter={(value: number, name: string) => {
+              formatter={(value: any, name: any) => {
                 if (name === "distance_km") return [`${value} km`, "跑量"];
                 return [value, name];
               }}
