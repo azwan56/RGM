@@ -48,9 +48,9 @@ export default function ActivityMap({ polyline, height = "350px" }: ActivityMapP
       // Fix default marker icons
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+        iconRetinaUrl: "/leaflet/marker-icon-2x.png",
+        iconUrl: "/leaflet/marker-icon.png",
+        shadowUrl: "/leaflet/marker-shadow.png",
       });
 
       const coords = decodePolyline(polyline);
@@ -59,8 +59,10 @@ export default function ActivityMap({ polyline, height = "350px" }: ActivityMapP
       const map = L.map(containerRef.current!, { zoomControl: true, attributionControl: false });
       mapRef.current = map;
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
+      L.tileLayer("https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}", {
+        maxZoom: 18,
+        subdomains: ["1", "2", "3", "4"],
+        attribution: "&copy; 高德地图",
       }).addTo(map);
 
       const line = L.polyline(coords, {

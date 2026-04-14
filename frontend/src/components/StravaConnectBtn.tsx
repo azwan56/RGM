@@ -18,7 +18,7 @@ export default function StravaConnectBtn() {
             <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5">
                 <path d="M10.573 5.376L11.9 2.827l4.086 8.24h-2.652l-1.434-2.898-1.434 2.898H7.814l2.759-5.691zm-4.49 2.755l-1.435 2.898H1.996l2.652-5.358 2.652 5.358H4.648L3.213 8.131h2.87z" />
             </svg>
-            Connect with Strava
+            连接 Strava
         </button>
     );
 }

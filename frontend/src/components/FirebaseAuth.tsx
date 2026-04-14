@@ -30,7 +30,7 @@ export default function FirebaseAuth() {
       <div className="flex items-center gap-4">
         <span className="text-zinc-300 text-sm hidden md:inline-block">{user.email}</span>
         <button onClick={() => signOut(auth)} className="text-sm font-medium text-zinc-400 hover:text-red-400 transition-colors">
-          Sign Out
+          退出
         </button>
       </div>
     );
@@ -38,7 +38,7 @@ export default function FirebaseAuth() {
 
   return (
     <button onClick={login} className="px-5 py-2 bg-white text-black text-sm font-semibold rounded-full hover:bg-zinc-200 shadow-lg shadow-white/10 transition-all">
-      Log In
+      登录
     </button>
   );
 }

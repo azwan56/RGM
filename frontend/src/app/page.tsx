@@ -45,12 +45,12 @@ export default function Home() {
         </div>
 
         <h1 className="text-6xl md:text-8xl font-black mb-6 tracking-tight">
-          Track. <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FC4C02] to-orange-400">Compete.</span> Evolve.
+          记录. <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FC4C02] to-orange-400">竞争.</span> 进化.
         </h1>
         
         <p className="text-zinc-400 text-lg md:text-xl max-w-2xl mx-auto mb-12 font-light leading-relaxed">
-          The ultimate platform for your running community. Sync your Strava activities automatically, 
-          compete on leaderboards, and get AI-driven coaching suggestions straight to your dashboard.
+          跑团一站式管理平台。自动同步 Strava 跑步数据，
+          团队排行榜实时竟跑，AI 教练个性化训练建议直达面板。
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -91,7 +91,7 @@ export default function Home() {
             onClick={() => router.push("/leaderboard")}
             className="px-6 py-3 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold rounded-xl transition-all w-full sm:w-auto"
           >
-            View Leaderboard
+            查看排行榜
           </button>
         </div>
 
@@ -112,19 +112,19 @@ export default function Home() {
         <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto w-full text-left">
           {/* Card 1 */}
           <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
-            <h3 className="text-xl font-bold mb-2 text-white">Auto Sync</h3>
-            <p className="text-zinc-400 text-sm">Connect once, and we'll automatically sync your runs, pace, and heart rate directly from Strava.</p>
+            <h3 className="text-xl font-bold mb-2 text-white">自动同步</h3>
+            <p className="text-zinc-400 text-sm">连接一次 Strava，即可自动同步你的跑步数据、配速和心率。</p>
           </div>
           {/* Card 2 */}
           <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-24 h-24 bg-[#FC4C02]/20 rounded-full blur-2xl"></div>
-            <h3 className="text-xl font-bold mb-2 text-white relative z-10">Smart Goals</h3>
-            <p className="text-zinc-400 text-sm relative z-10">Set weekly or monthly distance goals and track your completion percentage against your peers.</p>
+            <h3 className="text-xl font-bold mb-2 text-white relative z-10">智能目标</h3>
+            <p className="text-zinc-400 text-sm relative z-10">设定每周或每月跑量目标，追踪完成率并与跑友比拼。</p>
           </div>
           {/* Card 3 */}
           <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
-            <h3 className="text-xl font-bold mb-2 text-white">AI Analysis</h3>
-            <p className="text-zinc-400 text-sm">Get intelligent feedback on your pacing, heart rate zones, and recovery suggestions powered by AI.</p>
+            <h3 className="text-xl font-bold mb-2 text-white">AI 分析</h3>
+            <p className="text-zinc-400 text-sm">获取配速、心率区间和恢复建议等 AI 智能反馈。</p>
           </div>
         </div>
 

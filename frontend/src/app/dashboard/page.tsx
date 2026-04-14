@@ -95,7 +95,7 @@ export default function Dashboard() {
       <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-4 border-[#FC4C02] border-t-transparent rounded-full animate-spin" />
-          <p className="text-zinc-400 text-sm">Loading dashboard...</p>
+          <p className="text-zinc-400 text-sm">加载中...</p>
         </div>
       </div>
     );
@@ -115,7 +115,7 @@ export default function Dashboard() {
               {displayName ? `你好，${displayName}` : "Welcome Back"}<span className="text-[#FC4C02]">.</span>
             </h1>
             <p className="text-zinc-400">
-              {user?.email} &mdash; {isStravaConnected ? "Strava connected ✓" : "Connect Strava to start tracking"}
+              {user?.email} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -153,9 +153,9 @@ export default function Dashboard() {
         {!isStravaConnected && (
           <div className="bg-gradient-to-r from-[#FC4C02]/20 to-orange-500/10 border border-[#FC4C02]/30 p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 backdrop-blur-sm">
             <div>
-              <h3 className="text-xl font-bold mb-1">Connect Your Data</h3>
+              <h3 className="text-xl font-bold mb-1">连接数据源</h3>
               <p className="text-zinc-400 text-sm">
-                Connect your Strava account to automatically sync your runs and track progress.
+                连接你的 Strava 账号，自动同步跑步记录并追踪进度。
               </p>
             </div>
             <StravaConnectBtn />

@@ -41,21 +41,21 @@ export default function Leaderboard() {
       <main className="max-w-5xl mx-auto relative z-10">
         <header className="flex flex-col md:flex-row justify-between items-end mb-10 gap-6">
           <div>
-            <h1 className="text-4xl md:text-5xl font-black mb-2">Leaderboard</h1>
-            <p className="text-zinc-400">See how your running community is pushing the limits.</p>
+            <h1 className="text-4xl md:text-5xl font-black mb-2">排行榜</h1>
+            <p className="text-zinc-400">看看你的跑团伙伴们都在如何突破极限。</p>
           </div>
           <div className="flex bg-black/50 p-1 rounded-xl border border-white/10">
              <button 
                 onClick={() => setSortMethod("completion")}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${sortMethod === "completion" ? "bg-[#FC4C02] text-white" : "text-zinc-400 hover:text-white"}`}
              >
-               % of Goal
+               目标完成率
              </button>
              <button 
                 onClick={() => setSortMethod("distance")}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${sortMethod === "distance" ? "bg-[#FC4C02] text-white" : "text-zinc-400 hover:text-white"}`}
              >
-               Distance (km)
+               跑量 (km)
              </button>
           </div>
         </header>
@@ -65,18 +65,18 @@ export default function Leaderboard() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-black/40 border-b border-white/10 text-sm font-semibold text-zinc-400">
-                  <th className="p-6">Rank</th>
-                  <th className="p-6">Athlete</th>
-                  <th className="p-6 text-right">Distance</th>
-                  <th className="p-6 text-right">Avg Pace</th>
-                  <th className="p-6 text-right">Goal Progress</th>
+                  <th className="p-6">名次</th>
+                  <th className="p-6">跑者</th>
+                  <th className="p-6 text-right">跑量</th>
+                  <th className="p-6 text-right">平均配速</th>
+                  <th className="p-6 text-right">目标进度</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5} className="p-12 text-center text-zinc-500">Loading rankings...</td></tr>
+                  <tr><td colSpan={5} className="p-12 text-center text-zinc-500">加载中...</td></tr>
                 ) : entries.length === 0 ? (
-                  <tr><td colSpan={5} className="p-12 text-center text-zinc-500">No data found. Sync your Strava to appear here!</td></tr>
+                  <tr><td colSpan={5} className="p-12 text-center text-zinc-500">暂无数据。同步你的 Strava 来上榜吧！</td></tr>
                 ) : (
                   entries.map((entry, index) => (
                     <tr key={entry.uid} className="border-b border-white/5 hover:bg-white/5 transition-colors group">
@@ -90,7 +90,7 @@ export default function Leaderboard() {
                         {entry.total_distance_km} km
                       </td>
                       <td className="p-6 text-right text-zinc-300">
-                        {entry.avg_pace} /km <span className="block text-xs text-zinc-500">Avg HR: {entry.avg_heart_rate}</span>
+                        {entry.avg_pace} /km <span className="block text-xs text-zinc-500">平均心率: {entry.avg_heart_rate}</span>
                       </td>
                       <td className="p-6 text-right">
                         <div className="flex items-center justify-end gap-3">
