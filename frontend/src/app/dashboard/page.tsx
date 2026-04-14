@@ -57,6 +57,7 @@ export default function Dashboard() {
   const [showRaceAnalysis, setShowRaceAnalysis] = useState(false);
   const [showTrend, setShowTrend] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [activityMonth, setActivityMonth] = useState(new Date().getMonth());
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (u) => {
@@ -167,25 +168,42 @@ export default function Dashboard() {
           <RunningStatsPanel uid={user.uid} />
         )}
 
-        {/* Activity List + Leaderboard — side by side, fixed height */}
+        {/* Leaderboard + Activity List — side by side, fixed height */}
         {isStravaConnected && user && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Activity List */}
-            <div className="flex flex-col bg-white/5 border border-white/10 rounded-3xl overflow-hidden" style={{ height: "520px" }}>
-              <div className="px-5 pt-5 pb-3 flex-shrink-0">
-                <h2 className="text-lg font-bold text-white">
-                  {period === "weekly" ? "本周跑步记录" : "本月跑步记录"}
-                </h2>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 pb-5 scrollbar-thin">
-                <ActivityList uid={user.uid} period={period} />
-              </div>
-            </div>
-
-            {/* Leaderboard — same height */}
+            {/* Leaderboard — first */}
             <div className="flex flex-col" style={{ height: "520px" }}>
               <div className="flex-1 overflow-hidden">
                 <LeaderboardWidget currentUid={user.uid} fixedHeight="520px" />
+              </div>
+            </div>
+
+            {/* Activity List — with month selector */}
+            <div className="flex flex-col bg-white/5 border border-white/10 rounded-3xl overflow-hidden" style={{ height: "520px" }}>
+              <div className="px-5 pt-5 pb-3 flex-shrink-0 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-white">跑步记录</h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setActivityMonth(m => Math.min(m + 1, new Date().getMonth()))}
+                    disabled={activityMonth >= new Date().getMonth()}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <span className="text-sm font-medium text-zinc-300 min-w-[60px] text-center">
+                    {new Date().getFullYear()}年{activityMonth + 1}月
+                  </span>
+                  <button
+                    onClick={() => setActivityMonth(m => Math.max(m - 1, 0))}
+                    disabled={activityMonth <= 0}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 pb-5 scrollbar-thin">
+                <ActivityList uid={user.uid} month={activityMonth} />
               </div>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { db, auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 
 interface Activity {
@@ -20,7 +20,7 @@ interface Activity {
 
 function formatActivityDate(iso: string): string {
   if (!iso) return "—";
-  const d = new Date(iso.replace("Z", ""));  // treat as local time
+  const d = new Date(iso.replace("Z", ""));
   return d.toLocaleString("zh-CN", {
     month: "short",
     day: "numeric",
@@ -31,36 +31,40 @@ function formatActivityDate(iso: string): string {
   });
 }
 
-function getPeriodStart(period: string): string {
-  const today = new Date();
-  let start: Date;
-  if (period === "weekly") {
-    // Monday = day 1; Sunday = day 0 → shift to Monday
-    const day = today.getDay();
-    const daysFromMonday = day === 0 ? 6 : day - 1;
-    start = new Date(today);
-    start.setDate(today.getDate() - daysFromMonday);
-    start.setHours(0, 0, 0, 0);
-  } else {
-    start = new Date(today.getFullYear(), today.getMonth(), 1);
-  }
-  // Format as ISO local (YYYY-MM-DDTHH:MM:SS) to match Strava's start_date_local
+/**
+ * Returns [startISO, endISO] range for the given month (0-indexed) of the current year.
+ */
+function getMonthRange(month: number): [string, string] {
+  const year = new Date().getFullYear();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T00:00:00`;
+  const start = `${year}-${pad(month + 1)}-01T00:00:00`;
+  // End = 1st of next month
+  const nextMonth = month + 1;
+  const endYear = nextMonth > 11 ? year + 1 : year;
+  const endMon = nextMonth > 11 ? 0 : nextMonth;
+  const end = `${endYear}-${pad(endMon + 1)}-01T00:00:00`;
+  return [start, end];
 }
 
-export default function ActivityList({ uid, period }: { uid: string; period: "weekly" | "monthly" }) {
+interface Props {
+  uid: string;
+  month: number; // 0-indexed (Jan=0, Feb=1, ...)
+}
+
+export default function ActivityList({ uid, month }: Props) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
     if (!uid) return;
-    const periodStart = getPeriodStart(period);
+    setLoading(true);
+    const [startISO, endISO] = getMonthRange(month);
 
     const q = query(
       collection(db, "users", uid, "activities"),
-      where("start_date_local", ">=", periodStart),
+      where("start_date_local", ">=", startISO),
+      where("start_date_local", "<", endISO),
       orderBy("start_date_local", "desc")
     );
 
@@ -71,7 +75,7 @@ export default function ActivityList({ uid, period }: { uid: string; period: "we
     }, () => setLoading(false));
 
     return () => unsub();
-  }, [uid, period]);
+  }, [uid, month]);
 
   if (loading) {
     return (
@@ -86,14 +90,24 @@ export default function ActivityList({ uid, period }: { uid: string; period: "we
   if (activities.length === 0) {
     return (
       <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
-        <p className="text-zinc-400 text-sm">No runs recorded this {period === "weekly" ? "week" : "month"}.</p>
-        <p className="text-zinc-600 text-xs mt-1">Sync your Strava data to see activities here.</p>
+        <p className="text-zinc-400 text-sm">本月暂无跑步记录</p>
+        <p className="text-zinc-600 text-xs mt-1">同步 Strava 数据后即可查看</p>
       </div>
     );
   }
 
+  // Summary stats
+  const totalKm = activities.reduce((s, a) => s + a.distance_km, 0);
+  const count = activities.length;
+
   return (
     <div className="space-y-3">
+      {/* Month summary */}
+      <div className="flex items-center justify-between px-1 pb-2 border-b border-white/5">
+        <span className="text-xs text-zinc-500">{count} 次跑步</span>
+        <span className="text-xs font-semibold text-[#FC4C02]">{totalKm.toFixed(1)} km</span>
+      </div>
+
       {activities.map((act) => (
         <button
           key={act.activity_id}
@@ -131,7 +145,7 @@ export default function ActivityList({ uid, period }: { uid: string; period: "we
             )}
             <div className="hidden md:block text-right">
               <p className="text-white font-bold text-sm">{act.total_elevation_gain}m</p>
-              <p className="text-zinc-500 text-xs">elev</p>
+              <p className="text-zinc-500 text-xs">爬升</p>
             </div>
 
             {/* Chevron */}
