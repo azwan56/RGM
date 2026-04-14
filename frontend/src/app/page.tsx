@@ -37,14 +37,14 @@ export default function Home() {
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-[#FC4C02]/20 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[150px] pointer-events-none" />
 
-      <main className="max-w-7xl mx-auto px-6 pt-32 pb-20 relative z-10 text-center flex flex-col items-center justify-center min-h-screen">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 pt-24 md:pt-32 pb-16 md:pb-20 relative z-10 text-center flex flex-col items-center justify-center min-h-screen">
         
         <div className="mb-8 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-zinc-300">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
           Running Community Manager
         </div>
 
-        <h1 className="text-6xl md:text-8xl font-black mb-6 tracking-tight">
+        <h1 className="text-4xl sm:text-6xl md:text-8xl font-black mb-6 tracking-tight">
           记录. <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FC4C02] to-orange-400">竞争.</span> 进化.
         </h1>
         
@@ -109,7 +109,7 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto w-full text-left">
+        <div className="mt-16 md:mt-24 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-5xl mx-auto w-full text-left">
           {/* Card 1 */}
           <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
             <h3 className="text-xl font-bold mb-2 text-white">自动同步</h3>

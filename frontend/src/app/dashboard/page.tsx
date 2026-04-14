@@ -102,7 +102,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pt-24 px-6 pb-20 relative">
+    <div className="min-h-screen bg-[#0a0a0a] text-white pt-20 md:pt-24 px-4 md:px-6 pb-16 md:pb-20 relative">
       <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-[#FC4C02]/10 blur-[160px] pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[30%] h-[30%] rounded-full bg-blue-600/5 blur-[120px] pointer-events-none" />
 
@@ -111,10 +111,10 @@ export default function Dashboard() {
         {/* Header */}
         <header className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-4xl md:text-5xl font-black mb-1">
+            <h1 className="text-2xl sm:text-4xl md:text-5xl font-black mb-1">
               {displayName ? `你好，${displayName}` : "Welcome Back"}<span className="text-[#FC4C02]">.</span>
             </h1>
-            <p className="text-zinc-400">
+            <p className="text-zinc-400 text-sm md:text-base">
               {user?.email} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
             </p>
           </div>
@@ -151,7 +151,7 @@ export default function Dashboard() {
 
         {/* Strava connect banner */}
         {!isStravaConnected && (
-          <div className="bg-gradient-to-r from-[#FC4C02]/20 to-orange-500/10 border border-[#FC4C02]/30 p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 backdrop-blur-sm">
+          <div className="bg-gradient-to-r from-[#FC4C02]/20 to-orange-500/10 border border-[#FC4C02]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 backdrop-blur-sm">
             <div>
               <h3 className="text-xl font-bold mb-1">连接数据源</h3>
               <p className="text-zinc-400 text-sm">
