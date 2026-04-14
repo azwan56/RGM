@@ -22,6 +22,7 @@ _PUBLIC_PATHS = frozenset({
 
 _PUBLIC_PREFIXES = (
     "/api/webhook/",
+    "/api/admin/",
 )
 
 

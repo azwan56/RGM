@@ -14,7 +14,7 @@ from datetime import datetime
 
 router = APIRouter()
 
-VERIFY_TOKEN = os.getenv("STRAVA_WEBHOOK_VERIFY_TOKEN", "rgm_webhook_2026")
+VERIFY_TOKEN = os.getenv("STRAVA_WEBHOOK_VERIFY_TOKEN", "")
 
 
 # ── GET: Subscription Validation ─────────────────────────────────────────────
@@ -30,7 +30,7 @@ def webhook_validation(request: Request):
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
+    if mode == "subscribe" and VERIFY_TOKEN and token == VERIFY_TOKEN and challenge:
         print(f"[webhook] Subscription validated: challenge={challenge}")
         return {"hub.challenge": challenge}
 
@@ -88,16 +88,17 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             print(f"[webhook] No user found for strava_athlete_id={strava_athlete_id}")
             return
 
-        # Log the webhook event
+        # Log the webhook event (read once to avoid double Firestore read)
         try:
             log_ref = (db.collection("users").document(uid)
                          .collection("meta").document("webhook_log"))
+            log_snap = log_ref.get()
+            prev_total = (log_snap.to_dict() or {}).get("total_events", 0) if log_snap.exists else 0
             log_ref.set({
                 "last_event": aspect_type,
                 "last_activity_id": activity_id,
                 "last_event_time": datetime.now().isoformat(),
-                "total_events": (log_ref.get().to_dict() or {}).get("total_events", 0) + 1
-                if log_ref.get().exists else 1,
+                "total_events": prev_total + 1,
             }, merge=True)
         except Exception as e:
             print(f"[webhook] Log write failed: {e}")
@@ -169,13 +170,52 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         print(f"[webhook] Synced activity {activity_id} for uid={uid} "
               f"({act_doc['distance_km']}km, {act_doc['avg_pace']}/km)")
 
-        # Update yearly leaderboard
+        # Update both period and yearly leaderboards
         display_name = (
             user_data.get("display_name")
             or user_data.get("strava_name")
             or user_data.get("email", "").split("@")[0]
             or f"Runner #{uid[:6]}"
         )
+
+        # Update current period leaderboard (re-aggregate from all activities)
+        try:
+            from routers.sync import pace_str
+            all_acts = (user_ref.collection("activities")
+                        .where("period_start", "==", period_start.isoformat())
+                        .stream())
+            p_dist, p_time, p_hr_sum, p_hr_cnt, p_runs = 0.0, 0, 0, 0, 0
+            for adoc in all_acts:
+                ad = adoc.to_dict()
+                p_dist += ad.get("distance_km", 0) * 1000
+                p_time += ad.get("moving_time", 0)
+                p_runs += 1
+                hr = ad.get("avg_heart_rate", 0) or 0
+                if hr:
+                    p_hr_sum += hr
+                    p_hr_cnt += 1
+
+            goal_snap_data = goal_snap.to_dict() if goal_snap.exists else {}
+            target_dist = goal_snap_data.get("target_distance", 0)
+            km = p_dist / 1000
+            pct = round((km / target_dist) * 100) if target_dist > 0 else 0
+
+            db.collection("leaderboard").document(uid).set({
+                "uid": uid,
+                "display_name": display_name,
+                "email": user_data.get("email", ""),
+                "total_distance_km": round(km, 2),
+                "avg_pace": pace_str(p_dist, p_time),
+                "avg_heart_rate": round(p_hr_sum / p_hr_cnt) if p_hr_cnt else 0,
+                "goal_completion_percentage": min(pct, 100),
+                "run_count": p_runs,
+                "period": period,
+                "period_start": period_start.isoformat(),
+                "last_sync": datetime.now().isoformat(),
+            }, merge=True)
+        except Exception as e:
+            print(f"[webhook] Period leaderboard update failed: {e}")
+
         _update_yearly_leaderboard(uid, user_data, display_name)
 
     except Exception as e:

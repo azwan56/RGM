@@ -19,6 +19,14 @@ backend/.env*
 backend/serviceAccountKey.json
 backend/*.pyc
 
+# Secrets & Credentials (catch-all)
+*.pem
+*.key
+*credentials*.json
+*serviceAccount*.json
+.env.production
+.env.local
+
 # IDEs
 .vscode/
 .idea/

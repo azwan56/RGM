@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from routers import auth, sync, coach, science, profile
+from routers import admin as admin_router
 from middleware.auth import FirebaseAuthMiddleware
 
 app = FastAPI(title="Running Community Manager API")
@@ -28,6 +29,7 @@ app.include_router(sync.router,     prefix="/api/sync",    tags=["sync"])
 app.include_router(coach.router,    prefix="/api/coach",   tags=["coach"])
 app.include_router(science.router,  prefix="/api/science", tags=["science"])
 app.include_router(profile.router,  prefix="/api/profile", tags=["profile"])
+app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
 
 # Webhook router (loaded lazily to avoid import errors during initial setup)
 try:
@@ -42,6 +44,20 @@ try:
     app.include_router(team.router, prefix="/api/team", tags=["team"])
 except ImportError:
     pass
+
+
+# ── Startup: launch background scheduler ─────────────────────────────────────
+
+@app.on_event("startup")
+def on_startup():
+    """Start the APScheduler background scheduler for daily auto-sync."""
+    try:
+        from scheduler import start_scheduler
+        start_scheduler()
+        print("[startup] Background scheduler started")
+    except Exception as e:
+        print(f"[startup] Scheduler failed to start: {e}")
+
 
 @app.get("/")
 def read_root():
