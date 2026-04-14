@@ -4,7 +4,8 @@ Profile router — manages extended user attributes stored in Firestore.
 Fields stored under users/{uid}:
   display_name, age, gender, years_running,
   marathon_pb_sec, half_pb_sec, ten_k_pb_sec, five_k_pb_sec,
-  training_goal, phone, bio
+  training_goal, phone, bio,
+  upcoming_race, upcoming_race_date
   (strava_name, email are read-only — set by OAuth / Firebase Auth)
 """
 
@@ -22,6 +23,7 @@ EDITABLE_FIELDS = {
     "display_name", "age", "gender", "years_running",
     "marathon_pb_sec", "half_pb_sec", "ten_k_pb_sec", "five_k_pb_sec",
     "training_goal", "phone", "bio",
+    "upcoming_race", "upcoming_race_date",
 }
 
 READONLY_FIELDS = {"email", "strava_name", "strava_profile_url", "uid"}
@@ -78,6 +80,8 @@ class ProfileUpdate(BaseModel):
     training_goal:    Optional[str]  = None   # "fitness"|"finish_marathon"|"pb"|"elite"
     phone:            Optional[str]  = None
     bio:              Optional[str]  = None
+    upcoming_race:    Optional[str]  = None   # e.g. "full_marathon"|"half_marathon"|"gobi"|"trail_50k"...
+    upcoming_race_date: Optional[str] = None  # ISO date string YYYY-MM-DD
 
 
 @router.post("/update")

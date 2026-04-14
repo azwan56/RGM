@@ -81,6 +81,8 @@ export default function ProfilePage() {
     half_pb:         "",
     ten_k_pb:        "",
     five_k_pb:       "",
+    upcoming_race:   "",
+    upcoming_race_date: "",
   });
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -108,6 +110,8 @@ export default function ProfilePage() {
           half_pb:       secsToTime(p.half_pb_sec),
           ten_k_pb:      secsToTime(p.ten_k_pb_sec),
           five_k_pb:     secsToTime(p.five_k_pb_sec),
+          upcoming_race: p.upcoming_race || "",
+          upcoming_race_date: p.upcoming_race_date || "",
         });
       } catch { /* user might be new */ }
 
@@ -142,6 +146,8 @@ export default function ProfilePage() {
         half_pb_sec:    timeToSecs(form.half_pb) || undefined,
         ten_k_pb_sec:   timeToSecs(form.ten_k_pb) || undefined,
         five_k_pb_sec:  timeToSecs(form.five_k_pb) || undefined,
+        upcoming_race:  form.upcoming_race || undefined,
+        upcoming_race_date: form.upcoming_race_date || undefined,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -312,6 +318,79 @@ export default function ProfilePage() {
               onChange={set("bio")}
             />
           </Field>
+        </div>
+
+        {/* ── Race Plan ─────────────────────────────────────────────────────────── */}
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+          <SectionTitle>🏁 比赛计划</SectionTitle>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="备赛项目">
+              <select className={selectCls} value={form.upcoming_race} onChange={set("upcoming_race")}>
+                <option value="">暂无比赛计划</option>
+                <option value="10k">10K 路跑赛</option>
+                <option value="half_marathon">半程马拉松 (21.0975K)</option>
+                <option value="full_marathon">全程马拉松 (42.195K)</option>
+                <option value="gobi">戈壁挑战赛 (3天 120K)</option>
+                <option value="trail_50k">越野跑 50K</option>
+                <option value="trail_100k">越野跑 100K</option>
+                <option value="trail_100m">越野跑 100英里</option>
+              </select>
+            </Field>
+            <Field label="比赛日期">
+              <input
+                className={inputCls}
+                type="date"
+                value={form.upcoming_race_date}
+                onChange={set("upcoming_race_date")}
+              />
+            </Field>
+          </div>
+
+          {/* Race info card */}
+          {form.upcoming_race && (
+            <div className={`rounded-2xl p-4 border ${
+              form.upcoming_race === "gobi"
+                ? "bg-gradient-to-r from-amber-500/10 to-red-500/10 border-amber-500/20"
+                : "bg-white/5 border-white/8"
+            }`}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">
+                  {{
+                    "10k": "🏃", "half_marathon": "🥈", "full_marathon": "🏆",
+                    "gobi": "🏜️", "trail_50k": "⛰️", "trail_100k": "🏔️", "trail_100m": "🔥"
+                  }[form.upcoming_race] || "🏁"}
+                </span>
+                <div>
+                  <p className="text-white font-bold text-sm">
+                    {{
+                      "10k": "10K 路跑赛",
+                      "half_marathon": "半程马拉松",
+                      "full_marathon": "全程马拉松",
+                      "gobi": "戈壁挑战赛",
+                      "trail_50k": "越野跑 50K",
+                      "trail_100k": "越野跑 100K",
+                      "trail_100m": "越野跑 100英里",
+                    }[form.upcoming_race]}
+                  </p>
+                  {form.upcoming_race === "gobi" && (
+                    <p className="text-amber-400 text-xs mt-0.5">☢️ 连续3天共120K的竞技性赛事，训练要求激进，需大量耐力储备与越野适应</p>
+                  )}
+                  {form.upcoming_race_date && (() => {
+                    const days = Math.ceil((new Date(form.upcoming_race_date).getTime() - Date.now()) / 86400000);
+                    return (
+                      <p className={`text-xs mt-0.5 ${
+                        days <= 30 ? "text-red-400" : days <= 90 ? "text-amber-400" : "text-zinc-400"
+                      }`}>
+                        {days > 0 ? `距比赛还有 ${days} 天` : days === 0 ? "比赛就在今天！" : `比赛已结束`}
+                        {days > 0 && days <= 30 && " — 冲刺阶段 🔥"}
+                        {days > 30 && days <= 90 && " — 备赛关键期 💪"}
+                      </p>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Personal Bests ────────────────────────────────────────────────── */}
