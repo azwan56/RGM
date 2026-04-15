@@ -93,10 +93,11 @@ export default function ActivityChart({ activityId, uid, avgPace, avgHeartRate, 
       return;
     }
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-    fetch(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`)
-      .then((r) => r.json())
-      .then((d) => { setPoints(d.points || []); setLoading(false); })
-      .catch(() => { setError(true); setLoading(false); });
+    import("@/lib/apiClient").then(({ default: api }) => {
+      api.get(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`)
+        .then((r) => { setPoints(r.data.points || []); setLoading(false); })
+        .catch(() => { setError(true); setLoading(false); });
+    });
   }, [activityId, uid, initialPoints]);
 
   // Compute min/max for normalization

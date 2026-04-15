@@ -88,32 +88,29 @@ export default function ActivityDetailPage() {
         setLoading(false); // << Unblock the UI immediately
 
         // Phase 2: Upgrade polyline + fetch chart streams in parallel (non-blocking)
+        const apiClient = (await import("@/lib/apiClient")).default;
         const [polyRes, streamRes] = await Promise.allSettled([
-          fetch(`${backendUrl}/api/sync/activity/${activityId}?uid=${uid}`),
-          fetch(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`)
+          apiClient.get(`${backendUrl}/api/sync/activity/${activityId}?uid=${uid}`),
+          apiClient.get(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`),
         ]);
 
-        if (polyRes.status === "fulfilled" && polyRes.value.ok) {
-          const fullData = await polyRes.value.json();
+        if (polyRes.status === "fulfilled") {
+          const fullData = polyRes.value.data;
           if (fullData.polyline) setPolyline(fullData.polyline);
           else if (fullData.summary_polyline) setPolyline(fullData.summary_polyline);
         }
 
-        if (streamRes.status === "fulfilled" && streamRes.value.ok) {
-          const streamData = await streamRes.value.json();
-          setPoints(streamData.points || []);
+        if (streamRes.status === "fulfilled") {
+          setPoints(streamRes.value.data.points || []);
         }
         setStreamsFetchDone(true);
 
         // Phase 3: Lazy-load VDOT analysis AFTER chart is visible (fire-and-forget)
         setVdotLoading(true);
-        fetch(`${backendUrl}/api/sync/activity/${activityId}/vdot?uid=${uid}`)
-          .then(r => r.ok ? r.json() : null)
-          .then(vdotData => {
-            // Always set analysis — even partial/error results, so the chart section
-            // renders a meaningful message instead of silently disappearing
-            if (vdotData?.vdot_analysis) {
-              setVdotAnalysis(vdotData.vdot_analysis);
+        apiClient.get(`${backendUrl}/api/sync/activity/${activityId}/vdot?uid=${uid}`)
+          .then(r => {
+            if (r.data?.vdot_analysis) {
+              setVdotAnalysis(r.data.vdot_analysis);
             }
           })
           .catch(() => {})
