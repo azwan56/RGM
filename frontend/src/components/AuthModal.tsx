@@ -121,33 +121,52 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
   };
 
   // ── Phone ─────────────────────────────────────────────────────────────────
-  const setupRecaptcha = () => {
-    if (recaptchaRef.current) {
-      recaptchaRef.current.clear();
-      recaptchaRef.current = null;
-    }
-    if (recaptchaContainerRef.current) {
-      recaptchaContainerRef.current.innerHTML = "";
-    }
-    recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
-      size: "invisible",
-    });
-  };
+  // Init RecaptchaVerifier once when entering the phone screen
+  useEffect(() => {
+    if (screen !== "phone") return;
+    // Small delay so the DOM element is guaranteed to be mounted
+    const timer = setTimeout(() => {
+      try {
+        if (recaptchaRef.current) {
+          recaptchaRef.current.clear();
+          recaptchaRef.current = null;
+        }
+        recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
+          size: "invisible",
+        });
+        // Pre-render so first OTP request is instant
+        recaptchaRef.current.render().catch(() => {});
+      } catch (err) {
+        console.error("RecaptchaVerifier init error:", err);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [screen]);
 
   const handleSendOtp = async () => {
     setError("");
     const cleaned = phone.trim();
     if (!cleaned) { setError("请输入手机号"); return; }
     const fullPhone = cleaned.startsWith("+") ? cleaned : `+86${cleaned}`;
+    if (!recaptchaRef.current) {
+      setError("reCAPTCHA 未就绪，请稍后再试");
+      return;
+    }
     setLoading(true);
     try {
-      setupRecaptcha();
-      const result = await signInWithPhoneNumber(auth, fullPhone, recaptchaRef.current!);
+      const result = await signInWithPhoneNumber(auth, fullPhone, recaptchaRef.current);
       confirmationRef.current = result;
       setOtpSent(true);
       setCountdown(60);
     } catch (e: any) {
-      setError(mapError(e.code));
+      console.error("Phone Auth Error:", e);
+      // Recaptcha may be expired after a failed attempt — recreate it
+      try {
+        recaptchaRef.current?.clear();
+        recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", { size: "invisible" });
+        await recaptchaRef.current.render();
+      } catch (_) {}
+      setError(mapError(e.code) || e.message || "发送失败，请检查网络或手机号后重试");
     } finally {
       setLoading(false);
     }
@@ -418,7 +437,8 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                   </div>
                 </form>
               )}
-              <div id="recaptcha-container" ref={recaptchaContainerRef} />
+              {/* recaptcha-container must always be in the DOM when screen=phone */}
+              <div id="recaptcha-container" ref={recaptchaContainerRef} className="hidden" />
             </>
           )}
         </div>
@@ -484,5 +504,6 @@ function mapError(code: string): string {
     "auth/quota-exceeded":            "短信额度已用完，请稍后再试",
     "auth/network-request-failed":    "网络错误，请检查网络连接",
   };
+  if (!code) return "";
   return map[code] || `操作失败 (${code})`;
 }
