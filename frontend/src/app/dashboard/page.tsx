@@ -5,10 +5,25 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import dynamic from "next/dynamic";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
-import RunningStatsPanel from "@/components/RunningStatsPanel";
-import ActivityList from "@/components/ActivityList";
-import LeaderboardWidget from "@/components/LeaderboardWidget";
+
+const Skeleton = ({ h = "h-40" }: { h?: string }) => (
+  <div className={`${h} rounded-3xl bg-white/5 border border-white/10 animate-pulse`} />
+);
+
+const RunningStatsPanel = dynamic(() => import("@/components/RunningStatsPanel"), {
+  ssr: false,
+  loading: () => <Skeleton h="h-52" />,
+});
+const ActivityList = dynamic(() => import("@/components/ActivityList"), {
+  ssr: false,
+  loading: () => <Skeleton h="h-full" />,
+});
+const LeaderboardWidget = dynamic(() => import("@/components/LeaderboardWidget"), {
+  ssr: false,
+  loading: () => <Skeleton h="h-full" />,
+});
 
 export default function Dashboard() {
   const router = useRouter();
