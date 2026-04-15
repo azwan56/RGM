@@ -704,3 +704,40 @@ def get_yearly_leaderboard(year: int = 0, limit_n: int = 20):
     entries = [d.to_dict() for d in docs]
     entries.sort(key=lambda e: e.get("total_distance_km", 0), reverse=True)
     return {"year": year, "entries": entries[:limit_n]}
+
+
+# ── GET /vdot-trend/{uid} ─────────────────────────────────────────────────────
+
+@router.get("/vdot-trend/{uid}")
+def get_vdot_trend(uid: str, limit: int = 10):
+    """
+    Returns the most recent activities that have a valid VDOT score,
+    sorted by date descending. Used for VDOT trend chart.
+    """
+    acts = (db.collection("users").document(uid)
+              .collection("activities")
+              .order_by("start_date_local", direction="DESCENDING")
+              .limit(200)
+              .stream())
+
+    results = []
+    for doc in acts:
+        a = doc.to_dict()
+        v = a.get("vdot")
+        if not v or float(v) < 20:
+            continue
+        results.append({
+            "activity_id": a.get("activity_id"),
+            "name": a.get("name", "Run"),
+            "date": a.get("start_date_local", "")[:10],
+            "distance_km": round(a.get("distance_km", 0), 2),
+            "avg_pace": a.get("avg_pace", "—"),
+            "avg_heart_rate": a.get("avg_heart_rate", 0),
+            "vdot": round(float(v), 1),
+            "vdot_r2": round(float(a.get("vdot_r2", 0) or 0), 2),
+        })
+        if len(results) >= limit:
+            break
+
+    return {"entries": results}
+

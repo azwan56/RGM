@@ -7,6 +7,9 @@ import { doc, getDoc } from "firebase/firestore";
 import ActivityMap from "@/components/ActivityMap";
 import ActivityChart from "@/components/ActivityChart";
 import VdotChart from "@/components/VdotChart";
+import dynamic from "next/dynamic";
+
+const VdotTrend = dynamic(() => import("@/components/VdotTrend"), { ssr: false });
 
 interface ActivityDetail {
   activity_id: number;
@@ -203,10 +206,14 @@ export default function ActivityDetailPage() {
                 <p className="text-zinc-500 text-sm">正在计算跑力指数 (VDOT)...</p>
               </div>
             ) : vdotAnalysis ? (
-              // VdotChart handles both success and error states internally
               <VdotChart data={vdotAnalysis} />
             ) : null}
           </div>
+        )}
+
+        {/* VDOT Trend — shows recent VDOT progression */}
+        {user && !vdotLoading && (
+          <VdotTrend uid={user.uid} currentActivityId={activity.activity_id} />
         )}
 
         {/* Primary stats */}
