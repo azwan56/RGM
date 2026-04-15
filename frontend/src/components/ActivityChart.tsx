@@ -81,24 +81,21 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export default function ActivityChart({ activityId, uid, avgPace, avgHeartRate, avgCadence, initialPoints }: Props) {
-  const [points, setPoints] = useState<StreamPoint[]>(initialPoints || []);
-  const [loading, setLoading] = useState(!initialPoints);
+  const hasInitialPoints = (initialPoints?.length ?? 0) > 0;
+  const [points, setPoints] = useState<StreamPoint[]>(hasInitialPoints ? initialPoints! : []);
+  const [loading, setLoading] = useState(!hasInitialPoints);
   const [error, setError] = useState(false);
   const [active, setActive] = useState<Set<MetricKey>>(new Set(["pace", "heartRate", "cadence"]));
 
   useEffect(() => {
-    if (initialPoints && initialPoints.length > 0) {
-      setPoints(initialPoints);
-      setLoading(false);
-      return;
-    }
+    if (hasInitialPoints) return; // already seeded with real data
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     import("@/lib/apiClient").then(({ default: api }) => {
       api.get(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`)
         .then((r) => { setPoints(r.data.points || []); setLoading(false); })
         .catch(() => { setError(true); setLoading(false); });
     });
-  }, [activityId, uid, initialPoints]);
+  }, [activityId, uid, hasInitialPoints]);
 
   // Compute min/max for normalization
   const ranges = useMemo(() => {
@@ -142,8 +139,11 @@ export default function ActivityChart({ activityId, uid, avgPace, avgHeartRate, 
 
   if (error || points.length === 0) {
     return (
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex items-center justify-center h-40">
-        <p className="text-zinc-500 text-sm">暂无流数据</p>
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center h-40 gap-2">
+        <svg className="w-5 h-5 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+        </svg>
+        <p className="text-zinc-500 text-sm">{error ? "无法获取流数据，请稍后重试" : "此活动无详细流数据（Strava 未记录）"}</p>
       </div>
     );
   }
