@@ -591,67 +591,158 @@ async def generate_training_plan(req: TrainingPlanRequest):
         m = r // 60
         return f"{h}:{m:02d}"
 
-    # Race context for training plan
+    # ── Race & goal analysis — PRIMARY plan drivers ───────────────────────────
+    from datetime import date as _date_cls
     upcoming_races = profile.get("upcoming_races", [])
-    race_context = ""
-    if upcoming_races:
-        from datetime import date
-        for r in upcoming_races:
-            rdate = r.get("date", "")
-            rname = r.get("name", "")
-            rtype = r.get("type", "")
-            rtarget = r.get("target_time", "")
-            if rdate:
-                try:
-                    days = (date.fromisoformat(rdate) - date.today()).days
-                    if days > 0:
-                        race_context += f"\n- 备赛：{rname}（{rtype}），{days}天后，目标成绩{rtarget or '未设'}"
-                except ValueError:
-                    pass
+
+    # Find nearest upcoming race
+    nearest_race = None
+    nearest_days = 9999
+    for r in upcoming_races:
+        rdate = r.get("date", "")
+        if rdate:
+            try:
+                days = (_date_cls.fromisoformat(rdate) - _date_cls.today()).days
+                if 0 < days < nearest_days:
+                    nearest_days = days
+                    nearest_race = r
+            except ValueError:
+                pass
+
+    # Determine training phase from nearest race
+    race_phase_block = ""
+    if nearest_race:
+        rtype = nearest_race.get("type", "")
+        rname = nearest_race.get("name", rtype)
+        rtarget = nearest_race.get("target_time", "")
+
+        race_cn = {
+            "10k": "10K", "half_marathon": "半程马拉松", "full_marathon": "全程马拉松",
+            "gobi": "戈壁挑战赛（连续3天120K）", "trail_50k": "越野50K",
+            "trail_100k": "越野100K", "trail_100m": "越野100英里",
+        }.get(rtype, rtype)
+
+        if nearest_days <= 7:
+            phase = "赛前减量期"
+            phase_rules = (
+                "⚠️ 赛前最后1周！跑量减至平时40%，完全避免高强度训练。"
+                "重点：轻松跑维持感觉、充分休息、赛前2天完全休息或超短慢跑。"
+                "7天内【必须】安排至少3个休息日，最多1次配速验证跑（≤5km）。"
+            )
+        elif nearest_days <= 21:
+            phase = "赛前调整期"
+            phase_rules = (
+                f"赛前{nearest_days}天，进入减量调整期。跑量减至峰值60%。"
+                "保留1次短距离目标配速验证跑（≤8km），其余以轻松跑和休息为主。"
+                "7天内【必须】安排2个休息日，禁止大量间歇或长距离拉练。"
+            )
+        elif nearest_days <= 42:
+            phase = "赛前冲刺期"
+            phase_rules = (
+                f"距{rname}还有{nearest_days}天，最后高质量训练窗口！"
+                "需要1次比赛配速的中长距离（15-25km），1次间歇/节奏跑。"
+                f"如目标成绩{rtarget}，配速训练需贴近目标配速。"
+                "7天内安排1-2个休息日，确保高质量恢复。"
+            )
+        elif nearest_days <= 84:
+            phase = "专项训练期"
+            phase_rules = (
+                f"距{rname}还有{nearest_days}天，专项能力提升阶段。"
+                "每周需要：1次长距离（按比赛距离60-80%），1次节奏跑，1次间歇。"
+                f"若全马/超马，长距离跑优先，配速逐步向目标{rtarget or '成绩'}靠近。"
+            )
+        else:
+            phase = "基础储备期"
+            phase_rules = (
+                f"距{rname}还有{nearest_days}天，以打基础为主。"
+                "稳步提升周跑量，80%轻松有氧打底，每周1次长距离慢跑。"
+                "不需要高强度专项训练，重点是积累有氧能力。"
+            )
+
+        race_phase_block = (
+            f"\n\n{'='*50}\n"
+            f"⚡ 核心训练依据 — 比赛备赛\n"
+            f"{'='*50}\n"
+            f"最近比赛：{rname}（{race_cn}）\n"
+            f"比赛日期：{nearest_race.get('date', '')}（还有 {nearest_days} 天）\n"
+            f"目标成绩：{rtarget or '未设定'}\n"
+            f"当前阶段：【{phase}】\n"
+            f"本周训练要求：{phase_rules}\n"
+            f"{'='*50}\n"
+            f"⚠️ 此计划必须完全围绕上述比赛阶段来制定，这是最高优先级！\n"
+        )
+
+    # Training goal context
+    goal_cn_map = {
+        "fitness": "健康健身（有氧为主，养成习惯）",
+        "5k": "5K突破（速度训练为核心，800m/1km间歇）",
+        "10k": "10K提速（节奏跑+间歇，提升乳酸阈）",
+        "half": "半马训练（长距离拉练+配速跑）",
+        "full": "全马备赛（高周跑量+多次30km+长距离）",
+        "ultra": "超马挑战（极高跑量+背靠背长距离+越野适应）",
+    }
+    goal_cn = goal_cn_map.get(training_goal, training_goal)
+
+    # All upcoming races list
+    all_races_str = ""
+    for r in upcoming_races:
+        rdate = r.get("date", "")
+        if rdate:
+            try:
+                days = (_date_cls.fromisoformat(rdate) - _date_cls.today()).days
+                if days > 0:
+                    all_races_str += (
+                        f"\n  · {r.get('name', r.get('type',''))}（{rdate}，还有{days}天）"
+                        f" 目标：{r.get('target_time','未设')}"
+                    )
+            except ValueError:
+                pass
 
     prompt = (
-        "你是一位专业的中文跑步教练，请为跑者制定一份个性化的7天训练计划。"
-        "回复必须是纯 JSON，不含 markdown 标记。\n\n"
-        f"【跑者档案】\n"
+        "你是一位专业的中文跑步教练，请为跑者制定一份个性化的7天训练计划。\n"
+        "⚠️ 训练计划的制定优先级：① 比赛备赛阶段要求 > ② 训练目标 > ③ 近期体能数据\n"
+        "回复必须是纯 JSON，不含 markdown 标记。\n"
+        f"{race_phase_block}\n"
+        f"【训练目标（第二优先级）】\n"
+        f"  {goal_cn}\n"
+        f"  里程目标：{goal_str}\n\n"
+        f"【全部赛事计划】{all_races_str or ' 无'}\n\n"
+        f"【跑者档案（用于校准强度）】\n"
         f"- 年龄：{age}，性别：{gender}，跑龄：{years_running}年\n"
-        f"- VDOT：{vdot or '未知'}\n"
-        f"- 全马PB：{_fmt_pb(fm_pb_sec)}，半马PB：{_fmt_pb(half_pb_sec)}\n"
-        f"- 训练目标：{training_goal}\n"
-        f"- 最大心率：{max_hr}，静息心率：{rest_hr}\n"
-        f"- 目标：{goal_str}\n"
-        f"{race_context}\n\n"
-        f"【近14天训练】{run_count_14d} 次跑步，共 {total_km_14d:.1f}km\n"
-        f"近期跑步：{' | '.join(recent_summary) or '无近期数据'}\n\n"
-        f"【本月数据】{stats.get('total_distance_km',0)}km，"
+        f"- VDOT：{vdot or '未知'}，最大心率：{max_hr}，静息心率：{rest_hr}\n"
+        f"- 全马PB：{_fmt_pb(fm_pb_sec)}，半马PB：{_fmt_pb(half_pb_sec)}\n\n"
+        f"【近14天体能数据（用于确认当前状态）】\n"
+        f"{run_count_14d} 次跑步，共 {total_km_14d:.1f}km\n"
+        f"近期跑步：{' | '.join(recent_summary) or '无近期数据'}\n"
+        f"本月：{stats.get('total_distance_km',0)}km，"
         f"配速 {stats.get('avg_pace','?')}/km，"
-        f"心率 {stats.get('avg_heart_rate',0)}bpm\n\n"
+        f"均心率 {stats.get('avg_heart_rate',0)}bpm\n\n"
         "请从明天开始生成7天训练计划，所有文本使用中文。\n"
         "返回 JSON 格式如下：\n"
         '{\n'
-        '  "plan_summary": "<1-2句训练计划总述，中文>",\n'
+        '  "plan_summary": "<1-2句话，先说明当前备赛阶段/训练目标，再说本周训练重点>",\n'
         '  "weekly_km": <总公里数>,\n'
         '  "days": [\n'
         '    {\n'
         '      "day": 1,\n'
         '      "type": "<Easy|Tempo|Interval|Long Run|Recovery|Rest|Cross Training>",\n'
-        '      "title": "<中文标题，如：轻松恢复跑>",\n'
+        '      "title": "<中文训练标题，要体现训练目的，如：赛前配速验证跑>",\n'
         '      "distance_km": <公里数，休息日为0>,\n'
         '      "pace_target": "<如 5:30-6:00，休息日为null>",\n'
         '      "hr_zone": "<如 Zone 2，休息日为null>",\n'
         '      "duration_min": <预估分钟数>,\n'
-        '      "description": "<非常具体的中文描述，必须包含：1.热身(如热身跑2km+动态拉伸) 2.主课内容(含具体配速要求) 3.冷身(如慢跑放松1km+静态拉伸)>",\n'
+        '      "description": "<详细中文描述，必须包含：热身方式+主课内容（含具体配速/心率）+冷身方式，以及为什么安排这个训练（联系比赛或目标）>",\n'
         '      "intensity": <1-5强度>\n'
         '    }\n'
         '  ]\n'
         '}\n\n'
-        "规则：\n"
-        "- 安排 1-2 个休息日\n"
-        "- 遵循 80/20 原则（80%轻松跑，20%高强度）\n"
-        "- 长距离跑安排在周末\n"
-        "- 强度匹配跑者当前体能水平\n"
-        "- 如有备赛计划，训练内容要针对比赛需求并且强度足够（尤其是戈壁挑战赛等高难度赛事）\n"
-        "- description 字段绝对不能太简短，每天的训练必须有执行细节细节！\n"
-        "- 如 VDOT 未知，根据近期配速数据估算"
+        "核心规则（按优先级）：\n"
+        "1. 【最高优先级】若有备赛阶段要求，该阶段的训练规则必须严格执行，不可违背\n"
+        "2. 每天描述中必须说明此训练如何服务于比赛目标或训练目标\n"
+        "3. 安排 1-2 个休息日，遵循 80/20 原则\n"
+        "4. 长距离跑安排在周末\n"
+        "5. description 字段必须有详细执行步骤，不能简短！\n"
+        "6. VDOT 未知时，根据近期配速数据推算心率区间和配速目标\n"
     )
 
     if not _api_key:
