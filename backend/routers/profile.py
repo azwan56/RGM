@@ -11,7 +11,7 @@ Fields stored under users/{uid}:
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from firebase_config import db
 
 router = APIRouter()
@@ -23,7 +23,7 @@ EDITABLE_FIELDS = {
     "display_name", "age", "gender", "years_running",
     "marathon_pb_sec", "half_pb_sec", "ten_k_pb_sec", "five_k_pb_sec",
     "training_goal", "phone", "bio",
-    "upcoming_race", "upcoming_race_date",
+    # upcoming_races handled separately as a list
 }
 
 READONLY_FIELDS = {"email", "strava_name", "strava_profile_url", "uid"}
@@ -80,8 +80,7 @@ class ProfileUpdate(BaseModel):
     training_goal:    Optional[str]  = None   # "fitness"|"finish_marathon"|"pb"|"elite"
     phone:            Optional[str]  = None
     bio:              Optional[str]  = None
-    upcoming_race:    Optional[str]  = None   # e.g. "full_marathon"|"half_marathon"|"gobi"|"trail_50k"...
-    upcoming_race_date: Optional[str] = None  # ISO date string YYYY-MM-DD
+    upcoming_races:   Optional[List[dict]] = None  # list of up to 3 race dicts
 
 
 @router.post("/update")
@@ -96,6 +95,22 @@ def update_profile(req: ProfileUpdate):
         val = getattr(req, field, None)
         if val is not None:
             updates[field] = val
+
+    # Handle upcoming_races list separately (max 3)
+    if req.upcoming_races is not None:
+        # Filter out past races and limit to 3
+        from datetime import date
+        valid = []
+        for r in req.upcoming_races[:3]:
+            race_date = r.get("date", "")
+            if race_date:
+                try:
+                    if date.fromisoformat(race_date) < date.today():
+                        continue  # skip past races
+                except ValueError:
+                    pass
+            valid.append(r)
+        updates["upcoming_races"] = valid
 
     if not updates:
         return {"message": "Nothing to update"}

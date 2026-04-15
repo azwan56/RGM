@@ -122,10 +122,8 @@ async def generate_coach_feedback(req: CoachRequest):
         "half": "半马训练", "full": "全马备赛", "ultra": "超马挑战",
     }.get(training_goal, training_goal)
 
-    # Race context
-    upcoming_race = profile.get("upcoming_race", "") if profile else ""
-    upcoming_race_date = profile.get("upcoming_race_date", "") if profile else ""
-    race_cn = {
+    # Race context — multiple upcoming races
+    race_type_cn = {
         "10k": "10K 路跑赛",
         "half_marathon": "半程马拉松",
         "full_marathon": "全程马拉松",
@@ -133,23 +131,42 @@ async def generate_coach_feedback(req: CoachRequest):
         "trail_50k": "越野跑 50K",
         "trail_100k": "越野跑 100K",
         "trail_100m": "越野跑 100英里",
-    }.get(upcoming_race, upcoming_race)
-
-    # Calculate days until race
-    race_countdown = ""
-    if upcoming_race_date:
+    }
+    upcoming_races = profile.get("upcoming_races", []) if profile else []
+    race_lines = []
+    has_gobi = False
+    if upcoming_races:
         from datetime import date
-        try:
-            race_date = date.fromisoformat(upcoming_race_date)
-            days_left = (race_date - date.today()).days
-            if days_left > 0:
-                race_countdown = f"距比赛还有 {days_left} 天"
-            elif days_left == 0:
-                race_countdown = "比赛就在今天！"
-            else:
-                race_countdown = f"比赛已于 {abs(days_left)} 天前结束"
-        except ValueError:
-            pass
+        for r in upcoming_races:
+            rtype = race_type_cn.get(r.get("type", ""), r.get("type", ""))
+            rname = r.get("name", rtype)
+            rdate = r.get("date", "")
+            rtarget = r.get("target_time", "")
+            countdown = ""
+            if rdate:
+                try:
+                    days = (date.fromisoformat(rdate) - date.today()).days
+                    if days > 0:
+                        countdown = f"（还有{days}天）"
+                    elif days == 0:
+                        countdown = "（今天！）"
+                    else:
+                        continue  # skip past races
+                except ValueError:
+                    pass
+            line = f"  · {rname}（{rtype}）{rdate}{countdown}"
+            if rtarget:
+                line += f" 目标成绩：{rtarget}"
+            race_lines.append(line)
+            if r.get("type") == "gobi":
+                has_gobi = True
+
+    race_section = ""
+    if race_lines:
+        race_section = "【备赛计划】\n" + "\n".join(race_lines) + "\n"
+        if has_gobi:
+            race_section += "⚠️ 戈壁挑战赛为连续3天共120K的高强度竞技赛事，训练要求激进，需要大量耐力储备和越野适应训练\n"
+        race_section += "\n"
 
     runs_str = _build_runs_str(activities)
     completion_pct = stats.get('goal_completion_percentage', 0)
@@ -163,10 +180,8 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 年龄：{age or '未知'}\n"
         f"- 跑龄：{years_running} 年\n"
         f"- 训练目标：{goal_cn}\n"
-        f"- 当前目标：{goal_str}\n"
-        f"{f'- 备赛项目：{race_cn}' + chr(10) if race_cn else ''}"
-        f"{f'- 比赛日期：{upcoming_race_date}（{race_countdown}）' + chr(10) if upcoming_race_date and race_countdown else ''}"
-        f"{'- ⚠️ 戈壁挑战赛为连续3天共120K的高强度竞技赛事，训练要求激进，需要大量耐力储备和越野适应训练' + chr(10) if upcoming_race == 'gobi' else ''}\n"
+        f"- 当前目标：{goal_str}\n\n"
+        f"{race_section}"
         f"【本期训练数据（{stats.get('period', 'monthly')}）】\n"
         f"- 总里程：{stats.get('total_distance_km', 0)} 公里\n"
         f"- 平均配速：{stats.get('avg_pace', '?')}/km\n"

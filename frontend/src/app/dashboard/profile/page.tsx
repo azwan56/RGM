@@ -81,9 +81,12 @@ export default function ProfilePage() {
     half_pb:         "",
     ten_k_pb:        "",
     five_k_pb:       "",
-    upcoming_race:   "",
-    upcoming_race_date: "",
   });
+
+  // Race plan — separate state, up to 3 races
+  interface RaceEntry { name: string; type: string; date: string; target_time: string }
+  const emptyRace = (): RaceEntry => ({ name: "", type: "", date: "", target_time: "" });
+  const [races, setRaces] = useState<RaceEntry[]>([]);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -110,9 +113,13 @@ export default function ProfilePage() {
           half_pb:       secsToTime(p.half_pb_sec),
           ten_k_pb:      secsToTime(p.ten_k_pb_sec),
           five_k_pb:     secsToTime(p.five_k_pb_sec),
-          upcoming_race: p.upcoming_race || "",
-          upcoming_race_date: p.upcoming_race_date || "",
         });
+        // Load races — filter out past ones
+        const savedRaces = (p.upcoming_races || []).filter((r: any) => {
+          if (!r.date) return true;
+          return new Date(r.date).getTime() >= Date.now() - 86400000;
+        });
+        setRaces(savedRaces);
       } catch { /* user might be new */ }
 
       setLoading(false);
@@ -146,8 +153,7 @@ export default function ProfilePage() {
         half_pb_sec:    timeToSecs(form.half_pb) || undefined,
         ten_k_pb_sec:   timeToSecs(form.ten_k_pb) || undefined,
         five_k_pb_sec:  timeToSecs(form.five_k_pb) || undefined,
-        upcoming_race:  form.upcoming_race || undefined,
-        upcoming_race_date: form.upcoming_race_date || undefined,
+        upcoming_races: races.filter(r => r.type),  // only send non-empty races
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -156,7 +162,7 @@ export default function ProfilePage() {
       setPersona(pr.data);
     } catch { alert("保存失败，请重试"); }
     setSaving(false);
-  }, [uid, form, backendUrl]);
+  }, [uid, form, races, backendUrl]);
 
   // Import PBs from Strava
   const handleImportPBs = useCallback(async () => {
@@ -322,75 +328,113 @@ export default function ProfilePage() {
 
         {/* ── Race Plan ─────────────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
-          <SectionTitle>🏁 比赛计划</SectionTitle>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="备赛项目">
-              <select className={selectCls} value={form.upcoming_race} onChange={set("upcoming_race")}>
-                <option value="">暂无比赛计划</option>
-                <option value="10k">10K 路跑赛</option>
-                <option value="half_marathon">半程马拉松 (21.0975K)</option>
-                <option value="full_marathon">全程马拉松 (42.195K)</option>
-                <option value="gobi">戈壁挑战赛 (3天 120K)</option>
-                <option value="trail_50k">越野跑 50K</option>
-                <option value="trail_100k">越野跑 100K</option>
-                <option value="trail_100m">越野跑 100英里</option>
-              </select>
-            </Field>
-            <Field label="比赛日期">
-              <input
-                className={inputCls}
-                type="date"
-                value={form.upcoming_race_date}
-                onChange={set("upcoming_race_date")}
-              />
-            </Field>
+          <div className="flex items-center justify-between">
+            <SectionTitle>🏁 比赛计划</SectionTitle>
+            {races.length < 3 && (
+              <button
+                onClick={() => setRaces(r => [...r, emptyRace()])}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#FC4C02] text-white hover:bg-[#FC4C02]/80 transition-all"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                添加比赛
+              </button>
+            )}
           </div>
 
-          {/* Race info card */}
-          {form.upcoming_race && (
-            <div className={`rounded-2xl p-4 border ${
-              form.upcoming_race === "gobi"
-                ? "bg-gradient-to-r from-amber-500/10 to-red-500/10 border-amber-500/20"
-                : "bg-white/5 border-white/8"
-            }`}>
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">
-                  {{
-                    "10k": "🏃", "half_marathon": "🥈", "full_marathon": "🏆",
-                    "gobi": "🏜️", "trail_50k": "⛰️", "trail_100k": "🏔️", "trail_100m": "🔥"
-                  }[form.upcoming_race] || "🏁"}
-                </span>
-                <div>
-                  <p className="text-white font-bold text-sm">
-                    {{
-                      "10k": "10K 路跑赛",
-                      "half_marathon": "半程马拉松",
-                      "full_marathon": "全程马拉松",
-                      "gobi": "戈壁挑战赛",
-                      "trail_50k": "越野跑 50K",
-                      "trail_100k": "越野跑 100K",
-                      "trail_100m": "越野跑 100英里",
-                    }[form.upcoming_race]}
-                  </p>
-                  {form.upcoming_race === "gobi" && (
-                    <p className="text-amber-400 text-xs mt-0.5">☢️ 连续3天共120K的竞技性赛事，训练要求激进，需大量耐力储备与越野适应</p>
-                  )}
-                  {form.upcoming_race_date && (() => {
-                    const days = Math.ceil((new Date(form.upcoming_race_date).getTime() - Date.now()) / 86400000);
-                    return (
-                      <p className={`text-xs mt-0.5 ${
-                        days <= 30 ? "text-red-400" : days <= 90 ? "text-amber-400" : "text-zinc-400"
-                      }`}>
-                        {days > 0 ? `距比赛还有 ${days} 天` : days === 0 ? "比赛就在今天！" : `比赛已结束`}
-                        {days > 0 && days <= 30 && " — 冲刺阶段 🔥"}
-                        {days > 30 && days <= 90 && " — 备赛关键期 💪"}
-                      </p>
-                    );
-                  })()}
-                </div>
-              </div>
+          {races.length === 0 && (
+            <div className="text-center py-8">
+              <p className="text-zinc-500 text-sm">暂无比赛计划</p>
+              <p className="text-zinc-600 text-xs mt-1">添加一场比赛，AI 教练会据此定制训练建议</p>
             </div>
           )}
+
+          {races.map((race, idx) => {
+            const days = race.date ? Math.ceil((new Date(race.date).getTime() - Date.now()) / 86400000) : null;
+            const isPast = days !== null && days < 0;
+            if (isPast) return null;
+
+            const raceEmoji: Record<string, string> = {
+              "10k": "🏃", "half_marathon": "🥈", "full_marathon": "🏆",
+              "gobi": "🏜️", "trail_50k": "⛰️", "trail_100k": "🏔️", "trail_100m": "🔥"
+            };
+            const raceLabel: Record<string, string> = {
+              "10k": "10K 路跑赛", "half_marathon": "半程马拉松", "full_marathon": "全程马拉松",
+              "gobi": "戈壁挑战赛 (3天 120K)", "trail_50k": "越野跑 50K",
+              "trail_100k": "越野跑 100K", "trail_100m": "越野跑 100英里"
+            };
+
+            const updateRace = (field: string, value: string) => {
+              setRaces(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+            };
+
+            return (
+              <div key={idx} className={`rounded-2xl p-5 border space-y-4 ${
+                race.type === "gobi"
+                  ? "bg-gradient-to-r from-amber-500/10 to-red-500/10 border-amber-500/20"
+                  : "bg-white/5 border-white/8"
+              }`}>
+                {/* Race header with delete button */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{raceEmoji[race.type] || "🏁"}</span>
+                    <span className="text-sm font-bold text-white">比赛 {idx + 1}</span>
+                    {days !== null && days >= 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        days <= 30 ? "bg-red-500/20 text-red-400" : days <= 90 ? "bg-amber-500/20 text-amber-400" : "bg-zinc-700/50 text-zinc-400"
+                      }`}>
+                        {days === 0 ? "今天！" : `${days} 天`}
+                        {days > 0 && days <= 30 && " 冲刺"}
+                        {days > 30 && days <= 90 && " 关键期"}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setRaces(prev => prev.filter((_, i) => i !== idx))}
+                    className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500/30 flex items-center justify-center transition-all group"
+                    title="删除此比赛"
+                  >
+                    <svg className="w-3.5 h-3.5 text-zinc-500 group-hover:text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Race fields */}
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <Field label="比赛名称">
+                    <input className={inputCls} placeholder="如：上海马拉松" value={race.name} onChange={e => updateRace("name", e.target.value)} />
+                  </Field>
+                  <Field label="比赛类型">
+                    <select className={selectCls} value={race.type} onChange={e => updateRace("type", e.target.value)}>
+                      <option value="">请选择</option>
+                      <option value="10k">10K 路跑赛</option>
+                      <option value="half_marathon">半程马拉松 (21.0975K)</option>
+                      <option value="full_marathon">全程马拉松 (42.195K)</option>
+                      <option value="gobi">戈壁挑战赛 (3天 120K)</option>
+                      <option value="trail_50k">越野跑 50K</option>
+                      <option value="trail_100k">越野跑 100K</option>
+                      <option value="trail_100m">越野跑 100英里</option>
+                    </select>
+                  </Field>
+                  <Field label="比赛日期">
+                    <input className={inputCls} type="date" value={race.date} onChange={e => updateRace("date", e.target.value)} />
+                  </Field>
+                  <Field label="目标成绩" hint="如 3:45:00 或 1:50:00">
+                    <input className={inputCls} placeholder="H:MM:SS" value={race.target_time} onChange={e => updateRace("target_time", e.target.value)} pattern="[0-9:]*" />
+                  </Field>
+                </div>
+
+                {/* Gobi special note */}
+                {race.type === "gobi" && (
+                  <p className="text-amber-400 text-xs flex items-center gap-1.5">
+                    <span>☢️</span> 连续3天共120K的竞技性赛事，训练要求激进，需大量耐力储备与越野适应
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* ── Personal Bests ────────────────────────────────────────────────── */}
