@@ -220,7 +220,7 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
 
               {/* Description tooltip */}
               {day.description && (
-                <p className="text-[10px] text-zinc-600 mt-2 line-clamp-2 leading-tight">
+                <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed border-t border-white/5 pt-2 whitespace-pre-wrap">
                   {day.description}
                 </p>
               )}
