@@ -427,11 +427,11 @@ async def generate_coach_feedback(req: CoachRequest):
             temperature=0.6,
             max_output_tokens=1200,
         )
-        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.0-flash")
+        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.5-flash-preview-04-17")
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash-preview-04-17",
                 contents=prompt,
                 config=config,
             )
@@ -669,7 +669,7 @@ async def generate_training_plan(req: TrainingPlanRequest):
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash-preview-04-17",
                 contents=prompt,
                 config=config,
             )
