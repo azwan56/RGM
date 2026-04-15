@@ -72,6 +72,7 @@ _FALLBACK = {
         "80% 的跑步保持轻松配速，能聊天的节奏最好",
         "注意补水和睡眠，恢复和训练同样重要",
         "每周跑量增幅不超过 10%，循序渐进",
+        "每周安排 1 次速度训练（间歇跑或节奏跑）提升心肺能力",
     ]
 }
 
@@ -162,11 +163,92 @@ async def generate_coach_feedback(req: CoachRequest):
                 has_gobi = True
 
     race_section = ""
+    nearest_race = None
+    nearest_days = 999
     if race_lines:
         race_section = "【备赛计划】\n" + "\n".join(race_lines) + "\n"
         if has_gobi:
             race_section += "⚠️ 戈壁挑战赛为连续3天共120K的高强度竞技赛事，训练要求激进，需要大量耐力储备和越野适应训练\n"
         race_section += "\n"
+
+    # Find the nearest upcoming race for focused coaching
+    if upcoming_races:
+        from datetime import date
+        for r in upcoming_races:
+            rdate = r.get("date", "")
+            if rdate:
+                try:
+                    days = (date.fromisoformat(rdate) - date.today()).days
+                    if 0 <= days < nearest_days:
+                        nearest_days = days
+                        nearest_race = r
+                except ValueError:
+                    pass
+
+    # Build race-specific coaching instructions
+    race_coaching_instructions = ""
+    if nearest_race:
+        rtype = nearest_race.get("type", "")
+        rname = nearest_race.get("name", "")
+        rtarget = nearest_race.get("target_time", "")
+        race_label = race_type_cn.get(rtype, rtype)
+
+        # Determine training phase
+        if nearest_days <= 7:
+            phase = "赛前减量期"
+            phase_detail = "距比赛仅剩1周以内，应大幅减量，保持状态但不追求强度。重点是休息、营养、心理准备。"
+        elif nearest_days <= 14:
+            phase = "赛前调整期"
+            phase_detail = "距比赛2周，开始逐步减量（减至高峰期的50-60%），可安排1-2次短距离配速跑验证状态，但不追求新的训练刺激。"
+        elif nearest_days <= 30:
+            phase = "冲刺期"
+            phase_detail = "距比赛1个月，这是最后的高质量训练窗口。保持强度但注意恢复，避免受伤。每周安排1次比赛配速跑。"
+        elif nearest_days <= 60:
+            phase = "专项期"
+            phase_detail = "距比赛2个月，重点提升比赛专项能力。增加比赛配速训练和长距离拉练，跑量接近峰值。"
+        elif nearest_days <= 120:
+            phase = "基础期"
+            phase_detail = "距比赛3-4个月，重点打基础。稳步提升周跑量，80%有氧 + 20%速度，建立耐力储备。"
+        else:
+            phase = "准备期"
+            phase_detail = "距比赛尚远，可以轻松积累跑量，逐步建立训练习惯和基础体能。"
+
+        # Race difficulty context
+        race_difficulty = ""
+        if rtype in ("gobi", "trail_100k", "trail_100m"):
+            race_difficulty = (
+                "这是一场极高难度的超长距离赛事，需要特别关注：\n"
+                "  - 超长距离耐力储备（周跑量建议60-100km+）\n"
+                "  - 越野地形适应训练（爬升、下坡技术）\n"
+                "  - 补给策略（能量胶、电解质、固体食物搭配）\n"
+                "  - 装备测试（越野鞋、背包、头灯、急救包）\n"
+                "  - 心理韧性训练（长时间独处运动的心理准备）\n"
+            )
+            if rtype == "gobi":
+                race_difficulty += (
+                    "  - 戈壁特殊要素：防晒防沙、极端气候适应、连续3天恢复策略\n"
+                    "  - 需要提前进行连续2-3天背靠背长距离训练\n"
+                )
+        elif rtype == "full_marathon":
+            race_difficulty = "全程马拉松需要扎实的有氧基础，建议赛前至少完成2-3次30km+的长距离拉练。\n"
+        elif rtype == "trail_50k":
+            race_difficulty = "50K越野需要良好的爬升能力和下坡技术，建议增加山地训练和负重跑。\n"
+
+        # PB target analysis
+        pb_analysis = ""
+        if rtarget:
+            pb_analysis = f"目标成绩 {rtarget}，请根据跑者当前配速和心率数据，分析目标是否合理，给出达成目标的具体训练配速建议。\n"
+
+        race_coaching_instructions = (
+            f"\n【⚡ 重点备赛指导 — {rname or race_label}】\n"
+            f"最近的比赛：{rname}（{race_label}），距今 {nearest_days} 天\n"
+            f"当前阶段：{phase}\n"
+            f"{phase_detail}\n"
+            f"{race_difficulty}"
+            f"{pb_analysis}"
+            f"请围绕这场比赛的备赛需求给出有针对性的训练建议，"
+            f"包括本周具体训练重点和需要注意的事项。\n\n"
+        )
 
     runs_str = _build_runs_str(activities)
     completion_pct = stats.get('goal_completion_percentage', 0)
@@ -182,6 +264,7 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 训练目标：{goal_cn}\n"
         f"- 当前目标：{goal_str}\n\n"
         f"{race_section}"
+        f"{race_coaching_instructions}"
         f"【本期训练数据（{stats.get('period', 'monthly')}）】\n"
         f"- 总里程：{stats.get('total_distance_km', 0)} 公里\n"
         f"- 平均配速：{stats.get('avg_pace', '?')}/km\n"
@@ -190,17 +273,30 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 目标完成度：{completion_pct}%\n\n"
         f"【近期跑步记录】\n{runs_str}\n\n"
         "【输出要求】\n"
-        "全部使用中文。语气要温暖、正面、充满鼓励。"
-        "根据跑者的实际数据给出有针对性的分析，不要泛泛而谈。"
-        "先肯定跑者的付出和进步，再给出改进建议。\n\n"
+        "全部使用中文。语气要温暖、正面、充满鼓励。\n"
+        "根据跑者的实际数据给出有针对性的分析，不要泛泛而谈。\n"
+        "先肯定跑者的付出和进步，再给出改进建议。\n"
+    )
+
+    # Add race-specific output instructions if there's an upcoming race
+    if nearest_race and nearest_days <= 120:
+        prompt += (
+            "⚠️ 重点：跑者有临近比赛，你的建议必须围绕备赛展开：\n"
+            "  - summary 中要提到比赛备赛状态和当前训练阶段\n"
+            "  - actionable_tips 中至少2条要针对比赛备赛\n"
+            "  - 如果距比赛≤14天，重点提醒减量和赛前准备\n"
+            "  - 如果有目标成绩，分析当前状态与目标的差距\n\n"
+        )
+
+    prompt += (
         "返回 JSON 格式如下：\n"
         '{\n'
-        '  "status": "<状态标签，如：状态出色 🔥|稳步提升 📈|基础扎实 💪|建议休息 😴|继续加油 🏃>",\n'
-        '  "summary": "<2-3 句话的训练总结，先肯定再分析，温暖鼓励的语气>",\n'
-        '  "encouragement": "<一句短小有力的鼓励金句，像教练对你说的话>",\n'
-        '  "actionable_tips": ["建议1", "建议2", "建议3"]\n'
+        '  "status": "<状态标签，如：备赛冲刺 🔥|稳步提升 📈|状态出色 💪|注意恢复 😴|继续加油 🏃>",\n'
+        '  "summary": "<2-3 句话的训练总结，如有比赛则重点评估备赛状态>",\n'
+        '  "encouragement": "<一句短小有力的鼓励金句>",\n'
+        '  "actionable_tips": ["建议1", "建议2", "建议3", "建议4"]\n'
         '}\n\n'
-        "建议要具体、可操作，结合跑者的配速/心率/跑量数据给出。"
+        "建议要具体、可操作，结合跑者的配速/心率/跑量数据给出。如有比赛需包含本周训练重点。"
     )
 
     if not _api_key:
