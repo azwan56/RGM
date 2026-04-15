@@ -195,7 +195,7 @@ export default function Dashboard() {
             </Link>
 
             <Link
-              href="/dashboard/analysis#coach"
+              href="/dashboard/coach"
               className="py-5 px-6 bg-gradient-to-r from-white/5 to-white/[0.02] hover:from-white/10 hover:to-white/5 border border-white/10 hover:border-emerald-500/30 rounded-2xl transition-all group"
             >
               <div className="flex items-center justify-between">

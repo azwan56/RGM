@@ -416,11 +416,11 @@ async def generate_coach_feedback(req: CoachRequest):
             temperature=0.6,
             max_output_tokens=1200,
         )
-        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.0-flash")
+        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-3.1-flash-lite")
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt,
                 config=config,
             )
@@ -521,47 +521,67 @@ async def generate_training_plan(req: TrainingPlanRequest):
         m = r // 60
         return f"{h}:{m:02d}"
 
+    # Race context for training plan
+    upcoming_races = profile.get("upcoming_races", [])
+    race_context = ""
+    if upcoming_races:
+        from datetime import date
+        for r in upcoming_races:
+            rdate = r.get("date", "")
+            rname = r.get("name", "")
+            rtype = r.get("type", "")
+            rtarget = r.get("target_time", "")
+            if rdate:
+                try:
+                    days = (date.fromisoformat(rdate) - date.today()).days
+                    if days > 0:
+                        race_context += f"\n- 备赛：{rname}（{rtype}），{days}天后，目标成绩{rtarget or '未设'}"
+                except ValueError:
+                    pass
+
     prompt = (
-        "You are a professional running coach creating a 7-day training plan. "
-        "Reply with ONLY a valid JSON object, no markdown fences.\n\n"
-        f"ATHLETE PROFILE:\n"
-        f"- Age: {age}, Gender: {gender}, Running years: {years_running}\n"
-        f"- VDOT: {vdot or 'Unknown'}\n"
-        f"- Marathon PB: {_fmt_pb(fm_pb_sec)}, Half PB: {_fmt_pb(half_pb_sec)}\n"
-        f"- Training goal: {training_goal}\n"
-        f"- Max HR: {max_hr}, Rest HR: {rest_hr}\n"
-        f"- Goal: {goal_str}\n\n"
-        f"RECENT 14 DAYS: {run_count_14d} runs, {total_km_14d:.1f}km total\n"
-        f"Last runs: {' | '.join(recent_summary) or 'No recent data'}\n\n"
-        f"Current monthly stats: {stats.get('total_distance_km',0)}km, "
-        f"pace {stats.get('avg_pace','?')}/km, "
-        f"HR {stats.get('avg_heart_rate',0)}bpm\n\n"
-        "Generate a 7-day plan starting from tomorrow. "
-        "Use CHINESE for all text fields. "
-        "Return JSON with exactly this structure:\n"
+        "你是一位专业的中文跑步教练，请为跑者制定一份个性化的7天训练计划。"
+        "回复必须是纯 JSON，不含 markdown 标记。\n\n"
+        f"【跑者档案】\n"
+        f"- 年龄：{age}，性别：{gender}，跑龄：{years_running}年\n"
+        f"- VDOT：{vdot or '未知'}\n"
+        f"- 全马PB：{_fmt_pb(fm_pb_sec)}，半马PB：{_fmt_pb(half_pb_sec)}\n"
+        f"- 训练目标：{training_goal}\n"
+        f"- 最大心率：{max_hr}，静息心率：{rest_hr}\n"
+        f"- 目标：{goal_str}\n"
+        f"{race_context}\n\n"
+        f"【近14天训练】{run_count_14d} 次跑步，共 {total_km_14d:.1f}km\n"
+        f"近期跑步：{' | '.join(recent_summary) or '无近期数据'}\n\n"
+        f"【本月数据】{stats.get('total_distance_km',0)}km，"
+        f"配速 {stats.get('avg_pace','?')}/km，"
+        f"心率 {stats.get('avg_heart_rate',0)}bpm\n\n"
+        "请从明天开始生成7天训练计划，所有文本使用中文。\n"
+        "返回 JSON 格式如下：\n"
         '{\n'
-        '  "plan_summary": "<1-2 sentence overview in Chinese>",\n'
-        '  "weekly_km": <total km number>,\n'
+        '  "plan_summary": "<1-2句训练计划总述，中文>",\n'
+        '  "weekly_km": <总公里数>,\n'
         '  "days": [\n'
         '    {\n'
         '      "day": 1,\n'
         '      "type": "<Easy|Tempo|Interval|Long Run|Recovery|Rest|Cross Training>",\n'
-        '      "title": "<Chinese title, e.g. 轻松跑>",\n'
-        '      "distance_km": <number or 0 for rest>,\n'
-        '      "pace_target": "<e.g. 5:30-6:00 or null for rest>",\n'
-        '      "hr_zone": "<e.g. Zone 2 or null>",\n'
-        '      "duration_min": <estimated minutes>,\n'
-        '      "description": "<Chinese description of workout>",\n'
-        '      "intensity": <1-5 scale>\n'
+        '      "title": "<中文标题，如：轻松恢复跑>",\n'
+        '      "distance_km": <公里数，休息日为0>,\n'
+        '      "pace_target": "<如 5:30-6:00，休息日为null>",\n'
+        '      "hr_zone": "<如 Zone 2，休息日为null>",\n'
+        '      "duration_min": <预估分钟数>,\n'
+        '      "description": "<中文描述，具体说明训练内容和注意事项>",\n'
+        '      "intensity": <1-5强度>\n'
         '    }\n'
         '  ]\n'
         '}\n\n'
-        "RULES:\n"
-        "- Include 1-2 rest days\n"
-        "- Follow 80/20 rule (80% easy, 20% hard)\n"
-        "- Long run should be on weekend\n"
-        "- Match intensity to athlete's current fitness level\n"
-        "- If VDOT is unknown, estimate from recent pace data"
+        "规则：\n"
+        "- 安排 1-2 个休息日\n"
+        "- 遵循 80/20 原则（80%轻松跑，20%高强度）\n"
+        "- 长距离跑安排在周末\n"
+        "- 强度匹配跑者当前体能水平\n"
+        "- 如有备赛计划，训练内容要针对比赛需求\n"
+        "- description 字段要具体，包含热身、主课、拉伸等细节\n"
+        "- 如 VDOT 未知，根据近期配速数据估算"
     )
 
     if not _api_key:
@@ -578,7 +598,7 @@ async def generate_training_plan(req: TrainingPlanRequest):
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt,
                 config=config,
             )
