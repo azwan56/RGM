@@ -76,7 +76,7 @@ export default function Dashboard() {
               {displayName ? `你好，${displayName}` : "Welcome Back"}<span className="text-[#FC4C02]">.</span>
             </h1>
             <p className="text-zinc-400 text-sm md:text-base">
-              {user?.email} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
+              {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
             </p>
           </div>
           <div className="flex items-center gap-4">

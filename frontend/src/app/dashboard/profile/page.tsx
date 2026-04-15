@@ -99,6 +99,10 @@ export default function ProfilePage() {
       if (!user) { router.push("/"); return; }
       setUid(user.uid);
       setEmail(user.email || "");
+      // Pre-fill phone from Firebase auth if signed-in via phone
+      if (user.phoneNumber && !user.email) {
+        setForm(f => ({ ...f, phone: f.phone || user.phoneNumber || "" }));
+      }
 
       try {
         const res = await axios.get(`${backendUrl}/api/profile/${user.uid}`);
@@ -273,11 +277,20 @@ export default function ProfilePage() {
             <Field label="显示名称 / 昵称">
               <input className={inputCls} placeholder="你的跑步江湖名号" value={form.display_name} onChange={set("display_name")} />
             </Field>
-            <Field label="注册邮箱" hint="由 Firebase 验证，不可更改">
-              <input className={inputCls} value={email} disabled style={{ opacity: 0.5, cursor: "not-allowed" }} />
-            </Field>
-            <Field label="手机号码">
-              <input className={inputCls} placeholder="+86 138..." value={form.phone} onChange={set("phone")} />
+            {email && (
+              <Field label="注册邮箱" hint="由 Firebase 验证，不可更改">
+                <input className={inputCls} value={email} disabled style={{ opacity: 0.5, cursor: "not-allowed" }} />
+              </Field>
+            )}
+            <Field label="手机号码" hint={!email ? "由 Firebase 短信验证，不可更改" : undefined}>
+              <input
+                className={inputCls}
+                placeholder="+86 138..."
+                value={form.phone}
+                onChange={set("phone")}
+                disabled={!email}
+                style={!email ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+              />
             </Field>
             <Field label="Strava 账号">
               <div className={`${inputCls} flex items-center gap-2 cursor-default`} style={{ opacity: stravaConnected ? 1 : 0.5 }}>
