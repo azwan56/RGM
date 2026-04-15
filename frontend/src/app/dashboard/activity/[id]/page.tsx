@@ -5,7 +5,6 @@ import { useRouter, useParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import dynamic from "next/dynamic";
-import ActivityChart from "@/components/ActivityChart";
 import VdotChart from "@/components/VdotChart";
 
 const VdotTrend = dynamic(() => import("@/components/VdotTrend"), { ssr: false });
@@ -57,12 +56,9 @@ export default function ActivityDetailPage() {
   const activityId = params.id as string;
   const router = useRouter();
   const [activity, setActivity] = useState<ActivityDetail | null>(null);
-  const [polyline, setPolyline] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [streamsFetchDone, setStreamsFetchDone] = useState(false);
-  const [points, setPoints] = useState<any[]>([]);
   const [vdotAnalysis, setVdotAnalysis] = useState<any | null>(null);
   const [vdotLoading, setVdotLoading] = useState(false);
 
@@ -74,7 +70,7 @@ export default function ActivityDetailPage() {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
       try {
-        // Phase 1: Load from Firestore (instant — offline-capable)
+        // Load from Firestore (instant — offline-capable)
         const actRef = doc(db, "users", uid, "activities", activityId);
         const actSnap = await getDoc(actRef);
         if (!actSnap.exists()) {
@@ -84,36 +80,14 @@ export default function ActivityDetailPage() {
         }
         const data = actSnap.data() as ActivityDetail;
         setActivity(data);
+        setLoading(false);
 
-        // Use summary_polyline from Firestore immediately (fast)
-        if (data.summary_polyline) setPolyline(data.summary_polyline);
-        setLoading(false); // << Unblock the UI immediately
-
-        // Phase 2: Upgrade polyline + fetch chart streams in parallel (non-blocking)
-        const apiClient = (await import("@/lib/apiClient")).default;
-        const [polyRes, streamRes] = await Promise.allSettled([
-          apiClient.get(`${backendUrl}/api/sync/activity/${activityId}?uid=${uid}`),
-          apiClient.get(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`),
-        ]);
-
-        if (polyRes.status === "fulfilled") {
-          const fullData = polyRes.value.data;
-          if (fullData.polyline) setPolyline(fullData.polyline);
-          else if (fullData.summary_polyline) setPolyline(fullData.summary_polyline);
-        }
-
-        if (streamRes.status === "fulfilled") {
-          setPoints(streamRes.value.data.points || []);
-        }
-        setStreamsFetchDone(true);
-
-        // Phase 3: Lazy-load VDOT analysis AFTER chart is visible (fire-and-forget)
+        // Lazy-load VDOT analysis (fire-and-forget)
         setVdotLoading(true);
+        const apiClient = (await import("@/lib/apiClient")).default;
         apiClient.get(`${backendUrl}/api/sync/activity/${activityId}/vdot?uid=${uid}`)
           .then(r => {
-            if (r.data?.vdot_analysis) {
-              setVdotAnalysis(r.data.vdot_analysis);
-            }
+            if (r.data?.vdot_analysis) setVdotAnalysis(r.data.vdot_analysis);
           })
           .catch(() => {})
           .finally(() => setVdotLoading(false));
@@ -121,8 +95,8 @@ export default function ActivityDetailPage() {
       } catch (e) {
         console.error(e);
         setError("Failed to load activity.");
+        setLoading(false);
       }
-      setLoading(false);
     });
     return () => unsub();
   }, [activityId, router]);
@@ -181,29 +155,32 @@ export default function ActivityDetailPage() {
           </div>
         </div>
 
-        {/* Route summary — map removed to improve load speed */}
-        {polyline && (
-          <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm text-zinc-400">
-            <svg className="w-4 h-4 text-[#FC4C02] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
-            路线数据已记录，地图暂未显示
-          </div>
-        )}
+        {/* Primary stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatItem label="距离" value={`${activity.distance_km.toFixed(2)}`} unit="km" />
+          <StatItem label="运动时长" value={activity.duration_str} />
+          <StatItem label="平均配速" value={activity.avg_pace} unit="/km" />
+          <StatItem label="爬升高度" value={activity.total_elevation_gain} unit="m" />
+        </div>
 
-        {/* Performance Chart */}
-        {user && streamsFetchDone && (
-          <ActivityChart
-            activityId={activity.activity_id}
-            uid={user.uid}
-            avgPace={activity.avg_pace !== "—" ? activity.avg_pace : undefined}
-            avgHeartRate={activity.avg_heart_rate || undefined}
-            avgCadence={activity.avg_cadence || undefined}
-            initialPoints={points}
-          />
-        )}
+        {/* Secondary stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {activity.has_heartrate && (
+            <>
+              <StatItem label="平均心率" value={activity.avg_heart_rate} unit="bpm" />
+              <StatItem label="最大心率" value={activity.max_heart_rate} unit="bpm" />
+            </>
+          )}
+          <StatItem label="平均速度" value={activity.avg_speed_kmh} unit="km/h" />
+          <StatItem label="最大速度" value={activity.max_speed_kmh} unit="km/h" />
+          {activity.avg_cadence > 0 && (
+            <StatItem label="平均步频" value={activity.avg_cadence} unit="spm" />
+          )}
+          <StatItem label="成就数" value={activity.achievement_count || 0} />
+          <StatItem label="点赞数" value={activity.kudos_count || 0} />
+        </div>
 
-        {/* Vdot Chart — lazy loaded after main chart renders */}
+        {/* VDOT Chart */}
         {(vdotLoading || vdotAnalysis) && (
           <div className="h-80">
             {vdotLoading && !vdotAnalysis ? (
@@ -217,35 +194,10 @@ export default function ActivityDetailPage() {
           </div>
         )}
 
-        {/* VDOT Trend — shows recent VDOT progression */}
+        {/* VDOT Trend */}
         {user && !vdotLoading && (
           <VdotTrend uid={user.uid} currentActivityId={activity.activity_id} />
         )}
-
-        {/* Primary stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatItem label="Distance" value={`${activity.distance_km.toFixed(2)}`} unit="km" />
-          <StatItem label="Moving Time" value={activity.duration_str} />
-          <StatItem label="Avg Pace" value={activity.avg_pace} unit="/km" />
-          <StatItem label="Elevation Gain" value={activity.total_elevation_gain} unit="m" />
-        </div>
-
-        {/* Secondary stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {activity.has_heartrate && (
-            <>
-              <StatItem label="Avg Heart Rate" value={activity.avg_heart_rate} unit="bpm" />
-              <StatItem label="Max Heart Rate" value={activity.max_heart_rate} unit="bpm" />
-            </>
-          )}
-          <StatItem label="Avg Speed" value={activity.avg_speed_kmh} unit="km/h" />
-          <StatItem label="Max Speed" value={activity.max_speed_kmh} unit="km/h" />
-          {activity.avg_cadence > 0 && (
-            <StatItem label="Avg Cadence" value={activity.avg_cadence} unit="spm" />
-          )}
-          <StatItem label="Achievements" value={activity.achievement_count || 0} />
-          <StatItem label="Kudos" value={activity.kudos_count || 0} />
-        </div>
 
         {/* Strava link */}
         <a
@@ -258,7 +210,7 @@ export default function ActivityDetailPage() {
             <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066l-2.084 4.116z"/>
             <path d="M7.698 13.828l4.806-9.6 4.807 9.6h3.066L11.504 0 4.633 13.828h3.065z"/>
           </svg>
-          View on Strava
+          在 Strava 查看
         </a>
 
       </main>
