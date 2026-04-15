@@ -222,7 +222,18 @@ async def generate_coach_feedback(req: CoachRequest):
     ) if profile else "跑者"
     training_goal = profile.get("training_goal", "fitness") if profile else "fitness"
     years_running = profile.get("years_running", 0) if profile else 0
-    age = profile.get("age", "") if profile else ""
+    # Compute age from date_of_birth, fallback to legacy 'age' field
+    _dob = profile.get("date_of_birth", "") if profile else ""
+    if _dob:
+        try:
+            from datetime import date as _d
+            _born = _d.fromisoformat(_dob)
+            _today = _d.today()
+            age = _today.year - _born.year - ((_today.month, _today.day) < (_born.month, _born.day))
+        except (ValueError, TypeError):
+            age = profile.get("age", "") if profile else ""
+    else:
+        age = profile.get("age", "") if profile else ""
 
     goal_cn = {
         "fitness": "健康健身", "5k": "5K 突破", "10k": "10K 提升",
@@ -486,7 +497,18 @@ async def generate_training_plan(req: TrainingPlanRequest):
 
     # Build context
     vdot = profile.get("vdot") or None
-    age = profile.get("age", 30)
+    # Compute age from date_of_birth, fallback to legacy 'age' field
+    _dob2 = profile.get("date_of_birth", "")
+    if _dob2:
+        try:
+            from datetime import date as _d2
+            _born2 = _d2.fromisoformat(_dob2)
+            _today2 = _d2.today()
+            age = _today2.year - _born2.year - ((_today2.month, _today2.day) < (_born2.month, _born2.day))
+        except (ValueError, TypeError):
+            age = profile.get("age", 30)
+    else:
+        age = profile.get("age", 30)
     gender = profile.get("gender", "other")
     years_running = profile.get("years_running", 0) or 0
     training_goal = profile.get("training_goal", "fitness")

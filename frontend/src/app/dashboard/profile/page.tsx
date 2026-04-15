@@ -72,9 +72,11 @@ export default function ProfilePage() {
   const [form, setForm] = useState({
     display_name:    "",
     phone:           "",
-    age:             "",
+    date_of_birth:   "",   // YYYY-MM-DD
     gender:          "",
     years_running:   "",
+    height_cm:       "",
+    weight_kg:       "",
     training_goal:   "",
     bio:             "",
     marathon_pb:     "",  // HH:MM:SS string
@@ -104,9 +106,11 @@ export default function ProfilePage() {
         setForm({
           display_name:  p.display_name || p.strava_name || "",
           phone:         p.phone || "",
-          age:           p.age?.toString() || "",
+          date_of_birth: p.date_of_birth || "",
           gender:        p.gender || "",
           years_running: p.years_running?.toString() || "",
+          height_cm:     p.height_cm?.toString() || "",
+          weight_kg:     p.weight_kg?.toString() || "",
           training_goal: p.training_goal || "",
           bio:           p.bio || "",
           marathon_pb:   secsToTime(p.marathon_pb_sec),
@@ -144,9 +148,11 @@ export default function ProfilePage() {
         uid,
         display_name:   form.display_name || undefined,
         phone:          form.phone || undefined,
-        age:            form.age ? parseInt(form.age) : undefined,
+        date_of_birth:  form.date_of_birth || undefined,
         gender:         form.gender || undefined,
         years_running:  form.years_running ? parseInt(form.years_running) : undefined,
+        height_cm:      form.height_cm ? parseFloat(form.height_cm) : undefined,
+        weight_kg:      form.weight_kg ? parseFloat(form.weight_kg) : undefined,
         training_goal:  form.training_goal || undefined,
         bio:            form.bio || undefined,
         marathon_pb_sec: timeToSecs(form.marathon_pb) || undefined,
@@ -288,9 +294,20 @@ export default function ProfilePage() {
         {/* ── Runner Profile ────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
           <SectionTitle>跑者信息</SectionTitle>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Field label="年龄">
-              <input className={inputCls} type="number" placeholder="28" min={10} max={100} value={form.age} onChange={set("age")} />
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Field label="出生日期">
+              <input className={inputCls} type="date" value={form.date_of_birth} onChange={set("date_of_birth")} />
+              {form.date_of_birth && (
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  {(() => {
+                    const born = new Date(form.date_of_birth);
+                    const today = new Date();
+                    let age = today.getFullYear() - born.getFullYear();
+                    if (today.getMonth() < born.getMonth() || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) age--;
+                    return `${age} 岁`;
+                  })()}
+                </p>
+              )}
             </Field>
             <Field label="性别">
               <select className={selectCls} value={form.gender} onChange={set("gender")}>
@@ -300,6 +317,14 @@ export default function ProfilePage() {
                 <option value="other">其他</option>
               </select>
             </Field>
+            <Field label="身高 (cm)">
+              <input className={inputCls} type="number" placeholder="175" min={100} max={250} step={0.1} value={form.height_cm} onChange={set("height_cm")} />
+            </Field>
+            <Field label="体重 (kg)" hint={form.weight_kg ? undefined : "连接 Strava 可自动导入"}>
+              <input className={inputCls} type="number" placeholder="70" min={30} max={200} step={0.1} value={form.weight_kg} onChange={set("weight_kg")} />
+            </Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
             <Field label="跑龄（年）">
               <input className={inputCls} type="number" placeholder="3" min={0} max={50} value={form.years_running} onChange={set("years_running")} />
             </Field>

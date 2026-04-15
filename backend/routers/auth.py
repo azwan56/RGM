@@ -43,9 +43,13 @@ def auth_strava(request: StravaAuthRequest):
         athlete.get("lastname", ""),
     ])).strip() or None
 
-    # Save to Firestore — include name so leaderboard can show it immediately
-    user_ref = db.collection("users").document(request.uid)
-    user_ref.set({
+    # Extract weight from Strava (in kg), sex for gender mapping
+    strava_weight = athlete.get("weight")  # kg, float or None
+    strava_sex = athlete.get("sex")  # "M" or "F" or None
+    gender_map = {"M": "male", "F": "female"}
+
+    # Build update payload — only set fields Strava actually provides
+    strava_fields: dict = {
         "strava_access_token":  data["access_token"],
         "strava_refresh_token": data["refresh_token"],
         "strava_expires_at":    data["expires_at"],
@@ -53,7 +57,20 @@ def auth_strava(request: StravaAuthRequest):
         "strava_connected":     True,
         "strava_name":          strava_name,
         "strava_profile_url":   athlete.get("profile"),  # avatar URL
-    }, merge=True)
+    }
+    if strava_weight and strava_weight > 0:
+        strava_fields["weight_kg"] = round(strava_weight, 1)
+
+    # Save to Firestore — include name so leaderboard can show it immediately
+    user_ref = db.collection("users").document(request.uid)
+
+    if strava_sex and strava_sex in gender_map:
+        # Only set gender if not already set by user
+        existing = user_ref.get()
+        if existing.exists and not existing.to_dict().get("gender"):
+            strava_fields["gender"] = gender_map[strava_sex]
+
+    user_ref.set(strava_fields, merge=True)
 
     # Also keep leaderboard name in sync
     try:

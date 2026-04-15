@@ -2,10 +2,11 @@
 Profile router — manages extended user attributes stored in Firestore.
 
 Fields stored under users/{uid}:
-  display_name, age, gender, years_running,
+  display_name, date_of_birth, gender, years_running,
+  height_cm, weight_kg,
   marathon_pb_sec, half_pb_sec, ten_k_pb_sec, five_k_pb_sec,
   training_goal, phone, bio,
-  upcoming_race, upcoming_race_date
+  upcoming_races (list of up to 3 race dicts)
   (strava_name, email are read-only — set by OAuth / Firebase Auth)
 """
 
@@ -20,7 +21,8 @@ router = APIRouter()
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 EDITABLE_FIELDS = {
-    "display_name", "age", "gender", "years_running",
+    "display_name", "date_of_birth", "gender", "years_running",
+    "height_cm", "weight_kg",
     "marathon_pb_sec", "half_pb_sec", "ten_k_pb_sec", "five_k_pb_sec",
     "training_goal", "phone", "bio",
     # upcoming_races handled separately as a list
@@ -45,7 +47,7 @@ def _format_pb(seconds: Optional[int]) -> Optional[str]:
 
 @router.get("/{uid}")
 def get_profile(uid: str):
-    """Return the full user profile including formatted PB strings."""
+    """Return the full user profile including formatted PB strings and computed age."""
     doc = db.collection("users").document(uid).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="User not found")
@@ -55,6 +57,19 @@ def get_profile(uid: str):
     # Strip sensitive / internal fields before returning
     safe = {k: v for k, v in data.items()
             if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
+
+    # Compute age from date_of_birth if present
+    dob = data.get("date_of_birth")
+    if dob:
+        try:
+            from datetime import date
+            born = date.fromisoformat(dob)
+            today = date.today()
+            safe["age"] = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        except (ValueError, TypeError):
+            safe["age"] = data.get("age", 0)
+    else:
+        safe["age"] = data.get("age", 0)
 
     # Annotate with formatted PBs for display
     safe["marathon_pb_fmt"]  = _format_pb(data.get("marathon_pb_sec"))
@@ -70,9 +85,11 @@ def get_profile(uid: str):
 class ProfileUpdate(BaseModel):
     uid:              str
     display_name:     Optional[str]  = None
-    age:              Optional[int]  = None
+    date_of_birth:    Optional[str]  = None   # "YYYY-MM-DD"
     gender:           Optional[str]  = None   # "male" | "female" | "other"
     years_running:    Optional[int]  = None
+    height_cm:        Optional[float] = None  # cm
+    weight_kg:        Optional[float] = None  # kg
     marathon_pb_sec:  Optional[int]  = None   # seconds (0 = unset)
     half_pb_sec:      Optional[int]  = None
     ten_k_pb_sec:     Optional[int]  = None
@@ -147,7 +164,17 @@ def get_runner_persona(uid: str):
     profile = doc.to_dict() or {}
 
     # ── Gather signals ─────────────────────────────────────────────────────────
-    age           = profile.get("age", 30)
+    # Compute age from date_of_birth, fallback to legacy 'age' field
+    dob = profile.get("date_of_birth")
+    if dob:
+        try:
+            born = date.fromisoformat(dob)
+            today = date.today()
+            age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        except (ValueError, TypeError):
+            age = profile.get("age", 30)
+    else:
+        age = profile.get("age", 30)
     gender        = profile.get("gender", "other")
     years_running = profile.get("years_running", 0) or 0
     fm_pb_sec     = profile.get("marathon_pb_sec", 0) or 0  # 0 = no PB
