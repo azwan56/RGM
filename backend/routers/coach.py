@@ -416,11 +416,11 @@ async def generate_coach_feedback(req: CoachRequest):
             temperature=0.6,
             max_output_tokens=1200,
         )
-        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-3.1-flash-lite")
+        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.0-flash")
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config=config,
             )
@@ -569,7 +569,7 @@ async def generate_training_plan(req: TrainingPlanRequest):
         '      "pace_target": "<如 5:30-6:00，休息日为null>",\n'
         '      "hr_zone": "<如 Zone 2，休息日为null>",\n'
         '      "duration_min": <预估分钟数>,\n'
-        '      "description": "<中文描述，具体说明训练内容和注意事项>",\n'
+        '      "description": "<非常具体的中文描述，必须包含：1.热身(如热身跑2km+动态拉伸) 2.主课内容(含具体配速要求) 3.冷身(如慢跑放松1km+静态拉伸)>",\n'
         '      "intensity": <1-5强度>\n'
         '    }\n'
         '  ]\n'
@@ -579,8 +579,8 @@ async def generate_training_plan(req: TrainingPlanRequest):
         "- 遵循 80/20 原则（80%轻松跑，20%高强度）\n"
         "- 长距离跑安排在周末\n"
         "- 强度匹配跑者当前体能水平\n"
-        "- 如有备赛计划，训练内容要针对比赛需求\n"
-        "- description 字段要具体，包含热身、主课、拉伸等细节\n"
+        "- 如有备赛计划，训练内容要针对比赛需求并且强度足够（尤其是戈壁挑战赛等高难度赛事）\n"
+        "- description 字段绝对不能太简短，每天的训练必须有执行细节细节！\n"
         "- 如 VDOT 未知，根据近期配速数据估算"
     )
 
@@ -598,7 +598,7 @@ async def generate_training_plan(req: TrainingPlanRequest):
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config=config,
             )
