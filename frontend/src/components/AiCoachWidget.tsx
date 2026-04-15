@@ -77,9 +77,11 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
   // Determine badge color based on status
   const getBadgeColor = (status: string) => {
     const s = status;
-    if (s.includes("出色") || s.includes("🔥")) return "bg-green-500/20 text-green-400 border-green-500/30";
-    if (s.includes("提升") || s.includes("📈") || s.includes("扎实") || s.includes("💪")) return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-    if (s.includes("休息") || s.includes("😴") || s.includes("离线")) return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30";
+    if (s.includes("冲刺") || s.includes("🔥") || s.includes("倒计时") || s.includes("⏳")) return "bg-red-500/20 text-red-400 border-red-500/30";
+    if (s.includes("出色") || s.includes("💪")) return "bg-green-500/20 text-green-400 border-green-500/30";
+    if (s.includes("提升") || s.includes("📈") || s.includes("专项")) return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    if (s.includes("调整") || s.includes("📋") || s.includes("储备")) return "bg-purple-500/20 text-purple-400 border-purple-500/30";
+    if (s.includes("休息") || s.includes("😴") || s.includes("恢复")) return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30";
     if (s.includes("加油") || s.includes("🏃")) return "bg-[#FC4C02]/20 text-[#FC4C02] border-[#FC4C02]/30";
     return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
   };

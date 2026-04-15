@@ -78,6 +78,112 @@ _FALLBACK = {
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
+def _build_race_fallback(nearest_race, nearest_days, runner_name, stats):
+    """Generate race-specific fallback advice when Gemini API is unavailable."""
+    if not nearest_race or nearest_days > 120:
+        return {
+            **_FALLBACK,
+            "summary": f"{runner_name}，你已完成 {stats.get('total_distance_km', 0)} 公里，保持节奏！"
+                       if stats else _FALLBACK["summary"],
+        }
+
+    rtype = nearest_race.get("type", "")
+    rname = nearest_race.get("name", "比赛")
+    rtarget = nearest_race.get("target_time", "")
+
+    race_label = {
+        "10k": "10K", "half_marathon": "半马", "full_marathon": "全马",
+        "gobi": "戈壁挑战赛", "trail_50k": "越野50K",
+        "trail_100k": "越野100K", "trail_100m": "越野100英里",
+    }.get(rtype, rtype)
+
+    # Phase-specific tips
+    if nearest_days <= 7:
+        status = "赛前倒计时 ⏳"
+        summary = (
+            f"{runner_name}，距{rname}（{race_label}）仅剩 {nearest_days} 天！"
+            f"现在是赛前减量期，保持轻松跑维持状态即可，千万不要追求强度。"
+        )
+        encouragement = "信任你的训练，你已经准备好了！"
+        tips = [
+            f"跑量降至平时的 30-40%，每次跑步不超过 30-40 分钟",
+            "赛前 2 天完全休息或仅做 15 分钟慢跑 + 动态拉伸",
+            "调整作息，确保赛前连续 3 晚睡够 7-8 小时",
+            "准备比赛装备清单：号码布、能量胶、凡士林、备用袜子",
+        ]
+        if rtype in ("gobi", "trail_100k", "trail_100m", "trail_50k"):
+            tips.append("检查越野装备：头灯电池、水袋、应急毯、急救包")
+        if rtarget:
+            tips.append(f"回顾目标配速 {rtarget}，比赛前半段保守，后半段发力")
+
+    elif nearest_days <= 14:
+        status = "赛前调整期 📋"
+        summary = (
+            f"{runner_name}，距{rname}还有 {nearest_days} 天，"
+            f"进入赛前调整期。减量但不停跑，1-2 次短距离配速跑验证状态。"
+        )
+        encouragement = "减量期的不安是正常的，相信过程！"
+        tips = [
+            "本周跑量减至高峰期的 50-60%，以轻松跑为主",
+            f"安排 1 次 5-8km 的{race_label}目标配速跑，验证体感",
+            "增加碳水摄入比例，赛前 3 天进行糖原补充",
+            "提前研究赛道路线、补给站位置和海拔变化",
+        ]
+        if rtype in ("gobi", "trail_100k", "trail_100m"):
+            tips.append("最后一次装备全套测试跑，确保无磨脚、背包晃动等问题")
+
+    elif nearest_days <= 30:
+        status = "备赛冲刺 🔥"
+        summary = (
+            f"{runner_name}，距{rname}还有 {nearest_days} 天，"
+            f"这是最后的高质量训练窗口！保持强度但注意恢复，避免受伤。"
+        )
+        encouragement = "冲刺阶段，每一次训练都在为赛道蓄力！"
+        tips = [
+            f"每周安排 1 次{race_label}比赛配速的中长距离跑（15-25km）",
+            "每周 1 次间歇跑或节奏跑，维持速度感",
+            "注意身体信号，任何不适立即减量，保护性训练",
+            "模拟比赛日流程：起床时间、赛前餐、热身节奏",
+        ]
+        if rtype == "full_marathon":
+            tips.insert(0, "完成最后一次 30-32km 长距离拉练，之后开始逐步减量")
+        elif rtype in ("gobi", "trail_100k", "trail_100m"):
+            tips.insert(0, "完成最后一次 40-50km 的超长距离训练或连续 2 天背靠背长距离")
+
+    elif nearest_days <= 60:
+        status = "专项训练期 📈"
+        summary = (
+            f"{runner_name}，距{rname}还有 {nearest_days} 天，"
+            f"正是提升比赛专项能力的关键阶段，跑量接近峰值。"
+        )
+        encouragement = "此刻的汗水，都会成为赛道上的底气！"
+        tips = [
+            f"周跑量稳定在备赛峰值，长距离拉练每周递增 2-3km",
+            "每周 1-2 次比赛配速训练，找到比赛节奏",
+            "加入一些高于比赛配速的间歇训练，提升乳酸阈值",
+            "关注营养恢复，训练后 30 分钟内补充蛋白质和碳水",
+        ]
+    else:
+        status = "基础储备期 💪"
+        summary = (
+            f"{runner_name}，距{rname}还有 {nearest_days} 天，"
+            f"目前以打基础为主，稳步提升周跑量和有氧耐力。"
+        )
+        encouragement = "基础打得越扎实，赛道上越从容！"
+        tips = [
+            "80% 的跑步保持轻松配速（MAF 心率或能聊天的节奏）",
+            "每周跑量增幅不超过 10%，循序渐进积累",
+            "每周 1 次长距离慢跑，逐步延长到赛事距离的 60-70%",
+            "加入核心力量训练和柔韧性训练，预防跑步伤病",
+        ]
+
+    return {
+        "status": status,
+        "summary": summary,
+        "encouragement": encouragement,
+        "actionable_tips": tips[:5],
+    }
+
 @router.post("/analyze")
 async def generate_coach_feedback(req: CoachRequest):
     """
@@ -300,12 +406,7 @@ async def generate_coach_feedback(req: CoachRequest):
     )
 
     if not _api_key:
-        return {"feedback": {
-            "status": "离线模式 🔌",
-            "summary": "AI 教练暂时离线，但你的努力不会被辜负！",
-            "encouragement": "坚持训练，胜利属于每一个不放弃的人！",
-            "actionable_tips": ["轻松跑保持能聊天的配速", "坚持比速度更重要", "休息也是训练的一部分"]
-        }}
+        return {"feedback": _build_race_fallback(nearest_race, nearest_days, runner_name, stats)}
 
     try:
         from google.genai import types
@@ -313,28 +414,32 @@ async def generate_coach_feedback(req: CoachRequest):
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.6,
-            max_output_tokens=800,
+            max_output_tokens=1200,
         )
+        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.0-flash")
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config=config,
             )
         )
         text = response.text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        return {"feedback": json.loads(text)}
+        feedback = json.loads(text)
+        # Ensure 'encouragement' field exists
+        if "encouragement" not in feedback:
+            feedback["encouragement"] = "每一步都是进步，坚持就是胜利！"
+        return {"feedback": feedback}
 
     except json.JSONDecodeError as e:
         print(f"Coach JSON parse error: {e}")
-        return {"feedback": _FALLBACK}
+        return {"feedback": _build_race_fallback(nearest_race, nearest_days, runner_name, stats)}
     except Exception as e:
         print(f"Coach generation failed: {e}")
-        return {"feedback": {
-            **_FALLBACK,
-            "summary": f"{runner_name}，你已经跑了 {stats.get('total_distance_km', 0)} 公里，非常棒！继续保持！"
-        }}
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
+        fb["_error"] = str(e)  # Return error for debugging
+        return {"feedback": fb}
 
 
 # ── Training Plan Generator ──────────────────────────────────────────────────
