@@ -476,6 +476,54 @@ def _fetch_recent_14d(uid: str):
     return [d.to_dict() for d in docs]
 
 
+def _build_training_plan_fallback(total_km_14d: float, training_goal: str, upcoming_races: list) -> dict:
+    """Returns a sensible template 7-day training plan when AI is unavailable."""
+    from datetime import date, timedelta
+    # Estimate weekly volume from last 14 days (half of 14d total)
+    weekly_base = max(20, round(total_km_14d / 2))
+    long_run = round(weekly_base * 0.35)
+    tempo = round(weekly_base * 0.20)
+    easy1 = round(weekly_base * 0.18)
+    easy2 = round(weekly_base * 0.17)
+    total = long_run + tempo + easy1 + easy2
+
+    days = [
+        {"day": 1, "type": "Easy", "title": "轻松恢复跑", "distance_km": easy1,
+         "pace_target": "6:00-6:30", "hr_zone": "Zone 2", "duration_min": easy1 * 6,
+         "description": f"热身跑2km，以轻松舒适的配速跑{easy1}km，心率保持在最大心率65-75%，冷身慢跑1km+静态拉伸10分钟。",
+         "intensity": 2},
+        {"day": 2, "type": "Tempo", "title": "节奏跑", "distance_km": tempo,
+         "pace_target": "5:00-5:30", "hr_zone": "Zone 3-4", "duration_min": tempo * 5,
+         "description": f"热身跑2km+动态拉伸，主课：{max(tempo-4, 4)}km节奏跑（比马拉松配速快30-45秒），冷身慢跑2km+拉伸。",
+         "intensity": 4},
+        {"day": 3, "type": "Rest", "title": "完全休息", "distance_km": 0,
+         "pace_target": None, "hr_zone": None, "duration_min": 0,
+         "description": "完全休息日。可做10-15分钟轻柔瑜伽或泡沫轴放松，保证睡眠质量。",
+         "intensity": 0},
+        {"day": 4, "type": "Easy", "title": "有氧慢跑", "distance_km": easy2,
+         "pace_target": "6:00-6:30", "hr_zone": "Zone 2", "duration_min": easy2 * 6,
+         "description": f"热身跑2km，以能聊天的轻松配速跑{easy2}km，专注跑姿和呼吸节奏，冷身拉伸。",
+         "intensity": 2},
+        {"day": 5, "type": "Interval", "title": "间歇速度训练", "distance_km": round(easy1 * 0.8),
+         "pace_target": "4:30-5:00", "hr_zone": "Zone 4-5", "duration_min": round(easy1 * 0.8) * 6,
+         "description": "热身跑2km，主课：6×800m间歇跑，每组间歇400m慢跑恢复，目标心率85-90%最大心率，冷身跑2km+拉伸。",
+         "intensity": 5},
+        {"day": 6, "type": "Long Run", "title": "长距离跑", "distance_km": long_run,
+         "pace_target": "6:00-7:00", "hr_zone": "Zone 2", "duration_min": long_run * 6,
+         "description": f"热身跑2km，全程保持轻松配速跑完{long_run}km，每5km补水一次，后段若体力允许可稍微提速，冷身拉伸15分钟。",
+         "intensity": 3},
+        {"day": 7, "type": "Recovery", "title": "恢复慢跑", "distance_km": round(easy1 * 0.7),
+         "pace_target": "6:30-7:00", "hr_zone": "Zone 1-2", "duration_min": round(easy1 * 0.7) * 7,
+         "description": "极轻松配速的恢复跑，心率不超过最大值的70%，以放松为主。完成后做全身拉伸和泡沫轴放松。",
+         "intensity": 1},
+    ]
+    return {
+        "plan_summary": f"基于你过去两周的训练量（{total_km_14d:.0f}km）制定的7天均衡训练计划，遵循80/20原则。",
+        "weekly_km": total,
+        "days": days,
+    }
+
+
 @router.post("/training-plan")
 async def generate_training_plan(req: TrainingPlanRequest):
     """
@@ -607,7 +655,8 @@ async def generate_training_plan(req: TrainingPlanRequest):
     )
 
     if not _api_key:
-        return {"error": "AI Coach offline — Gemini API key not configured."}
+        plan = _build_training_plan_fallback(total_km_14d, training_goal, upcoming_races)
+        return {"plan": plan, "generated_at": __import__("datetime").date.today().isoformat(), "source": "fallback"}
 
     try:
         from google.genai import types
@@ -647,8 +696,10 @@ async def generate_training_plan(req: TrainingPlanRequest):
 
     except json.JSONDecodeError as e:
         print(f"Training plan JSON parse error: {e}")
-        return {"error": "AI returned invalid format. Please try again."}
+        plan = _build_training_plan_fallback(total_km_14d, training_goal, upcoming_races)
+        return {"plan": plan, "generated_at": __import__("datetime").date.today().isoformat(), "source": "fallback"}
     except Exception as e:
         print(f"Training plan generation failed: {e}")
-        return {"error": f"Generation failed: {str(e)}"}
+        plan = _build_training_plan_fallback(total_km_14d, training_goal, upcoming_races)
+        return {"plan": plan, "generated_at": __import__("datetime").date.today().isoformat(), "source": "fallback", "_error": str(e)}
 

@@ -54,65 +54,79 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [generated, setGenerated] = useState(false);
 
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   const generate = async () => {
     setLoading(true);
     setError(null);
+    setPlan(null);
     try {
       const res = await axios.post(`${backendUrl}/api/coach/training-plan`, { uid });
       if (res.data.error) {
         setError(res.data.error);
-      } else {
+      } else if (res.data.plan) {
         setPlan(res.data.plan);
-        setExpanded(true);
+        setGenerated(true);
+      } else {
+        setError("AI 返回格式有误，请重试");
       }
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "生成训练计划失败，请重试");
+      const msg = e?.response?.data?.detail || e?.message || "";
+      setError(msg || "生成训练计划失败，请检查网络后重试");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  if (!expanded && !plan) {
+  // ── Loading state ────────────────────────────────────────────────────────────
+  if (loading) {
     return (
-      <button
-        onClick={generate}
-        disabled={loading}
-        className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/30 text-zinc-400 hover:text-white rounded-2xl transition-all flex items-center justify-center gap-3 group"
-      >
-        {loading ? (
-          <>
-            <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-            <span className="font-semibold text-sm">AI 正在生成训练计划...</span>
-          </>
-        ) : (
-          <>
-            <svg className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-            </svg>
-            <span className="font-semibold text-sm">生成个性化 7 天训练计划 (AI)</span>
-          </>
-        )}
-      </button>
+      <div className="w-full py-6 bg-white/5 border border-white/10 rounded-2xl flex flex-col items-center justify-center gap-3">
+        <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-zinc-400 text-sm font-semibold">AI 正在制定专属训练计划...</p>
+        <p className="text-zinc-600 text-xs">通常需要 10-20 秒</p>
+      </div>
     );
   }
 
+  // ── Error state ──────────────────────────────────────────────────────────────
   if (error) {
     return (
-      <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 text-center">
-        <p className="text-red-400 text-sm mb-3">{error}</p>
-        <button onClick={generate} className="text-xs text-zinc-400 hover:text-white underline underline-offset-2">
+      <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5">
+        <div className="flex items-start gap-3 mb-4">
+          <svg className="w-5 h-5 text-red-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="10" /><path d="m15 9-6 6M9 9l6 6" />
+          </svg>
+          <p className="text-red-400 text-sm leading-relaxed">{error}</p>
+        </div>
+        <button
+          onClick={generate}
+          className="w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white text-sm font-semibold rounded-xl transition-all"
+        >
           重新生成
         </button>
       </div>
     );
   }
 
-  if (!plan) return null;
+  // ── Generate button (initial state) ─────────────────────────────────────────
+  if (!generated || !plan) {
+    return (
+      <button
+        onClick={generate}
+        className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/30 text-zinc-400 hover:text-white rounded-2xl transition-all flex items-center justify-center gap-3 group"
+      >
+        <svg className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+        </svg>
+        <span className="font-semibold text-sm">生成个性化 7 天训练计划 (AI)</span>
+      </button>
+    );
+  }
 
-  // Get tomorrow's date as start
+  // ── Plan display ─────────────────────────────────────────────────────────────
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -125,7 +139,7 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
             <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            本周训练计划
+            未来 7 天训练计划
           </h2>
           <p className="text-zinc-400 text-sm mt-1">{plan.plan_summary}</p>
         </div>
@@ -136,17 +150,12 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
           </div>
           <button
             onClick={generate}
-            disabled={loading}
             className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 border border-white/8 flex items-center justify-center text-zinc-400 hover:text-white transition-all"
             title="重新生成"
           >
-            {loading ? (
-              <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
           </button>
         </div>
       </div>
@@ -157,14 +166,14 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
           const cfg = getTypeConfig(day.type);
           const dayDate = new Date(tomorrow);
           dayDate.setDate(tomorrow.getDate() + idx);
-          const isToday = idx === 0;
+          const isFirst = idx === 0;
           const dayOfWeek = WEEKDAYS[dayDate.getDay() === 0 ? 6 : dayDate.getDay() - 1];
 
           return (
             <div
               key={day.day}
               className={`rounded-2xl p-3.5 border transition-all hover:scale-[1.02] ${
-                isToday
+                isFirst
                   ? "border-emerald-500/40 bg-emerald-500/8"
                   : "border-white/8 bg-white/3"
               }`}
@@ -180,7 +189,7 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
                     </p>
                   </div>
                 </div>
-                {isToday && (
+                {isFirst && (
                   <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-bold uppercase">
                     明天
                   </span>
@@ -218,7 +227,7 @@ export default function TrainingPlanWidget({ uid }: { uid: string }) {
                 <IntensityDots level={day.intensity} />
               </div>
 
-              {/* Description tooltip */}
+              {/* Description */}
               {day.description && (
                 <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed border-t border-white/5 pt-2 whitespace-pre-wrap">
                   {day.description}
