@@ -3,7 +3,7 @@ uvicorn
 firebase-admin
 requests
 python-dotenv
-google-genai
+google-generativeai
 pandas
 scikit-learn
 numpy

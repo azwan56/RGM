@@ -8,25 +8,22 @@ import asyncio
 router = APIRouter()
 
 _api_key = os.getenv("GEMINI_API_KEY")
-_gemini_base_url = os.getenv("GEMINI_BASE_URL")  # Optional CDN proxy, e.g. https://your-proxy.example.com
-_coach_client = None  # Lazy init
+_gemini_configured = False
 
-def _get_client():
-    """Lazily creates the Gemini client on first call.
-    If GEMINI_BASE_URL is set, routes requests through that proxy endpoint.
-    """
-    global _coach_client
-    if _coach_client is None and _api_key:
-        from google import genai
-        from google.genai import types
-        if _gemini_base_url:
-            _coach_client = genai.Client(
-                api_key=_api_key,
-                http_options=types.HttpOptions(base_url=_gemini_base_url)
-            )
-        else:
-            _coach_client = genai.Client(api_key=_api_key)
-    return _coach_client
+def _ensure_configured():
+    """Configure the google-generativeai SDK once."""
+    global _gemini_configured
+    if not _gemini_configured and _api_key:
+        import google.generativeai as genai
+        genai.configure(api_key=_api_key)
+        _gemini_configured = True
+
+def _get_model(model_name: str = "gemini-1.5-flash"):
+    """Returns a GenerativeModel instance."""
+    _ensure_configured()
+    import google.generativeai as genai
+    return genai.GenerativeModel(model_name)
+
 
 class CoachRequest(BaseModel):
     uid: str
@@ -467,20 +464,18 @@ async def generate_coach_feedback(req: CoachRequest):
 
 
     try:
-        from google.genai import types
-        client = _get_client()
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.6,
-            max_output_tokens=6000,
-        )
+        import google.generativeai as genai
+        model = _get_model("gemini-1.5-flash")
         print(f"Coach prompt length: {len(prompt)} chars, model: gemini-1.5-flash")
         response = await loop.run_in_executor(
             None,
-            lambda: client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt,
-                config=config,
+            lambda: model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.6,
+                    max_output_tokens=6000,
+                ),
             )
         )
         text = response.text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
@@ -853,19 +848,17 @@ async def generate_training_plan(req: TrainingPlanRequest):
         return {"plan": plan, "generated_at": __import__("datetime").date.today().isoformat(), "source": "fallback"}
 
     try:
-        from google.genai import types
-        client = _get_client()
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.5,
-            max_output_tokens=2048,
-        )
+        import google.generativeai as genai
+        model = _get_model("gemini-1.5-flash")
         response = await loop.run_in_executor(
             None,
-            lambda: client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt,
-                config=config,
+            lambda: model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.5,
+                    max_output_tokens=4000,
+                ),
             )
         )
         text = response.text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
