@@ -8,22 +8,72 @@ import asyncio
 router = APIRouter()
 
 _api_key = os.getenv("GEMINI_API_KEY")
-_gemini_configured = False
 
-def _ensure_configured():
-    """Configure the google-generativeai SDK once."""
-    global _gemini_configured
-    if not _gemini_configured and _api_key:
-        import google.generativeai as genai
-        genai.configure(api_key=_api_key)
-        _gemini_configured = True
+# Model preference order — try these in sequence
+_MODEL_CANDIDATES = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-2.0-flash-lite",
+    "gemini-pro",
+]
+_resolved_model = None  # Will be set on first successful call
 
-def _get_model(model_name: str = "gemini-1.5-flash"):
-    """Returns a GenerativeModel instance."""
-    _ensure_configured()
-    import google.generativeai as genai
-    return genai.GenerativeModel(model_name)
+import requests as http_requests
 
+def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True) -> dict:
+    """Call Gemini REST API directly, bypassing SDK version issues."""
+    global _resolved_model
+
+    models_to_try = [_resolved_model] if _resolved_model else _MODEL_CANDIDATES
+
+    last_error = None
+    for model_name in models_to_try:
+        for api_ver in ["v1beta", "v1"]:
+            url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={_api_key}"
+            body = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                },
+            }
+            if response_json:
+                body["generationConfig"]["responseMimeType"] = "application/json"
+
+            try:
+                resp = http_requests.post(url, json=body, timeout=60)
+                if resp.status_code == 200:
+                    _resolved_model = model_name  # Cache working model
+                    data = resp.json()
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return {"text": text, "model": model_name, "api_version": api_ver}
+                else:
+                    last_error = f"{model_name}@{api_ver}: {resp.status_code} {resp.text[:200]}"
+                    print(f"[gemini] {last_error}")
+            except Exception as e:
+                last_error = f"{model_name}@{api_ver}: {e}"
+                print(f"[gemini] {last_error}")
+
+    raise Exception(f"All Gemini models failed. Last error: {last_error}")
+
+
+@router.get("/debug-models")
+async def debug_models():
+    """List available Gemini models for diagnostics."""
+    results = {}
+    for api_ver in ["v1beta", "v1"]:
+        url = f"https://generativelanguage.googleapis.com/{api_ver}/models?key={_api_key}"
+        try:
+            resp = http_requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                models = resp.json().get("models", [])
+                results[api_ver] = [m.get("name", "") for m in models if "generateContent" in str(m.get("supportedGenerationMethods", []))]
+            else:
+                results[api_ver] = f"Error {resp.status_code}: {resp.text[:200]}"
+        except Exception as e:
+            results[api_ver] = str(e)
+    return results
 
 class CoachRequest(BaseModel):
     uid: str
@@ -464,21 +514,13 @@ async def generate_coach_feedback(req: CoachRequest):
 
 
     try:
-        import google.generativeai as genai
-        model = _get_model("gemini-1.5-flash")
-        print(f"Coach prompt length: {len(prompt)} chars, model: gemini-1.5-flash")
+        print(f"Coach prompt length: {len(prompt)} chars")
         response = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.6,
-                    max_output_tokens=6000,
-                ),
-            )
+            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=6000)
         )
-        text = response.text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        print(f"[coach] Used model: {response['model']}@{response['api_version']}")
+        text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         result = json.loads(text)
 
         # Handle combined {feedback, plan} format
@@ -848,20 +890,12 @@ async def generate_training_plan(req: TrainingPlanRequest):
         return {"plan": plan, "generated_at": __import__("datetime").date.today().isoformat(), "source": "fallback"}
 
     try:
-        import google.generativeai as genai
-        model = _get_model("gemini-1.5-flash")
         response = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.5,
-                    max_output_tokens=4000,
-                ),
-            )
+            lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000)
         )
-        text = response.text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        print(f"[training-plan] Used model: {response['model']}@{response['api_version']}")
+        text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         plan = json.loads(text)
 
         # Save to Firestore
