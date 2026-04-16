@@ -16,16 +16,11 @@ const AiCoachWidget = dynamic(() => import("@/components/AiCoachWidget"), {
   ssr: false,
 });
 
-const TrainingPlanWidget = dynamic(() => import("@/components/TrainingPlanWidget"), {
-  loading: () => <div className="h-40 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
-  ssr: false,
-});
 
 export default function CoachPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [trainingPlan, setTrainingPlan] = useState<any>(null);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => {
@@ -67,7 +62,7 @@ export default function CoachPage() {
           </Link>
           <div>
             <h1 className="text-2xl md:text-3xl font-black">AI 教练</h1>
-            <p className="text-zinc-500 text-sm">目标设定 · 备赛指导 · 训练建议 · 7天计划</p>
+            <p className="text-zinc-500 text-sm">目标设定 · 备赛指导 · 训练建议</p>
           </div>
         </header>
 
@@ -76,17 +71,10 @@ export default function CoachPage() {
           <GoalSettingForm />
         </section>
 
-        {/* AI Coach Analysis — generates plan automatically */}
+        {/* AI Coach Analysis */}
         {user && (
           <section>
-            <AiCoachWidget uid={user.uid} onPlan={setTrainingPlan} />
-          </section>
-        )}
-
-        {/* 7-Day Training Plan — auto-populated from coach analysis */}
-        {user && (
-          <section>
-            <TrainingPlanWidget uid={user.uid} initialPlan={trainingPlan} />
+            <AiCoachWidget uid={user.uid} />
           </section>
         )}
       </main>

@@ -457,8 +457,7 @@ async def generate_coach_feedback(req: CoachRequest):
 
     prompt = (
         "你是一位热情、专业、善于鼓励的中文跑步教练。\n"
-        "请根据以下跑者信息，**同时**输出：① 今日训练分析建议 ② 从明天开始的7天训练计划。\n"
-        "两者必须高度一致：7天计划是分析建议的具体日程落地。\n"
+        "请根据以下跑者信息，给出温暖、正面、具有激励性的个性化训练建议。\n"
         "回复必须是纯 JSON，不含 markdown 标记。\n\n"
         f"【跑者档案】\n"
         f"- 称呼：{runner_name}，年龄：{profile_age or '未知'}，性别：{profile_gender}，跑龄：{profile_years}年\n"
@@ -473,63 +472,43 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 平均心率：{stats.get('avg_heart_rate', 0)} bpm\n"
         f"- 跑步次数：{stats.get('run_count', 0)} 次，目标完成度：{completion_pct}%\n\n"
         f"【近期跑步记录】\n{runs_str}\n\n"
-        f"【7天计划约束】\n{plan_phase_block if plan_phase_block else '无临近比赛，按训练目标制定。'}\n\n"
-        "【输出格式 — 严格按以下 JSON 结构返回，不含任何 markdown】\n"
-        "{\n"
-        '  "feedback": {\n'
-        '    "status": "<状态标签，如：备赛冲刺 🔥|稳步提升 📈|状态出色 💪|注意恢复 😴|继续加油 🏃>",\n'
-        '    "summary": "<2-3句训练总结，结合比赛阶段和数据>",\n'
-        '    "encouragement": "<一句简短有力的鼓励金句>",\n'
-        '    "actionable_tips": ["具体建议1", "具体建议2", "具体建议3", "具体建议4"]\n'
-        "  },\n"
-        '  "plan": {\n'
-        '    "plan_summary": "<1-2句说明本周计划主旨及与教练建议的关联>",\n'
-        '    "weekly_km": <总公里数>,\n'
-        '    "days": [\n'
-        '      {\n'
-        '        "day": 1,\n'
-        '        "type": "<Easy|Tempo|Interval|Long Run|Recovery|Rest|Cross Training>",\n'
-        '        "title": "<中文训练标题，体现训练目的>",\n'
-        '        "distance_km": <公里数，休息日为0>,\n'
-        '        "pace_target": "<如5:30-6:00，休息日为null>",\n'
-        '        "hr_zone": "<如Zone 2，休息日为null>",\n'
-        '        "duration_min": <预估分钟数>,\n'
-        '        "description": "<详细描述：热身+主课(含配速/心率)+冷身+说明此训练如何落地教练的某条建议>",\n'
-        '        "intensity": <1-5强度>\n'
-        "      }\n"
-        "    ]\n"
-        "  }\n"
-        "}\n\n"
-        "规则：\n"
-        "1. 若有备赛阶段约束，plan 必须严格遵守，不可违背\n"
-        "2. 7天计划必须能直接执行 feedback 中的 actionable_tips\n"
-        "3. 语气温暖鼓励，建议具体可操作\n"
-        "4. 安排1-2个休息日，长距离跑在周末\n"
-        "5. description 必须有热身/主课/冷身详细步骤\n"
+    )
+
+    if nearest_race and nearest_days <= 120:
+        prompt += (
+            "⚠️ 重点：跑者有临近比赛，你的建议必须围绕备赛展开：\n"
+            "  - summary 中要提到比赛备赛状态和当前训练阶段\n"
+            "  - actionable_tips 中至少2条要针对比赛备赛\n"
+            "  - 如果距比赛≤14天，重点提醒减量和赛前准备\n"
+            "  - 如果有目标成绩，分析当前状态与目标的差距\n\n"
+        )
+    prompt += (
+        "返回 JSON 格式如下：\n"
+        '{\n'
+        '  "status": "<状态标签，如：备赛冲刺 🔥|稳步提升 📈|状态出色 💪|注意恢复 😴|继续加油 🏃>",\n'
+        '  "summary": "<2-3 句话的训练总结，如有比赛则重点评估备赛状态>",\n'
+        '  "encouragement": "<一句短小有力的鼓励金句>",\n'
+        '  "actionable_tips": ["建议1", "建议2", "建议3", "建议4"]\n'
+        '}\n\n'
+        "建议要具体、可操作，结合跑者的配速/心率/跑量数据给出。如有比赛需包含本周训练重点。"
     )
 
     if not _api_key:
         fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
-        return {"feedback": fb, "plan": None}
+        return {"feedback": fb}
 
 
     try:
         print(f"Coach prompt length: {len(prompt)} chars")
         response = await loop.run_in_executor(
             None,
-            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=6000)
+            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=1500)
         )
         print(f"[coach] Used model: {response['model']}@{response['api_version']}")
         text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(text)
+        feedback = json.loads(text)
 
-        # Handle combined {feedback, plan} format
-        if "feedback" in result:
-            feedback = result["feedback"]
-            plan = result.get("plan")
-        else:
-            feedback = result  # legacy flat format fallback
-            plan = None
+
 
         if "encouragement" not in feedback:
             feedback["encouragement"] = "每一步都是进步，坚持就是胜利！"
@@ -542,14 +521,10 @@ async def generate_coach_feedback(req: CoachRequest):
                 "nearest_race_days": nearest_days if nearest_days < 9999 else None,
                 "nearest_race_name": nearest_race.get("name", "") if nearest_race else "",
             }, merge=False)
-            if plan:
-                from datetime import date as _d
-                db.collection("users").document(req.uid).collection("training_plans").document(
-                    _d.today().isoformat()).set({**plan, "generated_at": _d.today().isoformat()}, merge=True)
         except Exception as _save_err:
             print(f"[coach] Failed to save: {_save_err}")
 
-        return {"feedback": feedback, "plan": plan}
+        return {"feedback": feedback}
 
     except json.JSONDecodeError as e:
         print(f"Coach JSON parse error: {e}")
@@ -559,7 +534,7 @@ async def generate_coach_feedback(req: CoachRequest):
                 {**fb, "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
         except Exception:
             pass
-        return {"feedback": fb, "plan": None}
+        return {"feedback": fb}
     except Exception as e:
         print(f"Coach generation failed: {e}")
         fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
@@ -570,7 +545,7 @@ async def generate_coach_feedback(req: CoachRequest):
                  "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
         except Exception:
             pass
-        return {"feedback": fb, "plan": None}
+        return {"feedback": fb}
 
 
 # ── Training Plan Generator ──────────────────────────────────────────────────
