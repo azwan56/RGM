@@ -18,6 +18,15 @@ export default function AiCoachWidget({ uid, onPlan }: { uid: string; onPlan?: (
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+  const fetchPlanFallback = async () => {
+    try {
+      const res = await axios.post(`${backendUrl}/api/coach/training-plan`, { uid });
+      if (res.data.plan) onPlan?.(res.data.plan);
+    } catch (_) {}
+  };
+
   useEffect(() => {
     const fetchFeedback = async () => {
       // — Check session cache first —
@@ -28,21 +37,26 @@ export default function AiCoachWidget({ uid, onPlan }: { uid: string; onPlan?: (
           if (Date.now() - ts < CACHE_TTL_MS) {
             setFeedback(data);
             setLoading(false);
-            return; // skip network call
+            // Still fetch plan in background (no cache for plan)
+            fetchPlanFallback();
+            return;
           }
         }
       } catch (_) {}
 
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
         const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
-        
+
         if (typeof res.data.feedback === "string") {
           setErrorStr(res.data.feedback);
         } else {
           setFeedback(res.data.feedback);
-          if (res.data.plan) onPlan?.(res.data.plan);
-          // — Write to session cache —
+          if (res.data.plan) {
+            onPlan?.(res.data.plan);
+          } else {
+            // Combined call didn't return plan — fetch it separately
+            fetchPlanFallback();
+          }
           try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
         }
       } catch (error: any) {
@@ -55,25 +69,29 @@ export default function AiCoachWidget({ uid, onPlan }: { uid: string; onPlan?: (
   }, [uid]);
 
   const triggerSync = async () => {
-     setLoading(true);
-     setErrorStr(null);
-     try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-        await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
-        const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
-        if (typeof res.data.feedback === "string") {
-          setErrorStr(res.data.feedback);
+    setLoading(true);
+    setErrorStr(null);
+    try {
+      await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
+      const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
+      if (typeof res.data.feedback === "string") {
+        setErrorStr(res.data.feedback);
+      } else {
+        setFeedback(res.data.feedback);
+        if (res.data.plan) {
+          onPlan?.(res.data.plan);
         } else {
-          setFeedback(res.data.feedback);
-          if (res.data.plan) onPlan?.(res.data.plan);
-          try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
+          fetchPlanFallback();
         }
-     } catch (err: any) {
-        console.error("Sync API error:", err?.message || err);
-        setErrorStr("同步失败，请确认 Strava 已连接且网络稳定。");
-     }
-     setLoading(false);
+        try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
+      }
+    } catch (err: any) {
+      console.error("Sync API error:", err?.message || err);
+      setErrorStr("同步失败，请确认 Strava 已连接且网络稳定。");
+    }
+    setLoading(false);
   };
+
 
   // Determine badge color based on status
   const getBadgeColor = (status: string) => {

@@ -472,7 +472,7 @@ async def generate_coach_feedback(req: CoachRequest):
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.6,
-            max_output_tokens=3000,
+            max_output_tokens=6000,
         )
         print(f"Coach prompt length: {len(prompt)} chars, model: gemini-2.5-flash-preview-04-17")
         response = await loop.run_in_executor(
