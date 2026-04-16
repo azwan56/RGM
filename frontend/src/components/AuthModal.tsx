@@ -1,18 +1,15 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { auth } from "@/lib/firebase";
 import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  ConfirmationResult,
 } from "firebase/auth";
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type Screen = "select" | "email" | "phone";
+type Screen = "select" | "email";
 
 interface AuthModalProps {
   open: boolean;
@@ -31,14 +28,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
   const [password, setPassword] = useState("");
   const [isRegister, setIsRegister] = useState(false);
 
-  // Phone state
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const confirmationRef = useRef<ConfirmationResult | null>(null);
-  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
-  const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
+
 
   // Reset everything when modal closes or screen changes
   const resetAll = useCallback(() => {
@@ -47,15 +37,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     setEmail("");
     setPassword("");
     setIsRegister(false);
-    setPhone("");
-    setOtp("");
-    setOtpSent(false);
-    setCountdown(0);
-    confirmationRef.current = null;
-    if (recaptchaRef.current) {
-      recaptchaRef.current.clear();
-      recaptchaRef.current = null;
-    }
+
   }, []);
 
   useEffect(() => {
@@ -65,12 +47,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     }
   }, [open, resetAll]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setInterval(() => setCountdown((c) => c - 1), 1000);
-    return () => clearInterval(t);
-  }, [countdown]);
+
 
   const handleSuccess = useCallback(() => {
     onClose();
@@ -120,73 +97,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     }
   };
 
-  // ── Phone ─────────────────────────────────────────────────────────────────
-  // Init RecaptchaVerifier once when entering the phone screen
-  useEffect(() => {
-    if (screen !== "phone") return;
-    // Small delay so the DOM element is guaranteed to be mounted
-    const timer = setTimeout(() => {
-      try {
-        if (recaptchaRef.current) {
-          recaptchaRef.current.clear();
-          recaptchaRef.current = null;
-        }
-        recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
-          size: "invisible",
-        });
-        // Pre-render so first OTP request is instant
-        recaptchaRef.current.render().catch(() => {});
-      } catch (err) {
-        console.error("RecaptchaVerifier init error:", err);
-      }
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [screen]);
 
-  const handleSendOtp = async () => {
-    setError("");
-    const cleaned = phone.trim();
-    if (!cleaned) { setError("请输入手机号"); return; }
-    const fullPhone = cleaned.startsWith("+") ? cleaned : `+86${cleaned}`;
-    if (!recaptchaRef.current) {
-      setError("reCAPTCHA 未就绪，请稍后再试");
-      return;
-    }
-    setLoading(true);
-    try {
-      const result = await signInWithPhoneNumber(auth, fullPhone, recaptchaRef.current);
-      confirmationRef.current = result;
-      setOtpSent(true);
-      setCountdown(60);
-    } catch (e: any) {
-      console.error("Phone Auth Error:", e);
-      // Recaptcha may be expired after a failed attempt — recreate it
-      try {
-        recaptchaRef.current?.clear();
-        recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", { size: "invisible" });
-        await recaptchaRef.current.render();
-      } catch (_) {}
-      setError(mapError(e.code) || e.message || "发送失败，请检查网络或手机号后重试");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    if (otp.length < 6) { setError("请输入 6 位验证码"); return; }
-    if (!confirmationRef.current) { setError("验证会话已过期，请重新获取"); return; }
-    setLoading(true);
-    try {
-      await confirmationRef.current.confirm(otp);
-      handleSuccess();
-    } catch (e: any) {
-      setError(mapError(e.code));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (!open) return null;
 
@@ -259,22 +170,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                   </svg>
                 </button>
 
-                {/* Phone */}
-                <button
-                  onClick={() => setScreen("phone")}
-                  className="w-full flex items-center gap-4 px-4 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all group"
-                >
-                  <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white/8 border border-white/10 shrink-0">
-                    <svg className="w-4.5 h-4.5 text-zinc-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                      <rect x="5" y="2" width="14" height="20" rx="2" />
-                      <path d="M12 18h.01" />
-                    </svg>
-                  </span>
-                  <span className="flex-1 text-left text-sm">手机短信验证码</span>
-                  <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
+
 
                 {/* Google — requires VPN in China */}
                 <button
@@ -360,88 +256,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
             </>
           )}
 
-          {/* ── PHONE SCREEN ───────────────────────────────────────────── */}
-          {screen === "phone" && (
-            <>
-              <div className="text-center mb-6 mt-2">
-                <h2 className="text-lg font-bold text-white">手机验证码登录</h2>
-                <p className="text-sm text-zinc-500 mt-1">
-                  {otpSent ? `验证码已发送至 ${phone.startsWith("+") ? phone : "+86" + phone}` : "输入手机号获取短信验证码"}
-                </p>
-              </div>
 
-              {error && <ErrorBanner>{error}</ErrorBanner>}
-
-              {!otpSent ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1.5 font-medium">手机号码</label>
-                    <div className="flex gap-2">
-                      <span className="flex items-center justify-center px-3.5 bg-white/5 border border-white/10 rounded-xl text-zinc-400 text-sm shrink-0 font-mono">
-                        +86
-                      </span>
-                      <input
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/[^\d+]/g, ""))}
-                        placeholder="138 0000 0000"
-                        autoComplete="tel"
-                        autoFocus
-                        className={`${inputCls} flex-1`}
-                      />
-                    </div>
-                    <p className="mt-1.5 text-xs text-zinc-600">含国际区号可直接输入，如 +65 XXXX XXXX</p>
-                  </div>
-                  <button
-                    onClick={handleSendOtp}
-                    disabled={loading}
-                    className={primaryBtn}
-                  >
-                    {loading ? <Spinner /> : "获取验证码"}
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1.5 font-medium">短信验证码</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                      placeholder="● ● ● ● ● ●"
-                      autoComplete="one-time-code"
-                      autoFocus
-                      className={`${inputCls} tracking-[0.6em] text-center text-lg font-mono`}
-                    />
-                  </div>
-                  <button type="submit" disabled={loading} className={primaryBtn}>
-                    {loading ? <Spinner /> : "验证并登录"}
-                  </button>
-                  <div className="flex items-center justify-between text-xs pt-1">
-                    <button
-                      type="button"
-                      onClick={() => { setOtpSent(false); setOtp(""); setError(""); }}
-                      className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                    >
-                      ← 更换号码
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSendOtp}
-                      disabled={countdown > 0 || loading}
-                      className="text-[#FC4C02] hover:text-orange-400 disabled:text-zinc-600 disabled:cursor-not-allowed transition-colors font-medium"
-                    >
-                      {countdown > 0 ? `重新发送 (${countdown}s)` : "重新发送"}
-                    </button>
-                  </div>
-                </form>
-              )}
-              {/* recaptcha-container must always be in the DOM when screen=phone */}
-              <div id="recaptcha-container" ref={recaptchaContainerRef} className="hidden" />
-            </>
-          )}
         </div>
       </div>
 
