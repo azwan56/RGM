@@ -441,15 +441,40 @@ async def generate_coach_feedback(req: CoachRequest):
         # Ensure 'encouragement' field exists
         if "encouragement" not in feedback:
             feedback["encouragement"] = "每一步都是进步，坚持就是胜利！"
+        # ─ Save to Firestore so training plan can align with this analysis ─
+        try:
+            db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set({
+                **feedback,
+                "saved_at": __import__("datetime").datetime.now().isoformat(),
+                "nearest_race_days": nearest_days if nearest_days < 9999 else None,
+                "nearest_race_name": nearest_race.get("name", "") if nearest_race else "",
+            }, merge=False)
+        except Exception as _save_err:
+            print(f"[coach] Failed to save analysis: {_save_err}")
         return {"feedback": feedback}
 
     except json.JSONDecodeError as e:
         print(f"Coach JSON parse error: {e}")
-        return {"feedback": _build_race_fallback(nearest_race, nearest_days, runner_name, stats)}
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
+        # Save fallback too so training plan isn't left without context
+        try:
+            db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set({
+                **fb, "saved_at": __import__("datetime").datetime.now().isoformat()
+            }, merge=False)
+        except Exception:
+            pass
+        return {"feedback": fb}
     except Exception as e:
         print(f"Coach generation failed: {e}")
         fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
-        fb["_error"] = str(e)  # Return error for debugging
+        fb["_error"] = str(e)
+        try:
+            db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set({
+                **{k: v for k, v in fb.items() if not k.startswith("_")},
+                "saved_at": __import__("datetime").datetime.now().isoformat()
+            }, merge=False)
+        except Exception:
+            pass
         return {"feedback": fb}
 
 
@@ -533,11 +558,17 @@ async def generate_training_plan(req: TrainingPlanRequest):
     """
     loop = asyncio.get_event_loop()
 
-    profile, goal_data, activities, stats = await asyncio.gather(
+    # ─ Fetch latest coach analysis to align plan with existing recommendations ─
+    def _fetch_latest_coach_analysis(uid: str):
+        doc = db.collection("users").document(uid).collection("coach").document("latest_analysis").get()
+        return doc.to_dict() if doc.exists else None
+
+    profile, goal_data, activities, stats, coach_analysis = await asyncio.gather(
         loop.run_in_executor(None, _fetch_profile, req.uid),
         loop.run_in_executor(None, _fetch_goal, req.uid),
         loop.run_in_executor(None, _fetch_recent_14d, req.uid),
         loop.run_in_executor(None, _fetch_leaderboard, req.uid),
+        loop.run_in_executor(None, _fetch_latest_coach_analysis, req.uid),
     )
 
     if not profile:
@@ -698,15 +729,29 @@ async def generate_training_plan(req: TrainingPlanRequest):
             except ValueError:
                 pass
 
+    # Build coach analysis context to align the plan
+    coach_context = ""
+    if coach_analysis:
+        tips = coach_analysis.get("actionable_tips", [])
+        tips_str = "\n".join(f"  · {t}" for t in tips) if tips else "  （暂无）"
+        coach_context = (
+            f"\n【⚠️ 必须对齐：AI教练最新分析建议（第三优先级，计划必须与此一致）】\n"
+            f"  教练总结：{coach_analysis.get('summary', '')}\n"
+            f"  当前状态：{coach_analysis.get('status', '')}\n"
+            f"  行动建议（必须在7天计划中体现这些）：\n{tips_str}\n"
+            f"  ⚠️ 7天计划的每天训练安排必须与上述建议保持一致，不能矛盾！\n"
+        )
+
     prompt = (
         "你是一位专业的中文跑步教练，请为跑者制定一份个性化的7天训练计划。\n"
-        "⚠️ 训练计划的制定优先级：① 比赛备赛阶段要求 > ② 训练目标 > ③ 近期体能数据\n"
+        "⚠️ 训练计划的制定优先级：① 比赛备赛阶段要求 > ② 训练目标 > ③ AI教练分析建议\n"
         "回复必须是纯 JSON，不含 markdown 标记。\n"
         f"{race_phase_block}\n"
         f"【训练目标（第二优先级）】\n"
         f"  {goal_cn}\n"
         f"  里程目标：{goal_str}\n\n"
-        f"【全部赛事计划】{all_races_str or ' 无'}\n\n"
+        f"【全部赛事计划】{all_races_str or ' 无'}\n"
+        f"{coach_context}\n"
         f"【跑者档案（用于校准强度）】\n"
         f"- 年龄：{age}，性别：{gender}，跑龄：{years_running}年\n"
         f"- VDOT：{vdot or '未知'}，最大心率：{max_hr}，静息心率：{rest_hr}\n"
