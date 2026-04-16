@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
 import axios from "@/lib/apiClient";
 import StatsCard from "./StatsCard";
 
@@ -52,25 +50,32 @@ export default function RunningStatsPanel({ uid }: { uid: string }) {
   const [syncing, setSyncing] = useState(false);
   const [fullSyncing, setFullSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-  // Real-time listener on leaderboard/{uid}
-  useEffect(() => {
-    const ref = doc(db, "leaderboard", uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setStats({ ...EMPTY_STATS, ...snap.data() } as Stats);
+  // Fetch stats from backend API (not direct Firestore — faster in China)
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await axios.get(`${backendUrl}/api/data/stats/${uid}`);
+      if (res.data && res.data.total_distance_km !== undefined) {
+        setStats({ ...EMPTY_STATS, ...res.data });
       }
-    });
-    return () => unsub();
-  }, [uid]);
+    } catch (err) {
+      console.error("Stats fetch error:", err);
+    }
+  }, [uid, backendUrl]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
       setSyncMsg({ text: "Sync successful! Data updated.", type: "success" });
+      // Refresh stats after sync
+      await fetchStats();
     } catch (err: any) {
       console.error("Sync trigger error:", err?.message || err);
       setSyncMsg({ text: "Sync failed. Please try again.", type: "error" });
@@ -78,12 +83,11 @@ export default function RunningStatsPanel({ uid }: { uid: string }) {
       setSyncing(false);
       setTimeout(() => setSyncMsg(null), 4000);
     }
-  }, [uid]);
+  }, [uid, backendUrl, fetchStats]);
 
   const handleFullSync = useCallback(async (sinceDate = "2025-01-01") => {
     setFullSyncing(true);
     setSyncMsg(null);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
     try {
       // 1. Kick off background sync (returns immediately)
@@ -99,6 +103,7 @@ export default function RunningStatsPanel({ uid }: { uid: string }) {
             clearInterval(poll);
             setFullSyncing(false);
             setSyncMsg({ text: `✓ 历史同步完成！共导入 ${s.saved} 次跑步 (${sinceDate} 至今)`, type: "success" });
+            fetchStats(); // Refresh stats
             setTimeout(() => setSyncMsg(null), 8000);
           } else if (s.state === "error") {
             clearInterval(poll);
@@ -117,7 +122,7 @@ export default function RunningStatsPanel({ uid }: { uid: string }) {
       setFullSyncing(false);
       setTimeout(() => setSyncMsg(null), 6000);
     }
-  }, [uid]);
+  }, [uid, backendUrl, fetchStats]);
 
   const pct = Math.min(stats.goal_completion_percentage, 100);
 

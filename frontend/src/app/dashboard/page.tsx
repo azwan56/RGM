@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { auth } from "@/lib/firebase";
+import axios from "@/lib/apiClient";
 import dynamic from "next/dynamic";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
 
@@ -42,24 +42,22 @@ export default function Dashboard() {
       }
       setUser(u);
 
-      // Parallel Firestore reads for user profile + goals
-      const [userSnap, goalSnap] = await Promise.all([
-        getDoc(doc(db, "users", u.uid)),
-        getDoc(doc(db, "users", u.uid, "goals", "current")),
-      ]);
+      // Fetch profile + goals from backend API (not direct Firestore — faster in China)
+      try {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const res = await axios.get(`${backendUrl}/api/data/init/${u.uid}`);
+        const { profile, goal, strava_connected, display_name } = res.data;
 
-      if (userSnap.exists()) {
-        const ud = userSnap.data();
-        if (ud?.strava_connected) setIsStravaConnected(true);
-        // Best display name
-        setDisplayName(
-          ud?.display_name || ud?.strava_name ||
-          (ud?.email?.split("@")[0]) || u.displayName || ""
-        );
-      }
-      if (goalSnap.exists()) {
-        const p = goalSnap.data()?.period;
-        if (p === "weekly" || p === "monthly") setPeriod(p);
+        if (strava_connected) setIsStravaConnected(true);
+        setDisplayName(display_name || u.displayName || "");
+
+        if (goal) {
+          const p = goal.period;
+          if (p === "weekly" || p === "monthly") setPeriod(p);
+        }
+      } catch (err) {
+        console.error("Dashboard init error:", err);
+        setDisplayName(u.displayName || u.email?.split("@")[0] || "");
       }
       setLoading(false);
     });

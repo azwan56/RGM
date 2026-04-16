@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import axios from "@/lib/apiClient";
 
 interface LeaderboardEntry {
   uid: string;
@@ -18,14 +17,21 @@ export default function Leaderboard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortMethod, setSortMethod] = useState<"distance" | "completion">("completion");
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const orderField = sortMethod === "distance" ? "total_distance_km" : "goal_completion_percentage";
-        const q = query(collection(db, "leaderboard"), orderBy(orderField, "desc"));
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => doc.data() as LeaderboardEntry);
+        const res = await axios.get(`${backendUrl}/api/data/leaderboard`, {
+          params: { period: "monthly", limit_n: 50 },
+        });
+        let data: LeaderboardEntry[] = res.data.entries || [];
+        // Client-side sort by selected method
+        if (sortMethod === "distance") {
+          data.sort((a, b) => b.total_distance_km - a.total_distance_km);
+        } else {
+          data.sort((a, b) => b.goal_completion_percentage - a.goal_completion_percentage);
+        }
         setEntries(data);
       } catch (error) {
         console.error("Failed to fetch leaderboard", error);
@@ -33,7 +39,7 @@ export default function Leaderboard() {
       setLoading(false);
     };
     fetchLeaderboard();
-  }, [sortMethod]);
+  }, [sortMethod, backendUrl]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pt-32 px-6 pb-20 relative">

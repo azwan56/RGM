@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
-import { collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 import axios from "@/lib/apiClient";
 
 interface LeaderboardEntry {
@@ -37,25 +35,17 @@ export default function LeaderboardWidget({ currentUid, fixedHeight }: { current
   const [loading, setLoading]       = useState(true);
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-  // ── Monthly / Weekly — Firestore real-time ────────────────────────────────
+  // ── Monthly / Weekly — backend API (not direct Firestore) ─────────────────
   useEffect(() => {
     if (tab === "yearly") return;
     setLoading(true);
-    const q = query(
-      collection(db, "leaderboard"),
-      where("period", "==", tab),
-      orderBy("total_distance_km", "desc"),
-      limit(20)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setEntries(snap.docs.map(d => d.data() as LeaderboardEntry));
-      setLoading(false);
-    }, (err) => {
-      console.error(err);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [tab]);
+    axios.get(`${backendUrl}/api/data/leaderboard`, { params: { period: tab, limit_n: 20 } })
+      .then((res) => {
+        setEntries(res.data.entries || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [tab, backendUrl]);
 
   // ── Yearly — backend REST (aggregated from leaderboard_yearly collection) ─
   useEffect(() => {

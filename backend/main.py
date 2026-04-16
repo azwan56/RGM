@@ -31,6 +31,13 @@ app.include_router(science.router,  prefix="/api/science", tags=["science"])
 app.include_router(profile.router,  prefix="/api/profile", tags=["profile"])
 app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
 
+# Data proxy router — replaces direct browser-to-Firestore reads for GFW users
+try:
+    from routers import data
+    app.include_router(data.router, prefix="/api/data", tags=["data"])
+except ImportError:
+    pass
+
 # Webhook router (loaded lazily to avoid import errors during initial setup)
 try:
     from routers import webhook

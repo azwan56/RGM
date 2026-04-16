@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import axios from "@/lib/apiClient";
 
 interface Activity {
   activity_id: number;
@@ -55,27 +54,26 @@ export default function ActivityList({ uid, month }: Props) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   useEffect(() => {
     if (!uid) return;
     setLoading(true);
     const [startISO, endISO] = getMonthRange(month);
 
-    const q = query(
-      collection(db, "users", uid, "activities"),
-      where("start_date_local", ">=", startISO),
-      where("start_date_local", "<", endISO),
-      orderBy("start_date_local", "desc")
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      const docs = snap.docs.map((d) => d.data() as Activity);
-      setActivities(docs);
-      setLoading(false);
-    }, () => setLoading(false));
-
-    return () => unsub();
-  }, [uid, month]);
+    // Fetch from backend API instead of direct Firestore (faster in China)
+    axios.get(`${backendUrl}/api/data/activities/${uid}`, {
+      params: { start: startISO, end: endISO },
+    })
+      .then((res) => {
+        setActivities(res.data.activities || []);
+      })
+      .catch((err) => {
+        console.error("Activities fetch error:", err);
+        setActivities([]);
+      })
+      .finally(() => setLoading(false));
+  }, [uid, month, backendUrl]);
 
   if (loading) {
     return (

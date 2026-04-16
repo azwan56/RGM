@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { auth } from "@/lib/firebase";
+import axios from "@/lib/apiClient";
 import dynamic from "next/dynamic";
 import VdotChart from "@/components/VdotChart";
 
@@ -70,22 +70,20 @@ export default function ActivityDetailPage() {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
       try {
-        // Load from Firestore (instant — offline-capable)
-        const actRef = doc(db, "users", uid, "activities", activityId);
-        const actSnap = await getDoc(actRef);
-        if (!actSnap.exists()) {
+        // Load from backend API (not direct Firestore — faster in China)
+        const res = await axios.get(`${backendUrl}/api/data/activity/${uid}/${activityId}`);
+        if (!res.data?.activity) {
           setError("Activity not found. Please sync your data first.");
           setLoading(false);
           return;
         }
-        const data = actSnap.data() as ActivityDetail;
+        const data = res.data.activity as ActivityDetail;
         setActivity(data);
         setLoading(false);
 
         // Lazy-load VDOT analysis (fire-and-forget)
         setVdotLoading(true);
-        const apiClient = (await import("@/lib/apiClient")).default;
-        apiClient.get(`${backendUrl}/api/sync/activity/${activityId}/vdot?uid=${uid}`)
+        axios.get(`${backendUrl}/api/sync/activity/${activityId}/vdot?uid=${uid}`)
           .then(r => {
             if (r.data?.vdot_analysis) setVdotAnalysis(r.data.vdot_analysis);
           })
