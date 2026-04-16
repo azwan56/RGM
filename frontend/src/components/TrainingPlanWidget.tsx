@@ -50,11 +50,11 @@ function IntensityDots({ level }: { level: number }) {
   );
 }
 
-export default function TrainingPlanWidget({ uid }: { uid: string }) {
-  const [plan, setPlan] = useState<TrainingPlan | null>(null);
+export default function TrainingPlanWidget({ uid, initialPlan }: { uid: string; initialPlan?: TrainingPlan | null }) {
+  const [plan, setPlan] = useState<TrainingPlan | null>(initialPlan || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generated, setGenerated] = useState(false);
+  const [generated, setGenerated] = useState(!!initialPlan);
 
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 

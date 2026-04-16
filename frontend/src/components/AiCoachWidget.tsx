@@ -13,7 +13,7 @@ interface CoachFeedback {
 const CACHE_KEY = (uid: string) => `coach_feedback_${uid}`;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-export default function AiCoachWidget({ uid }: { uid: string }) {
+export default function AiCoachWidget({ uid, onPlan }: { uid: string; onPlan?: (plan: any) => void }) {
   const [feedback, setFeedback] = useState<CoachFeedback | null>(null);
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +41,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           setErrorStr(res.data.feedback);
         } else {
           setFeedback(res.data.feedback);
+          if (res.data.plan) onPlan?.(res.data.plan);
           // — Write to session cache —
           try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
         }
@@ -64,7 +65,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           setErrorStr(res.data.feedback);
         } else {
           setFeedback(res.data.feedback);
-          // Bust and rewrite cache on manual sync
+          if (res.data.plan) onPlan?.(res.data.plan);
           try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
         }
      } catch (err: any) {

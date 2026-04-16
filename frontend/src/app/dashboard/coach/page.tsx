@@ -25,6 +25,7 @@ export default function CoachPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [trainingPlan, setTrainingPlan] = useState<any>(null);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => {
@@ -75,17 +76,17 @@ export default function CoachPage() {
           <GoalSettingForm />
         </section>
 
-        {/* AI Coach Analysis */}
+        {/* AI Coach Analysis — generates plan automatically */}
         {user && (
           <section>
-            <AiCoachWidget uid={user.uid} />
+            <AiCoachWidget uid={user.uid} onPlan={setTrainingPlan} />
           </section>
         )}
 
-        {/* 7-Day Training Plan */}
+        {/* 7-Day Training Plan — auto-populated from coach analysis */}
         {user && (
           <section>
-            <TrainingPlanWidget uid={user.uid} />
+            <TrainingPlanWidget uid={user.uid} initialPlan={trainingPlan} />
           </section>
         )}
       </main>
