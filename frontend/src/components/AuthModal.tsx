@@ -504,6 +504,10 @@ function mapError(code: string): string {
     "auth/missing-phone-number":      "请输入手机号",
     "auth/quota-exceeded":            "短信额度已用完，请稍后再试",
     "auth/network-request-failed":    "网络错误，请检查网络连接",
+    "auth/billing-not-enabled":       "短信验证暂不可用，请使用邮箱登录",
+    "auth/popup-blocked":             "弹窗被拦截，请允许弹窗或使用邮箱登录",
+    "auth/popup-closed-by-user":      "登录窗口已关闭，请重试",
+    "auth/cancelled-popup-request":   "登录已取消",
   };
   if (!code) return "";
   return map[code] || `操作失败 (${code})`;
