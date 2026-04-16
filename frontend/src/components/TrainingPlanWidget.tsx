@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "@/lib/apiClient";
 
 interface DayPlan {
@@ -56,7 +56,17 @@ export default function TrainingPlanWidget({ uid, initialPlan }: { uid: string; 
   const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState(!!initialPlan);
 
+  // Sync when initialPlan arrives after mount (API call completes async)
+  useEffect(() => {
+    if (initialPlan) {
+      setPlan(initialPlan);
+      setGenerated(true);
+      setError(null);
+    }
+  }, [initialPlan]);
+
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
 
   const generate = async () => {
     setLoading(true);

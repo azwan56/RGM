@@ -367,7 +367,11 @@ async def generate_coach_feedback(req: CoachRequest):
             f"包括本周具体训练重点和需要注意的事项。\n\n"
         )
 
-    # ── Training phase for plan (reuse nearest_race computed above) ─────────────
+    # ── Build context variables used in prompt ───────────────────────────────
+    runs_str = _build_runs_str(activities)
+    completion_pct = stats.get("goal_completion_percentage", 0)
+
+    # ── Training phase for plan (reuse nearest_race computed above) ──────────
     from datetime import date as _dclz
     plan_phase_block = ""
     if nearest_race:
