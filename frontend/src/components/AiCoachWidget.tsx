@@ -17,7 +17,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
   const [feedback, setFeedback] = useState<CoachFeedback | null>(null);
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   useEffect(() => {
     const fetchFeedback = async () => {
@@ -34,7 +34,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         }
       } catch (_) {}
 
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+      try {
         const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
 
         if (typeof res.data.feedback === "string") {
@@ -50,7 +50,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
       setLoading(false);
     };
     fetchFeedback();
-  }, [uid]);
+  }, [uid, backendUrl]);
 
   const triggerSync = async () => {
     setLoading(true);

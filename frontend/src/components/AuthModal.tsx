@@ -242,36 +242,19 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
               </div>
 
               <div className="space-y-3">
-                {/* Google */}
-                <button
-                  onClick={handleGoogle}
-                  disabled={loading}
-                  className="w-full flex items-center gap-4 px-4 py-3.5 bg-white hover:bg-zinc-100 text-black font-semibold rounded-xl transition-all disabled:opacity-50 group"
-                >
-                  <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white shadow-sm border border-zinc-200 shrink-0">
-                    <GoogleIcon />
-                  </span>
-                  <span className="flex-1 text-left text-sm">
-                    {loading ? "跳转中..." : "使用 Gmail / Google 账号"}
-                  </span>
-                  <svg className="w-4 h-4 text-zinc-400 group-hover:text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-
-                {/* Email */}
+                {/* Email — most reliable for China users */}
                 <button
                   onClick={() => setScreen("email")}
-                  className="w-full flex items-center gap-4 px-4 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all group"
+                  className="w-full flex items-center gap-4 px-4 py-3.5 bg-white hover:bg-zinc-100 text-black font-semibold rounded-xl transition-all group"
                 >
-                  <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white/8 border border-white/10 shrink-0">
-                    <svg className="w-4.5 h-4.5 text-zinc-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white shadow-sm border border-zinc-200 shrink-0">
+                    <svg className="w-4.5 h-4.5 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
                       <rect x="2" y="4" width="20" height="16" rx="2" />
                       <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
                     </svg>
                   </span>
                   <span className="flex-1 text-left text-sm">邮箱登录 / 注册</span>
-                  <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-4 h-4 text-zinc-400 group-hover:text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -288,6 +271,24 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                     </svg>
                   </span>
                   <span className="flex-1 text-left text-sm">手机短信验证码</span>
+                  <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                {/* Google — requires VPN in China */}
+                <button
+                  onClick={handleGoogle}
+                  disabled={loading}
+                  className="w-full flex items-center gap-4 px-4 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white font-semibold rounded-xl transition-all disabled:opacity-50 group"
+                >
+                  <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white/8 border border-white/10 shrink-0">
+                    <GoogleIcon />
+                  </span>
+                  <span className="flex-1 text-left">
+                    <span className="text-sm block">{loading ? "跳转中..." : "使用 Google 账号"}</span>
+                    <span className="text-[10px] text-zinc-500 block">需科学上网</span>
+                  </span>
                   <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>

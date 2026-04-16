@@ -8,6 +8,7 @@ import asyncio
 router = APIRouter()
 
 _api_key = os.getenv("GEMINI_API_KEY")
+_gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
@@ -30,7 +31,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
     last_error = None
     for model_name in models_to_try:
         for api_ver in ["v1beta", "v1"]:
-            url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model_name}:generateContent?key={_api_key}"
+            url = f"{_gemini_base_url}/{api_ver}/models/{model_name}:generateContent?key={_api_key}"
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -63,7 +64,7 @@ async def debug_models():
     """List available Gemini models for diagnostics."""
     results = {}
     for api_ver in ["v1beta", "v1"]:
-        url = f"https://generativelanguage.googleapis.com/{api_ver}/models?key={_api_key}"
+        url = f"{_gemini_base_url}/{api_ver}/models?key={_api_key}"
         try:
             resp = http_requests.get(url, timeout=10)
             if resp.status_code == 200:

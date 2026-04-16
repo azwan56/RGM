@@ -7,6 +7,7 @@ import { collection, getDocs, query, orderBy } from "firebase/firestore";
 interface LeaderboardEntry {
   uid: string;
   email: string;
+  display_name?: string;
   total_distance_km: number;
   avg_pace: string;
   avg_heart_rate: number;
@@ -84,7 +85,7 @@ export default function Leaderboard() {
                         #{index + 1}
                       </td>
                       <td className="p-6 font-medium">
-                        {entry.email.split('@')[0]}
+                        {entry.display_name || entry.email?.split('@')[0] || `Runner #${entry.uid?.slice(0,6)}`}
                       </td>
                       <td className="p-6 text-right text-[#FC4C02] font-semibold">
                         {entry.total_distance_km} km
