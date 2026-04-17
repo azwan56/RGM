@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { auth } from '@/lib/firebase';
 import axios from '@/lib/apiClient';
@@ -11,6 +11,8 @@ function CallbackContent() {
   const error = searchParams.get('error');
   const router = useRouter();
   const [status, setStatus] = useState('Verifying with Strava...');
+  // Guard: prevent onAuthStateChanged from firing the exchange request more than once
+  const hasCalled = useRef(false);
 
   useEffect(() => {
     if (error) {
@@ -19,24 +21,39 @@ function CallbackContent() {
     }
 
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      // In a real flow, if they are not logged in, we might store the code and ask them to log in first.
       if (!user) {
         setStatus("You must be logged in to this App first before connecting Strava.");
         return;
       }
-      
+
+      // Prevent double-firing (onAuthStateChanged can emit multiple times)
+      if (hasCalled.current) return;
+      hasCalled.current = true;
+
       if (code) {
         try {
           const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+          // 1. Exchange Strava OAuth code for tokens and persist to Firestore
           await axios.post(`${backendUrl}/api/auth/strava`, {
             code: code,
-            uid: user.uid
+            uid: user.uid,
           });
-          setStatus("Successfully connected! Redirecting to Dashboard...");
-          setTimeout(() => router.push('/dashboard'), 2000);
-        } catch (error) {
-          console.error(error);
-          setStatus("Failed to connect Strava. Please try again.");
+
+          // 2. Auto-trigger an initial Strava sync so the dashboard is not empty
+          setStatus('Connected! Syncing your Strava data...');
+          try {
+            await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
+          } catch (syncErr) {
+            // Non-fatal — user can always manually sync from the dashboard
+            console.warn('Initial sync failed (non-fatal):', syncErr);
+          }
+
+          setStatus('All done! Redirecting to Dashboard...');
+          setTimeout(() => router.push('/dashboard'), 1500);
+        } catch (err) {
+          console.error(err);
+          setStatus('Failed to connect Strava. Please try again.');
         }
       }
     });
