@@ -598,21 +598,23 @@ export default function ProfilePage() {
               )}
             </Field>
 
-            {/* WeCom — coming soon */}
+            {/* WeCom */}
             <Field
               label="企业微信机器人 Webhook URL"
-              hint="在企业微信群 → 群机器人 → 添加机器人 里创建，粘贴 URL 到这里（功能开发中）"
+              hint="在企业微信群 → 群机器人 → 添加机器人 里创建，粘贴 URL 到这里"
             >
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg select-none">💬</span>
                 <input
-                  className={`${inputCls} pl-9 opacity-50 cursor-not-allowed`}
-                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=... （即将上线）"
+                  className={`${inputCls} pl-9`}
+                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
                   value={form.wecom_webhook_url}
                   onChange={set("wecom_webhook_url")}
-                  disabled
                 />
               </div>
+              {form.wecom_webhook_url && (
+                <p className="text-[10px] text-emerald-500 mt-1">✓ 已配置 — 保存后生效</p>
+              )}
             </Field>
           </div>
         </div>
