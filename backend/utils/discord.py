@@ -131,7 +131,7 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict) -> str:
             "6. 不要超过120字"
         )
 
-        result = _gemini_generate(prompt, temperature=0.7, max_tokens=300, response_json=False)
+        result = _gemini_generate(prompt, temperature=0.7, response_json=False)
         return result.get("text", "").strip()
 
     except Exception as e:
