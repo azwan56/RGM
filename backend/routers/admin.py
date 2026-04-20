@@ -209,7 +209,7 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
 
 @router.get("/test-gemini")
 def test_gemini(request: Request):
-    """Admin: tests Gemini API connectivity from the server."""
+    """Admin: tests Gemini API connectivity, tries multiple models to find which works."""
     _check_admin(request)
 
     import os as _os
@@ -217,19 +217,41 @@ def test_gemini(request: Request):
     base_url = _os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 
     if not api_key:
-        return {"error": "GEMINI_API_KEY not set"}
+        return {"error": "GEMINI_API_KEY not set", "base_url": base_url}
 
-    url  = f"{base_url}/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    body = {
-        "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
-        "generationConfig": {"maxOutputTokens": 80},
-    }
-    try:
-        r = requests.post(url, json=body, timeout=15)
-        if r.status_code == 200:
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return {"status": "ok", "response": text, "base_url": base_url}
-        else:
-            return {"status": "error", "http_code": r.status_code, "detail": r.text[:300]}
-    except Exception as e:
-        return {"status": "exception", "error": str(e)}
+    candidates = [
+        "gemini-2.5-flash-preview-04-17",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-8b",
+        "gemini-2.0-flash",
+        "gemini-1.0-pro",
+    ]
+    results = {}
+    for model in candidates:
+        url  = f"{base_url}/v1beta/models/{model}:generateContent?key={api_key}"
+        body = {
+            "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
+            "generationConfig": {"maxOutputTokens": 60},
+        }
+        try:
+            r = requests.post(url, json=body, timeout=10)
+            if r.status_code == 200:
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                results[model] = {"status": "ok", "response": text}
+                # Return immediately on first success
+                return {
+                    "status": "ok",
+                    "working_model": model,
+                    "response": text,
+                    "base_url": base_url,
+                    "tested": list(results.keys()),
+                }
+            else:
+                results[model] = {"status": r.status_code, "error": r.json().get("error", {}).get("message", "")[:80]}
+        except Exception as e:
+            results[model] = {"status": "exception", "error": str(e)[:80]}
+
+    return {"status": "all_failed", "base_url": base_url, "results": results}
+

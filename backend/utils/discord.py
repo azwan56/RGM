@@ -42,7 +42,14 @@ def _generate_quick_coach_tip(act_doc: dict, user_data: dict) -> str:
             f"要求：语言简洁有力，包含一个具体的训练建议，不要用markdown，不要emoji过多，最多1个emoji。"
         )
 
-        for model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+        for model in [
+            "gemini-2.5-flash-preview-04-17",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash-8b",
+            "gemini-1.0-pro",
+        ]:
             for api_ver in ["v1beta", "v1"]:
                 url  = f"{base_url}/{api_ver}/models/{model}:generateContent?key={api_key}"
                 body = {
