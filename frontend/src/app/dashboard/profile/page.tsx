@@ -572,8 +572,6 @@ export default function ProfilePage() {
           )}
         </div>
 
-        </div>
-
         {/* ── Notification Webhooks ───────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
           <SectionTitle>🔔 跑步通知</SectionTitle>
