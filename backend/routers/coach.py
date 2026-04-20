@@ -12,6 +12,10 @@ _gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.goog
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
+    "gemini-2.5-flash",          # New API keys
+    "gemini-flash-latest",       # Alias for latest flash
+    "gemini-2.5-flash-lite",     # Lightweight new model
+    "gemini-2.0-flash-001",      # Versioned, more stable
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-1.5-flash-latest",
