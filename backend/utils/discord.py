@@ -74,7 +74,7 @@ def _get_fitness_state(uid: str, user_data: dict) -> dict:
 
 # ── Gemini coach tip ──────────────────────────────────────────────────────────
 
-def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict) -> str:
+def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict, is_wecom: bool = False) -> str:
     """
     Generates a detailed 4-5 sentence AI coach analysis.
     Context includes VDOT, CTL/ATL/TSB, monthly km, user goals.
@@ -119,16 +119,31 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict) -> str:
             state = "良好" if tsb > 5 else ("疲劳蓄积" if tsb < -10 else "平衡")
             context_lines.append(f"体能状态：CTL体能={ctl}，ATL疲劳={atl}，TSB状态值={tsb}（{state}）")
 
-        prompt = (
-            "你是一位专业的中文马拉松教练，请根据以下跑步数据给出深度教练分析。\n\n"
-            + "\n".join(context_lines)
-            + "\n\n要求（重要）：\n"
+        reqs = (
+            "要求（重要）：\n"
             "1. 用4-5句话深度分析，分别评估：配速质量、心率效率、本次训练价值\n"
             "2. 结合VDOT和体能状态数据（如有）给出针对性点评\n"
             "3. 给出1-2个具体的后续训练建议\n"
             "4. 语言专业但热情，有温度，不要机械罗列数据\n"
             "5. 不要用markdown格式，不要用JSON，只输出纯文本\n"
             "6. 不要超过120字"
+        )
+
+        if is_wecom:
+            reqs = (
+                "要求（重要）：\n"
+                "1. 用4-5句话深度分析，分别评估：配速质量、心率效率、本次训练价值\n"
+                "2. 结合提供的VDOT和体能状态数据进行定性评估，不要在回复中直接引用具体的VDOT、CTL、ATL等数字\n"
+                "3. 给出1-2个具体的后续训练建议\n"
+                "4. 语言专业但热情，有温度，绝不罗列冷冰冰的数据\n"
+                "5. 不要用markdown格式，不要用JSON，只输出纯文本\n"
+                "6. 不要超过120字"
+            )
+
+        prompt = (
+            "你是一位专业的中文马拉松教练，请根据以下跑步数据给出深度教练分析。\n\n"
+            + "\n".join(context_lines)
+            + f"\n\n{reqs}"
         )
 
         result = _gemini_generate(prompt, temperature=0.7, response_json=False)
@@ -325,8 +340,8 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             **fitness,
         }
 
-        # Reuse the identical AI coach engine
-        coach_tip = _generate_coach_tip(act_doc, user_data, context)
+        # Reuse the AI coach engine but with fuzzy metrics instruction
+        coach_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
 
         # ── Build Markdown ──
         runner_name = (
@@ -367,28 +382,9 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
             md += f"📅 **{month_label} 月累计**: <font color='info'>{monthly_km} km</font>\n"
 
-        if ctl is not None and atl is not None and tsb is not None:
-            if tsb > 5:
-                form_str = f"<font color='info'>状态良好 (+{tsb})</font>"
-            elif tsb < -15:
-                form_str = f"<font color='warning'>疲劳蓄积 ({tsb})</font>"
-            elif tsb < -5:
-                form_str = f"<font color='warning'>略感疲劳 ({tsb})</font>"
-            else:
-                form_str = f"<font color='comment'>状态平衡 ({tsb})</font>"
-
-            md += f"💪 **体能/状态**: CTL **{ctl}** · ATL **{atl}** · {form_str}\n"
-
-        if vdot and float(vdot) > 20:
-            md += f"📊 **VDOT 指数**: **{round(float(vdot),1)}**\n"
-
         if coach_tip:
             # WeCom blockquotes look nicely formatted for AI tips
             md += f"\n🤖 **AI 教练点评**:\n<font color='comment'>{coach_tip}</font>\n"
-
-        activity_id = act_doc.get("activity_id")
-        if activity_id:
-            md += f"\n[🔗 查看 Strava 详情](https://www.strava.com/activities/{activity_id})"
 
         payload = {
             "msgtype": "markdown",
