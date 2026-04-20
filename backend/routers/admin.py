@@ -184,7 +184,6 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
 
     # Fetch context
     from utils.discord import _get_monthly_km, _get_fitness_state, _generate_coach_tip, _build_embed
-    uid = user_data.get("uid") or target_act.get("uid", uid)
     date_str = target_act.get("start_date_local", "")
     monthly_km = _get_monthly_km(uid, date_str) if uid else 0.0
     fitness    = _get_fitness_state(uid, user_data) if uid else {}

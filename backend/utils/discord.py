@@ -250,10 +250,11 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def send_activity_discord_notification(act_doc: dict, user_data: dict) -> bool:
+def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str = "") -> bool:
     """
     Sends a Discord embed notification for a completed run.
     Reads webhook URL from user_data["discord_webhook_url"] (set in profile).
+    If uid is provided, fetches rich runner context (VDOT, fitness state, monthly volume).
     Returns True on success, False on failure (never raises).
     """
     webhook_url = (user_data.get("discord_webhook_url") or "").strip()
@@ -262,7 +263,10 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict) -> bool:
         return False
 
     try:
-        uid      = user_data.get("uid") or act_doc.get("uid", "")
+        # Determine uid safely
+        if not uid:
+            uid = user_data.get("uid") or user_data.get("id") or act_doc.get("uid") or ""
+
         date_str = act_doc.get("start_date_local", "")
 
         # Gather extra context

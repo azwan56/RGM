@@ -221,7 +221,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         # ── Discord notification (non-blocking, never crashes the webhook) ──
         try:
             from utils.discord import send_activity_discord_notification
-            send_activity_discord_notification(act_doc, user_data)
+            send_activity_discord_notification(act_doc, user_data, uid=uid)
         except Exception as _disc_err:
             print(f"[webhook] Discord notification failed: {_disc_err}")
 
