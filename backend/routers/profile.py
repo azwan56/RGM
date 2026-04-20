@@ -25,6 +25,7 @@ EDITABLE_FIELDS = {
     "height_cm", "weight_kg",
     "marathon_pb_sec", "half_pb_sec", "ten_k_pb_sec", "five_k_pb_sec",
     "training_goal", "phone", "bio",
+    "discord_webhook_url", "wecom_webhook_url",
     # upcoming_races handled separately as a list
 }
 
@@ -98,6 +99,8 @@ class ProfileUpdate(BaseModel):
     phone:            Optional[str]  = None
     bio:              Optional[str]  = None
     upcoming_races:   Optional[List[dict]] = None  # list of up to 3 race dicts
+    discord_webhook_url: Optional[str] = None   # Discord channel webhook URL
+    wecom_webhook_url:   Optional[str] = None   # 企业微信机器人 webhook URL
 
 
 @router.post("/update")

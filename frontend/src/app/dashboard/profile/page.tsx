@@ -83,6 +83,8 @@ export default function ProfilePage() {
     half_pb:         "",
     ten_k_pb:        "",
     five_k_pb:       "",
+    discord_webhook_url: "",
+    wecom_webhook_url:   "",
   });
 
   // Race plan — separate state, up to 3 races
@@ -121,6 +123,8 @@ export default function ProfilePage() {
           half_pb:       secsToTime(p.half_pb_sec),
           ten_k_pb:      secsToTime(p.ten_k_pb_sec),
           five_k_pb:     secsToTime(p.five_k_pb_sec),
+          discord_webhook_url: p.discord_webhook_url || "",
+          wecom_webhook_url:   p.wecom_webhook_url || "",
         });
         // Load races — filter out past ones
         const savedRaces = (p.upcoming_races || []).filter((r: any) => {
@@ -164,6 +168,8 @@ export default function ProfilePage() {
         ten_k_pb_sec:   timeToSecs(form.ten_k_pb) || undefined,
         five_k_pb_sec:  timeToSecs(form.five_k_pb) || undefined,
         upcoming_races: races.filter(r => r.type),  // only send non-empty races
+        discord_webhook_url: form.discord_webhook_url || undefined,
+        wecom_webhook_url:   form.wecom_webhook_url || undefined,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -564,6 +570,53 @@ export default function ProfilePage() {
               ))}
             </div>
           )}
+        </div>
+
+        </div>
+
+        {/* ── Notification Webhooks ───────────────────────────────────────────── */}
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+          <SectionTitle>🔔 跑步通知</SectionTitle>
+          <p className="text-zinc-500 text-xs">
+            每次 Strava 同步到新跑步记录后，自动发送通知到你的频道。
+          </p>
+          <div className="space-y-4">
+            {/* Discord */}
+            <Field
+              label="Discord Webhook URL"
+              hint="在你的 Discord 频道设置 → 整合 → Webhook 里创建，粘贴 URL 到这里"
+            >
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg select-none">🎮</span>
+                <input
+                  className={`${inputCls} pl-9`}
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={form.discord_webhook_url}
+                  onChange={set("discord_webhook_url")}
+                />
+              </div>
+              {form.discord_webhook_url && (
+                <p className="text-[10px] text-emerald-500 mt-1">✓ 已配置 — 保存后生效</p>
+              )}
+            </Field>
+
+            {/* WeCom — coming soon */}
+            <Field
+              label="企业微信机器人 Webhook URL"
+              hint="在企业微信群 → 群机器人 → 添加机器人 里创建，粘贴 URL 到这里（功能开发中）"
+            >
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg select-none">💬</span>
+                <input
+                  className={`${inputCls} pl-9 opacity-50 cursor-not-allowed`}
+                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=... （即将上线）"
+                  value={form.wecom_webhook_url}
+                  onChange={set("wecom_webhook_url")}
+                  disabled
+                />
+              </div>
+            </Field>
+          </div>
         </div>
 
         {/* Bottom save */}

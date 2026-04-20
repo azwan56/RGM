@@ -218,5 +218,12 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
 
         _update_yearly_leaderboard(uid, user_data, display_name)
 
+        # ── Discord notification (non-blocking, never crashes the webhook) ──
+        try:
+            from utils.discord import send_activity_discord_notification
+            send_activity_discord_notification(act_doc, user_data)
+        except Exception as _disc_err:
+            print(f"[webhook] Discord notification failed: {_disc_err}")
+
     except Exception as e:
         print(f"[webhook] Processing failed: {e}")
