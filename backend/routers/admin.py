@@ -143,6 +143,7 @@ def sync_all_users(request: Request):
 
 
 
+
 # ── Discord Notification Test ────────────────────────────────────────────────
 
 @router.post("/test-discord-notify")
@@ -150,14 +151,9 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     """
     Admin: sends a Discord notification (with AI coach tip) for a user's latest activity.
     Runs on the server so Gemini API is reachable.
-
-    Query params:
-        uid           - Firestore user ID (required)
-        activity_date - YYYY-MM-DD to target a specific date (optional, defaults to latest)
     """
     _check_admin(request)
 
-    # Fetch user
     user_doc = db.collection("users").document(uid).get()
     if not user_doc.exists:
         raise HTTPException(status_code=404, detail=f"User {uid} not found")
@@ -166,7 +162,6 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     if not user_data.get("discord_webhook_url"):
         raise HTTPException(status_code=400, detail="User has no discord_webhook_url in profile")
 
-    # Fetch activities
     acts_ref = (db.collection("users").document(uid)
                 .collection("activities")
                 .order_by("start_date_local", direction="DESCENDING")
@@ -176,7 +171,6 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     if not activities:
         raise HTTPException(status_code=404, detail="No activities found for this user")
 
-    # Find target activity
     target_act = None
     if activity_date:
         for _, act in activities:
@@ -188,18 +182,54 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     else:
         target_act = activities[0][1]
 
-    # Send Discord notification (Gemini runs server-side here ✓)
-    from utils.discord import send_activity_discord_notification
-    ok = send_activity_discord_notification(target_act, user_data)
+    # Generate coach tip inline so we can report it
+    from utils.discord import _generate_quick_coach_tip, _build_embed
+    coach_tip = _generate_quick_coach_tip(target_act, user_data)
+
+    # Send Discord notification
+    embed = _build_embed(target_act, user_data, coach_tip)
+    payload = {"embeds": [embed], "username": "RGM 跑团助手"}
+    resp = requests.post(user_data["discord_webhook_url"], json=payload, timeout=10)
+    ok = resp.status_code in (200, 204)
 
     return {
         "success": ok,
+        "coach_tip_generated": bool(coach_tip),
+        "coach_tip_preview": coach_tip[:80] if coach_tip else "(empty — Gemini failed)",
+        "discord_status": resp.status_code,
         "activity": {
             "name": target_act.get("name"),
             "date": target_act.get("start_date_local", "")[:10],
             "distance_km": target_act.get("distance_km"),
-            "avg_pace": target_act.get("avg_pace"),
         },
-        "discord_webhook": user_data.get("discord_webhook_url", "")[:40] + "...",
     }
 
+
+# ── Gemini Connectivity Test ──────────────────────────────────────────────────
+
+@router.get("/test-gemini")
+def test_gemini(request: Request):
+    """Admin: tests Gemini API connectivity from the server."""
+    _check_admin(request)
+
+    import os as _os
+    api_key  = _os.getenv("GEMINI_API_KEY", "")
+    base_url = _os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+
+    if not api_key:
+        return {"error": "GEMINI_API_KEY not set"}
+
+    url  = f"{base_url}/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    body = {
+        "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
+        "generationConfig": {"maxOutputTokens": 80},
+    }
+    try:
+        r = requests.post(url, json=body, timeout=15)
+        if r.status_code == 200:
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return {"status": "ok", "response": text, "base_url": base_url}
+        else:
+            return {"status": "error", "http_code": r.status_code, "detail": r.text[:300]}
+    except Exception as e:
+        return {"status": "exception", "error": str(e)}
