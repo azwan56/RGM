@@ -20,13 +20,11 @@ from datetime import datetime
 def _generate_quick_coach_tip(act_doc: dict, user_data: dict) -> str:
     """
     Generates a short 2-sentence AI coach comment on a single run.
+    Reuses _gemini_generate from coach.py which handles model fallback.
     Falls back gracefully if Gemini is unavailable.
     """
     try:
-        api_key  = os.getenv("GEMINI_API_KEY", "")
-        base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
-        if not api_key:
-            return ""
+        from routers.coach import _gemini_generate
 
         name     = (user_data.get("display_name") or user_data.get("strava_name") or "跑者").split()[0]
         dist     = act_doc.get("distance_km", 0)
@@ -40,33 +38,16 @@ def _generate_quick_coach_tip(act_doc: dict, user_data: dict) -> str:
             f"跑者：{name}\n"
             f"距离：{dist}km，配速：{pace}/km，平均心率：{hr}bpm，爬升：{elev}m，时长：{duration}\n"
             f"要求：语言简洁有力，包含一个具体的训练建议，不要用markdown，不要emoji过多，最多1个emoji。"
+            f"不要用JSON格式回答，只需纯文本。"
         )
 
-        for model in [
-            "gemini-2.5-flash-preview-04-17",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-flash-8b",
-            "gemini-1.0-pro",
-        ]:
-            for api_ver in ["v1beta", "v1"]:
-                url  = f"{base_url}/{api_ver}/models/{model}:generateContent?key={api_key}"
-                body = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 200},
-                }
-                try:
-                    resp = requests.post(url, json=body, timeout=20)
-                    if resp.status_code == 200:
-                        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-                        return text.strip()
-                except Exception:
-                    continue
+        result = _gemini_generate(prompt, temperature=0.7, max_tokens=200, response_json=False)
+        return result.get("text", "").strip()
+
     except Exception as e:
         print(f"[discord] Coach tip generation failed: {e}")
+        return ""
 
-    return ""
 
 
 # ── Embed builder ─────────────────────────────────────────────────────────────
