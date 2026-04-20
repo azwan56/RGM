@@ -211,7 +211,65 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     }
 
 
-# ── Gemini Connectivity Test ──────────────────────────────────────────────────
+@router.post("/test-wecom-notify")
+def test_wecom_notify(request: Request, uid: str, activity_date: str = ""):
+    """
+    Test endpoint for WeCom group robot notifications.
+    Usage:
+    POST /api/admin/test-wecom-notify?uid=<uid>&activity_date=YYYY-MM-DD
+    """
+    _check_admin(request)
+
+    from firebase_config import db
+    doc_ref = db.collection("users").document(uid).get()
+    if not doc_ref.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_data = doc_ref.to_dict()
+
+    if not user_data.get("wecom_webhook_url"):
+        raise HTTPException(status_code=400, detail="User has no wecom_webhook_url configured")
+
+    # Fetch activities
+    act_ref = db.collection("users").document(uid).collection("activities")
+    acts = act_ref.order_by("start_date_local", direction="DESCENDING").limit(10).stream()
+    activities = [(a.id, a.to_dict()) for a in acts]
+
+    if not activities:
+        raise HTTPException(status_code=404, detail="User has no activities")
+
+    # Find target act
+    target_act = None
+    if activity_date:
+        for _, act in activities:
+            if act.get("start_date_local", "")[:10] == activity_date:
+                target_act = act
+                break
+        if not target_act:
+            raise HTTPException(status_code=404, detail=f"No activity found for date {activity_date}")
+    else:
+        target_act = activities[0][1]
+
+    # Fetch context
+    from utils.discord import _get_monthly_km, _get_fitness_state, _generate_coach_tip
+    date_str = target_act.get("start_date_local", "")
+    monthly_km = _get_monthly_km(uid, date_str) if uid else 0.0
+    fitness    = _get_fitness_state(uid, user_data) if uid else {}
+    context = {"monthly_km": monthly_km, **fitness}
+
+    # Generate coach tip inline so we can report it
+    coach_tip = _generate_coach_tip(target_act, user_data, context)
+
+    # Send WeCom notification
+    from utils.discord import send_activity_wecom_notification
+    ok = send_activity_wecom_notification(target_act, user_data, uid=uid)
+
+    return {
+        "success": ok,
+        "coach_tip_generated": bool(coach_tip),
+        "coach_tip_preview": coach_tip[:80] if coach_tip else "(empty — Gemini failed)",
+    }
+
+# ── Gemini Diagnostic Endpoint ────────────────────────────────────────────────
 
 @router.get("/test-gemini")
 def test_gemini(request: Request):

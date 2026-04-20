@@ -301,18 +301,110 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
 
 # ── WeCom (企业微信) Notification — reserved for future implementation ─────────
 
-def send_activity_wecom_notification(act_doc: dict, user_data: dict) -> bool:
+def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "") -> bool:
     """
-    Placeholder: Sends a WeCom (企业微信) group robot notification for a completed run.
+    Sends a WeCom (企业微信) group robot notification for a completed run.
     Reads the webhook URL from user_data["wecom_webhook_url"] (set in profile).
-
-    TODO: Implement after Discord flow is validated.
-    WeCom robot API: POST to webhook URL with JSON body:
-      { "msgtype": "markdown", "markdown": { "content": "..." } }
+    Returns True on success, False on failure.
     """
     webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
     if not webhook_url:
+        print("[wecom] No wecom_webhook_url in user profile — skipping")
         return False
 
-    print(f"[wecom] WeCom notification not yet implemented for activity {act_doc.get('activity_id')}")
-    return False
+    try:
+        if not uid:
+            uid = user_data.get("uid") or user_data.get("id") or act_doc.get("uid") or ""
+
+        date_str = act_doc.get("start_date_local", "")
+
+        monthly_km = _get_monthly_km(uid, date_str) if uid else 0.0
+        fitness    = _get_fitness_state(uid, user_data) if uid else {}
+        context = {
+            "monthly_km": monthly_km,
+            **fitness,
+        }
+
+        # Reuse the identical AI coach engine
+        coach_tip = _generate_coach_tip(act_doc, user_data, context)
+
+        # ── Build Markdown ──
+        runner_name = (
+            user_data.get("display_name") or
+            user_data.get("strava_name") or
+            user_data.get("email", "").split("@")[0] or
+            "跑者"
+        )
+        run_name = act_doc.get("name", "跑步")
+        date_short = date_str[:10]
+        
+        dist     = act_doc.get("distance_km", 0)
+        pace     = act_doc.get("avg_pace", "—")
+        duration = act_doc.get("duration_str", "—")
+        hr       = act_doc.get("avg_heart_rate", 0)
+        elev     = act_doc.get("total_elevation_gain", 0)
+        vdot     = act_doc.get("vdot")
+
+        ctl = context.get("ctl")
+        atl = context.get("atl")
+        tsb = context.get("tsb")
+
+        # Color coding in markdown via <font color="warning|info|comment">
+        # Distance gets info (green-ish in wecom), title gets warning (red/orange)
+        md = f"🏃 **<font color=\\"warning\\">{runner_name}</font> 完成了一次跑步！**\n"
+        md += f"> **{run_name}** · <font color=\\"comment\\">{date_short}</font>\n\n"
+        
+        md += f"🏁 **距离**: <font color=\\"info\\">{dist} km</font>\n"
+        md += f"⚡ **配速**: <font color=\\"info\\">{pace}/km</font>  |  ⏱ **时长**: {duration}\n"
+        
+        if hr:
+            md += f"❤️ **心率**: {hr} bpm"
+        if elev and elev > 5:
+            md += f"  |  ⛰ **爬升**: {elev}m"
+        md += "\n"
+
+        if monthly_km:
+            month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
+            md += f"📅 **{month_label} 月累计**: <font color=\\"info\\">{monthly_km} km</font>\n"
+
+        if ctl is not None and atl is not None and tsb is not None:
+            if tsb > 5:
+                form_str = f"<font color=\\"info\\">状态良好 (+{tsb})</font>"
+            elif tsb < -15:
+                form_str = f"<font color=\\"warning\\">疲劳蓄积 ({tsb})</font>"
+            elif tsb < -5:
+                form_str = f"<font color=\\"warning\\">略感疲劳 ({tsb})</font>"
+            else:
+                form_str = f"<font color=\\"comment\\">状态平衡 ({tsb})</font>"
+
+            md += f"💪 **体能/状态**: CTL **{ctl}** · ATL **{atl}** · {form_str}\n"
+
+        if vdot and float(vdot) > 20:
+            md += f"📊 **VDOT 指数**: **{round(float(vdot),1)}**\n"
+
+        if coach_tip:
+            # WeCom blockquotes look nicely formatted for AI tips
+            md += f"\n🤖 **AI 教练点评**:\n<font color=\\"comment\\">{coach_tip}</font>\n"
+
+        activity_id = act_doc.get("activity_id")
+        if activity_id:
+            md += f"\n[🔗 查看 Strava 详情](https://www.strava.com/activities/{activity_id})"
+
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {
+                "content": md
+            }
+        }
+
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code == 200 and resp.json().get("errcode") == 0:
+            print(f"[wecom] Notification sent for activity {act_doc.get('activity_id')}")
+            return True
+        else:
+            print(f"[wecom] Failed to send: {resp.status_code} {resp.text[:200]}")
+            return False
+
+    except Exception as e:
+        print(f"[wecom] Notification error: {e}")
+        return False
