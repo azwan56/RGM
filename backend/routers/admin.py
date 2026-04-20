@@ -230,28 +230,33 @@ def test_gemini(request: Request):
     ]
     results = {}
     for model in candidates:
-        url  = f"{base_url}/v1beta/models/{model}:generateContent?key={api_key}"
-        body = {
-            "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
-            "generationConfig": {"maxOutputTokens": 60},
-        }
-        try:
-            r = requests.post(url, json=body, timeout=10)
-            if r.status_code == 200:
-                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                results[model] = {"status": "ok", "response": text}
-                # Return immediately on first success
-                return {
-                    "status": "ok",
-                    "working_model": model,
-                    "response": text,
-                    "base_url": base_url,
-                    "tested": list(results.keys()),
-                }
-            else:
-                results[model] = {"status": r.status_code, "error": r.json().get("error", {}).get("message", "")[:80]}
-        except Exception as e:
-            results[model] = {"status": "exception", "error": str(e)[:80]}
+        for api_ver in ["v1beta", "v1"]:
+            url  = f"{base_url}/{api_ver}/models/{model}:generateContent?key={api_key}"
+            body = {
+                "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
+                "generationConfig": {"maxOutputTokens": 60},
+            }
+            try:
+                r = requests.post(url, json=body, timeout=10)
+                if r.status_code == 200:
+                    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    return {
+                        "status": "ok",
+                        "working_model": model,
+                        "working_api_ver": api_ver,
+                        "response": text,
+                        "base_url": base_url,
+                    }
+                else:
+                    key = f"{model}@{api_ver}"
+                    try:
+                        err_msg = r.json().get("error", {}).get("message", r.text[:80])
+                    except Exception:
+                        err_msg = r.text[:80]
+                    results[key] = {"status": r.status_code, "error": err_msg}
+            except Exception as e:
+                results[f"{model}@{api_ver}"] = {"status": "exception", "error": str(e)[:80]}
 
     return {"status": "all_failed", "base_url": base_url, "results": results}
+
 
