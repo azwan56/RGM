@@ -182,12 +182,19 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     else:
         target_act = activities[0][1]
 
+    # Fetch context
+    from utils.discord import _get_monthly_km, _get_fitness_state, _generate_coach_tip, _build_embed
+    uid = user_data.get("uid") or target_act.get("uid", uid)
+    date_str = target_act.get("start_date_local", "")
+    monthly_km = _get_monthly_km(uid, date_str) if uid else 0.0
+    fitness    = _get_fitness_state(uid, user_data) if uid else {}
+    context = {"monthly_km": monthly_km, **fitness}
+
     # Generate coach tip inline so we can report it
-    from utils.discord import _generate_quick_coach_tip, _build_embed
-    coach_tip = _generate_quick_coach_tip(target_act, user_data)
+    coach_tip = _generate_coach_tip(target_act, user_data, context)
 
     # Send Discord notification
-    embed = _build_embed(target_act, user_data, coach_tip)
+    embed = _build_embed(target_act, user_data, coach_tip, context)
     payload = {"embeds": [embed], "username": "RGM 跑团助手"}
     resp = requests.post(user_data["discord_webhook_url"], json=payload, timeout=10)
     ok = resp.status_code in (200, 204)
