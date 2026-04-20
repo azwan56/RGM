@@ -349,13 +349,13 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         atl = context.get("atl")
         tsb = context.get("tsb")
 
-        # Color coding in markdown via <font color="warning|info|comment">
+        # Color coding in markdown via <font color='warning|info|comment'>
         # Distance gets info (green-ish in wecom), title gets warning (red/orange)
-        md = f"🏃 **<font color=\\"warning\\">{runner_name}</font> 完成了一次跑步！**\n"
-        md += f"> **{run_name}** · <font color=\\"comment\\">{date_short}</font>\n\n"
+        md = f"🏃 **<font color='warning'>{runner_name}</font> 完成了一次跑步！**\n"
+        md += f"> **{run_name}** · <font color='comment'>{date_short}</font>\n\n"
         
-        md += f"🏁 **距离**: <font color=\\"info\\">{dist} km</font>\n"
-        md += f"⚡ **配速**: <font color=\\"info\\">{pace}/km</font>  |  ⏱ **时长**: {duration}\n"
+        md += f"🏁 **距离**: <font color='info'>{dist} km</font>\n"
+        md += f"⚡ **配速**: <font color='info'>{pace}/km</font>  |  ⏱ **时长**: {duration}\n"
         
         if hr:
             md += f"❤️ **心率**: {hr} bpm"
@@ -365,17 +365,17 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
 
         if monthly_km:
             month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
-            md += f"📅 **{month_label} 月累计**: <font color=\\"info\\">{monthly_km} km</font>\n"
+            md += f"📅 **{month_label} 月累计**: <font color='info'>{monthly_km} km</font>\n"
 
         if ctl is not None and atl is not None and tsb is not None:
             if tsb > 5:
-                form_str = f"<font color=\\"info\\">状态良好 (+{tsb})</font>"
+                form_str = f"<font color='info'>状态良好 (+{tsb})</font>"
             elif tsb < -15:
-                form_str = f"<font color=\\"warning\\">疲劳蓄积 ({tsb})</font>"
+                form_str = f"<font color='warning'>疲劳蓄积 ({tsb})</font>"
             elif tsb < -5:
-                form_str = f"<font color=\\"warning\\">略感疲劳 ({tsb})</font>"
+                form_str = f"<font color='warning'>略感疲劳 ({tsb})</font>"
             else:
-                form_str = f"<font color=\\"comment\\">状态平衡 ({tsb})</font>"
+                form_str = f"<font color='comment'>状态平衡 ({tsb})</font>"
 
             md += f"💪 **体能/状态**: CTL **{ctl}** · ATL **{atl}** · {form_str}\n"
 
@@ -384,7 +384,7 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
 
         if coach_tip:
             # WeCom blockquotes look nicely formatted for AI tips
-            md += f"\n🤖 **AI 教练点评**:\n<font color=\\"comment\\">{coach_tip}</font>\n"
+            md += f"\n🤖 **AI 教练点评**:\n<font color='comment'>{coach_tip}</font>\n"
 
         activity_id = act_doc.get("activity_id")
         if activity_id:
