@@ -142,15 +142,64 @@ def sync_all_users(request: Request):
     return result
 
 
-# ── Scheduler Status ─────────────────────────────────────────────────────────
 
-@router.get("/scheduler-status")
-def scheduler_status(request: Request):
-    """Returns the current state of the background scheduler."""
+# ── Discord Notification Test ────────────────────────────────────────────────
+
+@router.post("/test-discord-notify")
+def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
+    """
+    Admin: sends a Discord notification (with AI coach tip) for a user's latest activity.
+    Runs on the server so Gemini API is reachable.
+
+    Query params:
+        uid           - Firestore user ID (required)
+        activity_date - YYYY-MM-DD to target a specific date (optional, defaults to latest)
+    """
     _check_admin(request)
 
-    try:
-        from scheduler import get_scheduler_status
-        return get_scheduler_status()
-    except Exception as e:
-        return {"error": str(e), "status": "not_initialized"}
+    # Fetch user
+    user_doc = db.collection("users").document(uid).get()
+    if not user_doc.exists:
+        raise HTTPException(status_code=404, detail=f"User {uid} not found")
+    user_data = user_doc.to_dict()
+
+    if not user_data.get("discord_webhook_url"):
+        raise HTTPException(status_code=400, detail="User has no discord_webhook_url in profile")
+
+    # Fetch activities
+    acts_ref = (db.collection("users").document(uid)
+                .collection("activities")
+                .order_by("start_date_local", direction="DESCENDING")
+                .limit(10)
+                .stream())
+    activities = [(a.id, a.to_dict()) for a in acts_ref]
+    if not activities:
+        raise HTTPException(status_code=404, detail="No activities found for this user")
+
+    # Find target activity
+    target_act = None
+    if activity_date:
+        for _, act in activities:
+            if act.get("start_date_local", "")[:10] == activity_date:
+                target_act = act
+                break
+        if not target_act:
+            raise HTTPException(status_code=404, detail=f"No activity found for date {activity_date}")
+    else:
+        target_act = activities[0][1]
+
+    # Send Discord notification (Gemini runs server-side here ✓)
+    from utils.discord import send_activity_discord_notification
+    ok = send_activity_discord_notification(target_act, user_data)
+
+    return {
+        "success": ok,
+        "activity": {
+            "name": target_act.get("name"),
+            "date": target_act.get("start_date_local", "")[:10],
+            "distance_km": target_act.get("distance_km"),
+            "avg_pace": target_act.get("avg_pace"),
+        },
+        "discord_webhook": user_data.get("discord_webhook_url", "")[:40] + "...",
+    }
+
