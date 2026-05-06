@@ -1236,14 +1236,23 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
                   "training_type": "越野训练" if is_trail else "轻松跑"}
 
             if _api_key:
-                try:
-                    resp = _gemini_generate(prompt, temperature=0.5, max_tokens=1200)
-                    text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-                    ai = json.loads(text)
-                    print(f"[backfill] {entry_date} AI OK")
-                except Exception as e:
-                    errors += 1
-                    print(f"[backfill] AI error for {entry_date}: {e}")
+                for attempt in range(3):  # Retry up to 3 times
+                    try:
+                        resp = _gemini_generate(prompt, temperature=0.5, max_tokens=1200)
+                        text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+                        ai = json.loads(text)
+                        print(f"[backfill] {entry_date} AI OK (attempt {attempt+1})")
+                        break
+                    except Exception as e:
+                        err_str = str(e)
+                        if "429" in err_str or "Resource" in err_str or "quota" in err_str.lower():
+                            wait = 10 * (attempt + 1)  # 10s, 20s, 30s backoff
+                            print(f"[backfill] Rate limited for {entry_date}, waiting {wait}s...")
+                            time.sleep(wait)
+                        else:
+                            errors += 1
+                            print(f"[backfill] AI error for {entry_date}: {e}")
+                            break
 
             entry = {
                 "date": entry_date, "entry_type": "daily", "activity_id": act_id,
@@ -1271,8 +1280,8 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
                 status_ref.set({"state": "running", "total": len(activities), "done": processed,
                                 "errors": errors}, merge=True)
 
-            # Delay to avoid Gemini rate limiting
-            time.sleep(1)
+            # 4s delay = ~15 RPM to stay within Gemini free tier limit
+            time.sleep(4)
 
         status_ref.set({"state": "done", "total": len(activities), "done": processed,
                         "errors": errors, "finished_at": _dt.now().isoformat()})
