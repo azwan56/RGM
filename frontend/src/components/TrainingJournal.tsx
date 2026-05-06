@@ -66,6 +66,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
   const [loading, setLoading] = useState(true);
   const [logging, setLogging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [backfilling, setBackfilling] = useState<string>("");
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   const fetchJournal = useCallback(async () => {
@@ -84,7 +85,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
   const logLatestActivity = async () => {
     setLogging(true);
     try {
-      await axios.post(`${backendUrl}/api/coach/journal/log`, { uid });
+      await axios.post(`${backendUrl}/api/coach/journal/log`, { uid, force: true });
       await fetchJournal();
     } catch (err) {
       console.error("Journal log error:", err);
@@ -294,23 +295,52 @@ export default function TrainingJournal({ uid }: { uid: string }) {
       )}
 
       {/* Action buttons */}
-      <div className="mt-5 flex gap-3 z-10 relative">
-        <button onClick={logLatestActivity} disabled={logging}
-          className="flex-1 py-2.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-300 disabled:opacity-50 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
-          {logging ? (
-            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          ) : "📝"} {logging ? "记录中..." : "记录最新训练"}
-        </button>
-        <button onClick={triggerWeeklyReview} disabled={reviewing}
-          className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white disabled:opacity-50 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
-          {reviewing ? (
-            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          ) : "📊"} {reviewing ? "生成中..." : "生成周总结"}
-        </button>
+      <div className="mt-5 space-y-3 z-10 relative">
+        <div className="flex gap-3">
+          <button onClick={logLatestActivity} disabled={logging}
+            className="flex-1 py-2.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-300 disabled:opacity-50 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
+            {logging ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : "📝"} {logging ? "记录中..." : "记录最新训练"}
+          </button>
+          <button onClick={triggerWeeklyReview} disabled={reviewing}
+            className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white disabled:opacity-50 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
+            {reviewing ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : "📊"} {reviewing ? "生成中..." : "生成周总结"}
+          </button>
+        </div>
+
+        {/* Backfill button */}
+        {!backfilling && entries.length <= 3 && (
+          <button
+            onClick={async () => {
+              if (!confirm("将为3月以来的所有训练生成AI评语（可能需要几分钟）")) return;
+              setBackfilling("启动中...");
+              try {
+                const res = await axios.post(`${backendUrl}/api/coach/journal/backfill`, {
+                  uid, since_date: "2026-03-01", journal_title: "UTMB 备赛日志"
+                });
+                setBackfilling(`完成！已生成 ${res.data.message}`);
+                await fetchJournal();
+                setTimeout(() => setBackfilling(""), 5000);
+              } catch (err) {
+                setBackfilling("回填失败，请重试");
+                setTimeout(() => setBackfilling(""), 3000);
+              }
+            }}
+            className="w-full py-2 bg-gradient-to-r from-orange-500/10 to-amber-500/10 hover:from-orange-500/15 hover:to-amber-500/15 border border-orange-500/20 text-orange-300 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
+          >
+            🔄 回填历史日志（3月至今）
+          </button>
+        )}
+        {backfilling && (
+          <div className="text-center py-2 text-xs text-orange-400 animate-pulse">{backfilling}</div>
+        )}
       </div>
     </div>
   );

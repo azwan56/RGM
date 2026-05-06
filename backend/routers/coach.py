@@ -925,6 +925,7 @@ async def generate_coach_feedback(req: CoachRequest):
 class JournalLogRequest(BaseModel):
     uid: str
     activity_id: str = ""
+    force: bool = False
 
 class WeeklyReviewRequest(BaseModel):
     uid: str
@@ -1013,7 +1014,7 @@ async def log_journal_entry(req: JournalLogRequest):
     act_id = str(activity.get("activity_id", ""))
     entry_date = activity.get("start_date_local", "")[:10]
     existing = entries_ref.document(f"{entry_date}_{act_id}").get()
-    if existing.exists:
+    if existing.exists and not req.force:
         return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
 
     # 3. This week's context
@@ -1129,6 +1130,160 @@ async def log_journal_entry(req: JournalLogRequest):
     return {"entry": entry, "journal_id": journal_id}
 
 
+class BackfillRequest(BaseModel):
+    uid: str
+    since_date: str = "2026-03-01"
+    journal_title: str = ""
+
+
+@router.post("/journal/backfill")
+async def backfill_journal(req: BackfillRequest):
+    """Generate journal entries for ALL activities since a date. Runs in background."""
+    from datetime import datetime as _dt
+    loop = asyncio.get_event_loop()
+    uid = req.uid
+    user_ref = db.collection("users").document(uid)
+
+    # Fetch all activities since date
+    acts_docs = list(
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", req.since_date)
+        .order_by("start_date_local")
+        .limit(500)
+        .stream()
+    )
+    activities = [d.to_dict() for d in acts_docs]
+    if not activities:
+        return {"error": "No activities found", "since": req.since_date}
+
+    # Create or get journal with custom title
+    import re
+    journal_title = req.journal_title or "UTMB 备赛日志"
+    race = _get_nearest_race_info(uid)
+
+    # Archive any existing active journals
+    for doc in user_ref.collection("training_logs").where("status", "==", "active").limit(5).stream():
+        user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
+
+    slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', journal_title).strip('-').lower()
+    journal_id = slug
+    journal_data = {
+        "title": journal_title,
+        "race_type": race.get("type", ""),
+        "race_date": race.get("date", ""),
+        "created_at": _dt.now().isoformat(),
+        "status": "active",
+    }
+    user_ref.collection("training_logs").document(journal_id).set(journal_data, merge=True)
+    entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+
+    # Progress tracking
+    status_ref = user_ref.collection("meta").document("journal_backfill_status")
+    status_ref.set({"state": "running", "total": len(activities), "done": 0,
+                    "started_at": _dt.now().isoformat()})
+
+    # Get training summary once
+    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+    avg_pace_8w = training_summary.get("avg_pace", "—")
+    avg_hr_8w = training_summary.get("avg_heart_rate", 0)
+    avg_dist = training_summary.get("avg_run_distance", 0)
+    longest = training_summary.get("longest_run", 0)
+
+    race_ctx = ""
+    if race and race.get("name"):
+        race_ctx = f"【备赛目标】{race['name']}（{race.get('type','')}）\n"
+
+    processed = 0
+    errors = 0
+
+    for activity in activities:
+        act_id = str(activity.get("activity_id", ""))
+        entry_date = activity.get("start_date_local", "")[:10]
+        km = activity.get("distance_km", 0)
+        act_elev = activity.get("total_elevation_gain", 0)
+        is_trail = act_elev > 30 and km > 0 and (act_elev / km) > 15
+
+        prompt = (
+            "你是一位专业跑步教练，正在为跑者撰写训练日志评语。\n"
+            "你需要根据训练数据进行深入分析，引用具体数据。\n"
+            "回复必须是纯 JSON，不含 markdown 标记。\n\n"
+            f"【训练日志】{journal_title}\n"
+            f"{race_ctx}"
+            f"【训练详情】日期：{entry_date}\n"
+            f"- 活动：{activity.get('name','Run')}\n"
+            f"- 距离：{km}km（8周均：{avg_dist}km，最长：{longest}km）\n"
+            f"- 配速：{activity.get('avg_pace','—')}/km（8周均：{avg_pace_8w}/km）\n"
+            f"- 心率：{activity.get('avg_heart_rate',0)}bpm（8周均：{avg_hr_8w}bpm），最大：{activity.get('max_heart_rate',0)}bpm\n"
+            f"- 爬升：{act_elev}m{'（越野/山地）' if is_trail else ''}\n"
+            f"- 时长：{activity.get('duration_str','—')}\n\n"
+            f"【8周概况】周均{training_summary.get('avg_weekly_km',0)}km | "
+            f"路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n\n"
+            "请分析：1.训练类型 2.配速心率匹配 3.与均值对比 4.备赛贡献\n\n"
+            '返回JSON：{\n'
+            '  "ai_comment": "<5-8句详细评语，引用数据>",\n'
+            '  "fatigue_level": "<low|moderate|high>",\n'
+            '  "performance_note": "<亮点或问题，2句>",\n'
+            '  "tomorrow_suggestion": "<建议>",\n'
+            '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"\n'
+            '}\n'
+        )
+
+        ai = {"ai_comment": f"{entry_date}: {activity.get('name','Run')} {km}km 训练完成。",
+              "fatigue_level": "moderate", "performance_note": "", "tomorrow_suggestion": "",
+              "training_type": "越野训练" if is_trail else "轻松跑"}
+
+        if _api_key:
+            try:
+                resp = await loop.run_in_executor(
+                    None, lambda p=prompt: _gemini_generate(p, temperature=0.5, max_tokens=1200))
+                text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+                ai = json.loads(text)
+            except Exception as e:
+                errors += 1
+                print(f"[backfill] AI error for {entry_date}: {e}")
+
+        entry = {
+            "date": entry_date, "entry_type": "daily", "activity_id": act_id,
+            "activity_snapshot": {
+                "name": activity.get("name", "Run"), "distance_km": km,
+                "avg_pace": activity.get("avg_pace", "—"),
+                "avg_heart_rate": activity.get("avg_heart_rate", 0),
+                "total_elevation_gain": act_elev,
+                "duration_str": activity.get("duration_str", "—"),
+                "max_heart_rate": activity.get("max_heart_rate", 0),
+            },
+            "ai_comment": ai.get("ai_comment", ""),
+            "fatigue_level": ai.get("fatigue_level", "moderate"),
+            "performance_note": ai.get("performance_note", ""),
+            "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
+            "training_type": ai.get("training_type", ""),
+            "weekly_progress": {"week_km": 0, "week_runs": 0, "target_km": 0, "completion_pct": 0},
+            "created_at": _dt.now().isoformat(),
+        }
+        entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+        processed += 1
+
+        # Update progress
+        if processed % 3 == 0:
+            status_ref.set({"state": "running", "total": len(activities), "done": processed,
+                            "errors": errors}, merge=True)
+
+        # Small delay to avoid rate limiting
+        await asyncio.sleep(0.5)
+
+    status_ref.set({"state": "done", "total": len(activities), "done": processed,
+                    "errors": errors, "finished_at": _dt.now().isoformat()})
+
+    return {"message": f"Backfill complete: {processed}/{len(activities)} entries",
+            "journal_id": journal_id, "errors": errors}
+
+
+@router.get("/journal/backfill-status")
+def get_backfill_status(uid: str):
+    """Poll backfill progress."""
+    doc = db.collection("users").document(uid).collection("meta").document("journal_backfill_status").get()
+    return doc.to_dict() if doc.exists else {"state": "idle"}
+
 @router.get("/journal")
 def get_journal(uid: str):
     """Get active journal with recent entries."""
@@ -1139,7 +1294,7 @@ def get_journal(uid: str):
     if not journal:
         return {"journal": None, "entries": []}
 
-    cutoff = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=60)).isoformat()
+    cutoff = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=90)).isoformat()
     entries = [d.to_dict() for d in
                user_ref.collection("training_logs").document(journal_id)
                .collection("entries").where("date", ">=", cutoff)
