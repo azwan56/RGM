@@ -15,8 +15,6 @@ _MODEL_CANDIDATES = [
     "gemini-2.5-flash",          # Latest, confirmed working
     "gemini-2.5-flash-lite",     # Lightweight variant
     "gemini-flash-latest",       # Alias for latest flash
-    "gemini-2.0-flash-lite",     # Lite fallback
-    "gemini-2.0-flash-001",      # Versioned fallback
 ]
 _resolved_model = None  # Will be set on first successful call
 
@@ -30,7 +28,9 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
 
     last_error = None
     for model_name in models_to_try:
-        for api_ver in ["v1beta", "v1"]:
+        # v1 does NOT support responseMimeType, so only use v1beta for JSON mode
+        api_versions = ["v1beta"] if response_json else ["v1beta", "v1"]
+        for api_ver in api_versions:
             url = f"{_gemini_base_url}/{api_ver}/models/{model_name}:generateContent?key={_api_key}"
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
