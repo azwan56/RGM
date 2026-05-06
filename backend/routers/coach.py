@@ -216,7 +216,22 @@ def _build_race_analysis(rtype, rname, stats):
 
     current_km = stats.get('total_distance_km', 0) if stats else 0
     period = stats.get('period', 'monthly') if stats else 'monthly'
-    est_weekly = round(current_km / 4.3) if period == 'monthly' else round(current_km)
+
+    # Estimate weekly km from actual elapsed days, not a fixed 4.3 divisor
+    if period == 'monthly':
+        from datetime import date as _dt
+        period_start = stats.get('period_start') if stats else None
+        if period_start:
+            try:
+                days_elapsed = max(1, (_dt.today() - _dt.fromisoformat(period_start)).days)
+            except (ValueError, TypeError):
+                days_elapsed = max(1, _dt.today().day)
+        else:
+            days_elapsed = max(1, _dt.today().day)
+        est_weekly = round(current_km / days_elapsed * 7)
+    else:
+        # weekly period — use directly
+        est_weekly = round(current_km)
     min_weekly = race_info.get("min_weekly_km", 40)
 
     if est_weekly >= min_weekly:
