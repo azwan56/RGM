@@ -775,6 +775,9 @@ async def generate_coach_feedback(req: CoachRequest):
     profile_gender = profile.get("gender", "other") if profile else "other"
     profile_age = age
 
+    _trend_cn = {"increasing": "上升", "stable": "平稳", "decreasing": "下降"}.get(
+        training_summary.get("volume_trend", "stable"), "平稳")
+
     prompt = (
         "你是一位热情、专业、善于鼓励的中文跑步教练。\n"
         "请根据以下跑者信息，给出温暖、正面、具有激励性的个性化训练建议。\n"
@@ -794,7 +797,7 @@ async def generate_coach_feedback(req: CoachRequest):
         f"越野跑：{training_summary.get('trail_runs', 0)} 次/{training_summary.get('trail_km', 0)}km\n"
         f"- 总海拔累积：{training_summary.get('total_elevation', 0)}m，平均每次：{training_summary.get('avg_elevation_per_run', 0)}m\n"
         f"- 8周平均配速：{training_summary.get('avg_pace', '?')}/km，平均心率：{training_summary.get('avg_heart_rate', 0)}bpm\n"
-        f"- 跑量趋势：{{'increasing':'上升','stable':'平稳','decreasing':'下降'}.get(training_summary.get('volume_trend','stable'), '平稳')}\n"
+        f"- 跑量趋势：{_trend_cn}\n"
         f"- 每周平均跑步：{training_summary.get('avg_runs_per_week', 0)} 次，休息日：{training_summary.get('avg_rest_days_per_week', 0)} 天\n"
         f"- 训练一致性评分：{training_summary.get('consistency_score', 0)}/10\n\n"
         f"【本期目标完成度】\n"
