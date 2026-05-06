@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from firebase_config import db
 import os
@@ -1137,28 +1137,29 @@ class BackfillRequest(BaseModel):
 
 
 @router.post("/journal/backfill")
-async def backfill_journal(req: BackfillRequest):
-    """Generate journal entries for ALL activities since a date. Runs in background."""
+def _run_backfill_task(uid: str, since_date: str, journal_title: str):
+    import asyncio
     from datetime import datetime as _dt
-    loop = asyncio.get_event_loop()
-    uid = req.uid
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     user_ref = db.collection("users").document(uid)
 
     # Fetch all activities since date
     acts_docs = list(
         user_ref.collection("activities")
-        .where("start_date_local", ">=", req.since_date)
+        .where("start_date_local", ">=", since_date)
         .order_by("start_date_local")
         .limit(500)
         .stream()
     )
     activities = [d.to_dict() for d in acts_docs]
     if not activities:
-        return {"error": "No activities found", "since": req.since_date}
+        return
 
     # Create or get journal with custom title
     import re
-    journal_title = req.journal_title or "UTMB 备赛日志"
+    journal_title = journal_title or "UTMB 备赛日志"
     race = _get_nearest_race_info(uid)
 
     # Archive any existing active journals
@@ -1183,7 +1184,7 @@ async def backfill_journal(req: BackfillRequest):
                     "started_at": _dt.now().isoformat()})
 
     # Get training summary once
-    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+    training_summary = loop.run_until_complete(loop.run_in_executor(None, _fetch_training_summary, uid))
     avg_pace_8w = training_summary.get("avg_pace", "—")
     avg_hr_8w = training_summary.get("avg_heart_rate", 0)
     avg_dist = training_summary.get("avg_run_distance", 0)
@@ -1234,8 +1235,8 @@ async def backfill_journal(req: BackfillRequest):
 
         if _api_key:
             try:
-                resp = await loop.run_in_executor(
-                    None, lambda p=prompt: _gemini_generate(p, temperature=0.5, max_tokens=1200))
+                resp = loop.run_until_complete(loop.run_in_executor(
+                    None, lambda p=prompt: _gemini_generate(p, temperature=0.5, max_tokens=1200)))
                 text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
                 ai = json.loads(text)
             except Exception as e:
@@ -1269,13 +1270,38 @@ async def backfill_journal(req: BackfillRequest):
                             "errors": errors}, merge=True)
 
         # Small delay to avoid rate limiting
-        await asyncio.sleep(0.5)
+        import time
+        time.sleep(0.5)
 
     status_ref.set({"state": "done", "total": len(activities), "done": processed,
                     "errors": errors, "finished_at": _dt.now().isoformat()})
+    loop.close()
 
-    return {"message": f"Backfill complete: {processed}/{len(activities)} entries",
-            "journal_id": journal_id, "errors": errors}
+
+@router.post("/journal/backfill")
+async def backfill_journal(req: BackfillRequest, background_tasks: BackgroundTasks):
+    """Generate journal entries for ALL activities since a date. Runs in background."""
+    from datetime import datetime as _dt
+    user_ref = db.collection("users").document(req.uid)
+
+    # Initial check
+    acts_docs = list(
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", req.since_date)
+        .order_by("start_date_local")
+        .limit(500)
+        .stream()
+    )
+    if not acts_docs:
+        return {"error": "No activities found", "since": req.since_date}
+        
+    status_ref = user_ref.collection("meta").document("journal_backfill_status")
+    status_ref.set({"state": "starting", "total": len(acts_docs), "done": 0,
+                    "started_at": _dt.now().isoformat()})
+
+    background_tasks.add_task(_run_backfill_task, req.uid, req.since_date, req.journal_title)
+
+    return {"message": f"Backfill task started for {len(acts_docs)} entries"}
 
 
 @router.get("/journal/backfill-status")
