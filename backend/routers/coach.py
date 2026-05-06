@@ -1212,28 +1212,15 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
             is_trail = act_elev > 30 and km > 0 and (act_elev / km) > 15
 
             prompt = (
-                "你是一位专业跑步教练，正在为跑者撰写训练日志评语。\n"
-                "你需要根据训练数据进行深入分析，引用具体数据。\n"
-                "回复必须是纯 JSON，不含 markdown 标记。\n\n"
-                f"【训练日志】{journal_title}\n"
-                f"{race_ctx}"
-                f"【训练详情】日期：{entry_date}\n"
-                f"- 活动：{activity.get('name','Run')}\n"
-                f"- 距离：{km}km（8周均：{avg_dist}km，最长：{longest}km）\n"
-                f"- 配速：{activity.get('avg_pace','—')}/km（8周均：{avg_pace_8w}/km）\n"
-                f"- 心率：{activity.get('avg_heart_rate',0)}bpm（8周均：{avg_hr_8w}bpm），最大：{activity.get('max_heart_rate',0)}bpm\n"
-                f"- 爬升：{act_elev}m{'（越野/山地）' if is_trail else ''}\n"
-                f"- 时长：{activity.get('duration_str','—')}\n\n"
-                f"【8周概况】周均{training_summary.get('avg_weekly_km',0)}km | "
-                f"路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n\n"
-                "请分析：1.训练类型 2.配速心率匹配 3.与均值对比 4.备赛贡献\n\n"
-                '返回JSON：{\n'
-                '  "ai_comment": "<5-8句详细评语，引用数据>",\n'
-                '  "fatigue_level": "<low|moderate|high>",\n'
-                '  "performance_note": "<亮点或问题，2句>",\n'
-                '  "tomorrow_suggestion": "<建议>",\n'
-                '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"\n'
-                '}\n'
+                "你是专业跑步教练，为跑者写简短训练评语。引用数据，简洁有力。\n"
+                "必须返回纯JSON。\n\n"
+                f"日志：{journal_title}\n{race_ctx}"
+                f"日期：{entry_date} | {activity.get('name','Run')}\n"
+                f"距离：{km}km（均{avg_dist}km） | 配速：{activity.get('avg_pace','—')}/km（均{avg_pace_8w}/km）\n"
+                f"心率：{activity.get('avg_heart_rate',0)}bpm（均{avg_hr_8w}） | 爬升：{act_elev}m | 时长：{activity.get('duration_str','—')}\n\n"
+                '返回：{"ai_comment":"<3-4句评语>","fatigue_level":"<low|moderate|high>",'
+                '"performance_note":"<1句亮点>","tomorrow_suggestion":"<1句建议>",'
+                '"training_type":"<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"}\n'
             )
 
             ai = {"ai_comment": f"{entry_date}: {activity.get('name','Run')} {km}km 训练完成。",
@@ -1243,7 +1230,7 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
             if _api_key:
                 for attempt in range(3):  # Retry up to 3 times
                     try:
-                        resp = _gemini_generate(prompt, temperature=0.5, max_tokens=1200)
+                        resp = _gemini_generate(prompt, temperature=0.5, max_tokens=2500)
                         text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
                         ai = json.loads(text)
                         print(f"[backfill] {entry_date} AI OK (attempt {attempt+1})")
