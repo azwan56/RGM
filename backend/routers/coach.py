@@ -917,6 +917,256 @@ async def generate_coach_feedback(req: CoachRequest):
         return {"feedback": fb}
 
 
+# ── Training Journal System ──────────────────────────────────────────────────
+
+class JournalLogRequest(BaseModel):
+    uid: str
+    activity_id: str = ""
+
+class WeeklyReviewRequest(BaseModel):
+    uid: str
+
+
+def _get_or_create_journal(uid: str) -> dict:
+    """Get active journal or create one based on nearest race."""
+    import re
+    user_ref = db.collection("users").document(uid)
+    for doc in user_ref.collection("training_logs").where("status", "==", "active").limit(1).stream():
+        j = doc.to_dict(); j["journal_id"] = doc.id
+        # Check if race changed
+        races_doc = user_ref.collection("goals").document("races").get()
+        if races_doc.exists:
+            races = races_doc.to_dict().get("upcoming", [])
+            future = sorted([r for r in races if r.get("date", "") >= __import__("datetime").date.today().isoformat()],
+                            key=lambda r: r.get("date", "9999"))
+            if future:
+                new_name = future[0].get("name", "")
+                if new_name and new_name not in j.get("title", ""):
+                    # Race changed — archive old, create new
+                    user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
+                    break  # fall through to create new
+        return j
+
+    # Create new journal
+    races_doc = user_ref.collection("goals").document("races").get()
+    races = races_doc.to_dict().get("upcoming", []) if races_doc.exists else []
+    title, race_type, race_date = "通用训练日志", "", ""
+    journal_id = f"general-{__import__('datetime').date.today().year}"
+    future = sorted([r for r in races if r.get("date", "") >= __import__("datetime").date.today().isoformat()],
+                    key=lambda r: r.get("date", "9999"))
+    if future:
+        race = future[0]
+        title = f"{race.get('name', '比赛')} 备赛日志"
+        race_type = race.get("type", "")
+        race_date = race.get("date", "")
+        slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', race.get('name', 'race')).strip('-').lower()
+        journal_id = f"{slug}-{race_date[:4]}" if race_date else slug
+
+    data = {"title": title, "race_type": race_type, "race_date": race_date,
+            "created_at": __import__("datetime").datetime.now().isoformat(), "status": "active"}
+    user_ref.collection("training_logs").document(journal_id).set(data, merge=True)
+    data["journal_id"] = journal_id
+    return data
+
+
+@router.post("/journal/log")
+async def log_journal_entry(req: JournalLogRequest):
+    """Generate AI commentary for a training session and save to journal."""
+    loop = asyncio.get_event_loop()
+    uid = req.uid
+    user_ref = db.collection("users").document(uid)
+
+    # 1. Get activity
+    if req.activity_id:
+        doc = user_ref.collection("activities").document(req.activity_id).get()
+        activity = doc.to_dict() if doc.exists else None
+    else:
+        activity = None
+        for doc in user_ref.collection("activities").order_by("start_date_local", direction="DESCENDING").limit(1).stream():
+            activity = doc.to_dict()
+    if not activity:
+        return {"error": "No activity found"}
+
+    # 2. Get/create journal
+    journal = _get_or_create_journal(uid)
+    journal_id = journal["journal_id"]
+    entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+
+    # Check if entry already exists for this activity
+    act_id = str(activity.get("activity_id", ""))
+    entry_date = activity.get("start_date_local", "")[:10]
+    existing = entries_ref.document(f"{entry_date}_{act_id}").get()
+    if existing.exists:
+        return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
+
+    # 3. This week's context
+    from datetime import date as _dt, timedelta
+    today = _dt.today()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+    week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
+
+    # 4. Training summary (parallel)
+    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+
+    # 5. Build prompt
+    km = activity.get("distance_km", 0)
+    week_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in week_entries) + km
+    week_runs = len(week_entries) + 1
+    target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
+
+    prev_context = ""
+    for e in week_entries[-3:]:
+        s = e.get("activity_snapshot", {})
+        prev_context += f"- {e['date']}: {s.get('name','')} {s.get('distance_km',0)}km | {e.get('ai_comment','')[:60]}\n"
+
+    prompt = (
+        "你是专业跑步教练，为跑者写训练日志评语。回复纯JSON。\n\n"
+        f"【日志】{journal.get('title','训练日志')}  日期：{entry_date}\n"
+        f"【今日训练】{activity.get('name','Run')} | {km}km | "
+        f"配速{activity.get('avg_pace','—')}/km | HR:{activity.get('avg_heart_rate',0)}bpm | "
+        f"爬升{activity.get('total_elevation_gain',0)}m | 时长{activity.get('duration_str','—')}\n"
+        f"【本周进度】已跑{week_km:.1f}km/{week_runs}次，目标约{target_wk:.0f}km（{min(100,round(week_km/target_wk*100))}%）\n"
+        f"【8周概况】周均{training_summary.get('avg_weekly_km',0)}km | "
+        f"配速{training_summary.get('avg_pace','—')}/km | HR:{training_summary.get('avg_heart_rate',0)} | "
+        f"趋势:{training_summary.get('volume_trend','stable')}\n"
+        f"{'【本周已有记录】' + chr(10) + prev_context if prev_context else ''}\n"
+        '返回JSON：{"ai_comment":"<3-5句评语，评估训练质量/强度/恢复>",'
+        '"fatigue_level":"<low|moderate|high>",'
+        '"performance_note":"<亮点或注意点，1句>",'
+        '"tomorrow_suggestion":"<明天建议，1句>"}\n'
+    )
+
+    ai = {"ai_comment": "训练完成，继续保持！", "fatigue_level": "moderate",
+          "performance_note": "", "tomorrow_suggestion": ""}
+    if _api_key:
+        try:
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=800))
+            text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            ai = json.loads(text)
+        except Exception as e:
+            print(f"[journal] AI error: {e}")
+
+    entry = {
+        "date": entry_date, "entry_type": "daily",
+        "activity_id": act_id,
+        "activity_snapshot": {
+            "name": activity.get("name", "Run"), "distance_km": km,
+            "avg_pace": activity.get("avg_pace", "—"),
+            "avg_heart_rate": activity.get("avg_heart_rate", 0),
+            "total_elevation_gain": activity.get("total_elevation_gain", 0),
+            "duration_str": activity.get("duration_str", "—"),
+            "max_heart_rate": activity.get("max_heart_rate", 0),
+        },
+        "ai_comment": ai.get("ai_comment", ""),
+        "fatigue_level": ai.get("fatigue_level", "moderate"),
+        "performance_note": ai.get("performance_note", ""),
+        "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
+        "weekly_progress": {
+            "week_km": round(week_km, 1), "week_runs": week_runs,
+            "target_km": round(target_wk), "completion_pct": min(100, round(week_km / target_wk * 100)),
+        },
+        "created_at": __import__("datetime").datetime.now().isoformat(),
+    }
+    entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+    return {"entry": entry, "journal_id": journal_id}
+
+
+@router.get("/journal")
+def get_journal(uid: str):
+    """Get active journal with recent entries."""
+    user_ref = db.collection("users").document(uid)
+    journal = None; journal_id = None
+    for doc in user_ref.collection("training_logs").where("status", "==", "active").limit(1).stream():
+        journal = doc.to_dict(); journal_id = doc.id
+    if not journal:
+        return {"journal": None, "entries": []}
+
+    cutoff = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=60)).isoformat()
+    entries = [d.to_dict() for d in
+               user_ref.collection("training_logs").document(journal_id)
+               .collection("entries").where("date", ">=", cutoff)
+               .order_by("date", direction="DESCENDING").limit(60).stream()]
+    journal["journal_id"] = journal_id
+    return {"journal": journal, "entries": entries}
+
+
+@router.post("/journal/weekly-review")
+async def generate_weekly_review(req: WeeklyReviewRequest):
+    """Generate weekly summary with plan adjustments."""
+    loop = asyncio.get_event_loop()
+    uid = req.uid
+    user_ref = db.collection("users").document(uid)
+    journal = _get_or_create_journal(uid)
+    journal_id = journal["journal_id"]
+
+    from datetime import date as _dt, timedelta
+    today = _dt.today()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+    entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+    daily = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()
+             if d.to_dict().get("entry_type") == "daily"]
+    if not daily:
+        return {"error": "本周暂无训练记录"}
+
+    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+
+    # Race context
+    race_ctx = ""
+    races_doc = user_ref.collection("goals").document("races").get()
+    if races_doc.exists:
+        future = sorted([r for r in races_doc.to_dict().get("upcoming", [])
+                         if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
+        if future:
+            days_to = (_dt.fromisoformat(future[0]["date"]) - today).days
+            race_ctx = f"目标赛事：{future[0].get('name','')}，距比赛{days_to}天\n"
+
+    total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
+    total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
+    entries_str = "\n".join(
+        f"- {e['date']}: {e.get('activity_snapshot',{}).get('name','')} "
+        f"{e.get('activity_snapshot',{}).get('distance_km',0)}km "
+        f"@{e.get('activity_snapshot',{}).get('avg_pace','—')}/km "
+        f"HR:{e.get('activity_snapshot',{}).get('avg_heart_rate',0)} "
+        f"疲劳:{e.get('fatigue_level','—')}"
+        for e in daily
+    )
+
+    prompt = (
+        "你是专业跑步教练，撰写本周训练总结。回复纯JSON。\n\n"
+        f"【日志】{journal.get('title','')}\n{race_ctx}"
+        f"【本周训练】\n{entries_str}\n"
+        f"合计：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m\n"
+        f"【8周概况】周均{training_summary.get('avg_weekly_km',0)}km | 趋势:{training_summary.get('volume_trend','stable')}\n\n"
+        '返回JSON：{"summary":"<3-4句周总结>","achievements":["<亮点>"],'
+        '"concerns":["<问题>"],"next_week_plan":{"focus":"<重点>",'
+        '"target_km":"<建议跑量>","key_sessions":["<课次1>","<课次2>"],'
+        '"adjustments":"<基于本周的调整>"},"weekly_score":<1-10>}\n'
+    )
+
+    ai = {"summary": "本周训练完成。", "achievements": [], "concerns": [],
+          "next_week_plan": {"focus": "保持节奏", "target_km": str(round(training_summary.get("avg_weekly_km", 40))),
+                            "key_sessions": [], "adjustments": ""}, "weekly_score": 7}
+    if _api_key:
+        try:
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=1200))
+            text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            ai = json.loads(text)
+        except Exception as e:
+            print(f"[journal] Weekly review error: {e}")
+
+    review = {
+        "date": today.isoformat(), "entry_type": "weekly_summary",
+        "week_number": today.isocalendar()[1],
+        "summary": ai.get("summary", ""), "achievements": ai.get("achievements", []),
+        "concerns": ai.get("concerns", []), "next_week_plan": ai.get("next_week_plan", {}),
+        "weekly_score": ai.get("weekly_score", 7),
+        "week_stats": {"total_km": round(total_km, 1), "total_runs": len(daily), "total_elevation": round(total_elev)},
+        "created_at": __import__("datetime").datetime.now().isoformat(),
+    }
+    entries_ref.document(f"week-{today.isocalendar()[1]:02d}-summary").set(review, merge=True)
+    return {"review": review, "journal_id": journal_id}
+
+
 # ── Training Plan Generator ──────────────────────────────────────────────────
 
 class TrainingPlanRequest(BaseModel):

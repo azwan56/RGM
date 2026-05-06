@@ -16,6 +16,11 @@ const AiCoachWidget = dynamic(() => import("@/components/AiCoachWidget"), {
   ssr: false,
 });
 
+const TrainingJournal = dynamic(() => import("@/components/TrainingJournal"), {
+  loading: () => <div className="h-60 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
+
 
 export default function CoachPage() {
   const router = useRouter();
@@ -62,7 +67,7 @@ export default function CoachPage() {
           </Link>
           <div>
             <h1 className="text-2xl md:text-3xl font-black">AI 教练</h1>
-            <p className="text-zinc-500 text-sm">目标设定 · 备赛指导 · 训练建议</p>
+            <p className="text-zinc-500 text-sm">目标设定 · 备赛指导 · 训练日志</p>
           </div>
         </header>
 
@@ -75,6 +80,13 @@ export default function CoachPage() {
         {user && (
           <section>
             <AiCoachWidget uid={user.uid} />
+          </section>
+        )}
+
+        {/* Training Journal */}
+        {user && (
+          <section>
+            <TrainingJournal uid={user.uid} />
           </section>
         )}
       </main>

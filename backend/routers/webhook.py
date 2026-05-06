@@ -53,11 +53,18 @@ def webhook_event(request_body: dict, background_tasks: BackgroundTasks):
 
     print(f"[webhook] Event: {aspect_type} {object_type} id={object_id} owner={owner_id}")
 
-    # Only process activity create/update events
-    if object_type == "activity" and aspect_type in ("create", "update"):
-        background_tasks.add_task(
-            _process_activity_event, owner_id, object_id, aspect_type
-        )
+    updates = request_body.get("updates", {})
+
+    if object_type == "athlete" and aspect_type == "update" and updates.get("authorized") == "false":
+        background_tasks.add_task(_process_athlete_deauth, owner_id)
+    elif object_type == "activity" and aspect_type == "delete":
+        background_tasks.add_task(_process_activity_delete, owner_id, object_id)
+    elif object_type == "activity" and aspect_type in ("create", "update"):
+        # If the activity was made private, treat it as a delete to comply with transparency
+        if aspect_type == "update" and updates.get("visibility") == "private":
+            background_tasks.add_task(_process_activity_delete, owner_id, object_id)
+        else:
+            background_tasks.add_task(_process_activity_event, owner_id, object_id, aspect_type)
 
     return {"status": "ok"}
 
@@ -75,6 +82,99 @@ def _find_uid_by_strava_id(strava_athlete_id: int) -> Optional[str]:
     for doc in docs:
         return doc.id
     return None
+
+
+def _recalculate_leaderboards(uid: str, user_ref):
+    """Re-aggregates all activities for the current period and yearly leaderboards."""
+    try:
+        from routers.sync import get_period_start, _update_yearly_leaderboard, pace_str
+        user_doc = user_ref.get()
+        if not user_doc.exists: return
+        user_data = user_doc.to_dict()
+
+        display_name = (
+            user_data.get("display_name")
+            or user_data.get("strava_name")
+            or user_data.get("email", "").split("@")[0]
+            or f"Runner #{uid[:6]}"
+        )
+
+        goal_snap = user_ref.collection("goals").document("current").get()
+        period = "monthly"
+        target_dist = 0
+        if goal_snap.exists:
+            goal_data = goal_snap.to_dict()
+            period = goal_data.get("period", "monthly")
+            target_dist = goal_data.get("target_distance", 0)
+            
+        period_start = get_period_start(period)
+
+        all_acts = (user_ref.collection("activities")
+                    .where("period_start", "==", period_start.isoformat())
+                    .stream())
+        
+        p_dist, p_time, p_hr_sum, p_hr_cnt, p_runs = 0.0, 0, 0, 0, 0
+        for adoc in all_acts:
+            ad = adoc.to_dict()
+            p_dist += ad.get("distance_km", 0) * 1000
+            p_time += ad.get("moving_time", 0)
+            p_runs += 1
+            hr = ad.get("avg_heart_rate", 0) or 0
+            if hr:
+                p_hr_sum += hr
+                p_hr_cnt += 1
+
+        km = p_dist / 1000
+        pct = round((km / target_dist) * 100) if target_dist > 0 else 0
+
+        db.collection("leaderboard").document(uid).set({
+            "uid": uid,
+            "display_name": display_name,
+            "email": user_data.get("email", ""),
+            "total_distance_km": round(km, 2),
+            "avg_pace": pace_str(p_dist, p_time),
+            "avg_heart_rate": round(p_hr_sum / p_hr_cnt) if p_hr_cnt else 0,
+            "goal_completion_percentage": min(pct, 100),
+            "run_count": p_runs,
+            "period": period,
+            "period_start": period_start.isoformat(),
+            "last_sync": datetime.now().isoformat(),
+        }, merge=True)
+
+        _update_yearly_leaderboard(uid, user_data, display_name)
+    except Exception as e:
+        print(f"[webhook] leaderboard update failed: {e}")
+
+
+def _process_athlete_deauth(strava_athlete_id: int):
+    """Handles an athlete revoking access to the app from Strava."""
+    uid = _find_uid_by_strava_id(strava_athlete_id)
+    if not uid: return
+    try:
+        db.collection("users").document(uid).update({
+            "strava_access_token": "",
+            "strava_refresh_token": "",
+            "strava_expires_at": 0,
+        })
+        print(f"[webhook] Successfully deauthorized uid={uid}")
+    except Exception as e:
+        print(f"[webhook] Deauthorization error for uid={uid}: {e}")
+
+
+def _process_activity_delete(strava_athlete_id: int, activity_id: int):
+    """Handles deletion of an activity on Strava (or becoming private)."""
+    uid = _find_uid_by_strava_id(strava_athlete_id)
+    if not uid: return
+    try:
+        user_ref = db.collection("users").document(uid)
+        act_ref = user_ref.collection("activities").document(str(activity_id))
+        
+        if act_ref.get().exists:
+            act_ref.delete()
+            print(f"[webhook] Deleted activity {activity_id} for uid={uid}")
+            _recalculate_leaderboards(uid, user_ref)
+    except Exception as e:
+        print(f"[webhook] Deletion handling failed for uid={uid} event={activity_id}: {e}")
 
 
 def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_type: str):
@@ -145,12 +245,23 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             timeout=15,
         )
         if not act_resp.ok:
-            print(f"[webhook] Failed to fetch activity {activity_id}: {act_resp.status_code}")
+            if act_resp.status_code == 404:
+                # If 404, it might have been deleted right before sync. Conform to compliance: delete it locally.
+                print(f"[webhook] Activity {activity_id} returned 404. Falling back to delete.")
+                _process_activity_delete(strava_athlete_id, activity_id)
+            else:
+                print(f"[webhook] Failed to fetch activity {activity_id}: {act_resp.status_code}")
             return
 
         act = act_resp.json()
         if act.get("type") != "Run":
             print(f"[webhook] Skipping non-run activity {activity_id} (type={act.get('type')})")
+            return
+            
+        # Ensure compliance by strictly dropping private visibility runs
+        if act.get("visibility") == "private":
+            print(f"[webhook] Activity {activity_id} is strictly private. Ignoring update to preserve transparency.")
+            _process_activity_delete(strava_athlete_id, activity_id)
             return
 
         # Save activity using the same format as sync.py
@@ -170,53 +281,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         print(f"[webhook] Synced activity {activity_id} for uid={uid} "
               f"({act_doc['distance_km']}km, {act_doc['avg_pace']}/km)")
 
-        # Update both period and yearly leaderboards
-        display_name = (
-            user_data.get("display_name")
-            or user_data.get("strava_name")
-            or user_data.get("email", "").split("@")[0]
-            or f"Runner #{uid[:6]}"
-        )
-
-        # Update current period leaderboard (re-aggregate from all activities)
-        try:
-            from routers.sync import pace_str
-            all_acts = (user_ref.collection("activities")
-                        .where("period_start", "==", period_start.isoformat())
-                        .stream())
-            p_dist, p_time, p_hr_sum, p_hr_cnt, p_runs = 0.0, 0, 0, 0, 0
-            for adoc in all_acts:
-                ad = adoc.to_dict()
-                p_dist += ad.get("distance_km", 0) * 1000
-                p_time += ad.get("moving_time", 0)
-                p_runs += 1
-                hr = ad.get("avg_heart_rate", 0) or 0
-                if hr:
-                    p_hr_sum += hr
-                    p_hr_cnt += 1
-
-            goal_snap_data = goal_snap.to_dict() if goal_snap.exists else {}
-            target_dist = goal_snap_data.get("target_distance", 0)
-            km = p_dist / 1000
-            pct = round((km / target_dist) * 100) if target_dist > 0 else 0
-
-            db.collection("leaderboard").document(uid).set({
-                "uid": uid,
-                "display_name": display_name,
-                "email": user_data.get("email", ""),
-                "total_distance_km": round(km, 2),
-                "avg_pace": pace_str(p_dist, p_time),
-                "avg_heart_rate": round(p_hr_sum / p_hr_cnt) if p_hr_cnt else 0,
-                "goal_completion_percentage": min(pct, 100),
-                "run_count": p_runs,
-                "period": period,
-                "period_start": period_start.isoformat(),
-                "last_sync": datetime.now().isoformat(),
-            }, merge=True)
-        except Exception as e:
-            print(f"[webhook] Period leaderboard update failed: {e}")
-
-        _update_yearly_leaderboard(uid, user_data, display_name)
+        _recalculate_leaderboards(uid, user_ref)
 
         # ── Notifications (non-blocking, never crashes the webhook) ──
         try:
