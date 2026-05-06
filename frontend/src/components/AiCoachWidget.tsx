@@ -8,7 +8,28 @@ interface CoachFeedback {
   summary: string;
   encouragement?: string;
   actionable_tips: string[];
+  training_principles?: { title: string; detail: string }[];
+  weekly_cycle?: {
+    week: number;
+    phase: string;
+    focus: string;
+    key_session: string;
+    volume_note: string;
+    tips?: string[];
+  }[];
+  key_metrics?: Record<string, string>;
 }
+
+const metricLabels: Record<string, string> = {
+  recommended_weekly_km: "建议周跑量",
+  easy_run_pace: "轻松跑配速",
+  tempo_pace: "节奏跑配速",
+  long_run_distance: "长跑距离",
+  maf_heart_rate: "MAF心率",
+  target_long_run_pct: "长距离占比",
+  easy_run_pct: "轻松跑占比",
+  max_weekly_increase: "最大跑量增幅"
+};
 
 const CACHE_KEY = (uid: string) => `coach_feedback_${uid}`;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -142,9 +163,21 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
             <span className="relative z-10 ml-2">{feedback.summary}</span>
           </div>
 
+          {/* Key Metrics */}
+          {feedback.key_metrics && Object.keys(feedback.key_metrics).length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {Object.entries(feedback.key_metrics).map(([key, value]) => (
+                <div key={key} className="bg-white/5 border border-white/5 p-3 rounded-xl flex flex-col justify-center items-center text-center">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{metricLabels[key] || key}</span>
+                  <span className="text-sm font-bold text-white">{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Actionable Tips */}
-          <div className="space-y-2.5 flex-1">
-            <h4 className="text-xs font-semibold text-zinc-500 tracking-wider mb-3">📋 训练建议</h4>
+          <div className="space-y-2.5">
+            <h4 className="text-xs font-semibold text-zinc-500 tracking-wider mb-3">📋 本周重点建议</h4>
             {feedback.actionable_tips.map((tip, idx) => (
               <div key={idx} className="flex gap-3 items-start group">
                 <div className="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:bg-emerald-500/20 transition-colors">
@@ -156,6 +189,52 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
               </div>
             ))}
           </div>
+
+          {/* Training Principles */}
+          {feedback.training_principles && feedback.training_principles.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-zinc-500 tracking-wider">🧠 核心训练原则</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {feedback.training_principles.map((p, idx) => (
+                  <div key={idx} className="bg-white/5 border border-white/5 p-3.5 rounded-xl">
+                    <h5 className="text-sm font-bold text-blue-400 mb-1.5">{p.title}</h5>
+                    <p className="text-xs text-zinc-400 leading-relaxed">{p.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Weekly Cycle */}
+          {feedback.weekly_cycle && feedback.weekly_cycle.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-zinc-500 tracking-wider">📅 周期性训练规划</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {feedback.weekly_cycle.map((w, idx) => (
+                  <div key={idx} className="bg-black/20 border border-white/5 p-4 rounded-xl flex flex-col gap-2.5 relative overflow-hidden group hover:border-white/10 transition-colors">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-purple-500 opacity-50" />
+                    
+                    <div className="flex items-center justify-between z-10">
+                      <span className="text-sm font-bold text-white">第 {w.week} 周</span>
+                      <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">{w.phase}期</span>
+                    </div>
+                    
+                    <div className="z-10 space-y-1">
+                      <p className="text-xs text-zinc-300 leading-snug"><strong className="text-zinc-500 font-normal">重点：</strong>{w.focus}</p>
+                      <p className="text-xs text-zinc-300 leading-snug"><strong className="text-zinc-500 font-normal">关键课：</strong>{w.key_session}</p>
+                      <p className="text-xs text-zinc-300 leading-snug"><strong className="text-zinc-500 font-normal">跑量：</strong><span className="text-orange-400">{w.volume_note}</span></p>
+                    </div>
+
+                    {w.tips && w.tips.length > 0 && (
+                      <ul className="text-[10px] text-zinc-500 list-disc list-inside mt-1 z-10">
+                        {w.tips.map((t, i) => <li key={i} className="truncate">{t}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 

@@ -12,15 +12,11 @@ _gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.goog
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
-    "gemini-2.5-flash",          # New API keys
+    "gemini-2.5-flash",          # Latest, confirmed working
+    "gemini-2.5-flash-lite",     # Lightweight variant
     "gemini-flash-latest",       # Alias for latest flash
-    "gemini-2.5-flash-lite",     # Lightweight new model
-    "gemini-2.0-flash-001",      # Versioned, more stable
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-2.0-flash-lite",
-    "gemini-pro",
+    "gemini-2.0-flash-lite",     # Lite fallback
+    "gemini-2.0-flash-001",      # Versioned fallback
 ]
 _resolved_model = None  # Will be set on first successful call
 
@@ -125,7 +121,24 @@ _FALLBACK = {
         "注意补水和睡眠，恢复和训练同样重要",
         "每周跑量增幅不超过 10%，循序渐进",
         "每周安排 1 次速度训练（间歇跑或节奏跑）提升心肺能力",
-    ]
+    ],
+    "training_principles": [
+        {"title": "有氧优先（80/20法则）", "detail": "80% 的训练量以 Zone 2 轻松有氧为主，保持能聊天的节奏，避免长期高强度累积疲劳。"},
+        {"title": "渐进超负荷", "detail": "每周跑量增幅不超过 10%，每 3-4 周安排一次减量周（跑量降至前一周的 60-70%），让身体充分适应。"},
+        {"title": "质量训练", "detail": "每周保留 1-2 次高强度课（节奏跑或间歇跑），同步提升速度和乳酸阈值。"},
+        {"title": "力量与柔韧", "detail": "每周 2 次核心力量训练（15-20 分钟），加强臀部、核心、小腿力量，预防跑步常见伤病。"},
+    ],
+    "weekly_cycle": [
+        {"week": 1, "phase": "积累", "focus": "建立有氧基础，以轻松配速积累跑量", "key_session": "长距离慢跑 (LSD)", "volume_note": "维持当前跑量"},
+        {"week": 2, "phase": "积累", "focus": "加入节奏跑，提升有氧阈值", "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
+        {"week": 3, "phase": "强化", "focus": "间歇训练提升速度，长距离跑进一步延长", "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
+        {"week": 4, "phase": "恢复", "focus": "减量恢复，消化前三周训练刺激", "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
+    ],
+    "key_metrics": {
+        "target_long_run_pct": "周跑量的 30-35%",
+        "easy_run_pct": "全部跑量的 75-80%",
+        "max_weekly_increase": "10%"
+    }
 }
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -488,14 +501,40 @@ async def generate_coach_feedback(req: CoachRequest):
             "  - 如果有目标成绩，分析当前状态与目标的差距\n\n"
         )
     prompt += (
-        "返回 JSON 格式如下：\n"
+        "返回 JSON 格式如下（必须包含全部字段）：\n"
         '{\n'
         '  "status": "<状态标签，如：备赛冲刺 🔥|稳步提升 📈|状态出色 💪|注意恢复 😴|继续加油 🏃>",\n'
-        '  "summary": "<2-3 句话的训练总结，如有比赛则重点评估备赛状态>",\n'
+        '  "summary": "<3-4 句话的训练总结，结合跑者当前配速/心率/跑量，如有比赛则点明当前备赛阶段和差距>",\n'
         '  "encouragement": "<一句短小有力的鼓励金句>",\n'
-        '  "actionable_tips": ["建议1", "建议2", "建议3", "建议4"]\n'
+        '  "actionable_tips": ["本周具体建议1（含数字）", "本周具体建议2", "本周具体建议3", "本周具体建议4"],\n'
+        '  "training_principles": [\n'
+        '    {"title": "<原则名称>", "detail": "<针对该跑者的具体执行说明，含配速/心率/距离参考值>"},\n'
+        '    ... (共3-5条核心训练原则)\n'
+        '  ],\n'
+        '  "weekly_cycle": [\n'
+        '    {\n'
+        '      "week": 1,\n'
+        '      "phase": "<阶段名，如：积累|强化|冲刺|减量>",\n'
+        '      "focus": "<本周训练核心目标（1句话）>",\n'
+        '      "key_session": "<本周关键课次（如：30km 长距离慢跑 @ 6:00-6:30/km）>",\n'
+        '      "volume_note": "<本周跑量说明（含预估总公里数）>",\n'
+        '      "tips": ["<本周注意事项1>", "<本周注意事项2>"]\n'
+        '    },\n'
+        '    ... (共4周一个循环，结合比赛倒计时或训练目标规划)\n'
+        '  ],\n'
+        '  "key_metrics": {\n'
+        '    "recommended_weekly_km": "<建议周跑量范围，如：50-60km>",\n'
+        '    "easy_run_pace": "<轻松跑配速区间，基于当前VDOT或近期跑步数据>",\n'
+        '    "tempo_pace": "<节奏跑配速，比轻松跑快约45-60秒>",\n'
+        '    "long_run_distance": "<长距离跑目标距离>",\n'
+        '    "maf_heart_rate": "<MAF有氧基础心率上限（180-年龄，可±5调整）>"\n'
+        '  }\n'
         '}\n\n'
-        "建议要具体、可操作，结合跑者的配速/心率/跑量数据给出。如有比赛需包含本周训练重点。"
+        "重要要求：\n"
+        "1. training_principles 必须结合跑者的具体数据（配速、心率、VDOT、跑龄）给出个性化说明，不能用通用文字\n"
+        "2. weekly_cycle 必须是4周循环方案，结合跑者距比赛天数或训练目标做具体规划\n"
+        "3. key_metrics 的所有数值必须基于跑者的实际数据计算，不能给出范围过宽的估计\n"
+        "4. 如有比赛，weekly_cycle 需要从当前周开始，倒推到比赛日，体现减量安排"
     )
 
     if not _api_key:
