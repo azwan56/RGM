@@ -1136,7 +1136,7 @@ class BackfillRequest(BaseModel):
     journal_title: str = ""
 
 
-@router.post("/journal/backfill")
+
 def _run_backfill_task(uid: str, since_date: str, journal_title: str):
     import asyncio
     from datetime import datetime as _dt
