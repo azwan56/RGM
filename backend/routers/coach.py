@@ -208,30 +208,29 @@ _RACE_KNOWLEDGE = {
 }
 
 
-def _build_race_analysis(rtype, rname, stats):
-    """Build race analysis section from knowledge base."""
+def _fetch_avg_weekly_km(uid: str, weeks: int = 8) -> float:
+    """Calculate average weekly km from activities over the past N weeks."""
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(weeks=weeks)).isoformat()
+    docs = (
+        db.collection("users").document(uid)
+        .collection("activities")
+        .where("start_date_local", ">=", cutoff)
+        .order_by("start_date_local", direction="DESCENDING")
+        .limit(200)
+        .stream()
+    )
+    total_km = sum(d.to_dict().get("distance_km", 0) for d in docs)
+    return round(total_km / weeks, 1)
+
+
+def _build_race_analysis(rtype, rname, avg_weekly_km):
+    """Build race analysis section from knowledge base + actual weekly km."""
     race_info = _RACE_KNOWLEDGE.get(rtype, {})
     if not race_info:
         return None
 
-    current_km = stats.get('total_distance_km', 0) if stats else 0
-    period = stats.get('period', 'monthly') if stats else 'monthly'
-
-    # Estimate weekly km from actual elapsed days, not a fixed 4.3 divisor
-    if period == 'monthly':
-        from datetime import date as _dt
-        period_start = stats.get('period_start') if stats else None
-        if period_start:
-            try:
-                days_elapsed = max(1, (_dt.today() - _dt.fromisoformat(period_start)).days)
-            except (ValueError, TypeError):
-                days_elapsed = max(1, _dt.today().day)
-        else:
-            days_elapsed = max(1, _dt.today().day)
-        est_weekly = round(current_km / days_elapsed * 7)
-    else:
-        # weekly period — use directly
-        est_weekly = round(current_km)
+    est_weekly = round(avg_weekly_km)
     min_weekly = race_info.get("min_weekly_km", 40)
 
     if est_weekly >= min_weekly:
@@ -260,7 +259,7 @@ def _build_race_analysis(rtype, rname, stats):
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
-def _build_race_fallback(nearest_race, nearest_days, runner_name, stats):
+def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km=0):
     """Generate race-specific fallback advice when Gemini API is unavailable."""
     if not nearest_race or nearest_days > 120:
         return {
@@ -360,7 +359,7 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats):
         ]
 
     # ── Build race_analysis from knowledge base ──
-    race_analysis = _build_race_analysis(rtype, rname, stats)
+    race_analysis = _build_race_analysis(rtype, rname, avg_weekly_km)
 
     # ── Phase-specific training principles ──
     if nearest_days <= 14:
@@ -434,11 +433,12 @@ async def generate_coach_feedback(req: CoachRequest):
     Parallel Firestore reads + personalized, encouraging tone.
     """
     loop = asyncio.get_event_loop()
-    stats, goal_data, activities, profile = await asyncio.gather(
+    stats, goal_data, activities, profile, avg_weekly_km = await asyncio.gather(
         loop.run_in_executor(None, _fetch_leaderboard, req.uid),
         loop.run_in_executor(None, _fetch_goal, req.uid),
         loop.run_in_executor(None, _fetch_recent_activities, req.uid),
         loop.run_in_executor(None, _fetch_profile, req.uid),
+        loop.run_in_executor(None, _fetch_avg_weekly_km, req.uid),
     )
 
     if not stats:
@@ -731,7 +731,7 @@ async def generate_coach_feedback(req: CoachRequest):
     )
 
     if not _api_key:
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
         return {"feedback": fb}
 
 
@@ -765,7 +765,7 @@ async def generate_coach_feedback(req: CoachRequest):
 
     except json.JSONDecodeError as e:
         print(f"Coach JSON parse error: {e}")
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
         try:
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
                 {**fb, "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
@@ -774,7 +774,7 @@ async def generate_coach_feedback(req: CoachRequest):
         return {"feedback": fb}
     except Exception as e:
         print(f"Coach generation failed: {e}")
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
         fb["_error"] = str(e)
         try:
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
