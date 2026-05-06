@@ -319,18 +319,38 @@ export default function TrainingJournal({ uid }: { uid: string }) {
         {!backfilling && entries.length <= 3 && (
           <button
             onClick={async () => {
-              if (!confirm("将为3月以来的所有训练生成AI评语（可能需要几分钟）")) return;
+              if (!confirm("将为3月以来的所有训练生成AI评语（后台运行，约2-3分钟）")) return;
               setBackfilling("启动中...");
               try {
                 const res = await axios.post(`${backendUrl}/api/coach/journal/backfill`, {
                   uid, since_date: "2026-03-01", journal_title: "UTMB 备赛日志"
                 });
-                setBackfilling(`完成！已生成 ${res.data.message}`);
-                await fetchJournal();
-                setTimeout(() => setBackfilling(""), 5000);
-              } catch (err) {
-                setBackfilling("回填失败，请重试");
-                setTimeout(() => setBackfilling(""), 3000);
+                setBackfilling(`${res.data.message} — 后台生成中...`);
+                // Poll progress
+                const poll = setInterval(async () => {
+                  try {
+                    const s = await axios.get(`${backendUrl}/api/coach/journal/backfill-status?uid=${uid}`);
+                    const d = s.data;
+                    if (d.state === "done") {
+                      clearInterval(poll);
+                      setBackfilling(`✅ 完成！${d.done}条日志已生成`);
+                      await fetchJournal();
+                      setTimeout(() => setBackfilling(""), 5000);
+                    } else if (d.state === "error") {
+                      clearInterval(poll);
+                      setBackfilling(`❌ 错误: ${d.error_msg || "unknown"}`);
+                      setTimeout(() => setBackfilling(""), 8000);
+                    } else if (d.state === "running") {
+                      setBackfilling(`⏳ 进度: ${d.done}/${d.total}${d.errors ? ` (${d.errors}失败)` : ""}`);
+                    }
+                  } catch { /* ignore poll errors */ }
+                }, 5000);
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : "未知错误";
+                const axErr = err as { response?: { data?: { detail?: string }, status?: number } };
+                const detail = axErr?.response?.data?.detail || axErr?.response?.status || msg;
+                setBackfilling(`回填失败: ${detail}`);
+                setTimeout(() => setBackfilling(""), 6000);
               }
             }}
             className="w-full py-2 bg-gradient-to-r from-orange-500/10 to-amber-500/10 hover:from-orange-500/15 hover:to-amber-500/15 border border-orange-500/20 text-orange-300 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
