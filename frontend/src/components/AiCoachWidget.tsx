@@ -3,6 +3,19 @@
 import { useState, useEffect } from "react";
 import axios from "@/lib/apiClient";
 
+interface RaceAnalysis {
+  race_name: string;
+  race_type: string;
+  difficulty_level: string;
+  total_distance: string;
+  elevation_gain: string;
+  key_demands: string[];
+  climate_notes: string;
+  recommended_weekly_km: string;
+  fitness_gap: string;
+  readiness_score: number;
+}
+
 interface CoachFeedback {
   status: string;
   summary: string;
@@ -18,7 +31,15 @@ interface CoachFeedback {
     tips?: string[];
   }[];
   key_metrics?: Record<string, string>;
+  race_analysis?: RaceAnalysis;
 }
+
+const difficultyColors: Record<string, string> = {
+  "初级": "text-green-400 bg-green-500/15 border-green-500/20",
+  "中级": "text-blue-400 bg-blue-500/15 border-blue-500/20",
+  "高级": "text-orange-400 bg-orange-500/15 border-orange-500/20",
+  "极限": "text-red-400 bg-red-500/15 border-red-500/20",
+};
 
 const metricLabels: Record<string, string> = {
   recommended_weekly_km: "建议周跑量",
@@ -152,6 +173,72 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
               <p className="text-[#FC4C02] text-sm font-semibold text-center">
                 {feedback.encouragement}
               </p>
+            </div>
+          )}
+
+          {/* Race Analysis Section */}
+          {feedback.race_analysis && (
+            <div className="space-y-4">
+              <h4 className="text-xs font-semibold text-zinc-500 tracking-wider">🏔️ 赛事深度分析</h4>
+              <div className="bg-gradient-to-br from-white/[0.04] to-white/[0.01] border border-white/10 p-5 rounded-2xl space-y-4">
+                {/* Race header */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h5 className="text-white font-bold text-base">{feedback.race_analysis.race_name}</h5>
+                    <p className="text-zinc-500 text-xs mt-0.5">{feedback.race_analysis.race_type}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${difficultyColors[feedback.race_analysis.difficulty_level] || 'text-zinc-400 bg-white/5 border-white/10'}`}>
+                      {feedback.race_analysis.difficulty_level}
+                    </span>
+                    <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg">
+                      <span className="text-[10px] text-zinc-500">就绪</span>
+                      <span className="text-sm font-bold text-white">{feedback.race_analysis.readiness_score}</span>
+                      <span className="text-[10px] text-zinc-500">/10</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Race stats */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+                  <div className="bg-black/20 rounded-xl p-2.5 text-center">
+                    <span className="text-[10px] text-zinc-500 block">总距离</span>
+                    <span className="text-sm font-bold text-white">{feedback.race_analysis.total_distance}</span>
+                  </div>
+                  <div className="bg-black/20 rounded-xl p-2.5 text-center">
+                    <span className="text-[10px] text-zinc-500 block">累计爬升</span>
+                    <span className="text-sm font-bold text-white">{feedback.race_analysis.elevation_gain}</span>
+                  </div>
+                  <div className="bg-black/20 rounded-xl p-2.5 text-center">
+                    <span className="text-[10px] text-zinc-500 block">建议周跑量</span>
+                    <span className="text-sm font-bold text-orange-400">{feedback.race_analysis.recommended_weekly_km}</span>
+                  </div>
+                </div>
+
+                {/* Key demands */}
+                <div>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">核心能力要求</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {feedback.race_analysis.key_demands.map((d, i) => (
+                      <span key={i} className="px-2 py-1 bg-blue-500/10 text-blue-300 text-[11px] rounded-md border border-blue-500/10">{d}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Climate notes */}
+                {feedback.race_analysis.climate_notes && (
+                  <div className="flex gap-2 items-start bg-yellow-500/5 border border-yellow-500/10 p-3 rounded-xl">
+                    <span className="text-yellow-500 text-sm flex-shrink-0">⚠️</span>
+                    <p className="text-xs text-yellow-200/70 leading-relaxed">{feedback.race_analysis.climate_notes}</p>
+                  </div>
+                )}
+
+                {/* Fitness gap */}
+                <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/15 p-3.5 rounded-xl">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">体能差距评估</span>
+                  <p className="text-sm text-zinc-200 leading-relaxed">{feedback.race_analysis.fitness_gap}</p>
+                </div>
+              </div>
             </div>
           )}
 

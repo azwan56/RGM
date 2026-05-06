@@ -141,6 +141,108 @@ _FALLBACK = {
     }
 }
 
+# ── Race Knowledge Base ───────────────────────────────────────────────────────
+
+_RACE_KNOWLEDGE = {
+    "10k": {
+        "race_type": "10K 路跑", "difficulty_level": "初级",
+        "total_distance": "10 公里", "elevation_gain": "通常 <100m",
+        "key_demands": ["速度耐力（VO2max）", "乳酸阈值能力", "起跑配速控制"],
+        "min_weekly_km": 30, "recommended_weekly_km": "30-50km",
+        "climate_notes": "注意比赛日温湿度对配速影响",
+    },
+    "half_marathon": {
+        "race_type": "半程马拉松", "difficulty_level": "中级",
+        "total_distance": "21.1 公里", "elevation_gain": "通常 <200m",
+        "key_demands": ["有氧耐力", "乳酸阈值跑能力", "配速分配策略", "赛中补给"],
+        "min_weekly_km": 40, "recommended_weekly_km": "40-65km",
+        "climate_notes": "赛中每5km补水，携带1-2个能量胶",
+    },
+    "full_marathon": {
+        "race_type": "全程马拉松", "difficulty_level": "高级",
+        "total_distance": "42.195 公里", "elevation_gain": "200-500m",
+        "key_demands": ["长距离有氧耐力", "糖原储备与补给策略", "撞墙期心理应对", "负分配配速策略", "赛前需2-3次30km+拉练"],
+        "min_weekly_km": 50, "recommended_weekly_km": "50-80km",
+        "climate_notes": "赛前3天碳水加载，每5km补水，每45分钟补能量胶",
+    },
+    "gobi": {
+        "race_type": "戈壁挑战赛（连续3天120K竞技赛事）", "difficulty_level": "极限",
+        "total_distance": "120km（连续3天，每天约40K）", "elevation_gain": "累计1000-2000m+（戈壁沙地）",
+        "key_demands": [
+            "连续3天背靠背超长距离作战", "沙地/砾石地形适应",
+            "极端高温（40°C+）与风沙耐受", "每日快速恢复能力",
+            "装备负重管理", "水分与电解质管理", "3天持续心理韧性",
+        ],
+        "min_weekly_km": 60, "recommended_weekly_km": "60-100km",
+        "climate_notes": "高温40°C+需热适应训练；昼夜温差>20°C；需防沙面罩和护目镜；每日恢复流程关键",
+    },
+    "trail_50k": {
+        "race_type": "越野跑 50K", "difficulty_level": "高级",
+        "total_distance": "50 公里", "elevation_gain": "通常 2000-3000m+",
+        "key_demands": ["山地爬升/下坡技术", "越野地形适应", "长距离耐力", "补给策略", "越野装备使用"],
+        "min_weekly_km": 50, "recommended_weekly_km": "50-80km",
+        "climate_notes": "山区天气多变，需备雨衣、保暖层、头灯",
+    },
+    "trail_100k": {
+        "race_type": "越野跑 100K", "difficulty_level": "极限",
+        "total_distance": "100 公里", "elevation_gain": "通常 4000-6000m+",
+        "key_demands": [
+            "超长距离耐力（15-24小时）", "大量爬升与Power Hiking",
+            "夜跑能力", "全天候装备管理", "分段补给计划", "低谷期心理应对",
+        ],
+        "min_weekly_km": 60, "recommended_weekly_km": "60-100km",
+        "climate_notes": "需夜间越野经验，山区气候多变，携带完整强制装备",
+    },
+    "trail_100m": {
+        "race_type": "越野跑 100英里（UTMB级别）", "difficulty_level": "极限",
+        "total_distance": "约170公里", "elevation_gain": "8000-10000m+（UTMB约10000m+）",
+        "key_demands": [
+            "超极限耐力（30-46小时持续运动）", "巨量累计爬升（10000m+）与Power Hiking",
+            "多次夜跑与睡眠管理", "极端天气应对（暴风雨、低温、大风）",
+            "全程分段补给（含固体食物，每站换装）", "强制装备负重（3-5kg）",
+            "30+小时心理极限挑战", "高海拔适应（2000-2600m+）",
+        ],
+        "min_weekly_km": 80, "recommended_weekly_km": "80-120km",
+        "climate_notes": "穿越高山，海拔500-2600m；暴风雨/低温/大风；经历2+夜晚需睡眠策略；高海拔需调整配速",
+    },
+}
+
+
+def _build_race_analysis(rtype, rname, stats):
+    """Build race analysis section from knowledge base."""
+    race_info = _RACE_KNOWLEDGE.get(rtype, {})
+    if not race_info:
+        return None
+
+    current_km = stats.get('total_distance_km', 0) if stats else 0
+    period = stats.get('period', 'monthly') if stats else 'monthly'
+    est_weekly = round(current_km / 4.3) if period == 'monthly' else round(current_km)
+    min_weekly = race_info.get("min_weekly_km", 40)
+
+    if est_weekly >= min_weekly:
+        fitness_gap = f"当前预估周跑量约{est_weekly}km，已达赛事建议最低{min_weekly}km+。基础跑量充足，重点转向专项能力提升。"
+        readiness = min(10, round(est_weekly / min_weekly * 6.5))
+    elif est_weekly >= min_weekly * 0.6:
+        fitness_gap = f"当前预估周跑量约{est_weekly}km，距赛事建议{min_weekly}km还差约{min_weekly - est_weekly}km/周。基础尚可但需循序渐进提升跑量。"
+        readiness = max(3, round(est_weekly / min_weekly * 7))
+    else:
+        fitness_gap = f"当前预估周跑量约{est_weekly}km，距赛事建议{min_weekly}km差距较大。需从有氧基础开始系统训练，切勿急于加量。"
+        readiness = max(1, round(est_weekly / min_weekly * 5))
+
+    return {
+        "race_name": rname,
+        "race_type": race_info["race_type"],
+        "difficulty_level": race_info["difficulty_level"],
+        "total_distance": race_info["total_distance"],
+        "elevation_gain": race_info["elevation_gain"],
+        "key_demands": race_info["key_demands"],
+        "climate_notes": race_info["climate_notes"],
+        "recommended_weekly_km": race_info["recommended_weekly_km"],
+        "fitness_gap": fitness_gap,
+        "readiness_score": readiness,
+    }
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 def _build_race_fallback(nearest_race, nearest_days, runner_name, stats):
@@ -242,12 +344,73 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats):
             "加入核心力量训练和柔韧性训练，预防跑步伤病",
         ]
 
-    return {
+    # ── Build race_analysis from knowledge base ──
+    race_analysis = _build_race_analysis(rtype, rname, stats)
+
+    # ── Phase-specific training principles ──
+    if nearest_days <= 14:
+        principles = [
+            {"title": "减量保状态", "detail": "跑量大幅减少但不完全停跑，保持肌肉记忆和跑感，每次跑步控制在30-40分钟内。"},
+            {"title": "赛前营养加载", "detail": "赛前3天增加碳水比例至总热量60-70%，确保糖原储备充足，避免尝试新食物。"},
+            {"title": "装备与赛道准备", "detail": "完成所有装备检查清单，研究赛道路线、补给站位置和海拔变化，制定配速策略。"},
+        ]
+    elif nearest_days <= 60:
+        principles = [
+            {"title": "比赛专项训练", "detail": f"针对{race_label}的特殊要求进行专项训练，模拟赛事地形和强度。"},
+            {"title": "长距离递增", "detail": "每周长距离跑逐步延长，目标达到赛事距离的60-70%，建立信心和耐力储备。"},
+            {"title": "配速校准", "detail": "通过节奏跑和比赛配速跑，找到适合自己的比赛节奏，避免起跑过快。"},
+            {"title": "恢复与防伤", "detail": "高质量训练后安排充分恢复，加强核心力量和柔韧性训练，预防过度训练。"},
+        ]
+    else:
+        principles = [
+            {"title": "有氧基础优先（80/20法则）", "detail": "80%训练量保持Zone 2轻松有氧，建立强大的有氧引擎，为后期高强度训练打基础。"},
+            {"title": "渐进超负荷", "detail": "每周跑量增幅≤10%，每3-4周安排一次减量周（降至60-70%），让身体充分适应和恢复。"},
+            {"title": "长距离慢跑", "detail": "每周1次长距离慢跑（LSD），逐步延长到赛事距离的50-60%，培养脂肪供能效率。"},
+            {"title": "核心力量与越野适应", "detail": "每周2次核心力量训练，加入山地/台阶训练提升爬升能力和下坡技术。"},
+        ]
+
+    # ── Phase-specific weekly cycle ──
+    if nearest_days <= 14:
+        weekly_cycle = [
+            {"week": 1, "phase": "减量", "focus": "跑量降至峰值40-50%，以轻松跑维持状态", "key_session": "1次5-8km配速验证跑", "volume_note": "大幅减量"},
+            {"week": 2, "phase": "赛前", "focus": "最后调整，赛前2天完全休息", "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
+        ]
+    elif nearest_days <= 60:
+        weekly_cycle = [
+            {"week": 1, "phase": "强化", "focus": "保持高质量训练，长距离+专项课", "key_session": f"长距离跑 + 1次{race_label}配速训练", "volume_note": "接近峰值跑量"},
+            {"week": 2, "phase": "强化", "focus": "间歇训练提升速度耐力", "key_session": "间歇跑或节奏跑", "volume_note": "维持峰值"},
+            {"week": 3, "phase": "冲刺", "focus": "最后一次高强度长距离拉练", "key_session": "比赛模拟跑（赛事距离60-70%）", "volume_note": "峰值跑量"},
+            {"week": 4, "phase": "减量", "focus": "开始逐步减量，保持跑感", "key_session": "轻松跑 + 短距离配速验证", "volume_note": "降至80%"},
+        ]
+    else:
+        weekly_cycle = [
+            {"week": 1, "phase": "积累", "focus": "建立有氧基础，轻松配速积累跑量", "key_session": "长距离慢跑（LSD）", "volume_note": "维持当前跑量"},
+            {"week": 2, "phase": "积累", "focus": "加入节奏跑，提升有氧阈值", "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
+            {"week": 3, "phase": "强化", "focus": "间歇训练提升速度，长距离进一步延长", "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
+            {"week": 4, "phase": "恢复", "focus": "减量恢复，消化前三周训练刺激", "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
+        ]
+
+    # ── Key metrics ──
+    rec_km = race_analysis.get("recommended_weekly_km", "40-60km") if race_analysis else "40-60km"
+    key_metrics = {
+        "recommended_weekly_km": rec_km,
+        "easy_run_pace": "基于当前配速+30-60秒/km",
+        "long_run_distance": f"赛事距离的50-70%",
+        "maf_heart_rate": "180-年龄 (±5调整)",
+    }
+
+    result = {
         "status": status,
         "summary": summary,
         "encouragement": encouragement,
         "actionable_tips": tips[:5],
+        "training_principles": principles,
+        "weekly_cycle": weekly_cycle,
+        "key_metrics": key_metrics,
     }
+    if race_analysis:
+        result["race_analysis"] = race_analysis
+    return result
 
 @router.post("/analyze")
 async def generate_coach_feedback(req: CoachRequest):
@@ -494,47 +657,62 @@ async def generate_coach_feedback(req: CoachRequest):
 
     if nearest_race and nearest_days <= 120:
         prompt += (
-            "⚠️ 重点：跑者有临近比赛，你的建议必须围绕备赛展开：\n"
-            "  - summary 中要提到比赛备赛状态和当前训练阶段\n"
-            "  - actionable_tips 中至少2条要针对比赛备赛\n"
+            "⚠️ 核心要求：跑者有临近比赛！你必须：\n"
+            "  1. 先在 race_analysis 中深入分析赛事的难度、强度和训练关键点\n"
+            "  2. 在 summary 中评估跑者目前的体能/跑力与赛事要求的差距\n"
+            "  3. 然后针对差距给出 training_principles 和 weekly_cycle\n"
             "  - 如果距比赛≤14天，重点提醒减量和赛前准备\n"
-            "  - 如果有目标成绩，分析当前状态与目标的差距\n\n"
+            "  - 如果有目标成绩，量化分析当前状态与目标的差距\n\n"
         )
     prompt += (
         "返回 JSON 格式如下（必须包含全部字段）：\n"
         '{\n'
+    )
+    # Only require race_analysis if there's an upcoming race
+    if nearest_race:
+        prompt += (
+            '  "race_analysis": {\n'
+            '    "race_name": "<赛事名称>",\n'
+            '    "race_type": "<赛事类型，如：越野跑100英里/全程马拉松>",\n'
+            '    "difficulty_level": "<初级|中级|高级|极限>",\n'
+            '    "total_distance": "<总距离>",\n'
+            '    "elevation_gain": "<累计爬升>",\n'
+            '    "key_demands": ["<核心能力要求1>", "<核心能力要求2>", ...],\n'
+            '    "climate_notes": "<气候/环境注意事项>",\n'
+            '    "recommended_weekly_km": "<建议备赛周跑量>",\n'
+            '    "fitness_gap": "<跑者当前体能与赛事要求的差距分析，2-3句话，要具体>",\n'
+            '    "readiness_score": <1-10的备赛就绪评分>\n'
+            '  },\n'
+        )
+    prompt += (
         '  "status": "<状态标签，如：备赛冲刺 🔥|稳步提升 📈|状态出色 💪|注意恢复 😴|继续加油 🏃>",\n'
-        '  "summary": "<3-4 句话的训练总结，结合跑者当前配速/心率/跑量，如有比赛则点明当前备赛阶段和差距>",\n'
+        '  "summary": "<3-4句话，先评估当前体能与赛事/目标的差距，再给出本阶段训练方向>",\n'
         '  "encouragement": "<一句短小有力的鼓励金句>",\n'
-        '  "actionable_tips": ["本周具体建议1（含数字）", "本周具体建议2", "本周具体建议3", "本周具体建议4"],\n'
+        '  "actionable_tips": ["本周具体建议1（含数字）", "本周具体建议2", "建议3", "建议4"],\n'
         '  "training_principles": [\n'
-        '    {"title": "<原则名称>", "detail": "<针对该跑者的具体执行说明，含配速/心率/距离参考值>"},\n'
-        '    ... (共3-5条核心训练原则)\n'
+        '    {"title": "<原则名称>", "detail": "<针对该跑者+赛事的具体执行说明，含配速/心率/距离参考值>"},\n'
+        '    ... (共3-5条，必须针对赛事的key_demands展开)\n'
         '  ],\n'
         '  "weekly_cycle": [\n'
-        '    {\n'
-        '      "week": 1,\n'
-        '      "phase": "<阶段名，如：积累|强化|冲刺|减量>",\n'
-        '      "focus": "<本周训练核心目标（1句话）>",\n'
-        '      "key_session": "<本周关键课次（如：30km 长距离慢跑 @ 6:00-6:30/km）>",\n'
-        '      "volume_note": "<本周跑量说明（含预估总公里数）>",\n'
-        '      "tips": ["<本周注意事项1>", "<本周注意事项2>"]\n'
-        '    },\n'
-        '    ... (共4周一个循环，结合比赛倒计时或训练目标规划)\n'
+        '    {"week": 1, "phase": "<积累|强化|冲刺|减量>", "focus": "<目标>",\n'
+        '     "key_session": "<关键课次含配速>", "volume_note": "<周跑量含数字>",\n'
+        '     "tips": ["注意事项1", "注意事项2"]}\n'
+        '    ... (共4周循环)\n'
         '  ],\n'
         '  "key_metrics": {\n'
-        '    "recommended_weekly_km": "<建议周跑量范围，如：50-60km>",\n'
-        '    "easy_run_pace": "<轻松跑配速区间，基于当前VDOT或近期跑步数据>",\n'
-        '    "tempo_pace": "<节奏跑配速，比轻松跑快约45-60秒>",\n'
-        '    "long_run_distance": "<长距离跑目标距离>",\n'
-        '    "maf_heart_rate": "<MAF有氧基础心率上限（180-年龄，可±5调整）>"\n'
+        '    "recommended_weekly_km": "<如50-60km>",\n'
+        '    "easy_run_pace": "<如6:00-6:30/km>",\n'
+        '    "tempo_pace": "<如5:00-5:30/km>",\n'
+        '    "long_run_distance": "<如25-30km>",\n'
+        '    "maf_heart_rate": "<如145bpm>"\n'
         '  }\n'
         '}\n\n'
-        "重要要求：\n"
-        "1. training_principles 必须结合跑者的具体数据（配速、心率、VDOT、跑龄）给出个性化说明，不能用通用文字\n"
-        "2. weekly_cycle 必须是4周循环方案，结合跑者距比赛天数或训练目标做具体规划\n"
-        "3. key_metrics 的所有数值必须基于跑者的实际数据计算，不能给出范围过宽的估计\n"
-        "4. 如有比赛，weekly_cycle 需要从当前周开始，倒推到比赛日，体现减量安排"
+        "核心规则：\n"
+        "1. 如有比赛，race_analysis 必须深入分析赛事难度、对跑者能力的具体要求\n"
+        "2. fitness_gap 必须对比跑者当前数据和赛事要求，给出量化差距\n"
+        "3. training_principles 必须针对赛事 key_demands 展开，不能泛泛而谈\n"
+        "4. weekly_cycle 共4周，从当前周开始规划，距比赛近则体现减量\n"
+        "5. key_metrics 所有数值必须基于跑者实际数据计算"
     )
 
     if not _api_key:
@@ -546,7 +724,7 @@ async def generate_coach_feedback(req: CoachRequest):
         print(f"Coach prompt length: {len(prompt)} chars")
         response = await loop.run_in_executor(
             None,
-            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=1500)
+            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=4000)
         )
         print(f"[coach] Used model: {response['model']}@{response['api_version']}")
         text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
