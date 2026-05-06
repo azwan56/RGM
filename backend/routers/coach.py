@@ -52,6 +52,11 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                 else:
                     last_error = f"{model_name}@{api_ver}: {resp.status_code} {resp.text[:200]}"
                     print(f"[gemini] {last_error}")
+                    # If cached model is gone (404), clear cache and retry all candidates
+                    if resp.status_code == 404 and _resolved_model:
+                        print(f"[gemini] Cached model {_resolved_model} is gone, clearing cache")
+                        _resolved_model = None
+                        return _gemini_generate(prompt, temperature, max_tokens, response_json)
             except Exception as e:
                 last_error = f"{model_name}@{api_ver}: {e}"
                 print(f"[gemini] {last_error}")
@@ -1245,13 +1250,15 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
                         break
                     except Exception as e:
                         err_str = str(e)
+                        print(f"[backfill] AI error for {entry_date} (attempt {attempt+1}): {err_str[:200]}")
                         if "429" in err_str or "Resource" in err_str or "quota" in err_str.lower():
-                            wait = 10 * (attempt + 1)  # 10s, 20s, 30s backoff
-                            print(f"[backfill] Rate limited for {entry_date}, waiting {wait}s...")
+                            wait = 10 * (attempt + 1)
+                            print(f"[backfill] Rate limited, waiting {wait}s...")
                             time.sleep(wait)
                         else:
                             errors += 1
-                            print(f"[backfill] AI error for {entry_date}: {e}")
+                            # Store last error for debugging
+                            status_ref.set({"last_error": err_str[:300]}, merge=True)
                             break
 
             entry = {
