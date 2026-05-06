@@ -208,20 +208,143 @@ _RACE_KNOWLEDGE = {
 }
 
 
-def _fetch_avg_weekly_km(uid: str, weeks: int = 8) -> float:
-    """Calculate average weekly km from activities over the past N weeks."""
+def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
+    """Comprehensive training analysis over the past N weeks."""
     from datetime import date, timedelta
+    from collections import defaultdict
+
     cutoff = (date.today() - timedelta(weeks=weeks)).isoformat()
     docs = (
         db.collection("users").document(uid)
         .collection("activities")
         .where("start_date_local", ">=", cutoff)
         .order_by("start_date_local", direction="DESCENDING")
-        .limit(200)
+        .limit(300)
         .stream()
     )
-    total_km = sum(d.to_dict().get("distance_km", 0) for d in docs)
-    return round(total_km / weeks, 1)
+    acts = [d.to_dict() for d in docs]
+
+    if not acts:
+        return {"avg_weekly_km": 0, "total_runs": 0, "weeks": weeks}
+
+    # ── Core aggregation ──
+    total_km = 0; total_elev = 0; total_time = 0
+    hr_vals = []; pace_vals = []; distances = []
+    trail_km = 0; trail_elev = 0; trail_runs = 0
+    road_km = 0; road_runs = 0
+    max_hr_seen = 0; longest_run = 0
+    weekly_bins = defaultdict(lambda: {"km": 0, "runs": 0, "elev": 0, "hr_sum": 0, "hr_n": 0})
+
+    for a in acts:
+        km = a.get("distance_km", 0) or 0
+        elev = a.get("total_elevation_gain", 0) or 0
+        mt = a.get("moving_time", 0) or 0
+        hr = a.get("avg_heart_rate", 0) or 0
+        mhr = a.get("max_heart_rate", 0) or 0
+        name = (a.get("name", "") or "").lower()
+
+        total_km += km; total_elev += elev; total_time += mt
+        distances.append(km)
+        if km > longest_run:
+            longest_run = km
+        if hr > 0:
+            hr_vals.append(hr)
+        if mhr > max_hr_seen:
+            max_hr_seen = mhr
+        if km > 0 and mt > 0:
+            pace_vals.append(mt / km / 60)  # min/km
+
+        # Trail vs road detection
+        is_trail = any(kw in name for kw in ["trail", "越野", "山", "hill", "mountain"])
+        if elev > 30 and km > 0 and (elev / km) > 20:  # >20m/km elevation = trail-like
+            is_trail = True
+        if is_trail:
+            trail_km += km; trail_elev += elev; trail_runs += 1
+        else:
+            road_km += km; road_runs += 1
+
+        # Weekly bin (ISO week)
+        ds = a.get("start_date_local", "")[:10]
+        if ds:
+            try:
+                d = date.fromisoformat(ds)
+                wk = d.isocalendar()[1]
+                yk = f"{d.year}-W{wk:02d}"
+                weekly_bins[yk]["km"] += km
+                weekly_bins[yk]["runs"] += 1
+                weekly_bins[yk]["elev"] += elev
+                if hr > 0:
+                    weekly_bins[yk]["hr_sum"] += hr
+                    weekly_bins[yk]["hr_n"] += 1
+            except ValueError:
+                pass
+
+    total_runs = len(acts)
+    avg_weekly_km = round(total_km / weeks, 1)
+
+    # ── Weekly trend (is volume increasing/stable/decreasing?) ──
+    sorted_weeks = sorted(weekly_bins.keys())
+    weekly_kms = [weekly_bins[w]["km"] for w in sorted_weeks]
+    trend = "stable"
+    if len(weekly_kms) >= 4:
+        first_half = sum(weekly_kms[:len(weekly_kms)//2]) / max(1, len(weekly_kms)//2)
+        second_half = sum(weekly_kms[len(weekly_kms)//2:]) / max(1, len(weekly_kms) - len(weekly_kms)//2)
+        if second_half > first_half * 1.15:
+            trend = "increasing"
+        elif second_half < first_half * 0.85:
+            trend = "decreasing"
+
+    # ── Consistency: how many weeks had ≥3 runs ──
+    active_weeks = sum(1 for w in weekly_bins.values() if w["runs"] >= 3)
+    consistency = round(active_weeks / max(1, len(weekly_bins)) * 10)
+
+    # ── Avg rest days per week ──
+    avg_runs_per_week = total_runs / weeks
+    avg_rest_days = round(7 - avg_runs_per_week, 1)
+
+    # ── Pace formatting ──
+    def _fmt_pace(min_per_km):
+        m = int(min_per_km)
+        s = int((min_per_km - m) * 60)
+        return f"{m}:{s:02d}"
+
+    avg_pace = _fmt_pace(sum(pace_vals) / len(pace_vals)) if pace_vals else "—"
+    avg_hr = round(sum(hr_vals) / len(hr_vals)) if hr_vals else 0
+
+    # ── Weekly breakdown (last 4 weeks for display) ──
+    recent_weeks = []
+    for wk in sorted_weeks[-4:]:
+        wd = weekly_bins[wk]
+        whr = round(wd["hr_sum"] / wd["hr_n"]) if wd["hr_n"] > 0 else 0
+        recent_weeks.append({
+            "week": wk, "km": round(wd["km"], 1),
+            "runs": wd["runs"], "elevation": round(wd["elev"]),
+            "avg_hr": whr,
+        })
+
+    return {
+        "weeks": weeks,
+        "total_runs": total_runs,
+        "total_km": round(total_km, 1),
+        "avg_weekly_km": avg_weekly_km,
+        "avg_run_distance": round(total_km / total_runs, 1) if total_runs else 0,
+        "longest_run": round(longest_run, 1),
+        "total_elevation": round(total_elev),
+        "avg_elevation_per_run": round(total_elev / total_runs) if total_runs else 0,
+        "avg_pace": avg_pace,
+        "avg_heart_rate": avg_hr,
+        "max_heart_rate_seen": max_hr_seen,
+        "trail_runs": trail_runs,
+        "road_runs": road_runs,
+        "trail_km": round(trail_km, 1),
+        "road_km": round(road_km, 1),
+        "trail_elevation": round(trail_elev),
+        "volume_trend": trend,
+        "consistency_score": consistency,
+        "avg_rest_days_per_week": avg_rest_days,
+        "avg_runs_per_week": round(avg_runs_per_week, 1),
+        "recent_weeks": recent_weeks,
+    }
 
 
 def _build_race_analysis(rtype, rname, avg_weekly_km):
@@ -433,13 +556,14 @@ async def generate_coach_feedback(req: CoachRequest):
     Parallel Firestore reads + personalized, encouraging tone.
     """
     loop = asyncio.get_event_loop()
-    stats, goal_data, activities, profile, avg_weekly_km = await asyncio.gather(
+    stats, goal_data, activities, profile, training_summary = await asyncio.gather(
         loop.run_in_executor(None, _fetch_leaderboard, req.uid),
         loop.run_in_executor(None, _fetch_goal, req.uid),
         loop.run_in_executor(None, _fetch_recent_activities, req.uid),
         loop.run_in_executor(None, _fetch_profile, req.uid),
-        loop.run_in_executor(None, _fetch_avg_weekly_km, req.uid),
+        loop.run_in_executor(None, _fetch_training_summary, req.uid),
     )
+    avg_weekly_km = training_summary.get("avg_weekly_km", 0)
 
     if not stats:
         return {"feedback": {
@@ -662,11 +786,19 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 当前里程目标：{goal_str}\n\n"
         f"{race_section}"
         f"{race_coaching_instructions}"
-        f"【本期训练数据（{stats.get('period', 'monthly')}）】\n"
-        f"- 总里程：{stats.get('total_distance_km', 0)} 公里\n"
-        f"- 平均配速：{stats.get('avg_pace', '?')}/km\n"
-        f"- 平均心率：{stats.get('avg_heart_rate', 0)} bpm\n"
-        f"- 跑步次数：{stats.get('run_count', 0)} 次，目标完成度：{completion_pct}%\n\n"
+        f"【过去8周训练统计分析】\n"
+        f"- 周均跑量：{training_summary.get('avg_weekly_km', 0)} km/周\n"
+        f"- 总跑次：{training_summary.get('total_runs', 0)} 次，总跑量：{training_summary.get('total_km', 0)} km\n"
+        f"- 平均每跑距离：{training_summary.get('avg_run_distance', 0)} km，最长单次：{training_summary.get('longest_run', 0)} km\n"
+        f"- 路跑：{training_summary.get('road_runs', 0)} 次/{training_summary.get('road_km', 0)}km，"
+        f"越野跑：{training_summary.get('trail_runs', 0)} 次/{training_summary.get('trail_km', 0)}km\n"
+        f"- 总海拔累积：{training_summary.get('total_elevation', 0)}m，平均每次：{training_summary.get('avg_elevation_per_run', 0)}m\n"
+        f"- 8周平均配速：{training_summary.get('avg_pace', '?')}/km，平均心率：{training_summary.get('avg_heart_rate', 0)}bpm\n"
+        f"- 跑量趋势：{{'increasing':'上升','stable':'平稳','decreasing':'下降'}.get(training_summary.get('volume_trend','stable'), '平稳')}\n"
+        f"- 每周平均跑步：{training_summary.get('avg_runs_per_week', 0)} 次，休息日：{training_summary.get('avg_rest_days_per_week', 0)} 天\n"
+        f"- 训练一致性评分：{training_summary.get('consistency_score', 0)}/10\n\n"
+        f"【本期目标完成度】\n"
+        f"- 总里程：{stats.get('total_distance_km', 0)} km，目标完成：{completion_pct}%\n\n"
         f"【近期跑步记录】\n{runs_str}\n\n"
     )
 
