@@ -930,45 +930,59 @@ class WeeklyReviewRequest(BaseModel):
     uid: str
 
 
+def _get_nearest_race_info(uid: str) -> dict:
+    """Get nearest future race from goals."""
+    import re
+    from datetime import date as _dt
+    user_ref = db.collection("users").document(uid)
+    races_doc = user_ref.collection("goals").document("races").get()
+    if not races_doc.exists:
+        return {}
+    races = races_doc.to_dict().get("upcoming", [])
+    future = sorted([r for r in races if r.get("date", "") >= _dt.today().isoformat()],
+                    key=lambda r: r.get("date", "9999"))
+    if not future:
+        return {}
+    race = future[0]
+    days_to = (_dt.fromisoformat(race["date"]) - _dt.today()).days if race.get("date") else 999
+    return {"name": race.get("name", ""), "type": race.get("type", ""),
+            "date": race.get("date", ""), "target_time": race.get("target_time", ""),
+            "days_to": days_to}
+
+
 def _get_or_create_journal(uid: str) -> dict:
     """Get active journal or create one based on nearest race."""
     import re
     user_ref = db.collection("users").document(uid)
+    race = _get_nearest_race_info(uid)
+
+    # Check existing active journal
     for doc in user_ref.collection("training_logs").where("status", "==", "active").limit(1).stream():
         j = doc.to_dict(); j["journal_id"] = doc.id
-        # Check if race changed
-        races_doc = user_ref.collection("goals").document("races").get()
-        if races_doc.exists:
-            races = races_doc.to_dict().get("upcoming", [])
-            future = sorted([r for r in races if r.get("date", "") >= __import__("datetime").date.today().isoformat()],
-                            key=lambda r: r.get("date", "9999"))
-            if future:
-                new_name = future[0].get("name", "")
-                if new_name and new_name not in j.get("title", ""):
-                    # Race changed — archive old, create new
-                    user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
-                    break  # fall through to create new
+        # If race exists but journal is generic or for a different race → archive & recreate
+        if race and race.get("name"):
+            if race["name"] not in j.get("title", ""):
+                user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
+                break  # fall through to create new
+        j["_race"] = race  # attach race info for prompt use
         return j
 
     # Create new journal
-    races_doc = user_ref.collection("goals").document("races").get()
-    races = races_doc.to_dict().get("upcoming", []) if races_doc.exists else []
-    title, race_type, race_date = "通用训练日志", "", ""
+    title = "通用训练日志"
+    race_type, race_date = "", ""
     journal_id = f"general-{__import__('datetime').date.today().year}"
-    future = sorted([r for r in races if r.get("date", "") >= __import__("datetime").date.today().isoformat()],
-                    key=lambda r: r.get("date", "9999"))
-    if future:
-        race = future[0]
-        title = f"{race.get('name', '比赛')} 备赛日志"
+    if race and race.get("name"):
+        title = f"{race['name']} 备赛日志"
         race_type = race.get("type", "")
         race_date = race.get("date", "")
-        slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', race.get('name', 'race')).strip('-').lower()
+        slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', race['name']).strip('-').lower()
         journal_id = f"{slug}-{race_date[:4]}" if race_date else slug
 
     data = {"title": title, "race_type": race_type, "race_date": race_date,
             "created_at": __import__("datetime").datetime.now().isoformat(), "status": "active"}
     user_ref.collection("training_logs").document(journal_id).set(data, merge=True)
     data["journal_id"] = journal_id
+    data["_race"] = race
     return data
 
 
@@ -1011,39 +1025,79 @@ async def log_journal_entry(req: JournalLogRequest):
     # 4. Training summary (parallel)
     training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
 
-    # 5. Build prompt
+    # 5. Build prompt with rich comparison data
     km = activity.get("distance_km", 0)
+    act_pace = activity.get("avg_pace", "—")
+    act_hr = activity.get("avg_heart_rate", 0)
+    act_elev = activity.get("total_elevation_gain", 0)
+    act_max_hr = activity.get("max_heart_rate", 0)
+    act_cadence = activity.get("avg_cadence", 0)
     week_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in week_entries) + km
     week_runs = len(week_entries) + 1
     target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
+    avg_pace_8w = training_summary.get("avg_pace", "—")
+    avg_hr_8w = training_summary.get("avg_heart_rate", 0)
+    avg_dist = training_summary.get("avg_run_distance", 0)
+    longest = training_summary.get("longest_run", 0)
+    is_trail = act_elev > 30 and km > 0 and (act_elev / km) > 15
+
+    # Race context
+    race = journal.get("_race", {})
+    race_ctx = ""
+    if race and race.get("name"):
+        race_ctx = (
+            f"【备赛目标】{race['name']}（{race.get('type','')}），"
+            f"距比赛{race.get('days_to', '?')}天"
+            f"{', 目标成绩：' + race['target_time'] if race.get('target_time') else ''}\n"
+        )
 
     prev_context = ""
     for e in week_entries[-3:]:
         s = e.get("activity_snapshot", {})
-        prev_context += f"- {e['date']}: {s.get('name','')} {s.get('distance_km',0)}km | {e.get('ai_comment','')[:60]}\n"
+        prev_context += f"- {e['date']}: {s.get('name','')} {s.get('distance_km',0)}km @{s.get('avg_pace','')}/km HR:{s.get('avg_heart_rate',0)}\n"
 
     prompt = (
-        "你是专业跑步教练，为跑者写训练日志评语。回复纯JSON。\n\n"
-        f"【日志】{journal.get('title','训练日志')}  日期：{entry_date}\n"
-        f"【今日训练】{activity.get('name','Run')} | {km}km | "
-        f"配速{activity.get('avg_pace','—')}/km | HR:{activity.get('avg_heart_rate',0)}bpm | "
-        f"爬升{activity.get('total_elevation_gain',0)}m | 时长{activity.get('duration_str','—')}\n"
-        f"【本周进度】已跑{week_km:.1f}km/{week_runs}次，目标约{target_wk:.0f}km（{min(100,round(week_km/target_wk*100))}%）\n"
-        f"【8周概况】周均{training_summary.get('avg_weekly_km',0)}km | "
-        f"配速{training_summary.get('avg_pace','—')}/km | HR:{training_summary.get('avg_heart_rate',0)} | "
-        f"趋势:{training_summary.get('volume_trend','stable')}\n"
-        f"{'【本周已有记录】' + chr(10) + prev_context if prev_context else ''}\n"
-        '返回JSON：{"ai_comment":"<3-5句评语，评估训练质量/强度/恢复>",'
-        '"fatigue_level":"<low|moderate|high>",'
-        '"performance_note":"<亮点或注意点，1句>",'
-        '"tomorrow_suggestion":"<明天建议，1句>"}\n'
+        "你是一位专业跑步教练，正在为跑者撰写今日训练评语。\n"
+        "你需要根据训练数据进行深入分析，不能只说'训练完成'。\n"
+        "回复必须是纯 JSON，不含 markdown 标记。\n\n"
+        f"【训练日志】{journal.get('title','训练日志')}\n"
+        f"{race_ctx}"
+        f"【今日训练详情】\n"
+        f"- 活动名称：{activity.get('name','Run')}\n"
+        f"- 距离：{km} km（8周平均每跑：{avg_dist}km，历史最长：{longest}km）\n"
+        f"- 配速：{act_pace}/km（8周平均：{avg_pace_8w}/km，{'今日偏慢' if act_pace > avg_pace_8w else '今日偏快或持平'}）\n"
+        f"- 平均心率：{act_hr}bpm（8周平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
+        f"- 海拔爬升：{act_elev}m{'（越野/山地训练）' if is_trail else ''}\n"
+        f"- 时长：{activity.get('duration_str','—')}\n"
+        f"- 日期：{entry_date}\n\n"
+        f"【本周训练进度】\n"
+        f"- 本周已跑：{week_km:.1f}km / {week_runs}次，周目标约{target_wk:.0f}km（{min(100,round(week_km/target_wk*100))}%）\n\n"
+        f"【跑者8周训练概况】\n"
+        f"- 周均{training_summary.get('avg_weekly_km',0)}km | 路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n"
+        f"- 平均配速{avg_pace_8w}/km | 平均HR:{avg_hr_8w} | 趋势：{training_summary.get('volume_trend','stable')}\n"
+        f"- 一致性：{training_summary.get('consistency_score',0)}/10\n"
+        f"{'【本周已有训练】' + chr(10) + prev_context if prev_context else ''}\n"
+        "请分析以下维度并给出详细评语：\n"
+        "1. 今日训练类型判断（轻松跑/节奏跑/间歇/长距离/恢复跑/越野）\n"
+        "2. 配速与心率的匹配度（是否在合理区间）\n"
+        "3. 与8周平均数据的对比（进步还是退步）\n"
+        "4. 本周训练负荷是否合理\n"
+        "5. 对备赛目标的贡献度\n\n"
+        '返回JSON格式：\n'
+        '{\n'
+        '  "ai_comment": "<5-8句详细评语，必须引用具体数据（配速、心率、距离），分析训练质量和效果>",\n'
+        '  "fatigue_level": "<low|moderate|high，基于心率/配速/本周累积综合判断>",\n'
+        '  "performance_note": "<今日训练的核心亮点或需要注意的问题，2句话>",\n'
+        '  "tomorrow_suggestion": "<明天的具体训练建议，含距离和强度>",\n'
+        '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"\n'
+        '}\n'
     )
 
     ai = {"ai_comment": "训练完成，继续保持！", "fatigue_level": "moderate",
-          "performance_note": "", "tomorrow_suggestion": ""}
+          "performance_note": "", "tomorrow_suggestion": "", "training_type": ""}
     if _api_key:
         try:
-            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=800))
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=1200))
             text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             ai = json.loads(text)
         except Exception as e:
@@ -1064,6 +1118,7 @@ async def log_journal_entry(req: JournalLogRequest):
         "fatigue_level": ai.get("fatigue_level", "moderate"),
         "performance_note": ai.get("performance_note", ""),
         "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
+        "training_type": ai.get("training_type", ""),
         "weekly_progress": {
             "week_km": round(week_km, 1), "week_runs": week_runs,
             "target_km": round(target_wk), "completion_pct": min(100, round(week_km / target_wk * 100)),

@@ -35,6 +35,7 @@ interface JournalEntry {
   fatigue_level?: string;
   performance_note?: string;
   tomorrow_suggestion?: string;
+  training_type?: string;
   weekly_progress?: WeeklyProgress;
   // Weekly summary fields
   summary?: string;
@@ -229,13 +230,17 @@ export default function TrainingJournal({ uid }: { uid: string }) {
 
                   return (
                     <div key={idx} className="bg-black/20 border border-white/5 p-4 rounded-2xl space-y-3 hover:border-white/10 transition-colors group">
-                      {/* Date + fatigue */}
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-bold text-white">{entry.date}</span>
                           {snap && <span className="text-xs text-zinc-500">{snap.name}</span>}
+                          {entry.training_type && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                              {entry.training_type}
+                            </span>
+                          )}
                         </div>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${fb.cls}`}>{fb.label}</span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${fb.cls} shrink-0`}>{fb.label}</span>
                       </div>
 
                       {/* Activity stats row */}
