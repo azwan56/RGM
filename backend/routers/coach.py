@@ -1077,8 +1077,16 @@ async def log_journal_entry(req: JournalLogRequest):
         s = e.get("activity_snapshot", {})
         prev_context += f"- {e['date']}: {s.get('name','')} {s.get('distance_km',0)}km @{s.get('avg_pace','')}/km HR:{s.get('avg_heart_rate',0)}\n"
 
+    # Day-of-week and remaining distance context for smarter suggestions
+    weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekday_idx = today.weekday()  # 0=Monday
+    today_weekday = weekday_names[weekday_idx]
+    tomorrow_weekday = weekday_names[(weekday_idx + 1) % 7]
+    remaining_km = max(0, target_wk - week_km)
+    days_left_in_week = 6 - weekday_idx  # days remaining after today (Sun=0 left)
+
     prompt = (
-        "你是一位专业跑步教练，正在为跑者撰写今日训练评语。\n"
+        "你是Canova教练（意大利著名马拉松教练），正在为跑者撰写今日训练评语。\n"
         "你需要根据训练数据进行深入分析，不能只说'训练完成'。\n"
         "回复必须是纯 JSON，不含 markdown 标记。\n\n"
         f"【训练日志】{journal.get('title','训练日志')}\n"
@@ -1090,9 +1098,11 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 平均心率：{act_hr}bpm（8周平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
         f"- 海拔爬升：{act_elev}m{'（越野/山地训练）' if is_trail else ''}\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
-        f"- 日期：{entry_date}\n\n"
+        f"- 日期：{entry_date}（{today_weekday}）\n\n"
         f"【本周训练进度】\n"
-        f"- 本周已跑：{week_km:.1f}km / {week_runs}次，周目标约{target_wk:.0f}km（{min(100,round(week_km/target_wk*100))}%）\n\n"
+        f"- 本周已跑：{week_km:.1f}km / {week_runs}次，周目标{target_wk:.0f}km（完成{min(100,round(week_km/target_wk*100))}%）\n"
+        f"- 本周还需完成：{remaining_km:.1f}km，剩余{days_left_in_week}天\n"
+        f"- 明天是{tomorrow_weekday}\n\n"
         f"【跑者8周训练概况】\n"
         f"- 周均{training_summary.get('avg_weekly_km',0)}km | 路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n"
         f"- 平均配速{avg_pace_8w}/km | 平均HR:{avg_hr_8w} | 趋势：{training_summary.get('volume_trend','stable')}\n"
@@ -1104,18 +1114,25 @@ async def log_journal_entry(req: JournalLogRequest):
         "3. 与8周平均数据的对比（进步还是退步）\n"
         "4. 本周训练负荷是否合理\n"
         "5. 对备赛目标的贡献度\n\n"
+        "【明日训练建议的要求】\n"
+        "- 必须考虑周目标剩余距离和本周已有训练负荷\n"
+        "- 周六周日适合安排长距离有氧或LSD（Long Slow Distance），工作日偏向轻松跑、恢复跑或短距离节奏跑\n"
+        "- 如果本周已完成较多距离，明天可以建议休息或轻松恢复\n"
+        "- 给出具体的距离、配速和强度建议\n\n"
         '返回JSON格式：\n'
         '{\n'
         '  "ai_comment": "<5-8句详细评语，必须引用具体数据（配速、心率、距离），分析训练质量和效果>",\n'
         '  "fatigue_level": "<low|moderate|high，基于心率/配速/本周累积综合判断>",\n'
         '  "performance_note": "<今日训练的核心亮点或需要注意的问题，2句话>",\n'
-        '  "tomorrow_suggestion": "<明天的具体训练建议，含距离和强度>",\n'
-        '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"\n'
+        '  "tomorrow_suggestion": "<明天的具体训练建议，含距离、配速和强度，要考虑星期、周目标剩余和疲劳度>",\n'
+        '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>",\n'
+        '  "encouragement": "<1-2句温暖有力的鼓励语，像教练对学员说的话，有人情味>"\n'
         '}\n'
     )
 
     ai = {"ai_comment": "训练完成，继续保持！", "fatigue_level": "moderate",
-          "performance_note": "", "tomorrow_suggestion": "", "training_type": ""}
+          "performance_note": "", "tomorrow_suggestion": "", "training_type": "",
+          "encouragement": ""}
     if _api_key:
         try:
             resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
@@ -1140,6 +1157,7 @@ async def log_journal_entry(req: JournalLogRequest):
         "performance_note": ai.get("performance_note", ""),
         "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
         "training_type": ai.get("training_type", ""),
+        "encouragement": ai.get("encouragement", ""),
         "weekly_progress": {
             "week_km": round(week_km, 1), "week_runs": week_runs,
             "target_km": round(target_wk), "completion_pct": min(100, round(week_km / target_wk * 100)),

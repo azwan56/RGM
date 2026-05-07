@@ -319,11 +319,12 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
 
 # ── WeCom (企业微信) Notification — reserved for future implementation ─────────
 
-def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "", coach_tip: str = "") -> bool:
+def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "", coach_tip: str = "", journal_entry: dict = None) -> bool:
     """
     Sends a WeCom (企业微信) group robot notification for a completed run.
     Reads the webhook URL from user_data["wecom_webhook_url"] (set in profile).
     If coach_tip is provided, uses it directly instead of generating a new one.
+    If journal_entry is provided, includes performance_note, tomorrow_suggestion, and encouragement.
     Returns True on success, False on failure.
     """
     webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
@@ -348,6 +349,9 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         if not coach_tip:
             coach_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
 
+        if journal_entry is None:
+            journal_entry = {}
+
         # ── Build Markdown ──
         runner_name = (
             user_data.get("display_name") or
@@ -363,14 +367,7 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         duration = act_doc.get("duration_str", "—")
         hr       = act_doc.get("avg_heart_rate", 0)
         elev     = act_doc.get("total_elevation_gain", 0)
-        vdot     = act_doc.get("vdot")
 
-        ctl = context.get("ctl")
-        atl = context.get("atl")
-        tsb = context.get("tsb")
-
-        # Color coding in markdown via <font color='warning|info|comment'>
-        # Distance gets info (green-ish in wecom), title gets warning (red/orange)
         md = f"🏃 **<font color='warning'>{runner_name}</font> 完成了一次跑步！**\n"
         md += f"> **{run_name}** · <font color='comment'>{date_short}</font>\n\n"
         
@@ -383,13 +380,31 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             md += f"  |  ⛰ **爬升**: {elev}m"
         md += "\n"
 
-        if monthly_km:
+        # Weekly progress from journal entry
+        wp = journal_entry.get("weekly_progress", {})
+        if wp and wp.get("target_km"):
+            md += f"📊 **本周进度**: <font color='info'>{wp['week_km']}km / {wp['target_km']}km</font> ({wp.get('completion_pct', 0)}%)\n"
+        elif monthly_km:
             month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
             md += f"📅 **{month_label} 月累计**: <font color='info'>{monthly_km} km</font>\n"
 
         if coach_tip:
-            # WeCom blockquotes look nicely formatted for AI tips
-            md += f"\n🤖 **AI 教练点评**:\n<font color='comment'>{coach_tip}</font>\n"
+            md += f"\n🤖 **Canova教练点评**:\n<font color='comment'>{coach_tip}</font>\n"
+
+        # Performance note (highlight)
+        perf_note = journal_entry.get("performance_note", "")
+        if perf_note:
+            md += f"\n💡 {perf_note}\n"
+
+        # Tomorrow's training suggestion
+        tomorrow = journal_entry.get("tomorrow_suggestion", "")
+        if tomorrow:
+            md += f"→ **明日**: {tomorrow}\n"
+
+        # Coach encouragement
+        encouragement = journal_entry.get("encouragement", "")
+        if encouragement:
+            md += f"\n🔥 {encouragement}\n"
 
         payload = {
             "msgtype": "markdown",
