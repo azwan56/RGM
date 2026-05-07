@@ -1103,7 +1103,7 @@ async def log_journal_entry(req: JournalLogRequest):
           "performance_note": "", "tomorrow_suggestion": "", "training_type": ""}
     if _api_key:
         try:
-            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=1200))
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
             text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             ai = json.loads(text)
         except Exception as e:
