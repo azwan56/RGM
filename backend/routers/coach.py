@@ -1028,8 +1028,11 @@ async def log_journal_entry(req: JournalLogRequest):
     week_start = (today - timedelta(days=today.weekday())).isoformat()
     week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
 
-    # 4. Training summary (parallel)
-    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+    # 4. Training summary + user goal (parallel)
+    training_summary, goal_data = await asyncio.gather(
+        loop.run_in_executor(None, _fetch_training_summary, uid),
+        loop.run_in_executor(None, _fetch_goal, uid),
+    )
 
     # 5. Build prompt with rich comparison data
     km = activity.get("distance_km", 0)
@@ -1040,7 +1043,19 @@ async def log_journal_entry(req: JournalLogRequest):
     act_cadence = activity.get("avg_cadence", 0)
     week_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in week_entries) + km
     week_runs = len(week_entries) + 1
-    target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
+
+    # Use user's actual goal for weekly target
+    if goal_data and goal_data.get("target_distance"):
+        goal_dist = goal_data["target_distance"]
+        goal_period = goal_data.get("period", "monthly")
+        if goal_period == "weekly":
+            target_wk = goal_dist
+        else:
+            # Monthly goal → approximate weekly (÷ 4.33)
+            target_wk = round(goal_dist / 4.33, 1)
+    else:
+        # Fallback: 105% of 8-week average
+        target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
     avg_pace_8w = training_summary.get("avg_pace", "—")
     avg_hr_8w = training_summary.get("avg_heart_rate", 0)
     avg_dist = training_summary.get("avg_run_distance", 0)
