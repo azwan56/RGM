@@ -265,11 +265,12 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str = "") -> bool:
+def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str = "", coach_tip: str = "") -> bool:
     """
     Sends a Discord embed notification for a completed run.
     Reads webhook URL from user_data["discord_webhook_url"] (set in profile).
     If uid is provided, fetches rich runner context (VDOT, fitness state, monthly volume).
+    If coach_tip is provided, uses it directly instead of generating a new one.
     Returns True on success, False on failure (never raises).
     """
     webhook_url = (user_data.get("discord_webhook_url") or "").strip()
@@ -293,7 +294,9 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
             **fitness,
         }
 
-        coach_tip = _generate_coach_tip(act_doc, user_data, context)
+        # Reuse provided coach_tip (from journal), or generate a new one
+        if not coach_tip:
+            coach_tip = _generate_coach_tip(act_doc, user_data, context)
         embed     = _build_embed(act_doc, user_data, coach_tip, context)
 
         payload = {
@@ -316,10 +319,11 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
 
 # ── WeCom (企业微信) Notification — reserved for future implementation ─────────
 
-def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "") -> bool:
+def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "", coach_tip: str = "") -> bool:
     """
     Sends a WeCom (企业微信) group robot notification for a completed run.
     Reads the webhook URL from user_data["wecom_webhook_url"] (set in profile).
+    If coach_tip is provided, uses it directly instead of generating a new one.
     Returns True on success, False on failure.
     """
     webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
@@ -340,8 +344,9 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             **fitness,
         }
 
-        # Reuse the AI coach engine but with fuzzy metrics instruction
-        coach_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
+        # Reuse provided coach_tip (from journal), or generate a new one
+        if not coach_tip:
+            coach_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
 
         # ── Build Markdown ──
         runner_name = (

@@ -283,11 +283,36 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
 
         _recalculate_leaderboards(uid, user_ref)
 
+        # ── Generate journal entry (produces AI coach comment) ──
+        # Uses the same _gemini_generate method that works in backfill.
+        # The AI comment is then reused for Discord/WeChat notifications
+        # to ensure consistency across all channels.
+        coach_tip = ""
+        try:
+            from routers.coach import log_journal_entry, JournalLogRequest
+            import asyncio
+
+            journal_req = JournalLogRequest(uid=uid, activity_id=str(activity_id))
+            # Run the async journal function synchronously in this background task
+            loop = asyncio.new_event_loop()
+            try:
+                journal_result = loop.run_until_complete(log_journal_entry(journal_req))
+            finally:
+                loop.close()
+
+            entry = journal_result.get("entry", {})
+            coach_tip = entry.get("ai_comment", "")
+            if coach_tip:
+                print(f"[webhook] Journal entry created, AI comment will be reused for notifications")
+        except Exception as _journal_err:
+            print(f"[webhook] Journal entry generation failed (notifications will generate their own): {_journal_err}")
+
         # ── Notifications (non-blocking, never crashes the webhook) ──
+        # Pass coach_tip so Discord/WeChat reuse the same AI comment from the journal
         try:
             from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
-            send_activity_discord_notification(act_doc, user_data, uid=uid)
-            send_activity_wecom_notification(act_doc, user_data, uid=uid)
+            send_activity_discord_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip)
+            send_activity_wecom_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip)
         except Exception as _notify_err:
             print(f"[webhook] Notification delivery failed: {_notify_err}")
 
