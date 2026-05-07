@@ -999,6 +999,16 @@ async def log_journal_entry(req: JournalLogRequest):
     uid = req.uid
     user_ref = db.collection("users").document(uid)
 
+    # 0. Get user profile (for runner name)
+    user_doc = user_ref.get()
+    user_data = user_doc.to_dict() if user_doc.exists else {}
+    runner_name = (
+        user_data.get("display_name") or
+        user_data.get("strava_name") or
+        user_data.get("email", "").split("@")[0] or
+        "跑者"
+    ).split()[0]  # Use first name only
+
     # 1. Get activity
     if req.activity_id:
         doc = user_ref.collection("activities").document(req.activity_id).get()
@@ -1022,11 +1032,13 @@ async def log_journal_entry(req: JournalLogRequest):
     if existing.exists and not req.force:
         return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
 
-    # 3. This week's context
+    # 3. This week's context (Monday = start, Sunday = end, matching Strava)
     from datetime import date as _dt, timedelta
     today = _dt.today()
-    week_start = (today - timedelta(days=today.weekday())).isoformat()
-    week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
+    week_start = (today - timedelta(days=today.weekday())).isoformat()  # Monday
+    all_week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
+    # Exclude current activity to avoid double-counting when force=True
+    week_entries = [e for e in all_week_entries if e.get("activity_id") != act_id]
 
     # 4. Training summary + user goal (parallel)
     training_summary, goal_data = await asyncio.gather(
@@ -1086,7 +1098,8 @@ async def log_journal_entry(req: JournalLogRequest):
     days_left_in_week = 6 - weekday_idx  # days remaining after today (Sun=0 left)
 
     prompt = (
-        "你是Canova教练（意大利著名马拉松教练），正在为跑者撰写今日训练评语。\n"
+        f"你是Canova教练（意大利著名马拉松教练），正在为你的学员{runner_name}撰写今日训练评语。\n"
+        f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
         "你需要根据训练数据进行深入分析，不能只说'训练完成'。\n"
         "回复必须是纯 JSON，不含 markdown 标记。\n\n"
         f"【训练日志】{journal.get('title','训练日志')}\n"
