@@ -17,6 +17,8 @@ interface PersonaData {
   monthly_km?: number;
   fm_pb_sec?: number;
   years_running?: number;
+  custom_avatar_url?: string;
+  strava_profile_url?: string;
 }
 
 interface Props {
@@ -32,10 +34,13 @@ const FEMALE_IMGS = ["/personas/lv0.png","/personas/lv1.png","/personas/lv2.png"
 const MALE_IMGS   = ["/personas/m_lv0.png","/personas/m_lv1.png","/personas/m_lv2.png",
                      "/personas/m_lv3.png","/personas/m_lv4.png","/personas/m_lv5.png"];
 
-function personaImage(level: number, gender?: string): string {
-  const idx = Math.min(level, 5);
+function personaImage(persona: PersonaData): string {
+  if (persona.custom_avatar_url) return persona.custom_avatar_url;
+  if (persona.strava_profile_url) return persona.strava_profile_url;
+  
+  const idx = Math.min(persona.level, 5);
   // Use male set if gender is "male" AND image is expected to exist
-  if (gender === "male") return MALE_IMGS[idx];
+  if (persona.gender === "male") return MALE_IMGS[idx];
   return FEMALE_IMGS[idx];
 }
 
@@ -94,7 +99,7 @@ function LoadingSkeleton() {
 export default function RunnerPersona({ persona, loading }: Props) {
   if (loading) return <LoadingSkeleton />;
 
-  const imgSrc   = personaImage(persona.level, persona.gender);
+  const imgSrc   = personaImage(persona);
   const vibeTags = VIBE_TAGS[persona.level] ?? [];
 
   return (

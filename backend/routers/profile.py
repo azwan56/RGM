@@ -25,7 +25,7 @@ EDITABLE_FIELDS = {
     "height_cm", "weight_kg",
     "marathon_pb_sec", "half_pb_sec", "ten_k_pb_sec", "five_k_pb_sec",
     "training_goal", "phone", "bio",
-    "discord_webhook_url", "wecom_webhook_url",
+    "discord_webhook_url", "wecom_webhook_url", "custom_avatar_url",
     # upcoming_races handled separately as a list
 }
 
@@ -101,6 +101,7 @@ class ProfileUpdate(BaseModel):
     upcoming_races:   Optional[List[dict]] = None  # list of up to 3 race dicts
     discord_webhook_url: Optional[str] = None   # Discord channel webhook URL
     wecom_webhook_url:   Optional[str] = None   # 企业微信机器人 webhook URL
+    custom_avatar_url:   Optional[str] = None   # 用户自定义头像 URL
 
 
 @router.post("/update")
@@ -313,6 +314,8 @@ def get_runner_persona(uid: str):
         "fm_pb_sec":     fm_pb_sec,
         "years_running": years_running,
         "training_goal": training_goal,
+        "custom_avatar_url": profile.get("custom_avatar_url"),
+        "strava_profile_url": profile.get("strava_profile_url"),
         **persona,
     }
 

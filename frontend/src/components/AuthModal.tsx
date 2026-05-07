@@ -27,6 +27,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegister, setIsRegister] = useState(false);
+  const [agreePrivacy, setAgreePrivacy] = useState(false);
 
 
 
@@ -37,6 +38,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     setEmail("");
     setPassword("");
     setIsRegister(false);
+    setAgreePrivacy(false);
 
   }, []);
 
@@ -61,6 +63,10 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
 
   // ── Google ────────────────────────────────────────────────────────────────
   const handleGoogle = async () => {
+    if (!agreePrivacy) {
+      setError("请先阅读并勾选同意个人数据声明");
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -152,10 +158,19 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                 <p className="text-sm text-zinc-500 mt-1">请选择登录或注册方式</p>
               </div>
 
+              {error && <ErrorBanner>{error}</ErrorBanner>}
+
               <div className="space-y-3">
                 {/* Email — most reliable for China users */}
                 <button
-                  onClick={() => setScreen("email")}
+                  onClick={() => {
+                    if (!agreePrivacy) {
+                      setError("请先阅读并勾选同意个人数据声明");
+                      return;
+                    }
+                    setError("");
+                    setScreen("email");
+                  }}
                   className="w-full flex items-center gap-4 px-4 py-3.5 bg-white hover:bg-zinc-100 text-black font-semibold rounded-xl transition-all group"
                 >
                   <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-white shadow-sm border border-zinc-200 shrink-0">
@@ -191,9 +206,27 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                 </button>
               </div>
 
-              <p className="text-center text-xs text-zinc-600 mt-6">
-                注册即表示同意服务条款与隐私政策
-              </p>
+              <div className="mt-6">
+                <label className="flex items-start gap-2.5 text-xs text-zinc-400 cursor-pointer group">
+                  <div className="relative flex items-center justify-center shrink-0 mt-0.5">
+                    <input 
+                      type="checkbox" 
+                      checked={agreePrivacy}
+                      onChange={(e) => {
+                        setAgreePrivacy(e.target.checked);
+                        if (e.target.checked) setError("");
+                      }}
+                      className="peer appearance-none w-4 h-4 border border-zinc-600 rounded bg-transparent checked:bg-[#FC4C02] checked:border-[#FC4C02] focus:outline-none focus:ring-1 focus:ring-[#FC4C02]/50 transition-all cursor-pointer"
+                    />
+                    <svg className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <span className="leading-relaxed group-hover:text-zinc-300 transition-colors">
+                    我已阅读并同意个人数据声明：本平台会收集有限的个人数据用于存储和分析，但绝不会用于转售、训练 AI 模型或任何其他未经授权的用途。
+                  </span>
+                </label>
+              </div>
             </>
           )}
 

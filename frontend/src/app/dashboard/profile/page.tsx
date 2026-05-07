@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
+import { auth, storage } from "@/lib/firebase";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import axios from "@/lib/apiClient";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -85,7 +86,10 @@ export default function ProfilePage() {
     five_k_pb:       "",
     discord_webhook_url: "",
     wecom_webhook_url:   "",
+    custom_avatar_url:   "",
   });
+
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Race plan — separate state, up to 3 races
   interface RaceEntry { name: string; type: string; date: string; target_time: string }
@@ -125,6 +129,7 @@ export default function ProfilePage() {
           five_k_pb:     secsToTime(p.five_k_pb_sec),
           discord_webhook_url: p.discord_webhook_url || "",
           wecom_webhook_url:   p.wecom_webhook_url || "",
+          custom_avatar_url:   p.custom_avatar_url || "",
         });
         // Load races — filter out past ones
         const savedRaces = (p.upcoming_races || []).filter((r: any) => {
@@ -170,6 +175,7 @@ export default function ProfilePage() {
         upcoming_races: races.filter(r => r.type),  // only send non-empty races
         discord_webhook_url: form.discord_webhook_url || undefined,
         wecom_webhook_url:   form.wecom_webhook_url || undefined,
+        custom_avatar_url:   form.custom_avatar_url,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -280,6 +286,65 @@ export default function ProfilePage() {
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
           <SectionTitle>账号信息</SectionTitle>
           <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="自定义头像" hint="留空则默认使用 Strava 头像">
+              <div className="flex items-center gap-3">
+                {form.custom_avatar_url ? (
+                  <img src={form.custom_avatar_url} alt="avatar" className="w-11 h-11 rounded-full object-cover" />
+                ) : (
+                  <div className="w-11 h-11 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] text-zinc-500">默认</div>
+                )}
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !uid) return;
+                      if (!file.type.startsWith("image/")) {
+                        alert("请上传图片文件");
+                        return;
+                      }
+                      setUploadingAvatar(true);
+                      const ext = file.name.split('.').pop() || 'jpg';
+                      const storageRef = ref(storage, `avatars/${uid}/${Date.now()}.${ext}`);
+                      const uploadTask = uploadBytesResumable(storageRef, file);
+                      uploadTask.on(
+                        "state_changed",
+                        null,
+                        (err) => {
+                          console.error(err);
+                          alert("上传失败");
+                          setUploadingAvatar(false);
+                        },
+                        async () => {
+                          const url = await getDownloadURL(uploadTask.snapshot.ref);
+                          setForm(f => ({ ...f, custom_avatar_url: url }));
+                          setUploadingAvatar(false);
+                        }
+                      );
+                    }}
+                    disabled={uploadingAvatar}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                  />
+                  <button
+                    type="button"
+                    disabled={uploadingAvatar}
+                    className="px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs hover:bg-white/10 transition-all text-white"
+                  >
+                    {uploadingAvatar ? "上传中..." : "上传新头像"}
+                  </button>
+                </div>
+                {form.custom_avatar_url && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, custom_avatar_url: "" }))}
+                    className="text-xs text-red-400 hover:text-red-300 px-2"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+            </Field>
             <Field label="显示名称 / 昵称">
               <input className={inputCls} placeholder="你的跑步江湖名号" value={form.display_name} onChange={set("display_name")} />
             </Field>
