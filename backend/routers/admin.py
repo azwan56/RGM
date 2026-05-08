@@ -326,3 +326,11 @@ def test_gemini(request: Request):
     return {"status": "all_failed", "base_url": base_url, "results": results}
 
 
+# ── Strava Rate Limit Status ─────────────────────────────────────────────────
+
+@router.get("/strava-rate-limit")
+def strava_rate_limit(request: Request):
+    """Admin: returns current Strava API rate limit usage and remaining capacity."""
+    _check_admin(request)
+    from utils.strava_rate_limiter import get_rate_limit_status
+    return get_rate_limit_status()

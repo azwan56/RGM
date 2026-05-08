@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from firebase_config import db
 import requests
+from utils.strava_rate_limiter import strava_request
 import os
 from datetime import datetime, date, timedelta
 
@@ -95,12 +96,12 @@ def sync_user_data(req: SyncRequest):
     if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="Strava credentials missing.")
 
-    token_resp = requests.post("https://www.strava.com/oauth/token", data={
+    token_resp = strava_request("POST", "https://www.strava.com/oauth/token", data={
         "client_id":     client_id,
         "client_secret": client_secret,
         "grant_type":    "refresh_token",
         "refresh_token": refresh_token,
-    })
+    }, skip_throttle=True)
     if not token_resp.ok:
         raise HTTPException(status_code=400, detail=f"Failed to refresh token: {token_resp.text}")
 
@@ -126,7 +127,8 @@ def sync_user_data(req: SyncRequest):
 
     # 3. Fetch Strava activities from period start (single page, max 200)
     headers = {"Authorization": f"Bearer {access_token}"}
-    activities_resp = requests.get(
+    activities_resp = strava_request(
+        "GET",
         f"https://www.strava.com/api/v3/athlete/activities",
         params={"after": epoch_start, "per_page": 200},
         headers=headers,
@@ -229,7 +231,8 @@ def _run_full_sync_bg(uid: str, since_date: str, access_token: str, period: str,
         total_saved = 0
 
         while True:
-            resp = requests.get(
+            resp = strava_request(
+                "GET",
                 "https://www.strava.com/api/v3/athlete/activities",
                 params={"after": epoch_start, "per_page": PER_PAGE, "page": page},
                 headers=headers,
@@ -356,9 +359,10 @@ def get_activity_detail(activity_id: int, uid: str):
     if not access_token:
         raise HTTPException(status_code=400, detail="Strava not connected")
 
-    resp = requests.get(
+    resp = strava_request(
+        "GET",
         f"https://www.strava.com/api/v3/activities/{activity_id}",
-        headers={"Authorization": f"Bearer {access_token}"}
+        headers={"Authorization": f"Bearer {access_token}"},
     )
     if not resp.ok:
         raise HTTPException(status_code=400, detail=f"Failed to fetch activity: {resp.text}")
@@ -385,14 +389,15 @@ def get_activity_streams(activity_id: int, uid: str):
     if not access_token:
         raise HTTPException(status_code=400, detail="Strava not connected")
 
-    resp = requests.get(
+    resp = strava_request(
+        "GET",
         "https://www.strava.com/api/v3/activities/{}/streams".format(activity_id),
         params={
             "keys": "time,distance,velocity_smooth,heartrate,cadence,altitude",
             "key_by_type": "true"
         },
         headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15  # Strava can be slow — set explicit timeout
+        timeout=15,
     )
     if not resp.ok:
         raise HTTPException(status_code=400, detail=f"Failed to fetch streams: {resp.text}")
@@ -440,11 +445,12 @@ def get_activity_vdot(activity_id: int, uid: str):
         return {"vdot_analysis": None, "error": "Strava not connected"}
 
     # Fetch streams needed for VDOT (no cadence needed — saves bandwidth)
-    resp = requests.get(
+    resp = strava_request(
+        "GET",
         "https://www.strava.com/api/v3/activities/{}/streams".format(activity_id),
         params={"keys": "time,distance,velocity_smooth,heartrate,altitude", "key_by_type": "true"},
         headers={"Authorization": f"Bearer {access_token}"},
-        timeout=20
+        timeout=20,
     )
     if not resp.ok:
         return {"vdot_analysis": None, "error": f"Strava API error: {resp.status_code}"}

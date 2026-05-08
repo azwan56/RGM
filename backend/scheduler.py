@@ -51,13 +51,14 @@ def run_daily_sync() -> dict:
             continue
 
         try:
-            # Refresh token
-            token_resp = requests.post("https://www.strava.com/oauth/token", data={
+            # Refresh token (skip throttle for auth requests)
+            from utils.strava_rate_limiter import strava_request, get_rate_limit_status
+            token_resp = strava_request("POST", "https://www.strava.com/oauth/token", data={
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
-            }, timeout=15)
+            }, timeout=15, skip_throttle=True)
 
             if not token_resp.ok:
                 results["failed"] += 1
@@ -89,7 +90,8 @@ def run_daily_sync() -> dict:
 
             # Fetch activities
             headers = {"Authorization": f"Bearer {access_token}"}
-            act_resp = requests.get(
+            act_resp = strava_request(
+                "GET",
                 "https://www.strava.com/api/v3/athlete/activities",
                 params={"after": epoch_start, "per_page": 200},
                 headers=headers,
@@ -159,6 +161,20 @@ def run_daily_sync() -> dict:
 
     results["finished_at"] = datetime.now().isoformat()
     results["total_users"] = len(user_list)
+    # Log Strava rate limit status after sync
+    try:
+        rl_status = get_rate_limit_status()
+        results["strava_rate_limit"] = {
+            "usage_15min": rl_status["usage_15min"],
+            "limit_15min": rl_status["limit_15min"],
+            "usage_daily": rl_status["usage_daily"],
+            "limit_daily": rl_status["limit_daily"],
+            "pct_used_daily": rl_status["pct_used_daily"],
+        }
+        logger.info(f"[scheduler] Strava rate limit: {rl_status['usage_daily']}/{rl_status['limit_daily']} daily, "
+                    f"{rl_status['usage_15min']}/{rl_status['limit_15min']} 15min")
+    except Exception:
+        pass
     _last_sync_result = results
     logger.info(f"[scheduler] Daily sync complete: {results['synced']}/{len(user_list)} synced, "
                 f"{results['failed']} failed, {results['skipped']} skipped")
