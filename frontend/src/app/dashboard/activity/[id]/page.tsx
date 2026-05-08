@@ -208,7 +208,7 @@ export default function ActivityDetailPage() {
             <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066l-2.084 4.116z"/>
             <path d="M7.698 13.828l4.806-9.6 4.807 9.6h3.066L11.504 0 4.633 13.828h3.065z"/>
           </svg>
-          在 Strava 查看
+          View on Strava
         </a>
 
       </main>

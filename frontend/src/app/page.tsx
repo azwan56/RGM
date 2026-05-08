@@ -116,6 +116,11 @@ export default function Home() {
             <p className="text-zinc-400 text-sm">获取配速、心率区间和恢复建议等 AI 智能反馈。</p>
           </div>
         </div>
+        
+        {/* Footer */}
+        <div className="mt-20 text-center">
+          <p className="text-zinc-500 text-sm font-medium">Powered by Strava</p>
+        </div>
 
       </main>
 

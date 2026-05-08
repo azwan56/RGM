@@ -243,6 +243,11 @@ export default function Dashboard() {
             </Link>
           </div>
         )}
+        
+        {/* Footer */}
+        <div className="mt-12 mb-4 text-center">
+          <p className="text-zinc-500 text-sm font-medium">Powered by Strava</p>
+        </div>
 
       </main>
     </div>
