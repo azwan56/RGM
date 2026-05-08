@@ -4,15 +4,22 @@ import { auth } from "./firebase";
 // Create a custom axios instance
 const apiClient = axios.create();
 
+// Cache auth readiness — resolves once, never blocks again
+let _authReady = false;
+const _authReadyPromise = auth.authStateReady().then(() => { _authReady = true; });
+
 // Request interceptor to attach Firebase ID Token
 apiClient.interceptors.request.use(
   async (config) => {
-    // Wait for auth to initialize if it hasn't already
-    await auth.authStateReady();
-    
+    // Only wait for auth init once (first request); subsequent calls skip instantly
+    if (!_authReady) {
+      await _authReadyPromise;
+    }
+
     const user = auth.currentUser;
     if (user) {
       try {
+        // getIdToken() returns cached token if not expired (~instant)
         const token = await user.getIdToken();
         config.headers.Authorization = `Bearer ${token}`;
       } catch (error) {

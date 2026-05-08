@@ -27,17 +27,19 @@ interface YearlyEntry {
 
 type Tab = "monthly" | "weekly" | "yearly";
 
-export default function LeaderboardWidget({ currentUid, fixedHeight }: { currentUid: string; fixedHeight?: string }) {
+export default function LeaderboardWidget({ currentUid, fixedHeight, initialEntries }: { currentUid: string; fixedHeight?: string; initialEntries?: LeaderboardEntry[] }) {
   // Default: monthly ranking
   const [tab, setTab]               = useState<Tab>("monthly");
-  const [entries, setEntries]       = useState<LeaderboardEntry[]>([]);
+  const [entries, setEntries]       = useState<LeaderboardEntry[]>(initialEntries || []);
   const [yearly,  setYearly]        = useState<YearlyEntry[]>([]);
-  const [loading, setLoading]       = useState(true);
+  const [loading, setLoading]       = useState(!initialEntries);
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   // ── Monthly / Weekly — backend API (not direct Firestore) ─────────────────
   useEffect(() => {
     if (tab === "yearly") return;
+    // Skip initial fetch if data was provided via props (from combined dashboard endpoint)
+    if (tab === "monthly" && initialEntries && entries.length > 0) return;
     setLoading(true);
     axios.get(`${backendUrl}/api/data/leaderboard`, { params: { period: tab, limit_n: 20 } })
       .then((res) => {

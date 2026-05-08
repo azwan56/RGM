@@ -612,6 +612,124 @@ def get_goal_history(uid: str):
     }
 
 
+# ── GET /stats-summary/{uid} — Combined history + annual (1 scan) ────────────
+
+@router.get("/stats-summary/{uid}")
+def get_stats_summary(uid: str):
+    """
+    Combined endpoint returning both monthly goal history AND annual summary.
+    Performs a single Firestore activity scan instead of two separate scans,
+    saving ~200-800ms per page load.
+    """
+    year        = date.today().year
+    year_start  = f"{year}-01-01"
+    this_month  = date.today().strftime("%Y-%m")
+    MONTHS_CN   = ["一月","二月","三月","四月","五月","六月",
+                   "七月","八月","九月","十月","十一月","十二月"]
+
+    # Goal target
+    goal_doc = (db.collection("users").document(uid)
+                  .collection("goals").document("current").get())
+    overall_target = 100.0
+    monthly_targets_arr: list = []
+    if goal_doc.exists:
+        gd = goal_doc.to_dict() or {}
+        overall_target = float(gd.get("target_distance", gd.get("target_distance_km", 100)) or 100)
+        raw = gd.get("monthly_targets") or []
+        if isinstance(raw, list) and len(raw) == 12:
+            monthly_targets_arr = [float(v or overall_target) for v in raw]
+        else:
+            monthly_targets_arr = [overall_target] * 12
+
+    def month_target(m_idx: int) -> float:
+        t = monthly_targets_arr[m_idx - 1] if monthly_targets_arr else overall_target
+        return t if t > 0 else overall_target
+
+    # Single Firestore scan for ALL year activities
+    from collections import defaultdict
+    monthly_data: dict = defaultdict(lambda: {"km": 0.0, "runs": 0, "moving_time": 0})
+    total_km   = 0.0
+    total_runs = 0
+    total_time = 0
+    hr_sum     = 0
+    hr_cnt     = 0
+
+    acts = (db.collection("users").document(uid)
+              .collection("activities")
+              .where("start_date_local", ">=", year_start)
+              .stream())
+
+    for doc in acts:
+        a  = doc.to_dict()
+        mk = a.get("start_date_local", "")[:7]
+        km = a.get("distance_km", 0)
+        t  = a.get("moving_time", 0)
+        monthly_data[mk]["km"]          += km
+        monthly_data[mk]["runs"]        += 1
+        monthly_data[mk]["moving_time"] += t
+        total_km   += km
+        total_runs += 1
+        total_time += t
+        hr = a.get("avg_heart_rate", 0) or 0
+        if hr:
+            hr_sum += hr
+            hr_cnt += 1
+
+    # Build monthly history
+    months_results = []
+    for m_idx in range(1, date.today().month + 1):
+        mk       = f"{year}-{m_idx:02d}"
+        data     = monthly_data.get(mk, {"km": 0.0, "runs": 0, "moving_time": 0})
+        actual   = round(data["km"], 1)
+        target   = round(month_target(m_idx), 1)
+        pct      = round((actual / target) * 100) if target > 0 else 0
+        months_results.append({
+            "month":          mk,
+            "month_name":     MONTHS_CN[m_idx - 1],
+            "target_km":      target,
+            "actual_km":      actual,
+            "run_count":      data["runs"],
+            "completion_pct": pct,
+            "is_current":     mk == this_month,
+            "achieved":       actual >= target,
+        })
+
+    ytd_km      = sum(r["actual_km"]  for r in months_results)
+    ytd_runs    = sum(r["run_count"]  for r in months_results)
+    annual_tgt  = sum(month_target(m) for m in range(1, 13))
+
+    # Build annual summary
+    monthly_km  = {mk: d["km"] for mk, d in monthly_data.items()}
+    best_month    = max(monthly_km, key=monthly_km.get) if monthly_km else None
+    best_month_km = round(monthly_km[best_month], 1) if best_month else 0
+    months_elapsed = date.today().month
+    projected_km   = round((total_km / months_elapsed) * 12, 1) if months_elapsed else 0
+
+    return {
+        "history": {
+            "year":           year,
+            "monthly_target": round(overall_target, 1),
+            "annual_target":  round(annual_tgt, 1),
+            "months":         months_results,
+            "ytd_km":         round(ytd_km, 1),
+            "ytd_runs":       ytd_runs,
+        },
+        "annual": {
+            "year":             year,
+            "annual_target_km": round(annual_tgt, 1),
+            "total_km":         round(total_km, 1),
+            "total_runs":       total_runs,
+            "completion_pct":   round((total_km / annual_tgt) * 100, 1) if annual_tgt else 0,
+            "avg_monthly_km":   round(total_km / months_elapsed, 1) if months_elapsed else 0,
+            "projected_km":     projected_km,
+            "best_month":       best_month,
+            "best_month_km":    best_month_km,
+            "avg_pace":         pace_str(total_km * 1000, total_time),
+            "avg_heart_rate":   round(hr_sum / hr_cnt) if hr_cnt else 0,
+        },
+    }
+
+
 # ── GET /annual/{uid} ─────────────────────────────────────────────────────────
 
 @router.get("/annual/{uid}")

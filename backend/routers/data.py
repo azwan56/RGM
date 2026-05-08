@@ -9,28 +9,142 @@ Data flow: Browser → Render backend → Firestore (both outside GFW)
 
 from fastapi import APIRouter, Request
 from firebase_config import db
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 
 router = APIRouter()
+
+# Shared thread pool for parallel Firestore reads
+_executor = ThreadPoolExecutor(max_workers=6)
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _read_user_doc(uid: str):
+    doc = db.collection("users").document(uid).get()
+    return doc.to_dict() if doc.exists else None
+
+def _read_goal_doc(uid: str):
+    doc = db.collection("users").document(uid).collection("goals").document("current").get()
+    return doc.to_dict() if doc.exists else None
+
+def _read_leaderboard_doc(uid: str):
+    doc = db.collection("leaderboard").document(uid).get()
+    return doc.to_dict() if doc.exists else None
+
+def _read_leaderboard_list(period: str, limit_n: int = 20):
+    docs = (db.collection("leaderboard")
+              .where("period", "==", period)
+              .order_by("total_distance_km", direction="DESCENDING")
+              .limit(limit_n)
+              .stream())
+    return [d.to_dict() for d in docs]
+
+def _read_activities(uid: str, start: str, end: str):
+    q = db.collection("users").document(uid).collection("activities")
+    if start and end:
+        q = (q.where("start_date_local", ">=", start)
+              .where("start_date_local", "<", end)
+              .order_by("start_date_local", direction="DESCENDING"))
+    else:
+        q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
+    return [d.to_dict() for d in q.stream()]
+
+
+# ── Combined Dashboard endpoint (replaces 4 serial requests) ─────────────────
+
+@router.get("/dashboard/{uid}")
+def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
+    """
+    Single-request dashboard loader — returns init, stats, leaderboard, and
+    current month activities in one response. Cuts 4 serial API round-trips
+    down to 1 (saving 1-3s on high-latency connections).
+    """
+    # Default month = current month
+    if month < 0:
+        month = date.today().month - 1  # 0-indexed
+
+    # Calculate month range for activities
+    year = date.today().year
+    pad = lambda n: str(n).zfill(2)
+    act_start = f"{year}-{pad(month + 1)}-01T00:00:00"
+    next_month = month + 1
+    end_year = year + 1 if next_month > 11 else year
+    end_mon = 0 if next_month > 11 else next_month
+    act_end = f"{end_year}-{pad(end_mon + 1)}-01T00:00:00"
+
+    # Fire all Firestore reads in parallel
+    futures = {
+        _executor.submit(_read_user_doc, uid): "user",
+        _executor.submit(_read_goal_doc, uid): "goal",
+        _executor.submit(_read_leaderboard_doc, uid): "stats",
+        _executor.submit(_read_leaderboard_list, period): "leaderboard",
+        _executor.submit(_read_activities, uid, act_start, act_end): "activities",
+    }
+
+    results = {}
+    for future in as_completed(futures):
+        key = futures[future]
+        try:
+            results[key] = future.result()
+        except Exception as e:
+            print(f"[dashboard] {key} fetch error: {e}")
+            results[key] = None
+
+    user_data = results.get("user") or {}
+    goal = results.get("goal")
+    stats = results.get("stats") or {}
+    leaderboard_entries = results.get("leaderboard") or []
+    activities = results.get("activities") or []
+
+    # Strip sensitive tokens from user profile
+    safe_profile = {k: v for k, v in user_data.items()
+                    if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
+
+    display_name = (
+        user_data.get("display_name") or user_data.get("strava_name")
+        or (user_data.get("email", "").split("@")[0] if user_data.get("email") else "")
+    )
+
+    strava_connected = bool(user_data.get("strava_connected"))
+
+    # Determine period from goal
+    goal_period = "monthly"
+    if goal:
+        p = goal.get("period")
+        if p in ("weekly", "monthly"):
+            goal_period = p
+
+    return {
+        "profile": safe_profile,
+        "goal": goal,
+        "strava_connected": strava_connected,
+        "display_name": display_name,
+        "goal_period": goal_period,
+        "stats": stats,
+        "leaderboard": {"entries": leaderboard_entries},
+        "activities": {"activities": activities},
+    }
 
 
 # ── Dashboard init (profile + goals + strava status) ──────────────────────────
 
 @router.get("/init/{uid}")
 def get_dashboard_init(uid: str):
-    """Combined endpoint for dashboard initial load — avoids multiple Firestore round-trips."""
-    user_doc = db.collection("users").document(uid).get()
-    if not user_doc.exists:
-        return {"profile": None, "goal": None, "strava_connected": False}
+    """Combined endpoint for dashboard initial load — parallel Firestore reads."""
+    # Parallel read: user doc + goal doc
+    user_future = _executor.submit(_read_user_doc, uid)
+    goal_future = _executor.submit(_read_goal_doc, uid)
 
-    data = user_doc.to_dict() or {}
+    data = user_future.result()
+    if not data:
+        return {"profile": None, "goal": None, "strava_connected": False}
 
     # Strip sensitive tokens
     safe = {k: v for k, v in data.items()
             if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
 
-    # Goal
-    goal_doc = db.collection("users").document(uid).collection("goals").document("current").get()
-    goal = goal_doc.to_dict() if goal_doc.exists else None
+    goal = goal_future.result()
 
     return {
         "profile": safe,
@@ -75,17 +189,7 @@ def get_activities(uid: str, start: str = "", end: str = ""):
     Returns activities for a user within a date range.
     start/end format: 'YYYY-MM-DDT00:00:00'
     """
-    q = db.collection("users").document(uid).collection("activities")
-
-    if start and end:
-        q = (q.where("start_date_local", ">=", start)
-              .where("start_date_local", "<", end)
-              .order_by("start_date_local", direction="DESCENDING"))
-    else:
-        q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
-
-    docs = q.stream()
-    return {"activities": [d.to_dict() for d in docs]}
+    return {"activities": _read_activities(uid, start, end)}
 
 
 # ── Single activity ───────────────────────────────────────────────────────────
@@ -97,3 +201,4 @@ def get_single_activity(uid: str, activity_id: str):
     if not doc.exists:
         return {"activity": None}
     return {"activity": doc.to_dict()}
+

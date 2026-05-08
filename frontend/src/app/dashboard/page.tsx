@@ -1,29 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import axios from "@/lib/apiClient";
-import dynamic from "next/dynamic";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
-
-const Skeleton = ({ h = "h-40" }: { h?: string }) => (
-  <div className={`${h} rounded-3xl bg-white/5 border border-white/10 animate-pulse`} />
-);
-
-const RunningStatsPanel = dynamic(() => import("@/components/RunningStatsPanel"), {
-  ssr: false,
-  loading: () => <Skeleton h="h-52" />,
-});
-const ActivityList = dynamic(() => import("@/components/ActivityList"), {
-  ssr: false,
-  loading: () => <Skeleton h="h-full" />,
-});
-const LeaderboardWidget = dynamic(() => import("@/components/LeaderboardWidget"), {
-  ssr: false,
-  loading: () => <Skeleton h="h-full" />,
-});
+import RunningStatsPanel from "@/components/RunningStatsPanel";
+import ActivityList from "@/components/ActivityList";
+import LeaderboardWidget from "@/components/LeaderboardWidget";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -34,6 +19,29 @@ export default function Dashboard() {
   const [displayName, setDisplayName] = useState("");
   const [activityMonth, setActivityMonth] = useState(new Date().getMonth());
 
+  // Pre-fetched data from combined endpoint
+  const [dashboardData, setDashboardData] = useState<any>(null);
+
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+  // Fetch all dashboard data in ONE request (replaces 4 serial requests)
+  const fetchDashboard = useCallback(async (uid: string, month: number) => {
+    try {
+      const res = await axios.get(`${backendUrl}/api/data/dashboard/${uid}`, {
+        params: { period: "monthly", month },
+      });
+      const d = res.data;
+      setDashboardData(d);
+      if (d.strava_connected) setIsStravaConnected(true);
+      setDisplayName(d.display_name || "");
+      if (d.goal_period === "weekly" || d.goal_period === "monthly") {
+        setPeriod(d.goal_period);
+      }
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+    }
+  }, [backendUrl]);
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (u) => {
       if (!u) {
@@ -41,28 +49,33 @@ export default function Dashboard() {
         return;
       }
       setUser(u);
-
-      // Fetch profile + goals from backend API (not direct Firestore — faster in China)
-      try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-        const res = await axios.get(`${backendUrl}/api/data/init/${u.uid}`);
-        const { profile, goal, strava_connected, display_name } = res.data;
-
-        if (strava_connected) setIsStravaConnected(true);
-        setDisplayName(display_name || u.displayName || "");
-
-        if (goal) {
-          const p = goal.period;
-          if (p === "weekly" || p === "monthly") setPeriod(p);
-        }
-      } catch (err) {
-        console.error("Dashboard init error:", err);
-        setDisplayName(u.displayName || u.email?.split("@")[0] || "");
-      }
+      await fetchDashboard(u.uid, activityMonth);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, fetchDashboard, activityMonth]);
+
+  // Refetch only activities when month changes
+  const handleMonthChange = useCallback(async (newMonth: number) => {
+    setActivityMonth(newMonth);
+    if (user) {
+      try {
+        const year = new Date().getFullYear();
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const start = `${year}-${pad(newMonth + 1)}-01T00:00:00`;
+        const nextMonth = newMonth + 1;
+        const endYear = nextMonth > 11 ? year + 1 : year;
+        const endMon = nextMonth > 11 ? 0 : nextMonth;
+        const end = `${endYear}-${pad(endMon + 1)}-01T00:00:00`;
+        const res = await axios.get(`${backendUrl}/api/data/activities/${user.uid}`, {
+          params: { start, end },
+        });
+        setDashboardData((prev: any) => prev ? { ...prev, activities: res.data } : prev);
+      } catch (err) {
+        console.error("Activities fetch error:", err);
+      }
+    }
+  }, [user, backendUrl]);
 
   if (loading) {
     return (
@@ -136,9 +149,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Running Stats Panel */}
+        {/* Running Stats Panel — pass pre-fetched stats */}
         {isStravaConnected && user && (
-          <RunningStatsPanel uid={user.uid} />
+          <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
 
         {/* Leaderboard + Activity List — side by side, fixed height */}
@@ -147,7 +160,7 @@ export default function Dashboard() {
             {/* Leaderboard — first */}
             <div className="flex flex-col" style={{ height: "520px" }}>
               <div className="flex-1 overflow-hidden">
-                <LeaderboardWidget currentUid={user.uid} fixedHeight="520px" />
+                <LeaderboardWidget currentUid={user.uid} fixedHeight="520px" initialEntries={dashboardData?.leaderboard?.entries} />
               </div>
             </div>
 
@@ -157,7 +170,7 @@ export default function Dashboard() {
                 <h2 className="text-lg font-bold text-white">跑步记录</h2>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => setActivityMonth(m => Math.max(m - 1, 0))}
+                    onClick={() => handleMonthChange(Math.max(activityMonth - 1, 0))}
                     disabled={activityMonth <= 0}
                     className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
                   >
@@ -167,7 +180,7 @@ export default function Dashboard() {
                     {new Date().getFullYear()}年{activityMonth + 1}月
                   </span>
                   <button
-                    onClick={() => setActivityMonth(m => Math.min(m + 1, new Date().getMonth()))}
+                    onClick={() => handleMonthChange(Math.min(activityMonth + 1, new Date().getMonth()))}
                     disabled={activityMonth >= new Date().getMonth()}
                     className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 text-zinc-400 hover:text-white transition-all"
                   >
@@ -176,7 +189,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto px-5 pb-5 scrollbar-thin">
-                <ActivityList uid={user.uid} month={activityMonth} />
+                <ActivityList uid={user.uid} month={activityMonth} initialActivities={dashboardData?.activities?.activities} />
               </div>
             </div>
           </div>
@@ -235,4 +248,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

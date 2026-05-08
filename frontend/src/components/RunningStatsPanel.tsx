@@ -45,8 +45,8 @@ function formatPeriodLabel(period: "weekly" | "monthly", periodStart: string | n
   }
 }
 
-export default function RunningStatsPanel({ uid }: { uid: string }) {
-  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
+export default function RunningStatsPanel({ uid, initialStats }: { uid: string; initialStats?: any }) {
+  const [stats, setStats] = useState<Stats>(initialStats ? { ...EMPTY_STATS, ...initialStats } : EMPTY_STATS);
   const [syncing, setSyncing] = useState(false);
   const [fullSyncing, setFullSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
@@ -65,8 +65,9 @@ export default function RunningStatsPanel({ uid }: { uid: string }) {
   }, [uid, backendUrl]);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    // Skip fetch if initial data was provided (from combined dashboard endpoint)
+    if (!initialStats) fetchStats();
+  }, [fetchStats, initialStats]);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);

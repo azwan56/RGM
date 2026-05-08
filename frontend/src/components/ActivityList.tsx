@@ -48,16 +48,20 @@ function getMonthRange(month: number): [string, string] {
 interface Props {
   uid: string;
   month: number; // 0-indexed (Jan=0, Feb=1, ...)
+  initialActivities?: Activity[];
 }
 
-export default function ActivityList({ uid, month }: Props) {
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ActivityList({ uid, month, initialActivities }: Props) {
+  const [activities, setActivities] = useState<Activity[]>(initialActivities || []);
+  const [loading, setLoading] = useState(!initialActivities);
+  const [initialMonth] = useState(month); // Track the initial month to know when to skip fetch
   const router = useRouter();
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   useEffect(() => {
     if (!uid) return;
+    // Skip fetch for initial month if data was provided via props
+    if (initialActivities && month === initialMonth) return;
     setLoading(true);
     const [startISO, endISO] = getMonthRange(month);
 

@@ -118,6 +118,7 @@ async def debug_models():
 
 class CoachRequest(BaseModel):
     uid: str
+    force_refresh: bool = False
 
 # ── Firestore helpers (run in thread pool) ────────────────────────────────────
 
@@ -594,7 +595,27 @@ async def generate_coach_feedback(req: CoachRequest):
     """
     Returns structured AI coaching feedback in Chinese.
     Parallel Firestore reads + personalized, encouraging tone.
+    Uses Firestore cache with 6h TTL to avoid slow Gemini API calls.
     """
+    from datetime import datetime, timedelta
+
+    # ── Check cache first (saves 10-30 seconds) ──────────────────────────────
+    CACHE_TTL_HOURS = 6
+    if not req.force_refresh:
+        try:
+            cache_ref = db.collection("users").document(req.uid).collection("meta").document("coach_cache")
+            cache_doc = cache_ref.get()
+            if cache_doc.exists:
+                cached = cache_doc.to_dict()
+                cached_at = cached.get("cached_at", "")
+                if cached_at:
+                    cache_time = datetime.fromisoformat(cached_at)
+                    if datetime.now() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
+                        print(f"[coach] Cache hit for {req.uid} (cached {cached_at})")
+                        return {"feedback": cached.get("feedback", {})}
+        except Exception as e:
+            print(f"[coach] Cache read error: {e}")
+
     loop = asyncio.get_event_loop()
     stats, goal_data, activities, profile, training_summary = await asyncio.gather(
         loop.run_in_executor(None, _fetch_leaderboard, req.uid),
@@ -933,6 +954,11 @@ async def generate_coach_feedback(req: CoachRequest):
                 "nearest_race_days": nearest_days if nearest_days < 9999 else None,
                 "nearest_race_name": nearest_race.get("name", "") if nearest_race else "",
             }, merge=False)
+            # Write to cache for fast subsequent loads
+            db.collection("users").document(req.uid).collection("meta").document("coach_cache").set({
+                "feedback": feedback,
+                "cached_at": __import__("datetime").datetime.now().isoformat(),
+            })
         except Exception as _save_err:
             print(f"[coach] Failed to save: {_save_err}")
 

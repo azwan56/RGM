@@ -55,13 +55,13 @@ export default function GoalHistoryPanel({ uid }: { uid: string }) {
 
   useEffect(() => {
     if (!uid) return;
-    Promise.all([
-      axios.get(`${backendUrl}/api/sync/history/${uid}`),
-      axios.get(`${backendUrl}/api/sync/annual/${uid}`),
-    ]).then(([h, a]) => {
-      setHistory(h.data);
-      setAnnual(a.data);
-    }).catch(console.error)
+    // Use combined endpoint (1 Firestore scan instead of 2)
+    axios.get(`${backendUrl}/api/sync/stats-summary/${uid}`)
+      .then((res) => {
+        setHistory(res.data.history);
+        setAnnual(res.data.annual);
+      })
+      .catch(console.error)
       .finally(() => setLoading(false));
   }, [uid, backendUrl]);
 

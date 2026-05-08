@@ -99,7 +99,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
     setErrorStr(null);
     try {
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
-      const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
+      const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid, force_refresh: true });
       if (typeof res.data.feedback === "string") {
         setErrorStr(res.data.feedback);
       } else {
