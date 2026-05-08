@@ -9,6 +9,8 @@ router = APIRouter()
 
 _api_key = os.getenv("GEMINI_API_KEY")
 _gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+_gemini_proxy_url = os.getenv("GEMINI_PROXY_URL", "https://us-central1-dailystockrpt.cloudfunctions.net/gemini_proxy")
+_gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "rgm_gemini_proxy_2026")
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
@@ -17,21 +19,53 @@ _MODEL_CANDIDATES = [
     "gemini-flash-latest",       # Alias for latest flash
 ]
 _resolved_model = None  # Will be set on first successful call
+_use_proxy = None  # None = auto-detect, True = proxy, False = direct
 
 import requests as http_requests
 
 def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True) -> dict:
-    """Call Gemini REST API directly, bypassing SDK version issues."""
-    global _resolved_model
+    """Call Gemini API — tries Cloud Functions proxy first, falls back to direct REST."""
+    global _resolved_model, _use_proxy
 
+    model_name = _resolved_model or _MODEL_CANDIDATES[0]
+
+    # ── Strategy 1: Cloud Functions proxy (avoids GeoIP blocks) ──
+    if _use_proxy is not False and _gemini_proxy_url:
+        try:
+            body = {
+                "secret": _gemini_proxy_secret,
+                "model": model_name,
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                },
+            }
+            if response_json:
+                body["generationConfig"]["responseMimeType"] = "application/json"
+
+            resp = http_requests.post(_gemini_proxy_url, json=body, timeout=90)
+            if resp.status_code == 200:
+                _use_proxy = True  # Cache: proxy works
+                _resolved_model = model_name
+                data = resp.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                print(f"[gemini] Proxy OK: {model_name}")
+                return {"text": text, "model": model_name, "api_version": "proxy"}
+            else:
+                print(f"[gemini] Proxy returned {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[gemini] Proxy error: {e}")
+
+    # ── Strategy 2: Direct Gemini REST API (fallback) ──
     models_to_try = [_resolved_model] if _resolved_model else _MODEL_CANDIDATES
 
     last_error = None
-    for model_name in models_to_try:
+    for mn in models_to_try:
         # v1 does NOT support responseMimeType, so only use v1beta for JSON mode
         api_versions = ["v1beta"] if response_json else ["v1beta", "v1"]
         for api_ver in api_versions:
-            url = f"{_gemini_base_url}/{api_ver}/models/{model_name}:generateContent?key={_api_key}"
+            url = f"{_gemini_base_url}/{api_ver}/models/{mn}:generateContent?key={_api_key}"
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -45,12 +79,13 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
             try:
                 resp = http_requests.post(url, json=body, timeout=60)
                 if resp.status_code == 200:
-                    _resolved_model = model_name  # Cache working model
+                    _resolved_model = mn  # Cache working model
+                    _use_proxy = False  # Direct works, skip proxy next time
                     data = resp.json()
                     text = data["candidates"][0]["content"]["parts"][0]["text"]
-                    return {"text": text, "model": model_name, "api_version": api_ver}
+                    return {"text": text, "model": mn, "api_version": api_ver}
                 else:
-                    last_error = f"{model_name}@{api_ver}: {resp.status_code} {resp.text[:200]}"
+                    last_error = f"{mn}@{api_ver}: {resp.status_code} {resp.text[:200]}"
                     print(f"[gemini] {last_error}")
                     # If cached model is gone (404), clear cache and retry all candidates
                     if resp.status_code == 404 and _resolved_model:
@@ -58,7 +93,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                         _resolved_model = None
                         return _gemini_generate(prompt, temperature, max_tokens, response_json)
             except Exception as e:
-                last_error = f"{model_name}@{api_ver}: {e}"
+                last_error = f"{mn}@{api_ver}: {e}"
                 print(f"[gemini] {last_error}")
 
     raise Exception(f"All Gemini models failed. Last error: {last_error}")
