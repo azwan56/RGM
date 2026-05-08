@@ -164,15 +164,14 @@ def run_daily_sync() -> dict:
     # Log Strava rate limit status after sync
     try:
         rl_status = get_rate_limit_status()
-        results["strava_rate_limit"] = {
-            "usage_15min": rl_status["usage_15min"],
-            "limit_15min": rl_status["limit_15min"],
-            "usage_daily": rl_status["usage_daily"],
-            "limit_daily": rl_status["limit_daily"],
-            "pct_used_daily": rl_status["pct_used_daily"],
-        }
-        logger.info(f"[scheduler] Strava rate limit: {rl_status['usage_daily']}/{rl_status['limit_daily']} daily, "
-                    f"{rl_status['usage_15min']}/{rl_status['limit_15min']} 15min")
+        results["strava_rate_limit"] = rl_status
+        o = rl_status["overall"]
+        r = rl_status["read"]
+        logger.info(
+            f"[scheduler] Strava rate limit — "
+            f"Overall: {o['usage_daily']}/{o['limit_daily']} daily ({o['pct_used_daily']}%), "
+            f"Read: {r['usage_daily']}/{r['limit_daily']} daily ({r['pct_used_daily']}%)"
+        )
     except Exception:
         pass
     _last_sync_result = results
