@@ -40,16 +40,24 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
                 },
+                # Cap thinking budget so output tokens aren't starved
+                "thinkingConfig": {"thinkingBudget": min(2048, max_tokens)},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
 
-            resp = http_requests.post(_gemini_proxy_url, json=body, timeout=90)
+            resp = http_requests.post(_gemini_proxy_url, json=body, timeout=120)
             if resp.status_code == 200:
                 _use_proxy = True  # Cache: proxy works
                 _resolved_model = model_name
                 data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                # Robustly extract text — thinking models may return empty content
+                try:
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                except (KeyError, IndexError, TypeError):
+                    finish_reason = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
+                    print(f"[gemini] Proxy returned empty content (finishReason={finish_reason})")
+                    raise Exception(f"Gemini returned no text (finishReason={finish_reason})")
                 print(f"[gemini] Proxy OK: {model_name}")
                 return {"text": text, "model": model_name, "api_version": "proxy"}
             else:
@@ -72,17 +80,24 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
                 },
+                "thinkingConfig": {"thinkingBudget": min(2048, max_tokens)},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
 
             try:
-                resp = http_requests.post(url, json=body, timeout=60)
+                resp = http_requests.post(url, json=body, timeout=120)
                 if resp.status_code == 200:
                     _resolved_model = mn  # Cache working model
                     _use_proxy = False  # Direct works, skip proxy next time
                     data = resp.json()
-                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    try:
+                        text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    except (KeyError, IndexError, TypeError):
+                        finish_reason = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
+                        last_error = f"{mn}@{api_ver}: empty response (finishReason={finish_reason})"
+                        print(f"[gemini] {last_error}")
+                        continue
                     return {"text": text, "model": mn, "api_version": api_ver}
                 else:
                     last_error = f"{mn}@{api_ver}: {resp.status_code} {resp.text[:200]}"

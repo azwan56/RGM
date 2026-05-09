@@ -254,54 +254,53 @@ def _compute_hr_zones(heartrates: list, max_hr: int, rest_hr: int) -> dict:
 
 
 def format_stream_stats_for_prompt(stats: dict) -> str:
-    """Format stream analysis results into a readable string for AI prompt injection."""
+    """Format stream analysis results into a compact string for AI prompt injection."""
     lines = []
 
-    # Pace splits
+    # Pace splits — compact one-line format
     splits = stats.get("pace_splits", [])
     if splits:
-        split_strs = [f"  K{s['km']}: {s['pace']}/km" for s in splits]
-        lines.append("【逐公里配速】")
-        lines.extend(split_strs)
+        split_strs = " | ".join(f"K{s['km']}:{s['pace']}" for s in splits)
+        lines.append(f"【逐公里配速】{split_strs}")
+        summary_parts = []
         if stats.get("best_km"):
-            lines.append(f"  最快: K{stats['best_km']['km']} ({stats['best_km']['pace']}/km)")
+            summary_parts.append(f"最快K{stats['best_km']['km']}({stats['best_km']['pace']})")
         if stats.get("worst_km"):
-            lines.append(f"  最慢: K{stats['worst_km']['km']} ({stats['worst_km']['pace']}/km)")
+            summary_parts.append(f"最慢K{stats['worst_km']['km']}({stats['worst_km']['pace']})")
         if stats.get("pace_consistency"):
-            lines.append(f"  配速稳定性: {stats['pace_consistency']} (CV={stats.get('pace_cv', 0)}%)")
+            summary_parts.append(f"稳定性:{stats['pace_consistency']}(CV={stats.get('pace_cv', 0)}%)")
         if "negative_split" in stats:
-            ns = "负分段（后半程加速）" if stats["negative_split"] else "正分段（后半程减速）"
-            lines.append(f"  分段策略: {ns}, 差异{abs(stats.get('split_diff_pct', 0))}%")
+            ns = "负分段" if stats["negative_split"] else "正分段"
+            summary_parts.append(f"{ns}({abs(stats.get('split_diff_pct', 0))}%)")
+        if summary_parts:
+            lines.append("  " + ", ".join(summary_parts))
 
-    # HR zones
+    # HR zones — compact
     hr_zones = stats.get("hr_zones", {})
     if hr_zones and hr_zones.get("primary_zone"):
-        lines.append("\n【心率区间分布】")
+        zone_parts = []
         for z in ["Z1", "Z2", "Z3", "Z4", "Z5"]:
-            if z in hr_zones and isinstance(hr_zones[z], dict):
-                pct = hr_zones[z]["pct"]
-                name = hr_zones[z]["name"]
-                bar = "█" * int(pct / 5) if pct > 0 else ""
-                lines.append(f"  {z} {name}: {pct}% {bar}")
-        lines.append(f"  主要训练区间: {hr_zones['primary_zone']}")
+            if z in hr_zones and isinstance(hr_zones[z], dict) and hr_zones[z]["pct"] > 0:
+                zone_parts.append(f"{z}({hr_zones[z]['name']}):{hr_zones[z]['pct']}%")
+        lines.append(f"【心率区间】{', '.join(zone_parts)} → 主区间:{hr_zones['primary_zone']}")
 
     # HR drift
     if "hr_drift_pct" in stats:
-        lines.append(f"\n【心率漂移】{stats['hr_drift_pct']}% — {stats.get('hr_drift_assessment', '')}")
+        lines.append(f"【心率漂移】{stats['hr_drift_pct']}% — {stats.get('hr_drift_assessment', '')}")
 
     # Cadence
     if "cadence_avg" in stats:
-        lines.append(f"\n【步频分析】平均 {stats['cadence_avg']}spm, 范围 {stats.get('cadence_range', [])}")
+        cad_line = f"【步频】平均{stats['cadence_avg']}spm 范围{stats.get('cadence_range', [])}"
         if stats.get("cadence_assessment"):
-            lines.append(f"  评估: {stats['cadence_assessment']}")
+            cad_line += f" → {stats['cadence_assessment']}"
+        lines.append(cad_line)
 
     # Elevation
     if "elevation_gain" in stats:
         lines.append(
-            f"\n【海拔分析】爬升 +{stats['elevation_gain']}m / 下降 -{stats['elevation_loss']}m, "
-            f"海拔范围 {stats.get('elevation_min', 0)}-{stats.get('elevation_max', 0)}m"
+            f"【海拔】+{stats['elevation_gain']}m/-{stats['elevation_loss']}m, "
+            f"范围{stats.get('elevation_min', 0)}-{stats.get('elevation_max', 0)}m, "
+            f"地形:{stats.get('terrain_type', '—')}"
         )
-        if stats.get("terrain_type"):
-            lines.append(f"  地形: {stats['terrain_type']}")
 
     return "\n".join(lines)
