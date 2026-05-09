@@ -334,3 +334,27 @@ def strava_rate_limit(request: Request):
     _check_admin(request)
     from utils.strava_rate_limiter import get_rate_limit_status
     return get_rate_limit_status()
+
+
+@router.post("/refresh-journal")
+def refresh_journal(request: Request, uid: str, activity_id: str):
+    """Admin: force-refresh an AI journal entry for a specific activity."""
+    _check_admin(request)
+    import asyncio
+    from routers.coach import log_journal_entry, JournalLogRequest
+
+    journal_req = JournalLogRequest(uid=uid, activity_id=activity_id, force=True)
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(log_journal_entry(journal_req))
+    finally:
+        loop.close()
+
+    entry = result.get("entry", {})
+    return {
+        "success": bool(entry.get("ai_comment")),
+        "ai_comment_preview": entry.get("ai_comment", "")[:200],
+        "training_type": entry.get("training_type", ""),
+        "fatigue_level": entry.get("fatigue_level", ""),
+        "journal_id": result.get("journal_id", ""),
+    }
