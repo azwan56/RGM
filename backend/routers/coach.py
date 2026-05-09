@@ -1291,13 +1291,19 @@ async def log_journal_entry(req: JournalLogRequest):
     ai = {"ai_comment": "训练完成，继续保持！", "fatigue_level": "moderate",
           "performance_note": "", "tomorrow_suggestion": "", "training_type": "",
           "encouragement": ""}
-    if _api_key:
+    # Try generating AI feedback (proxy or direct — _gemini_generate handles both)
+    if _api_key or _gemini_proxy_url:
         try:
             resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
             text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             ai = json.loads(text)
+            print(f"[journal] AI generated OK via {resp.get('api_version','?')}, comment length={len(ai.get('ai_comment',''))}")
+        except json.JSONDecodeError as e:
+            print(f"[journal] AI JSON parse error: {e}, raw text: {text[:200] if 'text' in dir() else 'N/A'}")
         except Exception as e:
-            print(f"[journal] AI error: {e}")
+            print(f"[journal] AI error: {type(e).__name__}: {e}")
+    else:
+        print("[journal] Skipped AI: no GEMINI_API_KEY and no GEMINI_PROXY_URL")
 
     entry = {
         "date": entry_date, "entry_type": "daily",
