@@ -1081,6 +1081,49 @@ async def log_journal_entry(req: JournalLogRequest):
     if not activity:
         return {"error": "No activity found"}
 
+    # 1b. Load or fetch stream stats for deeper analysis
+    stream_stats = activity.get("stream_stats", {})
+    if not stream_stats and req.activity_id:
+        # Stream stats not yet cached — try to fetch from Strava on-demand
+        try:
+            from utils.strava_rate_limiter import strava_request
+            from utils.stream_analyzer import analyze_streams
+
+            access_token = user_data.get("strava_access_token")
+            act_id_num = activity.get("activity_id", req.activity_id)
+            if access_token and act_id_num:
+                stream_resp = strava_request(
+                    "GET",
+                    f"https://www.strava.com/api/v3/activities/{act_id_num}/streams",
+                    params={
+                        "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
+                        "key_by_type": "true",
+                    },
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=15,
+                )
+                if stream_resp.ok:
+                    raw = stream_resp.json()
+                    max_hr = user_data.get("max_heart_rate", 190)
+                    rest_hr = user_data.get("resting_heart_rate", 60)
+                    stream_stats = analyze_streams(
+                        distances=raw.get("distance", {}).get("data", []),
+                        velocities=raw.get("velocity_smooth", {}).get("data", []),
+                        heartrates=raw.get("heartrate", {}).get("data", []),
+                        cadences=raw.get("cadence", {}).get("data", []),
+                        altitudes=raw.get("altitude", {}).get("data", []),
+                        max_hr=max_hr,
+                        rest_hr=rest_hr,
+                    )
+                    # Cache for next time
+                    if stream_stats:
+                        user_ref.collection("activities").document(
+                            str(act_id_num)
+                        ).set({"stream_stats": stream_stats}, merge=True)
+                        print(f"[journal] Stream stats fetched & cached for {act_id_num}")
+        except Exception as _se:
+            print(f"[journal] Stream fetch skipped: {_se}")
+
     # 2. Get/create journal
     journal = _get_or_create_journal(uid)
     journal_id = journal["journal_id"]
@@ -1158,6 +1201,12 @@ async def log_journal_entry(req: JournalLogRequest):
     remaining_km = max(0, target_wk - week_km)
     days_left_in_week = 6 - weekday_idx  # days remaining after today (Sun=0 left)
 
+    # Build stream stats text for the prompt (if available)
+    stream_stats_text = ""
+    if stream_stats:
+        from utils.stream_analyzer import format_stream_stats_for_prompt
+        stream_stats_text = format_stream_stats_for_prompt(stream_stats)
+
     prompt = (
         f"你是Canova教练（意大利著名马拉松教练），正在为你的学员{runner_name}撰写今日训练评语。\n"
         f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
@@ -1171,9 +1220,17 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 配速：{act_pace}/km（8周平均：{avg_pace_8w}/km，{'今日偏慢' if act_pace > avg_pace_8w else '今日偏快或持平'}）\n"
         f"- 平均心率：{act_hr}bpm（8周平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
         f"- 海拔爬升：{act_elev}m{'（越野/山地训练）' if is_trail else ''}\n"
+        f"- 步频：{act_cadence}spm\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
-        f"- 日期：{entry_date}（{today_weekday}）\n\n"
-        f"【本周训练进度】\n"
+        f"- 日期：{entry_date}（{today_weekday}）\n"
+    )
+
+    # Append detailed stream data when available
+    if stream_stats_text:
+        prompt += f"\n{stream_stats_text}\n"
+
+    prompt += (
+        f"\n【本周训练进度】\n"
         f"- 本周已跑：{week_km:.1f}km / {week_runs}次，周目标{target_wk:.0f}km（完成{min(100,round(week_km/target_wk*100))}%）\n"
         f"- 本周还需完成：{remaining_km:.1f}km，剩余{days_left_in_week}天\n"
         f"- 明天是{tomorrow_weekday}\n\n"
@@ -1187,17 +1244,29 @@ async def log_journal_entry(req: JournalLogRequest):
         "2. 配速与心率的匹配度（是否在合理区间）\n"
         "3. 与8周平均数据的对比（进步还是退步）\n"
         "4. 本周训练负荷是否合理\n"
-        "5. 对备赛目标的贡献度\n\n"
-        "【明日训练建议的要求】\n"
+        "5. 对备赛目标的贡献度\n"
+    )
+
+    # Add stream-specific analysis dimensions when data is available
+    if stream_stats_text:
+        prompt += (
+            "6. 逐公里配速分析：是否存在明显掉速？配速稳定性如何？\n"
+            "7. 心率区间评估：训练强度是否与目的匹配（轻松跑应以Z2为主，节奏跑应以Z3-Z4为主）？\n"
+            "8. 心率漂移评估：有氧耐力水平如何？是否需要加强有氧基础？\n"
+            "9. 步频建议：步频是否在最优范围（170-185spm）？\n"
+        )
+
+    prompt += (
+        "\n【明日训练建议的要求】\n"
         "- 必须考虑周目标剩余距离和本周已有训练负荷\n"
         "- 周六周日适合安排长距离有氧或LSD（Long Slow Distance），工作日偏向轻松跑、恢复跑或短距离节奏跑\n"
         "- 如果本周已完成较多距离，明天可以建议休息或轻松恢复\n"
         "- 给出具体的距离、配速和强度建议\n\n"
         '返回JSON格式：\n'
         '{\n'
-        '  "ai_comment": "<5-8句详细评语，必须引用具体数据（配速、心率、距离），分析训练质量和效果>",\n'
-        '  "fatigue_level": "<low|moderate|high，基于心率/配速/本周累积综合判断>",\n'
-        '  "performance_note": "<今日训练的核心亮点或需要注意的问题，2句话>",\n'
+        '  "ai_comment": "<8-12句详细评语，必须引用逐公里配速、心率区间、心率漂移等具体数据，深入分析训练质量>",\n'
+        '  "fatigue_level": "<low|moderate|high，基于心率漂移/配速变化/本周累积综合判断>",\n'
+        '  "performance_note": "<今日训练的核心亮点或需要注意的问题，2-3句话>",\n'
         '  "tomorrow_suggestion": "<明天的具体训练建议，含距离、配速和强度，要考虑星期、周目标剩余和疲劳度>",\n'
         '  "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>",\n'
         '  "encouragement": "<1-2句温暖有力的鼓励语，像教练对学员说的话，有人情味>"\n'

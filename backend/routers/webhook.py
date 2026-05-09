@@ -285,6 +285,47 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
 
         _recalculate_leaderboards(uid, user_ref)
 
+        # ── Fetch & cache stream stats (per-km splits, HR zones, etc.) ──────
+        # This costs 1 extra Strava API call but gives the AI coach much richer
+        # data for training analysis (pace variability, HR drift, cadence, etc.)
+        stream_stats = {}
+        try:
+            from utils.strava_rate_limiter import strava_request
+            from utils.stream_analyzer import analyze_streams
+
+            stream_resp = strava_request(
+                "GET",
+                f"https://www.strava.com/api/v3/activities/{activity_id}/streams",
+                params={
+                    "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
+                    "key_by_type": "true",
+                },
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=15,
+            )
+            if stream_resp.ok:
+                raw = stream_resp.json()
+                max_hr = user_data.get("max_heart_rate", 190)
+                rest_hr = user_data.get("resting_heart_rate", 60)
+                stream_stats = analyze_streams(
+                    distances=raw.get("distance", {}).get("data", []),
+                    velocities=raw.get("velocity_smooth", {}).get("data", []),
+                    heartrates=raw.get("heartrate", {}).get("data", []),
+                    cadences=raw.get("cadence", {}).get("data", []),
+                    altitudes=raw.get("altitude", {}).get("data", []),
+                    max_hr=max_hr,
+                    rest_hr=rest_hr,
+                )
+                # Cache stream stats to the activity doc (avoid re-fetching from Strava)
+                if stream_stats:
+                    act_ref.set({"stream_stats": stream_stats}, merge=True)
+                    print(f"[webhook] Stream stats cached for {activity_id} "
+                          f"({len(stream_stats.get('pace_splits', []))} km splits)")
+            else:
+                print(f"[webhook] Streams fetch returned {stream_resp.status_code} — skipping")
+        except Exception as _stream_err:
+            print(f"[webhook] Stream analysis failed (non-critical): {_stream_err}")
+
         # ── Generate journal entry (produces AI coach comment) ──
         # Uses the same _gemini_generate method that works in backfill.
         # The AI comment is then reused for Discord/WeChat notifications
