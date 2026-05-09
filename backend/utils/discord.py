@@ -368,28 +368,28 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         hr       = act_doc.get("avg_heart_rate", 0)
         elev     = act_doc.get("total_elevation_gain", 0)
 
-        md = f"🏃 **<font color='warning'>{runner_name}</font> 完成了一次跑步！**\n"
-        md += f"> **{run_name}** · <font color='comment'>{date_short}</font>\n\n"
+        md = f"🏃 **{runner_name} 完成了一次跑步！**\n"
+        md += f"> **{run_name}** · {date_short}\n\n"
         
-        md += f"🏁 **距离**: <font color='info'>{dist} km</font>\n"
-        md += f"⚡ **配速**: <font color='info'>{pace}/km</font>  |  ⏱ **时长**: {duration}\n"
+        md += f"🏁 距离：**{dist} km**\n"
+        md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
         
         if hr:
-            md += f"❤️ **心率**: {hr} bpm"
+            md += f"❤️ 心率：{hr} bpm"
         if elev and elev > 5:
-            md += f"  |  ⛰ **爬升**: {elev}m"
+            md += f"  |  🏔 爬升：{elev}m"
         md += "\n"
 
         # Weekly progress from journal entry
         wp = journal_entry.get("weekly_progress", {})
         if wp and wp.get("target_km"):
-            md += f"📊 **本周进度**: <font color='info'>{wp['week_km']}km / {wp['target_km']}km</font> ({wp.get('completion_pct', 0)}%)\n"
+            md += f"📊 本周进度：**{wp['week_km']}km / {wp['target_km']}km** ({wp.get('completion_pct', 0)}%)\n"
         elif monthly_km:
             month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
-            md += f"📅 **{month_label} 月累计**: <font color='info'>{monthly_km} km</font>\n"
+            md += f"📅 {month_label} 月累计：**{monthly_km} km**\n"
 
         if coach_tip:
-            md += f"\n🤖 **Canova教练点评**:\n<font color='comment'>{coach_tip}</font>\n"
+            md += f"\n🤖 **Canova教练点评**：\n{coach_tip}\n"
 
         # Performance note (highlight)
         perf_note = journal_entry.get("performance_note", "")
@@ -399,7 +399,7 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         # Tomorrow's training suggestion
         tomorrow = journal_entry.get("tomorrow_suggestion", "")
         if tomorrow:
-            md += f"→ **明日**: {tomorrow}\n"
+            md += f"→ **明日建议**：{tomorrow}\n"
 
         # Coach encouragement
         encouragement = journal_entry.get("encouragement", "")
