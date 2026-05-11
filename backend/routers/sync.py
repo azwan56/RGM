@@ -165,7 +165,7 @@ def sync_user_data(req: SyncRequest):
 
     batch.commit()
 
-    # 5. Aggregate + leaderboard
+    # 5. Aggregate stats for the user's goal period (weekly or monthly)
     km_distance      = total_distance / 1000
     avg_pace         = pace_str(total_distance, total_time)
     avg_heart_rate   = round(heart_rate_sum / hr_count) if hr_count > 0 else 0
@@ -179,17 +179,46 @@ def sync_user_data(req: SyncRequest):
         or f"Runner #{req.uid[:6]}"
     )
 
+    # ── Leaderboard: always use MONTHLY stats for fair ranking ──
+    # If user's goal is weekly, we still need monthly totals for the leaderboard.
+    if period == "weekly":
+        month_start = get_period_start("monthly")
+        month_epoch = int(month_start.timestamp())
+        # Re-aggregate from Strava for the full month
+        month_resp = strava_request(
+            "GET",
+            "https://www.strava.com/api/v3/athlete/activities",
+            params={"after": month_epoch, "per_page": 200},
+            headers=headers,
+            timeout=20,
+        )
+        if month_resp.ok:
+            month_acts    = month_resp.json()
+            lb_dist       = sum(a.get("distance", 0) for a in month_acts if a.get("type") == "Run") / 1000
+            lb_time       = sum(a.get("moving_time", 0) for a in month_acts if a.get("type") == "Run")
+            lb_hr_sum     = sum(a.get("average_heartrate", 0) for a in month_acts if a.get("type") == "Run" and a.get("has_heartrate"))
+            lb_hr_count   = sum(1 for a in month_acts if a.get("type") == "Run" and a.get("has_heartrate") and a.get("average_heartrate"))
+            lb_runs       = sum(1 for a in month_acts if a.get("type") == "Run")
+            lb_pace       = pace_str(lb_dist * 1000, lb_time)
+            lb_avg_hr     = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
+        else:
+            # Fallback: use what we have (at least the current period's data)
+            lb_dist, lb_pace, lb_avg_hr, lb_runs = km_distance, avg_pace, avg_heart_rate, run_count
+    else:
+        # Already monthly
+        lb_dist, lb_pace, lb_avg_hr, lb_runs = km_distance, avg_pace, avg_heart_rate, run_count
+
     db.collection("leaderboard").document(req.uid).set({
         "uid":                       req.uid,
         "display_name":              display_name,
         "email":                     user_data.get("email", ""),
-        "total_distance_km":         round(km_distance, 2),
-        "avg_pace":                  avg_pace,
-        "avg_heart_rate":            avg_heart_rate,
+        "total_distance_km":         round(lb_dist, 2),
+        "avg_pace":                  lb_pace,
+        "avg_heart_rate":            lb_avg_hr,
         "goal_completion_percentage": min(goal_percentage, 100),
-        "run_count":                 run_count,
-        "period":                    period,
-        "period_start":              period_start.isoformat(),
+        "run_count":                 lb_runs,
+        "period":                    "monthly",
+        "period_start":              get_period_start("monthly").isoformat(),
         "last_sync":                 datetime.now().isoformat(),
     }, merge=True)
 

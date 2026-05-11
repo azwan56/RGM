@@ -33,11 +33,19 @@ def _read_leaderboard_doc(uid: str):
     return doc.to_dict() if doc.exists else None
 
 def _read_leaderboard_list(period: str, limit_n: int = 20):
-    docs = (db.collection("leaderboard")
-              .where("period", "==", period)
-              .order_by("total_distance_km", direction="DESCENDING")
-              .limit(limit_n)
-              .stream())
+    # Leaderboard always stores monthly data now, but legacy docs may have
+    # period="weekly". For the monthly tab, fetch ALL docs sorted by distance.
+    if period == "monthly":
+        docs = (db.collection("leaderboard")
+                  .order_by("total_distance_km", direction="DESCENDING")
+                  .limit(limit_n)
+                  .stream())
+    else:
+        docs = (db.collection("leaderboard")
+                  .where("period", "==", period)
+                  .order_by("total_distance_km", direction="DESCENDING")
+                  .limit(limit_n)
+                  .stream())
     return [d.to_dict() for d in docs]
 
 def _read_activities(uid: str, start: str, end: str):
@@ -173,11 +181,18 @@ def get_user_stats(uid: str):
 @router.get("/leaderboard")
 def get_leaderboard(period: str = "monthly", limit_n: int = 20):
     """Returns sorted leaderboard entries for the given period (monthly or weekly)."""
-    docs = (db.collection("leaderboard")
-              .where("period", "==", period)
-              .order_by("total_distance_km", direction="DESCENDING")
-              .limit(limit_n)
-              .stream())
+    # Monthly tab fetches all docs (leaderboard now always stores monthly data)
+    if period == "monthly":
+        docs = (db.collection("leaderboard")
+                  .order_by("total_distance_km", direction="DESCENDING")
+                  .limit(limit_n)
+                  .stream())
+    else:
+        docs = (db.collection("leaderboard")
+                  .where("period", "==", period)
+                  .order_by("total_distance_km", direction="DESCENDING")
+                  .limit(limit_n)
+                  .stream())
     return {"entries": [d.to_dict() for d in docs]}
 
 
