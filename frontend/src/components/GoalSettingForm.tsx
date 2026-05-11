@@ -30,34 +30,62 @@ export default function GoalSettingForm() {
 
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  // Load
+  // Load via backend API (reliable from China)
   useEffect(() => {
     const fetchData = async () => {
       const user = auth.currentUser;
       if (!user) return;
 
-      const goalRef  = doc(db, "users", user.uid, "goals", "current");
-      const goalSnap = await getDoc(goalRef);
-      if (goalSnap.exists()) {
-        const data = goalSnap.data();
-        setPeriod(data.period || "monthly");
-        const overall = data.target_distance || 300;
-        setDistance(overall);
-        setPace(data.target_pace || "");
-        // Load per-month targets if stored, else derive from overall
-        if (data.monthly_targets && Array.isArray(data.monthly_targets)) {
-          setMonthlyTargets(data.monthly_targets);
-        } else {
-          setMonthlyTargets(defaultMonthlyTargets(overall));
-        }
-      }
+      try {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const { default: axios } = await import("@/lib/apiClient");
+        const res = await axios.get(`${backendUrl}/api/data/init/${user.uid}`);
+        const { profile, goal } = res.data;
 
-      const userRef  = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        const udata = userSnap.data();
-        if (udata.max_heart_rate)    setMaxHr(udata.max_heart_rate);
-        if (udata.resting_heart_rate) setRestHr(udata.resting_heart_rate);
+        if (goal) {
+          setPeriod(goal.period || "monthly");
+          const overall = goal.target_distance || 300;
+          setDistance(overall);
+          setPace(goal.target_pace || "");
+          if (goal.monthly_targets && Array.isArray(goal.monthly_targets)) {
+            setMonthlyTargets(goal.monthly_targets);
+          } else {
+            setMonthlyTargets(defaultMonthlyTargets(overall));
+          }
+        }
+
+        if (profile) {
+          if (profile.max_heart_rate)     setMaxHr(profile.max_heart_rate);
+          if (profile.resting_heart_rate) setRestHr(profile.resting_heart_rate);
+        }
+      } catch (err) {
+        console.error("Failed to load settings:", err);
+        // Fallback: try direct Firestore read
+        try {
+          const goalRef  = doc(db, "users", user.uid, "goals", "current");
+          const goalSnap = await getDoc(goalRef);
+          if (goalSnap.exists()) {
+            const data = goalSnap.data();
+            setPeriod(data.period || "monthly");
+            const overall = data.target_distance || 300;
+            setDistance(overall);
+            setPace(data.target_pace || "");
+            if (data.monthly_targets && Array.isArray(data.monthly_targets)) {
+              setMonthlyTargets(data.monthly_targets);
+            } else {
+              setMonthlyTargets(defaultMonthlyTargets(overall));
+            }
+          }
+          const userRef  = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const udata = userSnap.data();
+            if (udata.max_heart_rate)    setMaxHr(udata.max_heart_rate);
+            if (udata.resting_heart_rate) setRestHr(udata.resting_heart_rate);
+          }
+        } catch (fbErr) {
+          console.error("Firestore fallback also failed:", fbErr);
+        }
       }
     };
     fetchData();
@@ -90,27 +118,27 @@ export default function GoalSettingForm() {
     setMessage(null);
 
     try {
-      const uid     = auth.currentUser.uid;
-      const goalRef = doc(db, "users", uid, "goals", "current");
-      await setDoc(goalRef, {
-        period,
-        target_distance:  Number(distance),
-        monthly_targets:  monthlyTargets,
-        target_pace:      pace,
-        updated_at:       new Date().toISOString(),
-      }, { merge: true });
+      const uid = auth.currentUser.uid;
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-      const userRef = doc(db, "users", uid);
-      await setDoc(userRef, {
-        max_heart_rate:    Number(maxHr),
+      // Save via backend API (reliable from China — no direct Firestore needed)
+      const { default: axios } = await import("@/lib/apiClient");
+      await axios.post(`${backendUrl}/api/profile/save-settings`, {
+        uid,
+        period,
+        target_distance:    Number(distance),
+        monthly_targets:    monthlyTargets,
+        target_pace:        pace,
+        max_heart_rate:     Number(maxHr),
         resting_heart_rate: Number(restHr),
-      }, { merge: true });
+      });
 
       setMessage({ text: "设置已保存！", type: "success" });
       setTimeout(() => setMessage(null), 3000);
-    } catch (error) {
-      console.error(error);
-      setMessage({ text: "保存失败，请重试", type: "error" });
+    } catch (error: any) {
+      console.error("Save settings error:", error);
+      const detail = error?.response?.data?.detail || error?.message || "";
+      setMessage({ text: `保存失败${detail ? `：${detail}` : "，请重试"}`, type: "error" });
     }
     setLoading(false);
   };

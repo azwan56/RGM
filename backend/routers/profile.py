@@ -149,6 +149,62 @@ def update_profile(req: ProfileUpdate):
     return {"message": "Profile updated", "updated_fields": list(updates.keys())}
 
 
+# ── POST save training settings (goal + physiology) ────────────────────────────
+
+class TrainingSettingsUpdate(BaseModel):
+    uid:              str
+    # Goal fields
+    period:           Optional[str]   = None   # "weekly" | "monthly"
+    target_distance:  Optional[float] = None
+    monthly_targets:  Optional[List[float]] = None  # 12-element array
+    target_pace:      Optional[str]   = None
+    # Physiology fields
+    max_heart_rate:    Optional[int]  = None
+    resting_heart_rate: Optional[int] = None
+
+
+@router.post("/save-settings")
+def save_training_settings(req: TrainingSettingsUpdate):
+    """
+    Save goal + physiology settings via backend API.
+    Replaces direct Firestore writes from the frontend, which are unreliable
+    behind the GFW (Great Firewall of China).
+    """
+    user_ref = db.collection("users").document(req.uid)
+    if not user_ref.get().exists:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ── Save goal settings ──
+    goal_data = {}
+    if req.period is not None:
+        goal_data["period"] = req.period
+    if req.target_distance is not None:
+        goal_data["target_distance"] = req.target_distance
+    if req.monthly_targets is not None:
+        goal_data["monthly_targets"] = req.monthly_targets
+    if req.target_pace is not None:
+        goal_data["target_pace"] = req.target_pace
+
+    if goal_data:
+        from datetime import datetime
+        goal_data["updated_at"] = datetime.now().isoformat()
+        goal_ref = user_ref.collection("goals").document("current")
+        goal_ref.set(goal_data, merge=True)
+
+    # ── Save physiology settings ──
+    physio_data = {}
+    if req.max_heart_rate is not None:
+        physio_data["max_heart_rate"] = req.max_heart_rate
+    if req.resting_heart_rate is not None:
+        physio_data["resting_heart_rate"] = req.resting_heart_rate
+
+    if physio_data:
+        user_ref.set(physio_data, merge=True)
+
+    saved = list(goal_data.keys()) + list(physio_data.keys())
+    return {"message": "Settings saved", "updated_fields": saved}
+
+
 # ── GET runner persona ─────────────────────────────────────────────────────────
 
 @router.get("/{uid}/persona")

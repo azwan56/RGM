@@ -57,7 +57,17 @@ export default function RaceDashboard({ uid }: { uid: string }) {
         </div>
         <div>
           <h2 className="text-white font-bold text-xl">跑力分析</h2>
-          <p className="text-zinc-500 text-xs">VDOT {data.race_times.vdot} · 基于最近训练数据动态计算</p>
+          <p className="text-zinc-500 text-xs">
+            VDOT {data.race_times.vdot} · 基于最近训练数据动态计算
+            {data.vdot_source?.includes("road") && (
+              <span className="ml-2 text-green-400/70">🛣️ 仅路跑</span>
+            )}
+            {data.vdot_source?.includes("trail_excluded") && (
+              <span className="ml-1 text-zinc-600">
+                ({data.vdot_source.match(/trail_excluded=(\d+)/)?.[1] || 0} 越野跑已排除)
+              </span>
+            )}
+          </p>
         </div>
       </div>
 

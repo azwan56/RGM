@@ -56,18 +56,18 @@ def get_race_predictor(req: VdotRequest):
     Returns predicted race finish times for 5K, 10K, HM, FM based on VDOT.
     Also returns personalized training zones.
 
-    VDOT selection strategy (v3):
+    VDOT selection strategy (v4 — road-only):
     ┌─────────────────────────────────────────────────────────────────┐
     │  Window : 42 days  (activities with cached vdot field)         │
+    │  Filter : ROAD RUNS ONLY — excludes trail / high-elevation    │
+    │           sport_type != "TrailRun"                              │
+    │           name doesn't contain trail/越野/山 keywords           │
+    │           elevation_gain/km < 20m (flat terrain proxy)         │
     │  Decay  : exponential, half-life = 14 days                     │
-    │           w = 2^(-days_ago / 14)                               │
-    │           yesterday  → 0.95   │  7d ago  → 0.71               │
-    │           14d ago    → 0.50   │  28d ago → 0.25               │
-    │           42d ago    → 0.125  (lower cutoff, included)         │
-    │  Quality: R² bonus  quality = clamp(R²×5 + 0.5, 0.5, 1.0)     │
+    │  Quality: R² bonus  quality = exp(R²×4), clamped [0.3, 3.0]   │
     │  Final w = exponential_decay × quality                         │
     └─────────────────────────────────────────────────────────────────┘
-    If no 42-day data exists, falls back to oldest available VDOT.
+    If no road-only data in 42 days, falls back to latest road VDOT.
     """
     vdot = req.vdot
 
@@ -79,6 +79,25 @@ def get_race_predictor(req: VdotRequest):
         cutoff_42d = (today - timedelta(days=42)).isoformat()
         HALF_LIFE  = 14.0   # days — weight halves every 14 days
 
+        # Trail detection keywords
+        _TRAIL_KEYWORDS = {"trail", "越野", "山", "hill", "mountain", "hiking", "hike"}
+
+        def _is_trail(act: dict) -> bool:
+            """Determine if an activity is a trail run (should be excluded from VDOT)."""
+            # 1. Explicit sport_type from Strava
+            if act.get("sport_type", "").lower() == "trailrun":
+                return True
+            # 2. Name-based detection
+            name = (act.get("name", "") or "").lower()
+            if any(kw in name for kw in _TRAIL_KEYWORDS):
+                return True
+            # 3. Elevation ratio heuristic: >20m gain per km = trail-like
+            km   = act.get("distance_km", 0) or 0
+            elev = act.get("total_elevation_gain", 0) or 0
+            if km > 0 and elev > 0 and (elev / km) > 20:
+                return True
+            return False
+
         user_ref = db.collection("users").document(req.uid)
         # Order descending so we hit recent activities first; fetch 80 to cover sparse data
         docs = (user_ref.collection("activities")
@@ -88,6 +107,8 @@ def get_race_predictor(req: VdotRequest):
 
         candidates = []   # (date_str, vdot_val, r2)
         fallback   = None
+        trail_excluded = 0
+        road_total     = 0
 
         for doc in docs:
             d   = doc.to_dict()
@@ -96,8 +117,15 @@ def get_race_predictor(req: VdotRequest):
             dt  = d.get("start_date_local", "")[:10]
             if not v or float(v) < 20:
                 continue
+
+            # ── Road-only filter ──
+            if _is_trail(d):
+                trail_excluded += 1
+                continue
+
+            road_total += 1
             if not fallback:
-                fallback = float(v)     # most recent valid VDOT regardless of window
+                fallback = float(v)     # most recent valid road VDOT
             if dt >= cutoff_42d:
                 candidates.append((dt, float(v), float(r2)))
 
@@ -114,12 +142,12 @@ def get_race_predictor(req: VdotRequest):
                 weight_total += w
 
             vdot        = round(weighted_sum / weight_total, 1)
-            vdot_source = f"42d_exp_decay (n={len(candidates)})"
+            vdot_source = f"42d_road_only (n={len(candidates)}, trail_excluded={trail_excluded})"
         elif fallback:
             vdot        = fallback
-            vdot_source = "fallback_latest"
+            vdot_source = f"fallback_road (trail_excluded={trail_excluded})"
         else:
-            vdot_source = "none"
+            vdot_source = f"none (trail_excluded={trail_excluded}, road_with_vdot={road_total})"
 
     else:
         vdot_source = "user_provided"

@@ -68,6 +68,7 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
         "achievement_count":    act.get("achievement_count", 0),
         "kudos_count":          act.get("kudos_count", 0),
         "summary_polyline":     act.get("map", {}).get("summary_polyline", ""),
+        "sport_type":           act.get("sport_type", "Run"),  # "Run" | "TrailRun" | etc.
         "period":               period,
         "period_start":         period_start.isoformat(),
     }
