@@ -76,6 +76,45 @@ def _find_nearest_vdot(vdot: float) -> int:
     keys = sorted(_VDOT_TABLE.keys())
     return min(keys, key=lambda k: abs(k - vdot))
 
+
+def race_time_to_vdot(seconds: int, distance: str):
+    """
+    Reverse-lookup VDOT from a race finish time.
+    Uses linear interpolation between table entries for precision.
+
+    Args:
+        seconds: race finish time in seconds
+        distance: one of "5K", "10K", "HM", "FM"
+
+    Returns:
+        VDOT value (float), or None if out of table range.
+    """
+    if not seconds or seconds <= 0 or distance not in ("5K", "10K", "HM", "FM"):
+        return None
+
+    keys = sorted(_RACE_TABLE.keys())  # [30, 32, 34, ..., 85]
+
+    # Race table: higher VDOT → faster (fewer seconds)
+    # Find the two VDOT keys that bracket the given time
+    for i in range(len(keys) - 1):
+        v_low  = keys[i]      # lower VDOT  (slower)
+        v_high = keys[i + 1]  # higher VDOT (faster)
+        t_low  = _RACE_TABLE[v_low][distance]   # slower time
+        t_high = _RACE_TABLE[v_high][distance]   # faster time
+
+        if t_high <= seconds <= t_low:
+            # Linear interpolation
+            frac = (t_low - seconds) / (t_low - t_high) if t_low != t_high else 0
+            return round(v_low + frac * (v_high - v_low), 1)
+
+    # Check boundaries
+    if seconds >= _RACE_TABLE[keys[0]][distance]:
+        return float(keys[0])   # slower than VDOT 30
+    if seconds <= _RACE_TABLE[keys[-1]][distance]:
+        return float(keys[-1])  # faster than VDOT 85
+
+    return None
+
 def _fmt_pace(sec_per_km: float) -> str:
     """Convert seconds/km to 'M:SS' string."""
     m = int(sec_per_km) // 60
