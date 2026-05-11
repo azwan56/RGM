@@ -56,57 +56,21 @@ def get_race_predictor(req: VdotRequest):
     Returns predicted race finish times for 5K, 10K, HM, FM based on VDOT.
     Also returns personalized training zones.
 
-    VDOT selection strategy (v5 — race PB priority):
+    VDOT selection strategy (v6 — road-only training data):
     ┌─────────────────────────────────────────────────────────────────┐
-    │  Priority 1: RACE PBs (gold standard for Daniels VDOT)        │
-    │    Reverse-lookup VDOT from marathon/half/10K/5K PBs           │
-    │    Average across available distances                           │
-    │  Priority 2: BLEND (PB + training data)                        │
-    │    vdot = 0.7 × pb_vdot + 0.3 × training_vdot                 │
-    │  Priority 3: TRAINING ONLY (road runs, 42d decay)              │
-    │    Same stream-based logic as before                            │
+    │  Source: recent training stream VDOT (road runs only)          │
+    │  Window: 42 days, exponential decay (half-life 14 days)        │
+    │  Filter: excludes trail runs (sport_type / name / elevation)   │
+    │  Quality: R² weighted (exp boost, clamped [0.3, 3.0])          │
+    │  PBs NOT used — they may be stale and not reflect current form │
     └─────────────────────────────────────────────────────────────────┘
     """
-    from utils.sports_science import race_time_to_vdot
-
     vdot = req.vdot
-    vdot_source = "user_provided" if vdot else ""
-    pb_detail = {}
 
     if vdot is None:
         from datetime import date, timedelta
         import math
 
-        profile = _get_profile(req.uid)
-        max_hr  = profile.get("max_heart_rate",    190)
-        rest_hr = profile.get("resting_heart_rate", 60)
-
-        # ── Step 1: Race PB → VDOT (highest priority) ──
-        PB_FIELDS = [
-            ("marathon_pb_sec", "FM"),
-            ("half_pb_sec",     "HM"),
-            ("ten_k_pb_sec",    "10K"),
-            ("five_k_pb_sec",   "5K"),
-        ]
-        pb_vdots = []
-        for field, dist in PB_FIELDS:
-            pb_sec = profile.get(field)
-            if pb_sec and int(pb_sec) > 0:
-                v = race_time_to_vdot(int(pb_sec), dist)
-                if v:
-                    pb_vdots.append((dist, v))
-                    h, r = divmod(int(pb_sec), 3600)
-                    m, s = divmod(r, 60)
-                    pb_detail[dist] = {
-                        "time": f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}",
-                        "vdot": v,
-                    }
-
-        pb_vdot = max(v for _, v in pb_vdots) if pb_vdots else None
-        # Also record the average for diagnostics
-        pb_vdot_avg = round(sum(v for _, v in pb_vdots) / len(pb_vdots), 1) if pb_vdots else None
-
-        # ── Step 2: Training stream VDOT (road-only, 42d decay) ──
         today      = date.today()
         cutoff_42d = (today - timedelta(days=42)).isoformat()
         HALF_LIFE  = 14.0
@@ -150,7 +114,6 @@ def get_race_predictor(req: VdotRequest):
             if dt >= cutoff_42d:
                 candidates.append((dt, float(v), float(r2)))
 
-        training_vdot = None
         if candidates:
             weighted_sum = 0.0
             weight_total = 0.0
@@ -161,46 +124,28 @@ def get_race_predictor(req: VdotRequest):
                 w        = decay * quality
                 weighted_sum += v * w
                 weight_total += w
-            training_vdot = round(weighted_sum / weight_total, 1)
+            vdot        = round(weighted_sum / weight_total, 1)
+            vdot_source = f"42d_road_only (n={len(candidates)}, trail_excluded={trail_excluded})"
         elif fallback:
-            training_vdot = fallback
-
-        # ── Step 3: Final VDOT selection ──
-        if pb_vdot and training_vdot:
-            # Blend: PB is gold standard (70%), training is recent form (30%)
-            vdot = round(0.7 * pb_vdot + 0.3 * training_vdot, 1)
-            vdot_source = (
-                f"blended (pb={pb_vdot} × 0.7 + training={training_vdot} × 0.3, "
-                f"pbs={list(pb_detail.keys())}, trail_excluded={trail_excluded})"
-            )
-        elif pb_vdot:
-            vdot = pb_vdot
-            vdot_source = f"race_pb (pbs={list(pb_detail.keys())})"
-        elif training_vdot:
-            vdot = training_vdot
-            n = len(candidates)
-            vdot_source = f"42d_road_only (n={n}, trail_excluded={trail_excluded})"
+            vdot        = fallback
+            vdot_source = f"fallback_road (trail_excluded={trail_excluded})"
         else:
             vdot_source = f"none (trail_excluded={trail_excluded})"
     else:
-        profile = _get_profile(req.uid)
-        max_hr  = profile.get("max_heart_rate",    190)
-        rest_hr = profile.get("resting_heart_rate", 60)
+        vdot_source = "user_provided"
 
     if not vdot or vdot < 20:
         return {"error": "No VDOT data available. Open a run's detail page first to compute it."}
 
-    if "profile" not in dir():
-        profile = _get_profile(req.uid)
-        max_hr  = profile.get("max_heart_rate",    190)
-        rest_hr = profile.get("resting_heart_rate", 60)
+    profile = _get_profile(req.uid)
+    max_hr  = profile.get("max_heart_rate",    190)
+    rest_hr = profile.get("resting_heart_rate", 60)
 
     return {
         "race_times":  vdot_to_race_times(vdot),
         "zones":       vdot_to_zones(vdot, max_hr, rest_hr),
         "vdot_used":   vdot,
         "vdot_source": vdot_source,
-        "pb_detail":   pb_detail,
     }
 
 
