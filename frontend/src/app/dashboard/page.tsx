@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+
 import { auth } from "@/lib/firebase";
 import axios from "@/lib/apiClient";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
@@ -116,7 +116,33 @@ export default function Dashboard() {
               {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Analysis button */}
+            <button
+              onClick={() => router.push("/dashboard/analysis")}
+              className="flex-shrink-0 flex flex-col items-center gap-1 group"
+              title="深度分析"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center group-hover:bg-blue-500/25 group-hover:border-blue-400/40 transition-all">
+                <svg className="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span className="text-[10px] text-zinc-500 group-hover:text-blue-400 transition-colors">深度分析</span>
+            </button>
+            {/* Coach button */}
+            <button
+              onClick={() => router.push("/dashboard/coach")}
+              className="flex-shrink-0 flex flex-col items-center gap-1 group"
+              title="AI 教练"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center group-hover:bg-emerald-500/25 group-hover:border-emerald-400/40 transition-all">
+                <svg className="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <span className="text-[10px] text-zinc-500 group-hover:text-emerald-400 transition-colors">AI教练</span>
+            </button>
             {/* Team button */}
             <button
               onClick={() => router.push("/dashboard/team")}
@@ -211,54 +237,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Analysis + Coach — entry links */}
-        {isStravaConnected && user && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Link
-              href="/dashboard/analysis"
-              className="py-5 px-6 bg-gradient-to-r from-white/5 to-white/[0.02] hover:from-white/10 hover:to-white/5 border border-white/10 hover:border-[#FC4C02]/30 rounded-2xl transition-all group"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center group-hover:bg-blue-500/25 transition-colors">
-                    <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-sm">深度分析</p>
-                    <p className="text-zinc-500 text-xs">体能趋势 · 跑力诊断 · 月度统计</p>
-                  </div>
-                </div>
-                <svg className="w-5 h-5 text-zinc-500 group-hover:text-[#FC4C02] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-            </Link>
 
-            <Link
-              href="/dashboard/coach"
-              className="py-5 px-6 bg-gradient-to-r from-white/5 to-white/[0.02] hover:from-white/10 hover:to-white/5 border border-white/10 hover:border-emerald-500/30 rounded-2xl transition-all group"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center group-hover:bg-emerald-500/25 transition-colors">
-                    <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-sm">AI 教练</p>
-                    <p className="text-zinc-500 text-xs">目标设定 · 训练建议 · 周计划</p>
-                  </div>
-                </div>
-                <svg className="w-5 h-5 text-zinc-500 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-            </Link>
-          </div>
-        )}
         
         {/* Footer */}
         <div className="mt-12 mb-4 text-center">
