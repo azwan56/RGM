@@ -9,6 +9,12 @@ import StravaConnectBtn from "@/components/StravaConnectBtn";
 import RunningStatsPanel from "@/components/RunningStatsPanel";
 import ActivityList from "@/components/ActivityList";
 import LeaderboardWidget from "@/components/LeaderboardWidget";
+import dynamic from "next/dynamic";
+
+const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
+  loading: () => <div className="h-80 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
 
 export default function Dashboard() {
   const router = useRouter();
@@ -157,6 +163,11 @@ export default function Dashboard() {
         {/* Running Stats Panel — pass pre-fetched stats */}
         {isStravaConnected && user && (
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
+        )}
+
+        {/* Fitness & Form Chart */}
+        {isStravaConnected && user && (
+          <FitnessChart uid={user.uid} />
         )}
 
         {/* Leaderboard + Activity List — side by side, fixed height */}
