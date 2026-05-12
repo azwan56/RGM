@@ -46,15 +46,15 @@ function pctColor(pct: number): string {
 const MONTHS_SHORT = ["1月","2月","3月","4月","5月","6月",
                       "7月","8月","9月","10月","11月","12月"];
 
-export default function GoalHistoryPanel({ uid }: { uid: string }) {
+export default function GoalHistoryPanel({ uid, initialData }: { uid: string; initialData?: { history: HistoryData; annual: AnnualData } }) {
   const backendUrl  = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-  const [history,  setHistory]  = useState<HistoryData | null>(null);
-  const [annual,   setAnnual]   = useState<AnnualData  | null>(null);
-  const [loading,  setLoading]  = useState(true);
+  const [history,  setHistory]  = useState<HistoryData | null>(initialData?.history || null);
+  const [annual,   setAnnual]   = useState<AnnualData  | null>(initialData?.annual || null);
+  const [loading,  setLoading]  = useState(!initialData);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    if (!uid) return;
+    if (initialData || !uid) return;
     // Use combined endpoint (1 Firestore scan instead of 2)
     axios.get(`${backendUrl}/api/sync/stats-summary/${uid}`)
       .then((res) => {
@@ -63,7 +63,7 @@ export default function GoalHistoryPanel({ uid }: { uid: string }) {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [uid, backendUrl]);
+  }, [uid, backendUrl, initialData]);
 
   if (loading) {
     return (

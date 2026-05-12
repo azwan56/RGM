@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
+import axios from "@/lib/apiClient";
 import dynamic from "next/dynamic";
 
 const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
@@ -40,18 +41,35 @@ export default function AnalysisPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [bundleData, setBundleData] = useState<any>(null);
+
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+  // Fetch all analysis data in ONE request (replaces 4 serial requests)
+  const fetchBundle = useCallback(async (uid: string) => {
+    try {
+      const t0 = Date.now();
+      const res = await axios.post(`${backendUrl}/api/science/analysis-bundle`, { uid, days: 30, months: 6 });
+      console.log(`[analysis] Bundle loaded in ${Date.now() - t0}ms`);
+      setBundleData(res.data);
+    } catch (err) {
+      console.error("Analysis bundle error:", err);
+      // Fallback: components will fetch individually
+    }
+  }, [backendUrl]);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((u) => {
+    const unsub = auth.onAuthStateChanged(async (u) => {
       if (!u) {
         router.push("/");
         return;
       }
       setUser(u);
+      await fetchBundle(u.uid);
       setLoading(false);
     });
     return () => unsub();
-  }, [router]);
+  }, [router, fetchBundle]);
 
   if (loading) {
     return (
@@ -88,31 +106,32 @@ export default function AnalysisPage() {
         {/* Fitness Trend (CTL · ATL · TSB) */}
         {user && (
           <section>
-            <FitnessChart uid={user.uid} />
+            <FitnessChart uid={user.uid} initialData={bundleData?.fitness_trend?.data} />
           </section>
         )}
 
         {/* Race Analysis + Training Zones (VDOT) */}
         {user && (
           <section>
-            <RaceDashboard uid={user.uid} />
+            <RaceDashboard uid={user.uid} initialData={bundleData?.race_predictor} />
           </section>
         )}
 
         {/* Monthly Trend Chart */}
         {user && (
           <section>
-            <TrendChart uid={user.uid} />
+            <TrendChart uid={user.uid} initialData={bundleData?.monthly_trend?.data} />
           </section>
         )}
 
         {/* Goal History + Annual Summary */}
         {user && (
           <section>
-            <GoalHistoryPanel uid={user.uid} />
+            <GoalHistoryPanel uid={user.uid} initialData={bundleData?.stats_summary} />
           </section>
         )}
       </main>
     </div>
   );
 }
+

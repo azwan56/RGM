@@ -51,9 +51,14 @@ export default function Dashboard() {
       setUser(u);
       await fetchDashboard(u.uid, activityMonth);
       setLoading(false);
+
+      // Background prefetch: warm up Coach cache while user views dashboard
+      // This prevents cold-start delay when navigating to Coach page
+      axios.post(`${backendUrl}/api/coach/analyze`, { uid: u.uid })
+        .catch(() => {}); // Silent — don't block or show errors
     });
     return () => unsubscribe();
-  }, [router, fetchDashboard, activityMonth]);
+  }, [router, fetchDashboard, activityMonth, backendUrl]);
 
   // Refetch only activities when month changes
   const handleMonthChange = useCallback(async (newMonth: number) => {

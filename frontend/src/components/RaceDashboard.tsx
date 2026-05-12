@@ -5,12 +5,13 @@ import axios from "@/lib/apiClient";
 import RacePredictor from "./RacePredictor";
 import TrainingZones from "./TrainingZones";
 
-export default function RaceDashboard({ uid }: { uid: string }) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export default function RaceDashboard({ uid, initialData }: { uid: string; initialData?: any }) {
+  const [data, setData] = useState<any>(initialData || null);
+  const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialData) return;
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     axios
       .post(`${backendUrl}/api/science/race-predictor`, { uid })
@@ -20,7 +21,7 @@ export default function RaceDashboard({ uid }: { uid: string }) {
       })
       .catch(() => setError("无法加载跑力数据"))
       .finally(() => setLoading(false));
-  }, [uid]);
+  }, [uid, initialData]);
 
   if (loading) {
     return (

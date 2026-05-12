@@ -15,12 +15,13 @@ interface FitnessPoint {
   tsb: number;
 }
 
-export default function FitnessChart({ uid }: { uid: string }) {
-  const [data, setData] = useState<FitnessPoint[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function FitnessChart({ uid, initialData }: { uid: string; initialData?: FitnessPoint[] }) {
+  const [data, setData] = useState<FitnessPoint[]>(initialData || []);
+  const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    if (initialData) return; // Skip fetch if data was provided
     const fetchData = async () => {
       try {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -33,7 +34,7 @@ export default function FitnessChart({ uid }: { uid: string }) {
       setLoading(false);
     };
     fetchData();
-  }, [uid]);
+  }, [uid, initialData]);
 
   if (loading) {
     return (

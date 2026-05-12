@@ -11,18 +11,49 @@ from fastapi import APIRouter, Request
 from firebase_config import db
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
+import time
 
 router = APIRouter()
 
 # Shared thread pool for parallel Firestore reads
 _executor = ThreadPoolExecutor(max_workers=6)
 
+# ── Server-side TTL Cache ─────────────────────────────────────────────────────
+# Avoids repeated Firestore reads for data that changes infrequently.
+
+class _TTLCache:
+    """Simple thread-safe TTL cache for single-key values."""
+    def __init__(self, ttl_seconds: int):
+        self._ttl = ttl_seconds
+        self._data: dict = {}
+        self._ts: dict = {}
+
+    def get(self, key: str):
+        if key in self._data and (time.monotonic() - self._ts[key]) < self._ttl:
+            return self._data[key]
+        return None
+
+    def set(self, key: str, value):
+        self._data[key] = value
+        self._ts[key] = time.monotonic()
+
+# Leaderboard list: rarely changes, 5 min cache
+_lb_cache = _TTLCache(300)
+# User profiles: 2 min cache (same-session)
+_profile_cache = _TTLCache(120)
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _read_user_doc(uid: str):
+    cached = _profile_cache.get(uid)
+    if cached is not None:
+        return cached
     doc = db.collection("users").document(uid).get()
-    return doc.to_dict() if doc.exists else None
+    result = doc.to_dict() if doc.exists else None
+    if result:
+        _profile_cache.set(uid, result)
+    return result
 
 def _read_goal_doc(uid: str):
     doc = db.collection("users").document(uid).collection("goals").document("current").get()
@@ -33,6 +64,10 @@ def _read_leaderboard_doc(uid: str):
     return doc.to_dict() if doc.exists else None
 
 def _read_leaderboard_list(period: str, limit_n: int = 20):
+    cache_key = f"{period}_{limit_n}"
+    cached = _lb_cache.get(cache_key)
+    if cached is not None:
+        return cached
     # Leaderboard always stores monthly data now, but legacy docs may have
     # period="weekly". For the monthly tab, fetch ALL docs sorted by distance.
     if period == "monthly":
@@ -46,7 +81,9 @@ def _read_leaderboard_list(period: str, limit_n: int = 20):
                   .order_by("total_distance_km", direction="DESCENDING")
                   .limit(limit_n)
                   .stream())
-    return [d.to_dict() for d in docs]
+    result = [d.to_dict() for d in docs]
+    _lb_cache.set(cache_key, result)
+    return result
 
 def _read_activities(uid: str, start: str, end: str):
     q = db.collection("users").document(uid).collection("activities")

@@ -15,11 +15,12 @@ interface MonthPoint {
   avg_pace: string;
 }
 
-export default function TrendChart({ uid }: { uid: string }) {
-  const [data, setData] = useState<MonthPoint[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function TrendChart({ uid, initialData }: { uid: string; initialData?: MonthPoint[] }) {
+  const [data, setData] = useState<MonthPoint[]>(initialData || []);
+  const [loading, setLoading] = useState(!initialData);
 
   useEffect(() => {
+    if (initialData) return;
     const fetch = async () => {
       try {
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -29,7 +30,7 @@ export default function TrendChart({ uid }: { uid: string }) {
       setLoading(false);
     };
     fetch();
-  }, [uid]);
+  }, [uid, initialData]);
 
   if (loading) {
     return (
