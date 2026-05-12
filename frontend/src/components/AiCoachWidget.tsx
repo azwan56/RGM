@@ -24,6 +24,8 @@ interface CoachFeedback {
   training_principles?: { title: string; detail: string }[];
   weekly_cycle?: {
     week: number;
+    week_label?: string;
+    is_current?: boolean;
     phase: string;
     focus: string;
     key_session: string;
@@ -298,12 +300,28 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
               <h4 className="text-xs font-semibold text-zinc-500 tracking-wider">📅 周期性训练规划</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {feedback.weekly_cycle.map((w, idx) => (
-                  <div key={idx} className="bg-black/20 border border-white/5 p-4 rounded-xl flex flex-col gap-2.5 relative overflow-hidden group hover:border-white/10 transition-colors">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-purple-500 opacity-50" />
+                  <div key={idx} className={`bg-black/20 border p-4 rounded-xl flex flex-col gap-2.5 relative overflow-hidden group transition-colors ${
+                    w.is_current 
+                      ? 'border-[#FC4C02]/40 ring-1 ring-[#FC4C02]/20' 
+                      : 'border-white/5 hover:border-white/10'
+                  }`}>
+                    <div className={`absolute top-0 left-0 w-1 h-full bg-gradient-to-b ${
+                      w.is_current ? 'from-[#FC4C02] to-orange-600' : 'from-blue-500 to-purple-500 opacity-50'
+                    }`} />
                     
                     <div className="flex items-center justify-between z-10">
-                      <span className="text-sm font-bold text-white">第 {w.week} 周</span>
-                      <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">{w.phase}期</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">第 {w.week} 周</span>
+                        {w.week_label && (
+                          <span className="text-[10px] text-zinc-500">{w.week_label}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {w.is_current && (
+                          <span className="text-[10px] font-bold text-[#FC4C02] bg-[#FC4C02]/10 px-1.5 py-0.5 rounded">当前</span>
+                        )}
+                        <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">{w.phase}期</span>
+                      </div>
                     </div>
                     
                     <div className="z-10 space-y-1">

@@ -599,26 +599,46 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
             {"title": "核心力量与越野适应", "detail": "每周2次核心力量训练，加入山地/台阶训练提升爬升能力和下坡技术。"},
         ]
 
-    # ── Phase-specific weekly cycle ──
+    # ── Phase-specific weekly cycle (calendar-week aligned) ──
+    from datetime import date, timedelta
+    today = date.today()
+    # Calculate Monday of current week
+    current_monday = today - timedelta(days=today.weekday())
+
+    def _week_label(monday):
+        """Format a week as 'M/D-M/D'."""
+        sunday = monday + timedelta(days=6)
+        return f"{monday.month}/{monday.day}-{sunday.month}/{sunday.day}"
+
+    def _make_cycle(raw_weeks):
+        """Attach calendar week labels and current-week indicator."""
+        cycle = []
+        for i, w in enumerate(raw_weeks):
+            wk_monday = current_monday + timedelta(weeks=i)
+            w["week"] = i + 1
+            w["week_label"] = _week_label(wk_monday)
+            w["is_current"] = (i == 0)
+        return raw_weeks
+
     if nearest_days <= 14:
-        weekly_cycle = [
-            {"week": 1, "phase": "减量", "focus": "跑量降至峰值40-50%，以轻松跑维持状态", "key_session": "1次5-8km配速验证跑", "volume_note": "大幅减量"},
-            {"week": 2, "phase": "赛前", "focus": "最后调整，赛前2天完全休息", "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
-        ]
+        weekly_cycle = _make_cycle([
+            {"phase": "减量", "focus": "跑量降至峰值40-50%，以轻松跑维持状态", "key_session": "1次5-8km配速验证跑", "volume_note": "大幅减量"},
+            {"phase": "赛前", "focus": "最后调整，赛前2天完全休息", "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
+        ])
     elif nearest_days <= 60:
-        weekly_cycle = [
-            {"week": 1, "phase": "强化", "focus": "保持高质量训练，长距离+专项课", "key_session": f"长距离跑 + 1次{race_label}配速训练", "volume_note": "接近峰值跑量"},
-            {"week": 2, "phase": "强化", "focus": "间歇训练提升速度耐力", "key_session": "间歇跑或节奏跑", "volume_note": "维持峰值"},
-            {"week": 3, "phase": "冲刺", "focus": "最后一次高强度长距离拉练", "key_session": "比赛模拟跑（赛事距离60-70%）", "volume_note": "峰值跑量"},
-            {"week": 4, "phase": "减量", "focus": "开始逐步减量，保持跑感", "key_session": "轻松跑 + 短距离配速验证", "volume_note": "降至80%"},
-        ]
+        weekly_cycle = _make_cycle([
+            {"phase": "强化", "focus": "保持高质量训练，长距离+专项课", "key_session": f"长距离跑 + 1次{race_label}配速训练", "volume_note": "接近峰值跑量"},
+            {"phase": "强化", "focus": "间歇训练提升速度耐力", "key_session": "间歇跑或节奏跑", "volume_note": "维持峰值"},
+            {"phase": "冲刺", "focus": "最后一次高强度长距离拉练", "key_session": "比赛模拟跑（赛事距离60-70%）", "volume_note": "峰值跑量"},
+            {"phase": "减量", "focus": "开始逐步减量，保持跑感", "key_session": "轻松跑 + 短距离配速验证", "volume_note": "降至80%"},
+        ])
     else:
-        weekly_cycle = [
-            {"week": 1, "phase": "积累", "focus": "建立有氧基础，轻松配速积累跑量", "key_session": "长距离慢跑（LSD）", "volume_note": "维持当前跑量"},
-            {"week": 2, "phase": "积累", "focus": "加入节奏跑，提升有氧阈值", "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
-            {"week": 3, "phase": "强化", "focus": "间歇训练提升速度，长距离进一步延长", "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
-            {"week": 4, "phase": "恢复", "focus": "减量恢复，消化前三周训练刺激", "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
-        ]
+        weekly_cycle = _make_cycle([
+            {"phase": "积累", "focus": "建立有氧基础，轻松配速积累跑量", "key_session": "长距离慢跑（LSD）", "volume_note": "维持当前跑量"},
+            {"phase": "积累", "focus": "加入节奏跑，提升有氧阈值", "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
+            {"phase": "强化", "focus": "间歇训练提升速度，长距离进一步延长", "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
+            {"phase": "恢复", "focus": "减量恢复，消化前三周训练刺激", "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
+        ])
 
     # ── Key metrics ──
     rec_km = race_analysis.get("recommended_weekly_km", "40-60km") if race_analysis else "40-60km"
@@ -653,20 +673,42 @@ async def generate_coach_feedback(req: CoachRequest):
 
     # ── Check cache first (saves 10-30 seconds) ──────────────────────────────
     CACHE_TTL_HOURS = 6
-    if not req.force_refresh:
-        try:
-            cache_ref = db.collection("users").document(req.uid).collection("meta").document("coach_cache")
-            cache_doc = cache_ref.get()
-            if cache_doc.exists:
-                cached = cache_doc.to_dict()
-                cached_at = cached.get("cached_at", "")
-                if cached_at:
-                    cache_time = datetime.fromisoformat(cached_at)
-                    if datetime.now() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
-                        print(f"[coach] Cache hit for {req.uid} (cached {cached_at})")
-                        return {"feedback": cached.get("feedback", {})}
-        except Exception as e:
-            print(f"[coach] Cache read error: {e}")
+    CYCLE_STABLE_WEEKS = 3  # Don't regenerate weekly_cycle within first 3 weeks
+    cached_weekly_cycle = None
+    cycle_created_at = None
+
+    try:
+        cache_ref = db.collection("users").document(req.uid).collection("meta").document("coach_cache")
+        cache_doc = cache_ref.get()
+        if cache_doc.exists:
+            cached = cache_doc.to_dict()
+            cached_at = cached.get("cached_at", "")
+            cycle_created = cached.get("cycle_created_at", cached_at)
+
+            if cached_at:
+                cache_time = datetime.fromisoformat(cached_at)
+
+                # Return full cache if within TTL and not force refreshing
+                if not req.force_refresh and datetime.now() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
+                    print(f"[coach] Cache hit for {req.uid} (cached {cached_at})")
+                    return {"feedback": cached.get("feedback", {})}
+
+                # Preserve weekly_cycle if cycle is < 3 weeks old
+                if cycle_created:
+                    cycle_time = datetime.fromisoformat(cycle_created)
+                    weeks_since_cycle = (datetime.now() - cycle_time).days / 7
+                    if weeks_since_cycle < CYCLE_STABLE_WEEKS:
+                        cached_fb = cached.get("feedback", {})
+                        if cached_fb.get("weekly_cycle"):
+                            cached_weekly_cycle = cached_fb["weekly_cycle"]
+                            cycle_created_at = cycle_created
+                            # Update is_current based on which week we're in now
+                            week_idx = int(weeks_since_cycle)
+                            for i, w in enumerate(cached_weekly_cycle):
+                                w["is_current"] = (i == week_idx)
+                            print(f"[coach] Preserving weekly_cycle (week {week_idx + 1}/{len(cached_weekly_cycle)}, created {cycle_created})")
+    except Exception as e:
+        print(f"[coach] Cache read error: {e}")
 
     loop = asyncio.get_event_loop()
     stats, goal_data, activities, profile, training_summary = await asyncio.gather(
@@ -892,6 +934,13 @@ async def generate_coach_feedback(req: CoachRequest):
     _trend_cn = {"increasing": "上升", "stable": "平稳", "decreasing": "下降"}.get(
         training_summary.get("volume_trend", "stable"), "平稳")
 
+    # Calendar week labels for the AI prompt
+    from datetime import date as _date_cls, timedelta as _td
+    _today = _date_cls.today()
+    _mon = _today - _td(days=_today.weekday())
+    _sun = _mon + _td(days=6)
+    _wk1_label = f"{_mon.month}/{_mon.day}-{_sun.month}/{_sun.day}"
+
     prompt = (
         "你是一位热情、专业、善于鼓励的中文跑步教练。\n"
         "请根据以下跑者信息，给出温暖、正面、具有激励性的个性化训练建议。\n"
@@ -958,10 +1007,10 @@ async def generate_coach_feedback(req: CoachRequest):
         '    ... (共3-5条，必须针对赛事的key_demands展开)\n'
         '  ],\n'
         '  "weekly_cycle": [\n'
-        '    {"week": 1, "phase": "<积累|强化|冲刺|减量>", "focus": "<目标>",\n'
+        '    {"week": 1, "week_label": "<如5/12-5/18>", "is_current": true, "phase": "<积累|强化|冲刺|减量>", "focus": "<目标>",\n'
         '     "key_session": "<关键课次含配速>", "volume_note": "<周跑量含数字>",\n'
         '     "tips": ["注意事项1", "注意事项2"]}\n'
-        '    ... (共4周循环)\n'
+        '    ... (共4周循环，week_label用自然周日期范围，is_current只有第1周为true)\n'
         '  ],\n'
         '  "key_metrics": {\n'
         '    "recommended_weekly_km": "<如50-60km>",\n'
@@ -975,7 +1024,7 @@ async def generate_coach_feedback(req: CoachRequest):
         "1. 如有比赛，race_analysis 必须深入分析赛事难度、对跑者能力的具体要求\n"
         "2. fitness_gap 必须对比跑者当前数据和赛事要求，给出量化差距\n"
         "3. training_principles 必须针对赛事 key_demands 展开，不能泛泛而谈\n"
-        "4. weekly_cycle 共4周，从当前周开始规划，距比赛近则体现减量\n"
+        f"4. weekly_cycle 共4周，第1周从当前自然周（{_wk1_label}）开始，week_label使用'M/D-M/D'格式，距比赛近则体现减量\n"
         "5. key_metrics 所有数值必须基于跑者实际数据计算"
     )
 
@@ -999,6 +1048,13 @@ async def generate_coach_feedback(req: CoachRequest):
         if "encouragement" not in feedback:
             feedback["encouragement"] = "每一步都是进步，坚持就是胜利！"
 
+        # ── Cycle stability: overlay preserved weekly_cycle if within 3-week window ──
+        if cached_weekly_cycle:
+            feedback["weekly_cycle"] = cached_weekly_cycle
+            _cycle_ts = cycle_created_at  # preserve original creation time
+        else:
+            _cycle_ts = __import__("datetime").datetime.now().isoformat()
+
         # ─ Save both to Firestore ─
         try:
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set({
@@ -1011,6 +1067,7 @@ async def generate_coach_feedback(req: CoachRequest):
             db.collection("users").document(req.uid).collection("meta").document("coach_cache").set({
                 "feedback": feedback,
                 "cached_at": __import__("datetime").datetime.now().isoformat(),
+                "cycle_created_at": _cycle_ts,
             })
         except Exception as _save_err:
             print(f"[coach] Failed to save: {_save_err}")
