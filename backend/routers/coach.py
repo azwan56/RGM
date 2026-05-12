@@ -341,6 +341,21 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
     # ── Weekly trend (is volume increasing/stable/decreasing?) ──
     sorted_weeks = sorted(weekly_bins.keys())
     weekly_kms = [weekly_bins[w]["km"] for w in sorted_weeks]
+
+    # ── Estimated current weekly km (recent-weighted) ──
+    # Give 70% weight to last 4 weeks, 30% to earlier weeks.
+    # This reflects current form better than flat 8-week average.
+    if len(weekly_kms) >= 4:
+        recent_4 = weekly_kms[-4:]
+        older    = weekly_kms[:-4] if len(weekly_kms) > 4 else recent_4
+        recent_avg = sum(recent_4) / len(recent_4)
+        older_avg  = sum(older) / len(older)
+        est_weekly_km = round(0.7 * recent_avg + 0.3 * older_avg, 1)
+    elif weekly_kms:
+        est_weekly_km = round(sum(weekly_kms) / len(weekly_kms), 1)
+    else:
+        est_weekly_km = avg_weekly_km
+
     trend = "stable"
     if len(weekly_kms) >= 4:
         first_half = sum(weekly_kms[:len(weekly_kms)//2]) / max(1, len(weekly_kms)//2)
@@ -383,6 +398,7 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
         "total_runs": total_runs,
         "total_km": round(total_km, 1),
         "avg_weekly_km": avg_weekly_km,
+        "est_weekly_km": est_weekly_km,
         "avg_run_distance": round(total_km / total_runs, 1) if total_runs else 0,
         "longest_run": round(longest_run, 1),
         "total_elevation": round(total_elev),
@@ -403,23 +419,44 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
     }
 
 
-def _build_race_analysis(rtype, rname, avg_weekly_km):
-    """Build race analysis section from knowledge base + actual weekly km."""
+def _build_race_analysis(rtype, rname, avg_weekly_km, goal_data=None, est_weekly_km=None):
+    """Build race analysis section from knowledge base + actual weekly km + user goal."""
     race_info = _RACE_KNOWLEDGE.get(rtype, {})
     if not race_info:
         return None
 
-    est_weekly = round(avg_weekly_km)
+    # Use recent-weighted estimate if available, else fall back to 8w average
+    est_weekly = round(est_weekly_km if est_weekly_km else avg_weekly_km)
     min_weekly = race_info.get("min_weekly_km", 40)
 
+    # Factor in user's own weekly goal target if set
+    goal_weekly_km = 0
+    if goal_data:
+        target = goal_data.get("target_distance", 0) or 0
+        period = goal_data.get("period", "monthly")
+        if period == "weekly" and target > 0:
+            goal_weekly_km = target
+        elif period == "monthly" and target > 0:
+            goal_weekly_km = round(target / 4.33)  # ~4.33 weeks per month
+
+    # Build assessment text — incorporate both actual + goal
     if est_weekly >= min_weekly:
         fitness_gap = f"当前预估周跑量约{est_weekly}km，已达赛事建议最低{min_weekly}km+。基础跑量充足，重点转向专项能力提升。"
         readiness = min(10, round(est_weekly / min_weekly * 6.5))
     elif est_weekly >= min_weekly * 0.6:
-        fitness_gap = f"当前预估周跑量约{est_weekly}km，距赛事建议{min_weekly}km还差约{min_weekly - est_weekly}km/周。基础尚可但需循序渐进提升跑量。"
+        gap_km = min_weekly - est_weekly
+        goal_note = ""
+        if goal_weekly_km >= min_weekly:
+            goal_note = f"你的周目标{goal_weekly_km}km已达赛事要求，按目标执行即可。"
+        elif goal_weekly_km > est_weekly:
+            goal_note = f"你的周目标{goal_weekly_km}km高于当前水平，持续推进中。"
+        fitness_gap = f"近期周跑量约{est_weekly}km，距赛事建议{min_weekly}km还差约{gap_km}km/周。{goal_note}基础尚可，循序渐进提升。"
         readiness = max(3, round(est_weekly / min_weekly * 7))
+        # Boost readiness if goal is ambitious and on track
+        if goal_weekly_km >= min_weekly * 0.8:
+            readiness = min(10, readiness + 1)
     else:
-        fitness_gap = f"当前预估周跑量约{est_weekly}km，距赛事建议{min_weekly}km差距较大。需从有氧基础开始系统训练，切勿急于加量。"
+        fitness_gap = f"近期周跑量约{est_weekly}km，距赛事建议{min_weekly}km差距较大。需从有氧基础开始系统训练，切勿急于加量。"
         readiness = max(1, round(est_weekly / min_weekly * 5))
 
     return {
@@ -438,7 +475,7 @@ def _build_race_analysis(rtype, rname, avg_weekly_km):
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
-def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km=0):
+def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km=0, goal_data=None, est_weekly_km=None):
     """Generate race-specific fallback advice when Gemini API is unavailable."""
     if not nearest_race or nearest_days > 120:
         return {
@@ -538,7 +575,7 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
         ]
 
     # ── Build race_analysis from knowledge base ──
-    race_analysis = _build_race_analysis(rtype, rname, avg_weekly_km)
+    race_analysis = _build_race_analysis(rtype, rname, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
 
     # ── Phase-specific training principles ──
     if nearest_days <= 14:
@@ -640,6 +677,7 @@ async def generate_coach_feedback(req: CoachRequest):
         loop.run_in_executor(None, _fetch_training_summary, req.uid),
     )
     avg_weekly_km = training_summary.get("avg_weekly_km", 0)
+    est_weekly_km = training_summary.get("est_weekly_km", avg_weekly_km)
 
     if not stats:
         return {"feedback": {
@@ -942,7 +980,7 @@ async def generate_coach_feedback(req: CoachRequest):
     )
 
     if not _api_key:
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
         return {"feedback": fb}
 
 
@@ -981,7 +1019,7 @@ async def generate_coach_feedback(req: CoachRequest):
 
     except json.JSONDecodeError as e:
         print(f"Coach JSON parse error: {e}")
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
         try:
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
                 {**fb, "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
@@ -990,7 +1028,7 @@ async def generate_coach_feedback(req: CoachRequest):
         return {"feedback": fb}
     except Exception as e:
         print(f"Coach generation failed: {e}")
-        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km)
+        fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
         fb["_error"] = str(e)
         try:
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
