@@ -180,33 +180,31 @@ def sync_user_data(req: SyncRequest):
     )
 
     # ── Leaderboard: always use MONTHLY stats for fair ranking ──
-    # If user's goal is weekly, we still need monthly totals for the leaderboard.
-    if period == "weekly":
-        month_start = get_period_start("monthly")
-        month_epoch = int(month_start.timestamp())
-        # Re-aggregate from Strava for the full month
-        month_resp = strava_request(
-            "GET",
-            "https://www.strava.com/api/v3/athlete/activities",
-            params={"after": month_epoch, "per_page": 200},
-            headers=headers,
-            timeout=20,
-        )
-        if month_resp.ok:
-            month_acts    = month_resp.json()
-            lb_dist       = sum(a.get("distance", 0) for a in month_acts if a.get("type") == "Run") / 1000
-            lb_time       = sum(a.get("moving_time", 0) for a in month_acts if a.get("type") == "Run")
-            lb_hr_sum     = sum(a.get("average_heartrate", 0) for a in month_acts if a.get("type") == "Run" and a.get("has_heartrate"))
-            lb_hr_count   = sum(1 for a in month_acts if a.get("type") == "Run" and a.get("has_heartrate") and a.get("average_heartrate"))
-            lb_runs       = sum(1 for a in month_acts if a.get("type") == "Run")
-            lb_pace       = pace_str(lb_dist * 1000, lb_time)
-            lb_avg_hr     = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
-        else:
-            # Fallback: use what we have (at least the current period's data)
-            lb_dist, lb_pace, lb_avg_hr, lb_runs = km_distance, avg_pace, avg_heart_rate, run_count
-    else:
-        # Already monthly
-        lb_dist, lb_pace, lb_avg_hr, lb_runs = km_distance, avg_pace, avg_heart_rate, run_count
+    # Aggregate from Firestore activities (already synced) for the current month.
+    month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
+    month_acts = (
+        db.collection("users").document(req.uid)
+          .collection("activities")
+          .where("start_date_local", ">=", month_start_str)
+          .stream()
+    )
+    lb_dist    = 0.0
+    lb_time    = 0
+    lb_hr_sum  = 0.0
+    lb_hr_count = 0
+    lb_runs    = 0
+    for a in month_acts:
+        d = a.to_dict()
+        lb_runs    += 1
+        lb_dist    += d.get("distance_km", 0) or 0
+        lb_time    += d.get("moving_time", 0) or 0
+        hr = d.get("avg_heart_rate", 0) or 0
+        if hr > 0:
+            lb_hr_sum  += hr
+            lb_hr_count += 1
+
+    lb_pace   = pace_str(lb_dist * 1000, lb_time)
+    lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
 
     db.collection("leaderboard").document(req.uid).set({
         "uid":                       req.uid,
