@@ -599,20 +599,16 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
             {"title": "核心力量与越野适应", "detail": "每周2次核心力量训练，加入山地/台阶训练提升爬升能力和下坡技术。"},
         ]
 
-    # ── Phase-specific weekly cycle (calendar-week aligned) ──
+    # ── Phase-specific weekly cycle (calendar-week aligned, race-type-aware) ──
     from datetime import date, timedelta
     today = date.today()
-    # Calculate Monday of current week
     current_monday = today - timedelta(days=today.weekday())
 
     def _week_label(monday):
-        """Format a week as 'M/D-M/D'."""
         sunday = monday + timedelta(days=6)
         return f"{monday.month}/{monday.day}-{sunday.month}/{sunday.day}"
 
     def _make_cycle(raw_weeks):
-        """Attach calendar week labels and current-week indicator."""
-        cycle = []
         for i, w in enumerate(raw_weeks):
             wk_monday = current_monday + timedelta(weeks=i)
             w["week"] = i + 1
@@ -620,25 +616,77 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
             w["is_current"] = (i == 0)
         return raw_weeks
 
+    # Determine if this is a trail/ultra race
+    is_trail_race = rtype in ("trail_50k", "trail_100k", "trail_100m", "gobi") if rtype else False
+
     if nearest_days <= 14:
-        weekly_cycle = _make_cycle([
-            {"phase": "减量", "focus": "跑量降至峰值40-50%，以轻松跑维持状态", "key_session": "1次5-8km配速验证跑", "volume_note": "大幅减量"},
-            {"phase": "赛前", "focus": "最后调整，赛前2天完全休息", "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
-        ])
+        if is_trail_race:
+            weekly_cycle = _make_cycle([
+                {"phase": "减量", "focus": "跑量降至40-50%，保留1次短距离越野验证装备和技术",
+                 "key_session": "1次5-8km山地轻松跑，检查全部强制装备", "volume_note": "大幅减量"},
+                {"phase": "赛前", "focus": "最后调整，赛前2天完全休息，整理装备与补给计划",
+                 "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
+            ])
+        else:
+            weekly_cycle = _make_cycle([
+                {"phase": "减量", "focus": "跑量降至峰值40-50%，以轻松跑维持状态",
+                 "key_session": "1次5-8km配速验证跑", "volume_note": "大幅减量"},
+                {"phase": "赛前", "focus": "最后调整，赛前2天完全休息",
+                 "key_session": "赛前3天15分钟慢跑+动态拉伸", "volume_note": "最低量"},
+            ])
     elif nearest_days <= 60:
-        weekly_cycle = _make_cycle([
-            {"phase": "强化", "focus": "保持高质量训练，长距离+专项课", "key_session": f"长距离跑 + 1次{race_label}配速训练", "volume_note": "接近峰值跑量"},
-            {"phase": "强化", "focus": "间歇训练提升速度耐力", "key_session": "间歇跑或节奏跑", "volume_note": "维持峰值"},
-            {"phase": "冲刺", "focus": "最后一次高强度长距离拉练", "key_session": "比赛模拟跑（赛事距离60-70%）", "volume_note": "峰值跑量"},
-            {"phase": "减量", "focus": "开始逐步减量，保持跑感", "key_session": "轻松跑 + 短距离配速验证", "volume_note": "降至80%"},
-        ])
+        if is_trail_race:
+            weekly_cycle = _make_cycle([
+                {"phase": "强化", "focus": "高质量越野专项：长距离山地跑+爬升训练",
+                 "key_session": "长距离越野跑（含2000m+爬升）+ Power Hiking 训练",
+                 "volume_note": "接近峰值跑量"},
+                {"phase": "强化", "focus": "背靠背长距离模拟赛事连续作战",
+                 "key_session": "周末背靠背：周六越野长跑 + 周日山地恢复跑",
+                 "volume_note": "维持峰值"},
+                {"phase": "冲刺", "focus": "赛事模拟——夜跑+高海拔+全装备拉练",
+                 "key_session": "夜间越野长跑（含头灯，赛事距离40-50%）",
+                 "volume_note": "峰值跑量"},
+                {"phase": "减量", "focus": "逐步减量，保留越野跑感和装备熟练度",
+                 "key_session": "轻松越野跑 + 装备最终检查", "volume_note": "降至70-80%"},
+            ])
+        else:
+            weekly_cycle = _make_cycle([
+                {"phase": "强化", "focus": "保持高质量训练，长距离+专项课",
+                 "key_session": f"长距离跑 + 1次{race_label}配速训练", "volume_note": "接近峰值跑量"},
+                {"phase": "强化", "focus": "间歇训练提升速度耐力",
+                 "key_session": "间歇跑或节奏跑", "volume_note": "维持峰值"},
+                {"phase": "冲刺", "focus": "最后一次高强度长距离拉练",
+                 "key_session": "比赛模拟跑（赛事距离60-70%）", "volume_note": "峰值跑量"},
+                {"phase": "减量", "focus": "开始逐步减量，保持跑感",
+                 "key_session": "轻松跑 + 短距离配速验证", "volume_note": "降至80%"},
+            ])
     else:
-        weekly_cycle = _make_cycle([
-            {"phase": "积累", "focus": "建立有氧基础，轻松配速积累跑量", "key_session": "长距离慢跑（LSD）", "volume_note": "维持当前跑量"},
-            {"phase": "积累", "focus": "加入节奏跑，提升有氧阈值", "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
-            {"phase": "强化", "focus": "间歇训练提升速度，长距离进一步延长", "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
-            {"phase": "恢复", "focus": "减量恢复，消化前三周训练刺激", "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
-        ])
+        if is_trail_race:
+            weekly_cycle = _make_cycle([
+                {"phase": "积累", "focus": "有氧基础+山地适应，轻松配速积累爬升量",
+                 "key_session": "越野长跑（含1000m+爬升）或山地徒步",
+                 "volume_note": "维持当前跑量"},
+                {"phase": "积累", "focus": "加入Power Hiking和爬升专项，提升上坡效率",
+                 "key_session": "爬升专项：台阶训练/山坡重复 + 节奏跑",
+                 "volume_note": "跑量+5-8%"},
+                {"phase": "强化", "focus": "越野专项强化：夜跑适应+技术下坡+背靠背",
+                 "key_session": "1次夜间越野跑 + 周末背靠背长距离",
+                 "volume_note": "跑量+5%"},
+                {"phase": "恢复", "focus": "减量恢复，消化前三周训练刺激，核心力量为主",
+                 "key_session": "轻松跑 + 核心力量 + 拉伸放松",
+                 "volume_note": "跑量降至60-70%"},
+            ])
+        else:
+            weekly_cycle = _make_cycle([
+                {"phase": "积累", "focus": "建立有氧基础，轻松配速积累跑量",
+                 "key_session": "长距离慢跑（LSD）", "volume_note": "维持当前跑量"},
+                {"phase": "积累", "focus": "加入节奏跑，提升有氧阈值",
+                 "key_session": "节奏跑 Tempo Run", "volume_note": "跑量+5-8%"},
+                {"phase": "强化", "focus": "间歇训练提升速度，长距离进一步延长",
+                 "key_session": "间歇跑 Interval", "volume_note": "跑量+5%"},
+                {"phase": "恢复", "focus": "减量恢复，消化前三周训练刺激",
+                 "key_session": "轻松跑 + 拉伸放松", "volume_note": "跑量降至60-70%"},
+            ])
 
     # ── Key metrics ──
     rec_km = race_analysis.get("recommended_weekly_km", "40-60km") if race_analysis else "40-60km"
@@ -676,6 +724,7 @@ async def generate_coach_feedback(req: CoachRequest):
     CYCLE_STABLE_WEEKS = 3  # Don't regenerate weekly_cycle within first 3 weeks
     cached_weekly_cycle = None
     cycle_created_at = None
+    _completed_cycle_weeks = []  # completed weeks from expired cycle for merging
 
     try:
         cache_ref = db.collection("users").document(req.uid).collection("meta").document("coach_cache")
@@ -693,20 +742,40 @@ async def generate_coach_feedback(req: CoachRequest):
                     print(f"[coach] Cache hit for {req.uid} (cached {cached_at})")
                     return {"feedback": cached.get("feedback", {})}
 
-                # Preserve weekly_cycle if cycle is < 3 weeks old
+                # Preserve weekly_cycle if cycle is < 3 weeks old (full preserve)
+                # OR if cycle is >= 3 weeks, save completed weeks for merging
                 if cycle_created:
                     cycle_time = datetime.fromisoformat(cycle_created)
                     weeks_since_cycle = (datetime.now() - cycle_time).days / 7
-                    if weeks_since_cycle < CYCLE_STABLE_WEEKS:
-                        cached_fb = cached.get("feedback", {})
-                        if cached_fb.get("weekly_cycle"):
-                            cached_weekly_cycle = cached_fb["weekly_cycle"]
-                            cycle_created_at = cycle_created
-                            # Update is_current based on which week we're in now
-                            week_idx = int(weeks_since_cycle)
-                            for i, w in enumerate(cached_weekly_cycle):
-                                w["is_current"] = (i == week_idx)
-                            print(f"[coach] Preserving weekly_cycle (week {week_idx + 1}/{len(cached_weekly_cycle)}, created {cycle_created})")
+                    cached_fb = cached.get("feedback", {})
+
+                    if weeks_since_cycle < CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
+                        # Cycle is still fresh — preserve entire cycle
+                        cached_weekly_cycle = cached_fb["weekly_cycle"]
+                        cycle_created_at = cycle_created
+                        week_idx = min(int(weeks_since_cycle), len(cached_weekly_cycle) - 1)
+                        for i, w in enumerate(cached_weekly_cycle):
+                            w["is_current"] = (i == week_idx)
+                        print(f"[coach] Preserving weekly_cycle (week {week_idx + 1}/{len(cached_weekly_cycle)}, created {cycle_created})")
+
+                    elif weeks_since_cycle >= CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
+                        # Cycle expired — but save completed weeks for merging into new cycle
+                        old_cycle = cached_fb["weekly_cycle"]
+                        week_idx = min(int(weeks_since_cycle), len(old_cycle) - 1)
+                        # Mark completed weeks to merge later
+                        completed_weeks = []
+                        for i, w in enumerate(old_cycle):
+                            if i < week_idx:
+                                w["is_current"] = False
+                                w["status"] = "completed"
+                                completed_weeks.append(w)
+                        if completed_weeks:
+                            # Store for later merging in the response building
+                            cached_weekly_cycle = None  # Will regenerate
+                            cycle_created_at = None
+                            # Store completed weeks separately for merge
+                            _completed_cycle_weeks = completed_weeks
+                            print(f"[coach] Cycle expired, will merge {len(completed_weeks)} completed weeks into new cycle")
     except Exception as e:
         print(f"[coach] Cache read error: {e}")
 
@@ -1024,8 +1093,10 @@ async def generate_coach_feedback(req: CoachRequest):
         "1. 如有比赛，race_analysis 必须深入分析赛事难度、对跑者能力的具体要求\n"
         "2. fitness_gap 必须对比跑者当前数据和赛事要求，给出量化差距\n"
         "3. training_principles 必须针对赛事 key_demands 展开，不能泛泛而谈\n"
-        f"4. weekly_cycle 共4周，第1周从当前自然周（{_wk1_label}）开始，week_label使用'M/D-M/D'格式，距比赛近则体现减量\n"
-        "5. key_metrics 所有数值必须基于跑者实际数据计算"
+        f"4. weekly_cycle 共4周，第1周从当前自然周（{_wk1_label}）开始，week_label使用'M/D-M/D'格式，is_current只有第1周为true\n"
+        "5. weekly_cycle 必须与赛事类型匹配：越野赛应含爬升训练/Power Hiking/夜跑/背靠背长距离/装备拉练；"
+        "路跑赛应含节奏跑/间歇/LSD/配速训练。训练内容必须与 training_principles 一致\n"
+        "6. key_metrics 所有数值必须基于跑者实际数据计算"
     )
 
     if not _api_key:
@@ -1050,8 +1121,34 @@ async def generate_coach_feedback(req: CoachRequest):
 
         # ── Cycle stability: overlay preserved weekly_cycle if within 3-week window ──
         if cached_weekly_cycle:
+            # Full preservation — cycle is still fresh
             feedback["weekly_cycle"] = cached_weekly_cycle
             _cycle_ts = cycle_created_at  # preserve original creation time
+        elif _completed_cycle_weeks and feedback.get("weekly_cycle"):
+            # Partial merge — cycle expired, keep completed weeks + new future weeks
+            new_cycle = feedback["weekly_cycle"]
+            n_completed = len(_completed_cycle_weeks)
+            # Take future weeks from new cycle (skip slots that overlap with completed)
+            future_weeks = [w for w in new_cycle if w.get("week", 0) > n_completed]
+            # Renumber and relabel the merged cycle
+            merged = []
+            from datetime import date as _d2, timedelta as _td2
+            _today2 = _d2.today()
+            _cm2 = _today2 - _td2(days=_today2.weekday())
+            for i, w in enumerate(_completed_cycle_weeks + future_weeks):
+                w["week"] = i + 1
+                # Recalc labels based on cycle start (completed weeks are in the past)
+                wk_offset = i - n_completed  # negative for past weeks, 0 = current
+                wk_monday = _cm2 + _td2(weeks=wk_offset)
+                wk_sunday = wk_monday + _td2(days=6)
+                w["week_label"] = f"{wk_monday.month}/{wk_monday.day}-{wk_sunday.month}/{wk_sunday.day}"
+                w["is_current"] = (wk_offset == 0)
+                if i < n_completed:
+                    w["status"] = "completed"
+                merged.append(w)
+            feedback["weekly_cycle"] = merged[:4]  # Keep to 4 weeks max
+            _cycle_ts = __import__("datetime").datetime.now().isoformat()
+            print(f"[coach] Merged {n_completed} completed + {len(future_weeks)} new weeks")
         else:
             _cycle_ts = __import__("datetime").datetime.now().isoformat()
 

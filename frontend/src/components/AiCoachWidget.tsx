@@ -26,6 +26,7 @@ interface CoachFeedback {
     week: number;
     week_label?: string;
     is_current?: boolean;
+    status?: string;
     phase: string;
     focus: string;
     key_session: string;
@@ -303,10 +304,14 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
                   <div key={idx} className={`bg-black/20 border p-4 rounded-xl flex flex-col gap-2.5 relative overflow-hidden group transition-colors ${
                     w.is_current 
                       ? 'border-[#FC4C02]/40 ring-1 ring-[#FC4C02]/20' 
-                      : 'border-white/5 hover:border-white/10'
+                      : w.status === 'completed'
+                        ? 'border-emerald-500/20 opacity-75'
+                        : 'border-white/5 hover:border-white/10'
                   }`}>
                     <div className={`absolute top-0 left-0 w-1 h-full bg-gradient-to-b ${
-                      w.is_current ? 'from-[#FC4C02] to-orange-600' : 'from-blue-500 to-purple-500 opacity-50'
+                      w.is_current ? 'from-[#FC4C02] to-orange-600' 
+                      : w.status === 'completed' ? 'from-emerald-500 to-emerald-600 opacity-70'
+                      : 'from-blue-500 to-purple-500 opacity-50'
                     }`} />
                     
                     <div className="flex items-center justify-between z-10">
@@ -317,6 +322,9 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5">
+                        {w.status === 'completed' && (
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">✓ 已完成</span>
+                        )}
                         {w.is_current && (
                           <span className="text-[10px] font-bold text-[#FC4C02] bg-[#FC4C02]/10 px-1.5 py-0.5 rounded">当前</span>
                         )}

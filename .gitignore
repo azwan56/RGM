@@ -30,3 +30,9 @@ backend/*.pyc
 # IDEs
 .vscode/
 .idea/
+workers/
+workers/
+
+workers/
+__pycache__/
+*.pyc
