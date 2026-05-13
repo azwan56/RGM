@@ -433,15 +433,29 @@ def compute_vdot_from_streams(streams: dict, max_hr: float = 190, rest_hr: float
     model.fit(X, y)
     r_squared = float(model.score(X, y))
 
-    # ── Estimate ② — Threshold-anchored (only if R² ≥ 0.10) ──────────────────
+    # ── Estimate ② — Threshold-anchored (with extrapolation guard) ────────────
     # Predict pace at 85% HRR (aerobic threshold zone).
     # Physiological anchor: threshold pace ≈ 88% of vVO₂max (Daniels / Lucía 2000).
-    if r_squared >= 0.10:
+    #
+    # ⚠️ Extrapolation guard: if the observed HRR range is far below 85%,
+    #    the regression prediction becomes unreliable. We penalize weight by
+    #    the extrapolation distance to prevent VDOT inflation from easy runs.
+    #    e.g. data at 60-70% HRR → extrapolating to 85% = 15% gap → heavy penalty
+    #         data at 75-85% HRR → extrapolating to 85% = 0% gap  → full weight
+    hrr_observed_max = float(np.percentile(hrr_pct, 95))  # P95 to ignore outliers
+    extrap_gap       = max(0.0, 0.85 - hrr_observed_max)  # how far we must extrapolate
+
+    if r_squared >= 0.10 and hrr_observed_max >= 0.72:
         v_at_threshold = float(model.predict([[0.85]])[0])
         v_at_threshold = np.clip(v_at_threshold, 1.5, 8.0)
+        # Cap: threshold velocity cannot exceed 120% of observed median velocity.
+        # This prevents regression slope from producing impossible predictions.
+        v_at_threshold = min(v_at_threshold, mean_v * 1.20)
         vvo2max_2      = v_at_threshold / 0.88
-        # Weight ②: proportional to R² (max 60% weight, so ① always has ≥40%)
-        w2 = min(r_squared * 3, 0.60)
+        # Weight ②: proportional to R², max 40%, penalized by extrapolation distance.
+        # Penalty: for every 1% HRR gap beyond data, reduce weight by ~8%.
+        extrap_penalty = max(0.0, 1.0 - extrap_gap * 8.0)  # 0% gap→1.0, 12% gap→0.04
+        w2 = min(r_squared * 2.5, 0.40) * extrap_penalty
         w1 = 1.0 - w2
     else:
         vvo2max_2 = vvo2max_1  # fall back to estimate ①
