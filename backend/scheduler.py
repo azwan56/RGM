@@ -8,7 +8,7 @@ Uses APScheduler to run periodic jobs:
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 
@@ -180,6 +180,72 @@ def run_daily_sync() -> dict:
     return results
 
 
+def run_rest_day_reminders() -> dict:
+    """
+    Runs at 22:00 UTC (06:00 CST) every day.
+    For each Strava-connected user, checks whether they had any run
+    recorded for the previous calendar day (CST).  If not, sends
+    a rest-day reminder to Discord and/or WeCom — without writing
+    any training journal entry.
+    """
+    from firebase_config import db
+    from utils.discord import send_rest_day_discord_notification, send_rest_day_wecom_notification
+
+    # "Yesterday" in CST (UTC+8)
+    cst_now = datetime.now(timezone.utc) + timedelta(hours=8)
+    yesterday = (cst_now - timedelta(days=1)).date()
+    yesterday_str = yesterday.isoformat()  # "YYYY-MM-DD"
+
+    logger.info(f"[scheduler] Rest-day reminder check for {yesterday_str}")
+
+    users = db.collection("users").where("strava_connected", "==", True).stream()
+    user_list = [(doc.id, doc.to_dict()) for doc in users]
+
+    results = {"reminded": 0, "skipped": 0, "errors": [], "date": yesterday_str}
+
+    for uid, user_data in user_list:
+        try:
+            # Skip users who have opted out of rest-day reminders
+            if not user_data.get("rest_day_reminder", True):
+                results["skipped"] += 1
+                continue
+
+            # Check Firestore activities for any run dated yesterday
+            acts = (
+                db.collection("users").document(uid)
+                .collection("activities")
+                .order_by("start_date_local", direction="DESCENDING")
+                .limit(10)
+                .stream()
+            )
+            had_run = any(
+                a.to_dict().get("start_date_local", "")[:10] == yesterday_str
+                for a in acts
+            )
+
+            if had_run:
+                results["skipped"] += 1
+                logger.debug(f"[scheduler] {uid} ran yesterday — no reminder needed")
+                continue
+
+            # Send reminders (both platforms; each silently skips if no webhook configured)
+            send_rest_day_discord_notification(user_data, uid, yesterday_str)
+            send_rest_day_wecom_notification(user_data, uid, yesterday_str)
+            results["reminded"] += 1
+            logger.info(f"[scheduler] Rest-day reminder sent to uid={uid}")
+
+        except Exception as e:
+            results["errors"].append(f"{uid}: {e}")
+            logger.error(f"[scheduler] Rest-day reminder failed for uid={uid}: {e}")
+
+    logger.info(
+        f"[scheduler] Rest-day reminders done — "
+        f"{results['reminded']} reminded, {results['skipped']} skipped, "
+        f"{len(results['errors'])} errors"
+    )
+    return results
+
+
 def start_scheduler():
     """Initialize and start the APScheduler background scheduler."""
     global _scheduler
@@ -198,8 +264,21 @@ def start_scheduler():
         misfire_grace_time=3600,  # 1 hour grace period
     )
 
+    # Rest-day reminder at 22:00 UTC (06:00 CST next day)
+    _scheduler.add_job(
+        run_rest_day_reminders,
+        trigger=CronTrigger(hour=22, minute=0),
+        id="rest_day_reminder",
+        name="Rest Day Reminder",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     _scheduler.start()
-    logger.info("[scheduler] Background scheduler started — daily sync at 04:00 UTC")
+    logger.info(
+        "[scheduler] Background scheduler started — "
+        "daily sync at 04:00 UTC, rest-day reminder at 22:00 UTC"
+    )
 
 
 def get_scheduler_status() -> dict:

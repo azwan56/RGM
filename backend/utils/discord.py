@@ -172,7 +172,6 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     duration = act_doc.get("duration_str", "—")
     run_name = act_doc.get("name", "跑步")
     date_str = act_doc.get("start_date_local", "")[:10]
-    vdot     = act_doc.get("vdot")
 
     monthly_km = context.get("monthly_km", 0)
     ctl = context.get("ctl")
@@ -187,34 +186,41 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     else:
         colour = 0x22C55E   # Green — short run
 
-    # ── Primary stats row (always shown) ─────────────────────────────────────
-    fields = [
-        {"name": "🏁 距离",  "value": f"**{dist} km**",  "inline": True},
-        {"name": "⚡ 配速",  "value": f"**{pace}/km**",  "inline": True},
-        {"name": "⏱ 时长",  "value": f"**{duration}**", "inline": True},
-    ]
+    # ── Activity link ─────────────────────────────────────────────────────────
+    activity_id = act_doc.get("activity_id")
+    strava_link = f"https://www.strava.com/activities/{activity_id}" if activity_id else ""
 
-    # ── Secondary stats row ───────────────────────────────────────────────────
-    secondary = []
+    # ── Description: all basic stats as compact flowing text ──────────────────
+    # Stats live in description (markdown text) rather than embed fields.
+    # On Discord mobile every field renders as "label\nvalue" stacked
+    # vertically — description text stays compact on any screen width.
+    desc_lines = [f"**{run_name}**  ·  📅 {date_str}"]
+    if strava_link:
+        desc_lines.append(f"[查看 Strava 详情]({strava_link})")
+    desc_lines.append("")  # blank separator
+
+    # Row 1: distance · pace · duration (always shown)
+    desc_lines.append(f"🏁 **{dist} km**  ·  ⚡ **{pace}/km**  ·  ⏱ **{duration}**")
+
+    # Row 2: HR and/or elevation (optional)
+    row2_parts = []
     if hr:
-        secondary.append({"name": "❤️ 心率", "value": f"**{hr} bpm**", "inline": True})
-    if vdot and float(vdot) > 20:
-        secondary.append({"name": "📊 VDOT", "value": f"**{round(float(vdot),1)}**", "inline": True})
+        row2_parts.append(f"❤️ **{hr} bpm**")
     if elev and elev > 5:
-        secondary.append({"name": "⛰ 爬升", "value": f"**{elev} m**", "inline": True})
-    if secondary:
-        fields += secondary
+        row2_parts.append(f"⛰ **{elev} m**")
+    if row2_parts:
+        desc_lines.append("  ·  ".join(row2_parts))
 
-    # ── Monthly mileage ───────────────────────────────────────────────────────
+    # Row 3: monthly mileage
     if monthly_km:
         month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
-        fields.append({
-            "name":   f"📅 {month_label} 月累计",
-            "value":  f"**{monthly_km} km**",
-            "inline": True
-        })
+        desc_lines.append(f"📅 {month_label} 月累计：**{monthly_km} km**")
 
-    # ── Fitness / form state ──────────────────────────────────────────────────
+    description = "\n".join(desc_lines)
+
+    # ── Fields: only fitness state + AI coach tip (both full-width) ───────────
+    fields = []
+
     if ctl is not None and atl is not None and tsb is not None:
         if tsb > 5:
             form_icon, form_label = "🟢", f"状态良好 (+{tsb})"
@@ -231,7 +237,6 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
             "inline": False
         })
 
-    # ── AI coach tip ──────────────────────────────────────────────────────────
     if coach_tip:
         fields.append({
             "name":   "🤖 AI 教练点评",
@@ -239,13 +244,6 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
             "inline": False
         })
 
-    # Activity link
-    activity_id = act_doc.get("activity_id")
-    strava_link = f"https://www.strava.com/activities/{activity_id}" if activity_id else ""
-
-    description = f"**{run_name}**  ·  📅 {date_str}"
-    if strava_link:
-        description += f"\n[查看 Strava 详情]({strava_link})"
 
     embed = {
         "title":       f"🏃 {runner_name} 完成了一次跑步！",
@@ -317,14 +315,20 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
         return False
 
 
-# ── WeCom (企业微信) Notification — reserved for future implementation ─────────
+# ── WeCom (企业微信) Notification ─────────────────────────────────────────────
 
 def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = "", coach_tip: str = "", journal_entry: dict = None) -> bool:
     """
     Sends a WeCom (企业微信) group robot notification for a completed run.
     Reads the webhook URL from user_data["wecom_webhook_url"] (set in profile).
-    If coach_tip is provided, uses it directly instead of generating a new one.
-    If journal_entry is provided, includes performance_note, tomorrow_suggestion, and encouragement.
+
+    Privacy policy for WeCom (group channel):
+    - Always regenerates a WeCom-specific AI tip — never reuses journal tip
+      which may contain CTL/ATL/TSB/HR/PB numbers.
+    - Only shows basic run stats: distance, pace, duration, elevation,
+      weekly/monthly mileage. No biometric or fitness-score data.
+    - journal_entry is accepted for API compatibility but only weekly_progress
+      (non-biometric) is read from it.
     Returns True on success, False on failure.
     """
     webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
@@ -339,48 +343,41 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         date_str = act_doc.get("start_date_local", "")
 
         monthly_km = _get_monthly_km(uid, date_str) if uid else 0.0
-        fitness    = _get_fitness_state(uid, user_data) if uid else {}
-        context = {
-            "monthly_km": monthly_km,
-            **fitness,
-        }
+        # Fetch fitness for Gemini context only — not shown in message
+        fitness = _get_fitness_state(uid, user_data) if uid else {}
+        context = {"monthly_km": monthly_km, **fitness}
 
-        # Reuse provided coach_tip (from journal), or generate a new one
-        if not coach_tip:
-            coach_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
+        # ALWAYS regenerate a WeCom-safe tip — never reuse the journal
+        # coach_tip which can contain CTL/ATL/TSB/HR/PB numbers.
+        wecom_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
 
         if journal_entry is None:
             journal_entry = {}
 
-        # ── Build Markdown ──
+        # ── Build Markdown ────────────────────────────────────────────────────
         runner_name = (
             user_data.get("display_name") or
             user_data.get("strava_name") or
             user_data.get("email", "").split("@")[0] or
             "跑者"
         )
-        run_name = act_doc.get("name", "跑步")
+        run_name   = act_doc.get("name", "跑步")
         date_short = date_str[:10]
-        
-        dist     = act_doc.get("distance_km", 0)
-        pace     = act_doc.get("avg_pace", "—")
-        duration = act_doc.get("duration_str", "—")
-        hr       = act_doc.get("avg_heart_rate", 0)
-        elev     = act_doc.get("total_elevation_gain", 0)
+        dist       = act_doc.get("distance_km", 0)
+        pace       = act_doc.get("avg_pace", "—")
+        duration   = act_doc.get("duration_str", "—")
+        elev       = act_doc.get("total_elevation_gain", 0)
 
-        md = f"🏃 **{runner_name} 完成了一次跑步！**\n"
+        md  = f"🏃 **{runner_name} 完成了一次跑步！**\n"
         md += f"> **{run_name}** · {date_short}\n\n"
-        
+
+        # Basic run stats only — no heart rate, no biometric scores
         md += f"🏁 距离：**{dist} km**\n"
         md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
-        
-        if hr:
-            md += f"❤️ 心率：{hr} bpm"
         if elev and elev > 5:
-            md += f"  |  🏔 爬升：{elev}m"
-        md += "\n"
+            md += f"🏔 爬升：{elev} m\n"
 
-        # Weekly progress from journal entry
+        # Weekly/monthly mileage (non-biometric)
         wp = journal_entry.get("weekly_progress", {})
         if wp and wp.get("target_km"):
             md += f"📊 本周进度：**{wp['week_km']}km / {wp['target_km']}km** ({wp.get('completion_pct', 0)}%)\n"
@@ -388,29 +385,13 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
             md += f"📅 {month_label} 月累计：**{monthly_km} km**\n"
 
-        if coach_tip:
-            md += f"\n🤖 **Canova教练点评**：\n{coach_tip}\n"
-
-        # Performance note (highlight)
-        perf_note = journal_entry.get("performance_note", "")
-        if perf_note:
-            md += f"\n💡 {perf_note}\n"
-
-        # Tomorrow's training suggestion
-        tomorrow = journal_entry.get("tomorrow_suggestion", "")
-        if tomorrow:
-            md += f"→ **明日建议**：{tomorrow}\n"
-
-        # Coach encouragement
-        encouragement = journal_entry.get("encouragement", "")
-        if encouragement:
-            md += f"\n🔥 {encouragement}\n"
+        # Privacy-safe AI coach comment (no biometric numbers)
+        if wecom_tip:
+            md += f"\n🤖 **教练点评**：\n{wecom_tip}\n"
 
         payload = {
             "msgtype": "markdown",
-            "markdown": {
-                "content": md
-            }
+            "markdown": {"content": md},
         }
 
         resp = requests.post(webhook_url, json=payload, timeout=10)
@@ -423,4 +404,150 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
 
     except Exception as e:
         print(f"[wecom] Notification error: {e}")
+        return False
+
+
+# ── Rest Day Reminder ─────────────────────────────────────────────────────────
+
+def _generate_rest_day_tip(user_data: dict, rest_date: str, monthly_km: float) -> str:
+    """
+    Uses Gemini to generate a short, warm motivational message for a runner
+    who had no recorded activity the previous day.
+    Returns plain text (no markdown/JSON), max ~80 chars.
+    """
+    try:
+        from routers.coach import _gemini_generate
+
+        name  = (user_data.get("display_name") or user_data.get("strava_name") or "跑者").split()[0]
+        goal  = user_data.get("training_goal", "")
+
+        context = (
+            f"跑者：{name}，训练目标：{goal or '未设定'}\n"
+            f"昨天（{rest_date}）没有运动记录\n"
+            f"本月累计跑量：{monthly_km}km"
+        )
+
+        prompt = (
+            f"你是一位温柔、充满活力的跑步教练。以下是跑者情况：\n{context}\n\n"
+            f"请用中文写一句温馨鼓励的话（不超过60字），提醒{name}昨天没有运动，"
+            f"鼓励他今天重新出发。语气亲切自然，不要提具体数字或专业术语。"
+            f"只输出这一句话，不要加任何前缀或解释。"
+        )
+
+        result = _gemini_generate(prompt, max_tokens=100, temperature=0.8, response_json=False)
+        return result.get("text", "").strip()
+
+    except Exception as e:
+        print(f"[discord] Rest day tip generation failed: {e}")
+        return ""
+
+
+def send_rest_day_discord_notification(user_data: dict, rest_date: str, uid: str = "") -> bool:
+    """
+    Sends a Discord rest-day reminder for a runner with no activity yesterday.
+    Does NOT create a journal entry — pure motivational ping.
+    Returns True on success, False on failure.
+    """
+    webhook_url = (user_data.get("discord_webhook_url") or "").strip()
+    if not webhook_url:
+        return False
+
+    try:
+        runner_name = (
+            user_data.get("display_name") or
+            user_data.get("strava_name") or
+            user_data.get("email", "").split("@")[0] or
+            "跑者"
+        )
+
+        monthly_km = _get_monthly_km(uid, rest_date) if uid else 0.0
+        rest_tip   = _generate_rest_day_tip(user_data, rest_date, monthly_km)
+
+        fields = []
+        if monthly_km:
+            month_label = rest_date[:7]
+            fields.append({
+                "name":   f"📊 {month_label} 月累计",
+                "value":  f"**{monthly_km} km**",
+                "inline": False,
+            })
+        if rest_tip:
+            fields.append({
+                "name":   "🤖 AI 教练寄语",
+                "value":  rest_tip,
+                "inline": False,
+            })
+
+        embed = {
+            "title":       f"☀️ 早安，{runner_name}！昨天没有运动记录",
+            "description": f"昨天（{rest_date}）暂无活动  ·  今天是重新出发的好时机 💪",
+            "color":       0x8B5CF6,  # Purple — rest day
+            "fields":      fields,
+            "footer":      {"text": "RGM 跑团管理平台 · AI 教练提醒"},
+            "timestamp":   datetime.utcnow().isoformat() + "Z",
+        }
+
+        avatar = user_data.get("strava_profile_url") or user_data.get("photoURL")
+        if avatar:
+            embed["thumbnail"] = {"url": avatar}
+
+        payload = {"embeds": [embed], "username": "RGM 跑团助手"}
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        ok = resp.status_code in (200, 204)
+        if ok:
+            print(f"[discord] Rest-day reminder sent for {runner_name}")
+        else:
+            print(f"[discord] Rest-day reminder failed: {resp.status_code}")
+        return ok
+
+    except Exception as e:
+        print(f"[discord] Rest-day reminder error: {e}")
+        return False
+
+
+def send_rest_day_wecom_notification(user_data: dict, rest_date: str, uid: str = "") -> bool:
+    """
+    Sends a WeCom rest-day reminder for a runner with no activity yesterday.
+    Does NOT create a journal entry — pure motivational ping.
+    Returns True on success, False on failure.
+    """
+    webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
+    if not webhook_url:
+        return False
+
+    try:
+        runner_name = (
+            user_data.get("display_name") or
+            user_data.get("strava_name") or
+            user_data.get("email", "").split("@")[0] or
+            "跑者"
+        )
+
+        monthly_km = _get_monthly_km(uid, rest_date) if uid else 0.0
+        rest_tip   = _generate_rest_day_tip(user_data, rest_date, monthly_km)
+
+        md  = f"☀️ **早安，{runner_name}！**\n"
+        md += f"> 昨天（{rest_date}）暂无运动记录\n\n"
+        if monthly_km:
+            month_label = rest_date[:7]
+            md += f"📊 {month_label} 月累计：**{monthly_km} km**\n"
+        if rest_tip:
+            md += f"\n🤖 **教练寄语**：{rest_tip}\n"
+        md += "\n💪 今天是重新出发的好时机，加油！"
+
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {"content": md},
+        }
+
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code == 200 and resp.json().get("errcode") == 0:
+            print(f"[wecom] Rest-day reminder sent for {runner_name}")
+            return True
+        else:
+            print(f"[wecom] Rest-day reminder failed: {resp.status_code} {resp.text[:100]}")
+            return False
+
+    except Exception as e:
+        print(f"[wecom] Rest-day reminder error: {e}")
         return False

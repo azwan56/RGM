@@ -240,7 +240,11 @@ def get_runner_persona(uid: str):
     fm_pb_sec     = profile.get("marathon_pb_sec", 0) or 0  # 0 = no PB
     training_goal = profile.get("training_goal", "fitness")
 
-    # VDOT — 42-day exponential decay (half-life 14 days), same as race-predictor
+    # VDOT — 42-day exponential decay (half-life 14 days)
+    # ⚠️ 注意：此处 **未** 排除越野跑，与 science.py race-predictor 的逻辑不同。
+    #   - science.py 会过滤越野跑（_is_trail），仅用路跑数据计算 VDOT → 值偏高、更准确
+    #   - 此处包含所有活动（含越野），越野配速慢会拉低加权均值 → 值偏低
+    #   - 如需统一，可将 science.py 的 _is_trail() 过滤逻辑复制到此处
     import math as _math
     cutoff_42d = (date.today() - timedelta(days=42)).isoformat()
     HALF_LIFE  = 14.0
