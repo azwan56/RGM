@@ -10,6 +10,7 @@ import RunningStatsPanel from "@/components/RunningStatsPanel";
 import ActivityList from "@/components/ActivityList";
 import LeaderboardWidget from "@/components/LeaderboardWidget";
 import dynamic from "next/dynamic";
+import PageNav from "@/components/PageNav";
 
 const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
   loading: () => <div className="h-80 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
@@ -116,61 +117,7 @@ export default function Dashboard() {
               {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Analysis button */}
-            <button
-              onClick={() => router.push("/dashboard/analysis")}
-              className="flex-shrink-0 flex flex-col items-center gap-1 group"
-              title="深度分析"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center group-hover:bg-blue-500/25 group-hover:border-blue-400/40 transition-all">
-                <svg className="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <span className="text-[10px] text-zinc-500 group-hover:text-blue-400 transition-colors">深度分析</span>
-            </button>
-            {/* Coach button */}
-            <button
-              onClick={() => router.push("/dashboard/coach")}
-              className="flex-shrink-0 flex flex-col items-center gap-1 group"
-              title="AI 教练"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center group-hover:bg-emerald-500/25 group-hover:border-emerald-400/40 transition-all">
-                <svg className="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-              </div>
-              <span className="text-[10px] text-zinc-500 group-hover:text-emerald-400 transition-colors">AI教练</span>
-            </button>
-            {/* Team button */}
-            <button
-              onClick={() => router.push("/dashboard/team")}
-              className="flex-shrink-0 flex flex-col items-center gap-1 group"
-              title="我的团队"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-white/10 group-hover:border-white/20 transition-all">
-                <svg className="w-6 h-6 text-zinc-300 group-hover:text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <span className="text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors">我的团队</span>
-            </button>
-            {/* Profile button */}
-            <button
-              onClick={() => router.push("/dashboard/profile")}
-              className="flex-shrink-0 flex flex-col items-center gap-1 group"
-              title="跑者档案"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-[#FC4C02]/15 border border-[#FC4C02]/30 flex items-center justify-center group-hover:bg-[#FC4C02]/25 transition-all">
-                <svg className="w-6 h-6 text-[#FC4C02]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <circle cx="12" cy="8" r="4"/>
-                  <path strokeLinecap="round" d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-                </svg>
-              </div>
-              <span className="text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors">我的档案</span>
-            </button>
-          </div>
+          <PageNav />
         </header>
 
         {/* Strava connect banner */}

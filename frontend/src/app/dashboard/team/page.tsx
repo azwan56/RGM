@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import axios from "@/lib/apiClient";
+import PageNav from "@/components/PageNav";
 
 interface Team {
   team_id: string;
@@ -100,39 +101,31 @@ export default function TeamPage() {
     <div className="min-h-screen bg-[#09090b] text-white">
       {/* Top bar */}
       <header className="sticky top-0 z-40 border-b border-white/5 bg-[#09090b]/90 backdrop-blur-xl">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/12 border border-white/8 text-zinc-300 hover:text-white transition-all text-sm font-medium"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-              返回
-            </Link>
+        <div className="max-w-5xl mx-auto px-4 py-4 space-y-3">
+          <div className="flex items-center justify-between">
             <h1 className="text-base font-bold text-white flex items-center gap-2">
               <svg className="w-5 h-5 text-[#FC4C02]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
               我的团队
             </h1>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowJoin(!showJoin); setShowCreate(false); }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
+              >
+                加入团队
+              </button>
+              <button
+                onClick={() => { setShowCreate(!showCreate); setShowJoin(false); }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: "#FC4C02" }}
+              >
+                创建团队
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => { setShowJoin(!showJoin); setShowCreate(false); }}
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
-            >
-              加入团队
-            </button>
-            <button
-              onClick={() => { setShowCreate(!showCreate); setShowJoin(false); }}
-              className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-              style={{ background: "#FC4C02" }}
-            >
-              创建团队
-            </button>
-          </div>
+          <PageNav />
         </div>
       </header>
 

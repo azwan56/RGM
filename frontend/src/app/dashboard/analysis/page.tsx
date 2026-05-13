@@ -6,6 +6,7 @@ import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import axios from "@/lib/apiClient";
 import dynamic from "next/dynamic";
+import PageNav from "@/components/PageNav";
 
 const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
   loading: () => <div className="h-80 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
@@ -88,19 +89,12 @@ export default function AnalysisPage() {
 
       <main className="max-w-5xl mx-auto space-y-8 relative z-10">
         {/* Header */}
-        <header className="flex items-center gap-4">
-          <Link
-            href="/dashboard"
-            className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all"
-          >
-            <svg className="w-5 h-5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </Link>
+        <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-black">深度分析</h1>
             <p className="text-zinc-500 text-sm">体能趋势 · 跑力诊断 · 月度统计 · 目标回顾</p>
           </div>
+          <PageNav />
         </header>
 
         {/* Fitness Trend (CTL · ATL · TSB) */}
