@@ -1418,8 +1418,6 @@ async def log_journal_entry(req: JournalLogRequest):
     else:
         # Fallback: 105% of 8-week average
         target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
-    avg_pace_8w_all = training_summary.get("avg_pace", "—")
-    avg_hr_8w_all = training_summary.get("avg_heart_rate", 0)
 
     # Detect trail vs road for THIS activity
     act_sport = (activity.get("sport_type", "") or "").lower()
@@ -1429,29 +1427,7 @@ async def log_journal_entry(req: JournalLogRequest):
         is_trail = any(kw in act_name_lower for kw in ["trail", "越野", "山", "hill", "mountain"])
     if not is_trail and act_elev > 30 and km > 0 and (act_elev / km) > 15:
         is_trail = True
-
-    # Use type-specific comparison data (road vs trail)
-    if is_trail:
-        type_stats = training_summary.get("trail_stats", {})
-        type_label = "越野跑"
-    else:
-        type_stats = training_summary.get("road_stats", {})
-        type_label = "路跑"
-
-    # Type-specific averages (fallback to overall if not enough data)
-    type_runs = type_stats.get("total_runs", 0)
-    if type_runs >= 3:
-        avg_pace_8w = type_stats.get("avg_pace", avg_pace_8w_all)
-        avg_hr_8w = type_stats.get("avg_heart_rate", avg_hr_8w_all)
-        avg_dist = type_stats.get("avg_distance", training_summary.get("avg_run_distance", 0))
-        longest = type_stats.get("longest_run", training_summary.get("longest_run", 0))
-        comparison_note = f"（仅{type_label}数据，共{type_runs}次）"
-    else:
-        avg_pace_8w = avg_pace_8w_all
-        avg_hr_8w = avg_hr_8w_all
-        avg_dist = training_summary.get("avg_run_distance", 0)
-        longest = training_summary.get("longest_run", 0)
-        comparison_note = f"（全部类型，{type_label}数据不足{type_runs}次）"
+    type_label = "越野跑" if is_trail else "路跑"
 
     # Race context
     race = journal.get("_race", {})
@@ -1534,13 +1510,6 @@ async def log_journal_entry(req: JournalLogRequest):
         from utils.stream_analyzer import format_stream_stats_for_prompt
         stream_stats_text = format_stream_stats_for_prompt(stream_stats)
 
-    # Build trail-specific elevation context
-    trail_elev_ctx = ""
-    if is_trail:
-        trail_s = training_summary.get("trail_stats", {})
-        if trail_s.get("avg_elevation", 0) > 0:
-            trail_elev_ctx = f"- 8周越野平均爬升：{trail_s['avg_elevation']}m/次\n"
-
     prompt = (
         f"你是Canova教练（意大利著名马拉松教练），正在为你的学员{runner_name}撰写今日训练评语。\n"
         f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
@@ -1551,11 +1520,10 @@ async def log_journal_entry(req: JournalLogRequest):
         f"{travel_ctx}"
         f"【今日训练详情】（类型：{type_label}{'🏔️' if is_trail else '🛣️'}）\n"
         f"- 活动名称：{activity.get('name','Run')}\n"
-        f"- 距离：{km} km（8周{type_label}平均每跑：{avg_dist}km，{type_label}最长：{longest}km）{comparison_note}\n"
-        f"- 配速：{act_pace}/km（8周{type_label}平均：{avg_pace_8w}/km，{'今日偏慢' if act_pace > avg_pace_8w else '今日偏快或持平'}）\n"
-        f"- 平均心率：{act_hr}bpm（8周{type_label}平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
+        f"- 距离：{km} km\n"
+        f"- 配速：{act_pace}/km\n"
+        f"- 平均心率：{act_hr}bpm，最大心率：{act_max_hr}bpm\n"
         f"- 海拔爬升：{act_elev}m{'（越野/山地训练）' if is_trail else ''}\n"
-        f"{trail_elev_ctx}"
         f"- 步频：{act_cadence}spm\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
         f"- 日期：{entry_date}（{today_weekday}）\n"
@@ -1572,26 +1540,25 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 本周还需完成：{remaining_km:.1f}km，剩余{days_left_in_week}天\n"
         f"- 明天是{tomorrow_weekday}\n\n"
         f"【跑者8周训练概况】\n"
-        f"- 周均{training_summary.get('avg_weekly_km',0)}km | 路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n"
-        f"- 总体平均配速{avg_pace_8w_all}/km | 总体平均HR:{avg_hr_8w_all}\n"
-        f"- {type_label}专项：配速{avg_pace_8w}/km | HR:{avg_hr_8w} | 平均距离{avg_dist}km\n"
-        f"- 趋势：{training_summary.get('volume_trend','stable')} | 一致性：{training_summary.get('consistency_score',0)}/10\n"
+        f"- 周均跑量：{training_summary.get('avg_weekly_km',0)}km | 路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n"
+        f"- 跑量趋势：{training_summary.get('volume_trend','stable')} | 训练一致性：{training_summary.get('consistency_score',0)}/10\n"
         f"{'【本周已有训练】' + chr(10) + prev_context if prev_context else ''}\n"
         "请分析以下维度并给出详细评语：\n"
-        f"1. 今日训练类型判断（轻松跑/节奏跑/间歇/长距离/恢复跑/越野）\n"
-        f"2. 配速与心率的匹配度（⚠️ 必须使用{type_label}的8周平均数据对比，不要混用路跑和越野跑数据）\n"
-        f"3. 与8周{type_label}平均数据的对比（进步还是退步）\n"
-        "4. 本周训练负荷是否合理\n"
-        "5. 对备赛目标的贡献度\n"
+        "1. 根据配速、心率、距离和活动名称，判断今日训练类型和目的（轻松跑/节奏跑/间歇/长距离/恢复跑/越野）\n"
+        "2. 配速与心率的内在匹配度：该配速下心率是否合理？是否存在心率偏高（有氧不足）或偏低（强度不够）的情况？\n"
+        "3. 本周训练负荷是否合理（距离、频次、强度搭配）\n"
+        "4. 对备赛目标的贡献度\n"
+        "⚠️ 重要：不要将今日数据与'8周平均'做对比。每次训练目的不同（轻松跑、节奏跑、间歇等），简单平均值没有参考意义。\n"
+        "请专注分析本次训练自身的配速/心率匹配度、训练目的达成情况和本周整体训练负荷。\n"
     )
 
     # Add stream-specific analysis dimensions when data is available
     if stream_stats_text:
         prompt += (
-            "6. 逐公里配速分析：是否存在明显掉速？配速稳定性如何？\n"
-            "7. 心率区间评估：训练强度是否与目的匹配（轻松跑应以Z2为主，节奏跑应以Z3-Z4为主）？\n"
-            "8. 心率漂移评估：有氧耐力水平如何？是否需要加强有氧基础？\n"
-            "9. 步频建议：步频是否在最优范围（170-185spm）？\n"
+            "5. 逐公里配速分析：是否存在明显掉速？配速稳定性如何？\n"
+            "6. 心率区间评估：训练强度是否与目的匹配（轻松跑应以Z2为主，节奏跑应以Z3-Z4为主）？\n"
+            "7. 心率漂移评估：有氧耐力水平如何？是否需要加强有氧基础？\n"
+            "8. 步频建议：步频是否在最优范围（170-185spm）？\n"
         )
 
     travel_instruction = ""
