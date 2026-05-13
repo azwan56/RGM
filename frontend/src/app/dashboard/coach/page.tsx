@@ -2,15 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import dynamic from "next/dynamic";
 import PageNav from "@/components/PageNav";
-
-const GoalSettingForm = dynamic(() => import("@/components/GoalSettingForm"), {
-  loading: () => <div className="h-48 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
-  ssr: false,
-});
 
 const AiCoachWidget = dynamic(() => import("@/components/AiCoachWidget"), {
   loading: () => <div className="h-80 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
@@ -60,15 +54,10 @@ export default function CoachPage() {
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-black">AI 教练</h1>
-            <p className="text-zinc-500 text-sm">目标设定 · 备赛指导 · 训练日志</p>
+            <p className="text-zinc-500 text-sm">备赛指导 · 训练日志</p>
           </div>
           <PageNav />
         </header>
-
-        {/* Goal Setting */}
-        <section>
-          <GoalSettingForm />
-        </section>
 
         {/* AI Coach Analysis */}
         {user && (

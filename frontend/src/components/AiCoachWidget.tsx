@@ -79,19 +79,8 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         }
       } catch (_) {}
 
-      try {
-        const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid });
-
-        if (typeof res.data.feedback === "string") {
-          setErrorStr(res.data.feedback);
-        } else {
-          setFeedback(res.data.feedback);
-          try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
-        }
-      } catch (error: any) {
-        console.error("Coach API error:", error?.message || error);
-        setErrorStr("请先连接 Strava 并同步数据，即可获得 AI 教练的专属建议。");
-      }
+      // Do NOT auto-fetch on mount. Prompt user to click button.
+      setErrorStr("点击下方按钮进行 AI 智能分析与数据同步。");
       setLoading(false);
     };
     fetchFeedback();

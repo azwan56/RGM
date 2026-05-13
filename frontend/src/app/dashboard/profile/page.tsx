@@ -10,6 +10,10 @@ import dynamic from "next/dynamic";
 import PageNav from "@/components/PageNav";
 
 const RunnerPersona = dynamic(() => import("@/components/RunnerPersona"), { ssr: false });
+const GoalSettingForm = dynamic(() => import("@/components/GoalSettingForm"), {
+  loading: () => <div className="h-48 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
 
 // ── Helper: seconds ↔ HH:MM:SS ───────────────────────────────────────────────
 function secsToTime(s: number): string {
@@ -274,6 +278,9 @@ export default function ProfilePage() {
 
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
         <RunnerPersona persona={persona!} loading={personaLoading || !persona} />
+
+        {/* ── Goal Setting ─────────────────────────────────────────────────── */}
+        <GoalSettingForm />
 
         {/* ── Account Info ─────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
