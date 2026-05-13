@@ -749,6 +749,20 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
         result["race_analysis"] = race_analysis
     return result
 
+@router.get("/cache/{uid}")
+def get_cached_feedback(uid: str):
+    """Returns the latest stored AI feedback if available, without triggering generation."""
+    try:
+        cache_ref = db.collection("users").document(uid).collection("meta").document("coach_cache")
+        cache_doc = cache_ref.get()
+        if cache_doc.exists:
+            cached = cache_doc.to_dict()
+            if "feedback" in cached:
+                return {"feedback": cached["feedback"], "cached_at": cached.get("cached_at")}
+    except Exception as e:
+        print(f"[coach] Error fetching cache for {uid}: {e}")
+    return {"feedback": None}
+
 @router.post("/analyze")
 async def generate_coach_feedback(req: CoachRequest):
     """

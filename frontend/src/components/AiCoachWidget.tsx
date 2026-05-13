@@ -79,7 +79,19 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         }
       } catch (_) {}
 
-      // Do NOT auto-fetch on mount. Prompt user to click button.
+      // — Fetch from backend cache —
+      try {
+        const res = await axios.get(`${backendUrl}/api/coach/cache/${uid}`);
+        if (res.data && res.data.feedback) {
+          setFeedback(res.data.feedback);
+          setLoading(false);
+          // Update session storage
+          try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
+          return;
+        }
+      } catch (_) {}
+
+      // Do NOT auto-generate on mount. Prompt user to click button.
       setErrorStr("点击下方按钮进行 AI 智能分析与数据同步。");
       setLoading(false);
     };
