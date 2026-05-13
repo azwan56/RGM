@@ -251,36 +251,36 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-white">
-      {/* Top bar */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#09090b]/90 backdrop-blur-xl">
-        <div className="max-w-5xl mx-auto px-4 py-4 md:py-6">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-black text-white mb-1">跑者档案</h1>
-              <p className="text-zinc-500 text-sm">个人信息 · 能力指数 · 目标设定</p>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
-              <PageNav />
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 min-w-[100px]"
-                style={{ background: saved ? "#10b981" : "#FC4C02" }}
-              >
-                {saving ? (
-                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中</>
-                ) : saved ? (
-                  <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> 已保存</>
-                ) : "保存档案"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-[#0a0a0a] text-white pt-20 md:pt-24 px-4 md:px-6 pb-16 md:pb-20 relative">
+      <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-orange-600/10 blur-[160px] pointer-events-none" />
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+      <main className="max-w-5xl mx-auto space-y-8 relative z-10">
+        {/* Header */}
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-black text-white mb-1">跑者档案</h1>
+            <p className="text-zinc-500 text-sm">个人信息 · 能力指数 · 目标设定</p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
+            <PageNav />
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 min-w-[100px]"
+              style={{ background: saved ? "#10b981" : "#FC4C02" }}
+            >
+              {saving ? (
+                <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中</>
+              ) : saved ? (
+                <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> 已保存</>
+              ) : "保存档案"}
+            </button>
+          </div>
+        </header>
+
+        {/* Content area */}
+        <div className="space-y-8">
 
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
         <RunnerPersona persona={persona!} loading={personaLoading || !persona} />
@@ -700,6 +700,7 @@ export default function ProfilePage() {
           >
             {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中...</> : "💾 保存所有修改"}
           </button>
+        </div>
         </div>
       </main>
     </div>
