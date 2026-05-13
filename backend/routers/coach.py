@@ -1390,10 +1390,13 @@ async def log_journal_entry(req: JournalLogRequest):
     # Exclude current activity to avoid double-counting when force=True
     week_entries = [e for e in all_week_entries if e.get("activity_id") != act_id]
 
-    # 4. Training summary + user goal (parallel)
-    training_summary, goal_data = await asyncio.gather(
+    # 4. Training summary + user goal + weather (parallel)
+    from utils.weather import get_training_weather, get_forecast_weather
+    training_summary, goal_data, training_weather, forecast_weather = await asyncio.gather(
         loop.run_in_executor(None, _fetch_training_summary, uid),
         loop.run_in_executor(None, _fetch_goal, uid),
+        loop.run_in_executor(None, get_training_weather, activity),
+        loop.run_in_executor(None, get_forecast_weather, activity),
     )
 
     # 5. Build prompt with rich comparison data
@@ -1534,6 +1537,11 @@ async def log_journal_entry(req: JournalLogRequest):
     if stream_stats_text:
         prompt += f"\n{stream_stats_text}\n"
 
+    # Append training weather conditions
+    if training_weather:
+        from utils.weather import format_training_weather_for_prompt
+        prompt += f"\n{format_training_weather_for_prompt(training_weather)}\n"
+
     prompt += (
         f"\n【本周训练进度】\n"
         f"- 本周已跑：{week_km:.1f}km / {week_runs}次，周目标{target_wk:.0f}km（完成{min(100,round(week_km/target_wk*100))}%）\n"
@@ -1553,13 +1561,22 @@ async def log_journal_entry(req: JournalLogRequest):
     )
 
     # Add stream-specific analysis dimensions when data is available
+    dim_n = 5
     if stream_stats_text:
         prompt += (
-            "5. 逐公里配速分析：是否存在明显掉速？配速稳定性如何？\n"
-            "6. 心率区间评估：训练强度是否与目的匹配（轻松跑应以Z2为主，节奏跑应以Z3-Z4为主）？\n"
-            "7. 心率漂移评估：有氧耐力水平如何？是否需要加强有氧基础？\n"
-            "8. 步频建议：步频是否在最优范围（170-185spm）？\n"
+            f"{dim_n}. 逐公里配速分析：是否存在明显掉速？配速稳定性如何？\n"
+            f"{dim_n+1}. 心率区间评估：训练强度是否与目的匹配（轻松跑应以Z2为主，节奏跑应以Z3-Z4为主）？\n"
+            f"{dim_n+2}. 心率漂移评估：有氧耐力水平如何？是否需要加强有氧基础？\n"
+            f"{dim_n+3}. 步频建议：步频是否在最优范围（170-185spm）？\n"
         )
+        dim_n += 4
+
+    if training_weather:
+        prompt += (
+            f"{dim_n}. 天气对训练的影响：高温/高湿/寒冷条件下，配速下降和心率升高是否属于正常生理反应？"
+            "分析时必须结合天气数据客观评估表现\n"
+        )
+        dim_n += 1
 
     travel_instruction = ""
     if travel_ctx:
@@ -1572,6 +1589,12 @@ async def log_journal_entry(req: JournalLogRequest):
             "  · 在ai_comment和tomorrow_suggestion中必须提及时差调整建议\n"
         )
 
+    # Append forecast weather for tomorrow's suggestion
+    forecast_ctx = ""
+    if forecast_weather:
+        from utils.weather import format_forecast_for_prompt
+        forecast_ctx = format_forecast_for_prompt(forecast_weather)
+
     prompt += (
         "\n【明日训练建议的要求】\n"
         f"- 今天是{entry_date}（{today_weekday}），明天是{tomorrow_date_str}（{tomorrow_weekday}）\n"
@@ -1580,7 +1603,8 @@ async def log_journal_entry(req: JournalLogRequest):
         "- 如果本周已完成较多距离，明天可以建议休息或轻松恢复\n"
         "- 给出具体的距离、配速和强度建议\n"
         f"- tomorrow_suggestion中必须明确写出'明天（{tomorrow_date_str}，{tomorrow_weekday}）'\n"
-        f"{travel_instruction}\n"
+        f"{travel_instruction}"
+        f"{forecast_ctx}\n"
         '返回JSON格式：\n'
         '{\n'
         '  "ai_comment": "<8-12句详细评语，必须引用逐公里配速、心率区间、心率漂移等具体数据，深入分析训练质量>",\n'

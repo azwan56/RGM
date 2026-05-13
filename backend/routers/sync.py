@@ -68,6 +68,7 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
         "achievement_count":    act.get("achievement_count", 0),
         "kudos_count":          act.get("kudos_count", 0),
         "summary_polyline":     act.get("map", {}).get("summary_polyline", ""),
+        "start_latlng":         act.get("start_latlng", []),    # [lat, lng] from Strava
         "sport_type":           act.get("sport_type", "Run"),  # "Run" | "TrailRun" | etc.
         "timezone":             act.get("timezone", ""),       # e.g. "(GMT+08:00) Asia/Singapore"
         "utc_offset":           act.get("utc_offset", 0),      # seconds, e.g. 28800 = UTC+8
