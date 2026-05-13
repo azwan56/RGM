@@ -286,8 +286,11 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
     # ── Core aggregation ──
     total_km = 0; total_elev = 0; total_time = 0
     hr_vals = []; pace_vals = []; distances = []
-    trail_km = 0; trail_elev = 0; trail_runs = 0
-    road_km = 0; road_runs = 0
+    trail_km = 0; trail_elev = 0; trail_runs = 0; trail_time = 0
+    road_km = 0; road_runs = 0; road_time = 0
+    # Separate pace/HR tracking for road vs trail
+    road_pace_vals = []; road_hr_vals = []; road_distances = []; road_longest = 0
+    trail_pace_vals = []; trail_hr_vals = []; trail_distances = []; trail_longest = 0
     max_hr_seen = 0; longest_run = 0
     weekly_bins = defaultdict(lambda: {"km": 0, "runs": 0, "elev": 0, "hr_sum": 0, "hr_n": 0})
 
@@ -298,6 +301,7 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
         hr = a.get("avg_heart_rate", 0) or 0
         mhr = a.get("max_heart_rate", 0) or 0
         name = (a.get("name", "") or "").lower()
+        sport_type = (a.get("sport_type", "") or "").lower()
 
         total_km += km; total_elev += elev; total_time += mt
         distances.append(km)
@@ -311,13 +315,23 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
             pace_vals.append(mt / km / 60)  # min/km
 
         # Trail vs road detection
-        is_trail = any(kw in name for kw in ["trail", "越野", "山", "hill", "mountain"])
-        if elev > 30 and km > 0 and (elev / km) > 20:  # >20m/km elevation = trail-like
+        is_trail = sport_type == "trailrun"
+        if not is_trail:
+            is_trail = any(kw in name for kw in ["trail", "越野", "山", "hill", "mountain"])
+        if not is_trail and elev > 30 and km > 0 and (elev / km) > 20:  # >20m/km elevation = trail-like
             is_trail = True
         if is_trail:
-            trail_km += km; trail_elev += elev; trail_runs += 1
+            trail_km += km; trail_elev += elev; trail_runs += 1; trail_time += mt
+            trail_distances.append(km)
+            if km > trail_longest: trail_longest = km
+            if hr > 0: trail_hr_vals.append(hr)
+            if km > 0 and mt > 0: trail_pace_vals.append(mt / km / 60)
         else:
-            road_km += km; road_runs += 1
+            road_km += km; road_runs += 1; road_time += mt
+            road_distances.append(km)
+            if km > road_longest: road_longest = km
+            if hr > 0: road_hr_vals.append(hr)
+            if km > 0 and mt > 0: road_pace_vals.append(mt / km / 60)
 
         # Weekly bin (ISO week)
         ds = a.get("start_date_local", "")[:10]
@@ -393,6 +407,15 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
             "avg_hr": whr,
         })
 
+    # ── Type-specific stats ──
+    road_avg_pace = _fmt_pace(sum(road_pace_vals) / len(road_pace_vals)) if road_pace_vals else "—"
+    road_avg_hr = round(sum(road_hr_vals) / len(road_hr_vals)) if road_hr_vals else 0
+    road_avg_dist = round(road_km / road_runs, 1) if road_runs else 0
+    trail_avg_pace = _fmt_pace(sum(trail_pace_vals) / len(trail_pace_vals)) if trail_pace_vals else "—"
+    trail_avg_hr = round(sum(trail_hr_vals) / len(trail_hr_vals)) if trail_hr_vals else 0
+    trail_avg_dist = round(trail_km / trail_runs, 1) if trail_runs else 0
+    trail_avg_elev = round(trail_elev / trail_runs) if trail_runs else 0
+
     return {
         "weeks": weeks,
         "total_runs": total_runs,
@@ -416,6 +439,22 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
         "avg_rest_days_per_week": avg_rest_days,
         "avg_runs_per_week": round(avg_runs_per_week, 1),
         "recent_weeks": recent_weeks,
+        # Type-specific comparison data
+        "road_stats": {
+            "avg_pace": road_avg_pace,
+            "avg_heart_rate": road_avg_hr,
+            "avg_distance": road_avg_dist,
+            "longest_run": round(road_longest, 1),
+            "total_runs": road_runs,
+        },
+        "trail_stats": {
+            "avg_pace": trail_avg_pace,
+            "avg_heart_rate": trail_avg_hr,
+            "avg_distance": trail_avg_dist,
+            "longest_run": round(trail_longest, 1),
+            "avg_elevation": trail_avg_elev,
+            "total_runs": trail_runs,
+        },
     }
 
 
@@ -1379,11 +1418,40 @@ async def log_journal_entry(req: JournalLogRequest):
     else:
         # Fallback: 105% of 8-week average
         target_wk = max(training_summary.get("avg_weekly_km", 30) * 1.05, 20)
-    avg_pace_8w = training_summary.get("avg_pace", "—")
-    avg_hr_8w = training_summary.get("avg_heart_rate", 0)
-    avg_dist = training_summary.get("avg_run_distance", 0)
-    longest = training_summary.get("longest_run", 0)
-    is_trail = act_elev > 30 and km > 0 and (act_elev / km) > 15
+    avg_pace_8w_all = training_summary.get("avg_pace", "—")
+    avg_hr_8w_all = training_summary.get("avg_heart_rate", 0)
+
+    # Detect trail vs road for THIS activity
+    act_sport = (activity.get("sport_type", "") or "").lower()
+    act_name_lower = (activity.get("name", "") or "").lower()
+    is_trail = act_sport == "trailrun"
+    if not is_trail:
+        is_trail = any(kw in act_name_lower for kw in ["trail", "越野", "山", "hill", "mountain"])
+    if not is_trail and act_elev > 30 and km > 0 and (act_elev / km) > 15:
+        is_trail = True
+
+    # Use type-specific comparison data (road vs trail)
+    if is_trail:
+        type_stats = training_summary.get("trail_stats", {})
+        type_label = "越野跑"
+    else:
+        type_stats = training_summary.get("road_stats", {})
+        type_label = "路跑"
+
+    # Type-specific averages (fallback to overall if not enough data)
+    type_runs = type_stats.get("total_runs", 0)
+    if type_runs >= 3:
+        avg_pace_8w = type_stats.get("avg_pace", avg_pace_8w_all)
+        avg_hr_8w = type_stats.get("avg_heart_rate", avg_hr_8w_all)
+        avg_dist = type_stats.get("avg_distance", training_summary.get("avg_run_distance", 0))
+        longest = type_stats.get("longest_run", training_summary.get("longest_run", 0))
+        comparison_note = f"（仅{type_label}数据，共{type_runs}次）"
+    else:
+        avg_pace_8w = avg_pace_8w_all
+        avg_hr_8w = avg_hr_8w_all
+        avg_dist = training_summary.get("avg_run_distance", 0)
+        longest = training_summary.get("longest_run", 0)
+        comparison_note = f"（全部类型，{type_label}数据不足{type_runs}次）"
 
     # Race context
     race = journal.get("_race", {})
@@ -1466,6 +1534,13 @@ async def log_journal_entry(req: JournalLogRequest):
         from utils.stream_analyzer import format_stream_stats_for_prompt
         stream_stats_text = format_stream_stats_for_prompt(stream_stats)
 
+    # Build trail-specific elevation context
+    trail_elev_ctx = ""
+    if is_trail:
+        trail_s = training_summary.get("trail_stats", {})
+        if trail_s.get("avg_elevation", 0) > 0:
+            trail_elev_ctx = f"- 8周越野平均爬升：{trail_s['avg_elevation']}m/次\n"
+
     prompt = (
         f"你是Canova教练（意大利著名马拉松教练），正在为你的学员{runner_name}撰写今日训练评语。\n"
         f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
@@ -1474,12 +1549,13 @@ async def log_journal_entry(req: JournalLogRequest):
         f"【训练日志】{journal.get('title','训练日志')}\n"
         f"{race_ctx}"
         f"{travel_ctx}"
-        f"【今日训练详情】\n"
+        f"【今日训练详情】（类型：{type_label}{'🏔️' if is_trail else '🛣️'}）\n"
         f"- 活动名称：{activity.get('name','Run')}\n"
-        f"- 距离：{km} km（8周平均每跑：{avg_dist}km，历史最长：{longest}km）\n"
-        f"- 配速：{act_pace}/km（8周平均：{avg_pace_8w}/km，{'今日偏慢' if act_pace > avg_pace_8w else '今日偏快或持平'}）\n"
-        f"- 平均心率：{act_hr}bpm（8周平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
+        f"- 距离：{km} km（8周{type_label}平均每跑：{avg_dist}km，{type_label}最长：{longest}km）{comparison_note}\n"
+        f"- 配速：{act_pace}/km（8周{type_label}平均：{avg_pace_8w}/km，{'今日偏慢' if act_pace > avg_pace_8w else '今日偏快或持平'}）\n"
+        f"- 平均心率：{act_hr}bpm（8周{type_label}平均：{avg_hr_8w}bpm），最大心率：{act_max_hr}bpm\n"
         f"- 海拔爬升：{act_elev}m{'（越野/山地训练）' if is_trail else ''}\n"
+        f"{trail_elev_ctx}"
         f"- 步频：{act_cadence}spm\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
         f"- 日期：{entry_date}（{today_weekday}）\n"
@@ -1497,13 +1573,14 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 明天是{tomorrow_weekday}\n\n"
         f"【跑者8周训练概况】\n"
         f"- 周均{training_summary.get('avg_weekly_km',0)}km | 路跑{training_summary.get('road_runs',0)}次 越野{training_summary.get('trail_runs',0)}次\n"
-        f"- 平均配速{avg_pace_8w}/km | 平均HR:{avg_hr_8w} | 趋势：{training_summary.get('volume_trend','stable')}\n"
-        f"- 一致性：{training_summary.get('consistency_score',0)}/10\n"
+        f"- 总体平均配速{avg_pace_8w_all}/km | 总体平均HR:{avg_hr_8w_all}\n"
+        f"- {type_label}专项：配速{avg_pace_8w}/km | HR:{avg_hr_8w} | 平均距离{avg_dist}km\n"
+        f"- 趋势：{training_summary.get('volume_trend','stable')} | 一致性：{training_summary.get('consistency_score',0)}/10\n"
         f"{'【本周已有训练】' + chr(10) + prev_context if prev_context else ''}\n"
         "请分析以下维度并给出详细评语：\n"
-        "1. 今日训练类型判断（轻松跑/节奏跑/间歇/长距离/恢复跑/越野）\n"
-        "2. 配速与心率的匹配度（是否在合理区间）\n"
-        "3. 与8周平均数据的对比（进步还是退步）\n"
+        f"1. 今日训练类型判断（轻松跑/节奏跑/间歇/长距离/恢复跑/越野）\n"
+        f"2. 配速与心率的匹配度（⚠️ 必须使用{type_label}的8周平均数据对比，不要混用路跑和越野跑数据）\n"
+        f"3. 与8周{type_label}平均数据的对比（进步还是退步）\n"
         "4. 本周训练负荷是否合理\n"
         "5. 对备赛目标的贡献度\n"
     )
