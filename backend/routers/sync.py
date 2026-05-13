@@ -721,8 +721,10 @@ def get_stats_summary(uid: str):
                   .collection("goals").document("current").get())
     overall_target = 100.0
     monthly_targets_arr: list = []
+    period = "monthly"
     if goal_doc.exists:
         gd = goal_doc.to_dict() or {}
+        period = gd.get("period", "monthly")
         overall_target = float(gd.get("target_distance", gd.get("target_distance_km", 100)) or 100)
         raw = gd.get("monthly_targets") or []
         if isinstance(raw, list) and len(raw) == 12:
@@ -731,6 +733,9 @@ def get_stats_summary(uid: str):
             monthly_targets_arr = [overall_target] * 12
 
     def month_target(m_idx: int) -> float:
+        if period == "weekly":
+            days = calendar.monthrange(year, m_idx)[1]
+            return overall_target * (days / 7.0)
         t = monthly_targets_arr[m_idx - 1] if monthly_targets_arr else overall_target
         return t if t > 0 else overall_target
 
@@ -797,7 +802,7 @@ def get_stats_summary(uid: str):
     return {
         "history": {
             "year":           year,
-            "monthly_target": round(overall_target, 1),
+            "monthly_target": round(annual_tgt / 12, 1),
             "annual_target":  round(annual_tgt, 1),
             "months":         months_results,
             "ytd_km":         round(ytd_km, 1),
@@ -835,16 +840,25 @@ def get_annual_summary(uid: str):
                   .collection("goals").document("current").get())
     overall_target = 100.0
     monthly_targets_arr: list = []
+    period = "monthly"
     if goal_doc.exists:
         gd = goal_doc.to_dict() or {}
+        period = gd.get("period", "monthly")
         overall_target = float(gd.get("target_distance", gd.get("target_distance_km", 100)) or 100)
         raw = gd.get("monthly_targets") or []
         if isinstance(raw, list) and len(raw) == 12:
             monthly_targets_arr = [float(v or overall_target) for v in raw]
-    annual_target = (
-        sum(monthly_targets_arr) if len(monthly_targets_arr) == 12
-        else overall_target * 12
-    )
+
+    if period == "weekly":
+        annual_target = 0
+        for m_idx in range(1, 13):
+            days = calendar.monthrange(year, m_idx)[1]
+            annual_target += overall_target * (days / 7.0)
+    else:
+        annual_target = (
+            sum(monthly_targets_arr) if len(monthly_targets_arr) == 12
+            else overall_target * 12
+        )
 
     # Activities
     acts_stream = (db.collection("users").document(uid)
