@@ -1415,6 +1415,51 @@ async def log_journal_entry(req: JournalLogRequest):
     remaining_km = max(0, target_wk - week_km)
     days_left_in_week = 6 - weekday_idx  # days remaining after today (Sun=0 left)
 
+    # ── Timezone / travel detection ───────────────────────────────────────────
+    # Compare current activity timezone against recent activities to detect travel
+    current_tz = activity.get("timezone", "")
+    current_utc_offset = activity.get("utc_offset", 0)  # seconds
+    travel_ctx = ""
+
+    # Look at the user's last 7 activities for their "home" timezone
+    recent_acts = [d.to_dict() for d in
+                   user_ref.collection("activities")
+                   .order_by("start_date_local", direction="DESCENDING")
+                   .limit(10)
+                   .stream()]
+
+    if current_tz and len(recent_acts) > 1:
+        # Find the most common timezone among recent activities (excluding current)
+        from collections import Counter
+        tz_offsets = [a.get("utc_offset", 0) for a in recent_acts[1:] if a.get("utc_offset") is not None]
+        if tz_offsets:
+            home_offset = Counter(tz_offsets).most_common(1)[0][0]
+            tz_shift_hours = abs(current_utc_offset - home_offset) / 3600
+
+            if tz_shift_hours >= 2:
+                # Significant timezone shift detected
+                home_tz_names = [a.get("timezone", "") for a in recent_acts[1:] if a.get("utc_offset") == home_offset]
+                home_tz_display = home_tz_names[0] if home_tz_names else f"UTC{home_offset/3600:+.0f}"
+                direction = "向东" if current_utc_offset > home_offset else "向西"
+                # Jet-lag recovery rule: ~1 day per hour of shift
+                recovery_days = max(1, int(tz_shift_hours))
+
+                travel_ctx = (
+                    f"\n【旅行/时差提醒】\n"
+                    f"- 检测到时区变化：常驻时区 {home_tz_display} → 当前 {current_tz}\n"
+                    f"- 时差：{direction}跨越 {tz_shift_hours:.0f} 小时\n"
+                    f"- 预计身体需要 {recovery_days}-{recovery_days+1} 天适应新时区\n"
+                    f"- 时差对训练的影响：体温节律紊乱、睡眠质量下降、心率偏高、恢复能力降低\n"
+                    f"- 建议在到达新时区后的前 {recovery_days} 天以恢复性训练为主，"
+                    f"避免高强度训练，优先保证睡眠和水分补充\n"
+                )
+                print(f"[journal] Travel detected: {home_tz_display} → {current_tz}, shift={tz_shift_hours:.0f}h")
+
+    elif not current_tz and len(recent_acts) > 0:
+        # If timezone not stored yet, try to detect from start_date differences
+        # (for backward compatibility with activities synced before timezone storage)
+        pass
+
     # Build stream stats text for the prompt (if available)
     stream_stats_text = ""
     if stream_stats:
@@ -1428,6 +1473,7 @@ async def log_journal_entry(req: JournalLogRequest):
         "回复必须是纯 JSON，不含 markdown 标记。\n\n"
         f"【训练日志】{journal.get('title','训练日志')}\n"
         f"{race_ctx}"
+        f"{travel_ctx}"
         f"【今日训练详情】\n"
         f"- 活动名称：{activity.get('name','Run')}\n"
         f"- 距离：{km} km（8周平均每跑：{avg_dist}km，历史最长：{longest}km）\n"
@@ -1437,6 +1483,7 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 步频：{act_cadence}spm\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
         f"- 日期：{entry_date}（{today_weekday}）\n"
+        f"- 所在时区：{current_tz or '未知'}\n"
     )
 
     # Append detailed stream data when available
@@ -1470,6 +1517,17 @@ async def log_journal_entry(req: JournalLogRequest):
             "9. 步频建议：步频是否在最优范围（170-185spm）？\n"
         )
 
+    travel_instruction = ""
+    if travel_ctx:
+        travel_instruction = (
+            "- ⚠️ 检测到跨时区旅行！训练建议必须优先考虑时差恢复：\n"
+            "  · 到达新时区后的前几天应以恢复跑/轻松跑为主，降低强度20-30%\n"
+            "  · 心率上限建议比平时降低5-10bpm\n"
+            "  · 优先保证睡眠规律、补充水分和电解质\n"
+            "  · 避免安排间歇、节奏跑等高强度训练\n"
+            "  · 在ai_comment和tomorrow_suggestion中必须提及时差调整建议\n"
+        )
+
     prompt += (
         "\n【明日训练建议的要求】\n"
         f"- 今天是{entry_date}（{today_weekday}），明天是{tomorrow_date_str}（{tomorrow_weekday}）\n"
@@ -1477,7 +1535,8 @@ async def log_journal_entry(req: JournalLogRequest):
         "- 周六周日适合安排长距离有氧或LSD（Long Slow Distance），工作日偏向轻松跑、恢复跑或短距离节奏跑\n"
         "- 如果本周已完成较多距离，明天可以建议休息或轻松恢复\n"
         "- 给出具体的距离、配速和强度建议\n"
-        f"- tomorrow_suggestion中必须明确写出'明天（{tomorrow_date_str}，{tomorrow_weekday}）'\n\n"
+        f"- tomorrow_suggestion中必须明确写出'明天（{tomorrow_date_str}，{tomorrow_weekday}）'\n"
+        f"{travel_instruction}\n"
         '返回JSON格式：\n'
         '{\n'
         '  "ai_comment": "<8-12句详细评语，必须引用逐公里配速、心率区间、心率漂移等具体数据，深入分析训练质量>",\n'
