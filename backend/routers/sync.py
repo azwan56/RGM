@@ -220,7 +220,7 @@ def sync_user_data(req: SyncRequest):
         "period":                    "monthly",
         "period_start":              get_period_start("monthly").isoformat(),
         "last_sync":                 datetime.now().isoformat(),
-    }, merge=True)
+    })  # Full set (not merge) — prevents stale data from persisting
 
     # ── Also update yearly leaderboard aggregate ───────────────────────────────
     _update_yearly_leaderboard(req.uid, user_data, display_name)
