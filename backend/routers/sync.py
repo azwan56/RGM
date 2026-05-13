@@ -236,6 +236,45 @@ def sync_user_data(req: SyncRequest):
         "last_sync":                 datetime.now().isoformat(),
     })  # Full set (not merge) — prevents stale data from persisting
 
+    # ── Weekly Leaderboard Aggregate ──
+    week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
+    week_acts = (
+        db.collection("users").document(req.uid)
+          .collection("activities")
+          .where("start_date_local", ">=", week_start_str)
+          .stream()
+    )
+    wk_dist = 0.0
+    wk_time = 0
+    wk_hr_sum = 0.0
+    wk_hr_count = 0
+    wk_runs = 0
+    for a in week_acts:
+        d = a.to_dict()
+        wk_runs += 1
+        wk_dist += d.get("distance_km", 0) or 0
+        wk_time += d.get("moving_time", 0) or 0
+        hr = d.get("avg_heart_rate", 0) or 0
+        if hr > 0:
+            wk_hr_sum += hr
+            wk_hr_count += 1
+            
+    wk_pace = pace_str(wk_dist * 1000, wk_time)
+    wk_avg_hr = round(wk_hr_sum / wk_hr_count) if wk_hr_count > 0 else 0
+    
+    db.collection("leaderboard_weekly").document(req.uid).set({
+        "uid": req.uid,
+        "display_name": display_name,
+        "email": user_data.get("email", ""),
+        "total_distance_km": round(wk_dist, 2),
+        "avg_pace": wk_pace,
+        "avg_heart_rate": wk_avg_hr,
+        "run_count": wk_runs,
+        "period": "weekly",
+        "period_start": get_period_start("weekly").isoformat(),
+        "last_sync": datetime.now().isoformat(),
+    })
+
     # ── Also update yearly leaderboard aggregate ───────────────────────────────
     _update_yearly_leaderboard(req.uid, user_data, display_name)
 

@@ -225,8 +225,7 @@ def get_leaderboard(period: str = "monthly", limit_n: int = 20):
                   .limit(limit_n)
                   .stream())
     else:
-        docs = (db.collection("leaderboard")
-                  .where("period", "==", period)
+        docs = (db.collection("leaderboard_weekly")
                   .order_by("total_distance_km", direction="DESCENDING")
                   .limit(limit_n)
                   .stream())
