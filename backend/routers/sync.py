@@ -4,6 +4,7 @@ from firebase_config import db
 import requests
 from utils.strava_rate_limiter import strava_request
 import os
+import calendar
 from datetime import datetime, date, timedelta
 
 router = APIRouter()
@@ -196,11 +197,13 @@ def sync_user_data(req: SyncRequest):
     lb_hr_sum  = 0.0
     lb_hr_count = 0
     lb_runs    = 0
+    lb_elev    = 0.0
     for a in month_acts:
         d = a.to_dict()
         lb_runs    += 1
         lb_dist    += d.get("distance_km", 0) or 0
         lb_time    += d.get("moving_time", 0) or 0
+        lb_elev    += d.get("total_elevation_gain", 0) or 0
         hr = d.get("avg_heart_rate", 0) or 0
         if hr > 0:
             lb_hr_sum  += hr
@@ -209,14 +212,24 @@ def sync_user_data(req: SyncRequest):
     lb_pace   = pace_str(lb_dist * 1000, lb_time)
     lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
 
+    # Automatically estimate monthly goal if the user uses a weekly plan
+    now = datetime.now()
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    monthly_target_dist = target_dist
+    if period == "weekly" and target_dist > 0:
+        monthly_target_dist = target_dist * (days_in_month / 7.0)
+
+    lb_goal_percentage = round((lb_dist / monthly_target_dist) * 100) if monthly_target_dist > 0 else 0
+
     db.collection("leaderboard").document(req.uid).set({
         "uid":                       req.uid,
         "display_name":              display_name,
         "email":                     user_data.get("email", ""),
         "total_distance_km":         round(lb_dist, 2),
+        "total_elevation_gain":      round(lb_elev, 1),
         "avg_pace":                  lb_pace,
         "avg_heart_rate":            lb_avg_hr,
-        "goal_completion_percentage": min(goal_percentage, 100),
+        "goal_completion_percentage": min(lb_goal_percentage, 100),
         "run_count":                 lb_runs,
         "period":                    "monthly",
         "period_start":              get_period_start("monthly").isoformat(),

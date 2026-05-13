@@ -6,6 +6,7 @@ import StatsCard from "./StatsCard";
 
 interface Stats {
   total_distance_km: number;
+  total_elevation_gain?: number;
   avg_pace: string;
   avg_heart_rate: number;
   goal_completion_percentage: number;
@@ -206,7 +207,7 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
       )}
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <StatsCard
           title="Total Distance"
           value={stats.total_distance_km > 0 ? stats.total_distance_km.toFixed(1) : 0}
@@ -216,6 +217,17 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          }
+        />
+        <StatsCard
+          title="Total Elevation"
+          value={stats.total_elevation_gain ? stats.total_elevation_gain.toFixed(0) : 0}
+          unit="m"
+          color="emerald"
+          icon={
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
             </svg>
           }
         />
