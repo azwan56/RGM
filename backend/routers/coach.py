@@ -1401,10 +1401,17 @@ async def log_journal_entry(req: JournalLogRequest):
         prev_context += f"- {e['date']}: {s.get('name','')} {s.get('distance_km',0)}km @{s.get('avg_pace','')}/km HR:{s.get('avg_heart_rate',0)}\n"
 
     # Day-of-week and remaining distance context for smarter suggestions
+    # Use activity date (user's local timezone), NOT server date (may be UTC)
     weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    weekday_idx = today.weekday()  # 0=Monday
+    try:
+        activity_date = _dt.fromisoformat(entry_date)
+    except (ValueError, TypeError):
+        activity_date = today
+    weekday_idx = activity_date.weekday()  # 0=Monday
     today_weekday = weekday_names[weekday_idx]
-    tomorrow_weekday = weekday_names[(weekday_idx + 1) % 7]
+    tomorrow_date = activity_date + timedelta(days=1)
+    tomorrow_weekday = weekday_names[tomorrow_date.weekday()]
+    tomorrow_date_str = tomorrow_date.isoformat()  # e.g. "2026-05-14"
     remaining_km = max(0, target_wk - week_km)
     days_left_in_week = 6 - weekday_idx  # days remaining after today (Sun=0 left)
 
@@ -1465,10 +1472,12 @@ async def log_journal_entry(req: JournalLogRequest):
 
     prompt += (
         "\n【明日训练建议的要求】\n"
+        f"- 今天是{entry_date}（{today_weekday}），明天是{tomorrow_date_str}（{tomorrow_weekday}）\n"
         "- 必须考虑周目标剩余距离和本周已有训练负荷\n"
         "- 周六周日适合安排长距离有氧或LSD（Long Slow Distance），工作日偏向轻松跑、恢复跑或短距离节奏跑\n"
         "- 如果本周已完成较多距离，明天可以建议休息或轻松恢复\n"
-        "- 给出具体的距离、配速和强度建议\n\n"
+        "- 给出具体的距离、配速和强度建议\n"
+        f"- tomorrow_suggestion中必须明确写出'明天（{tomorrow_date_str}，{tomorrow_weekday}）'\n\n"
         '返回JSON格式：\n'
         '{\n'
         '  "ai_comment": "<8-12句详细评语，必须引用逐公里配速、心率区间、心率漂移等具体数据，深入分析训练质量>",\n'
