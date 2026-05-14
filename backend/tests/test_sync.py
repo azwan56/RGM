@@ -142,8 +142,9 @@ class TestGetPeriodStart:
 
     def test_monthly(self):
         from routers.sync import get_period_start
+        from zoneinfo import ZoneInfo
         result = get_period_start("monthly")
-        today = date.today()
+        today = datetime.now(ZoneInfo("Asia/Singapore")).date()
         assert result.year == today.year
         assert result.month == today.month
         assert result.day == 1
@@ -156,6 +157,7 @@ class TestGetPeriodStart:
 
     def test_default_is_monthly(self):
         from routers.sync import get_period_start
+        from zoneinfo import ZoneInfo
         result = get_period_start("unknown")
-        today = date.today()
+        today = datetime.now(ZoneInfo("Asia/Singapore")).date()
         assert result.day == 1

@@ -6,6 +6,10 @@ from utils.strava_rate_limiter import strava_request
 import os
 import calendar
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+# Default user timezone — all current users are in UTC+8
+_DEFAULT_TZ = "Asia/Singapore"
 
 router = APIRouter()
 
@@ -14,9 +18,14 @@ class SyncRequest(BaseModel):
     uid: str
 
 
-def get_period_start(period: str) -> datetime:
-    """Natural week (Monday 00:00) or natural month (1st 00:00)."""
-    today = date.today()
+def get_period_start(period: str, tz_name: str = _DEFAULT_TZ) -> datetime:
+    """Natural week (Monday 00:00) or natural month (1st 00:00) in user timezone.
+
+    Uses the user's local timezone to determine "today" so that the week/month
+    boundary is correct even when the server runs in UTC.
+    """
+    tz = ZoneInfo(tz_name)
+    today = datetime.now(tz).date()
     if period == "weekly":
         monday = today - timedelta(days=today.weekday())
         return datetime(monday.year, monday.month, monday.day, 0, 0, 0)
@@ -213,7 +222,7 @@ def sync_user_data(req: SyncRequest):
     lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
 
     # Automatically estimate monthly goal if the user uses a weekly plan
-    now = datetime.now()
+    now = datetime.now(ZoneInfo(_DEFAULT_TZ))
     days_in_month = calendar.monthrange(now.year, now.month)[1]
     monthly_target_dist = target_dist
     if period == "weekly" and target_dist > 0:

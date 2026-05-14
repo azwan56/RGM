@@ -59,8 +59,9 @@ def _read_goal_doc(uid: str):
     doc = db.collection("users").document(uid).collection("goals").document("current").get()
     return doc.to_dict() if doc.exists else None
 
-def _read_leaderboard_doc(uid: str):
-    doc = db.collection("leaderboard").document(uid).get()
+def _read_leaderboard_doc(uid: str, period: str = "monthly"):
+    collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
+    doc = db.collection(collection).document(uid).get()
     return doc.to_dict() if doc.exists else None
 
 def _read_leaderboard_list(period: str, limit_n: int = 20):
@@ -119,10 +120,18 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     act_end = f"{end_year}-{pad(end_mon + 1)}-01T00:00:00"
 
     # Fire all Firestore reads in parallel
+    # We need the goal doc first to determine the correct stats collection,
+    # but we can still fire user/activities in parallel and read goal inline.
+    goal_data = _read_goal_doc(uid)
+    goal_period = "monthly"
+    if goal_data:
+        p = goal_data.get("period")
+        if p in ("weekly", "monthly"):
+            goal_period = p
+
     futures = {
         _executor.submit(_read_user_doc, uid): "user",
-        _executor.submit(_read_goal_doc, uid): "goal",
-        _executor.submit(_read_leaderboard_doc, uid): "stats",
+        _executor.submit(_read_leaderboard_doc, uid, goal_period): "stats",
         _executor.submit(_read_leaderboard_list, period): "leaderboard",
         _executor.submit(_read_activities, uid, act_start, act_end): "activities",
     }
@@ -137,7 +146,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
             results[key] = None
 
     user_data = results.get("user") or {}
-    goal = results.get("goal")
+    goal = goal_data
     stats = results.get("stats") or {}
     leaderboard_entries = results.get("leaderboard") or []
     activities = results.get("activities") or []
@@ -206,8 +215,17 @@ def get_dashboard_init(uid: str):
 
 @router.get("/stats/{uid}")
 def get_user_stats(uid: str):
-    """Returns the leaderboard document for a single user (used by RunningStatsPanel)."""
-    doc = db.collection("leaderboard").document(uid).get()
+    """Returns the leaderboard document for a single user (used by RunningStatsPanel).
+    Reads from the correct collection based on the user's goal period setting.
+    """
+    # Check user's goal period to pick the right leaderboard collection
+    goal_doc = db.collection("users").document(uid).collection("goals").document("current").get()
+    period = "monthly"
+    if goal_doc.exists:
+        period = (goal_doc.to_dict() or {}).get("period", "monthly")
+
+    collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
+    doc = db.collection(collection).document(uid).get()
     if not doc.exists:
         return {}
     return doc.to_dict()
