@@ -1228,8 +1228,13 @@ async def generate_coach_feedback(req: CoachRequest):
         print(f"Coach JSON parse error: {e}")
         fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
         try:
+            _now = __import__("datetime").datetime.now().isoformat()
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
-                {**fb, "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
+                {**fb, "saved_at": _now}, merge=False)
+            # Also write to cache so next page load shows fallback instead of "click button"
+            db.collection("users").document(req.uid).collection("meta").document("coach_cache").set({
+                "feedback": fb, "cached_at": _now,
+            })
         except Exception:
             pass
         return {"feedback": fb}
@@ -1238,9 +1243,15 @@ async def generate_coach_feedback(req: CoachRequest):
         fb = _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_weekly_km, goal_data=goal_data, est_weekly_km=est_weekly_km)
         fb["_error"] = str(e)
         try:
+            _now = __import__("datetime").datetime.now().isoformat()
             db.collection("users").document(req.uid).collection("coach").document("latest_analysis").set(
                 {**{k: v for k, v in fb.items() if not k.startswith("_")},
-                 "saved_at": __import__("datetime").datetime.now().isoformat()}, merge=False)
+                 "saved_at": _now}, merge=False)
+            # Also write to cache so next page load shows fallback instead of "click button"
+            db.collection("users").document(req.uid).collection("meta").document("coach_cache").set({
+                "feedback": {k: v for k, v in fb.items() if not k.startswith("_")},
+                "cached_at": _now,
+            })
         except Exception:
             pass
         return {"feedback": fb}

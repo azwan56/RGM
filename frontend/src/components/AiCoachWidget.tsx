@@ -89,7 +89,9 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
           return;
         }
-      } catch (_) {}
+      } catch (err) {
+        console.warn("[AiCoach] Backend cache fetch failed:", err);
+      }
 
       // Do NOT auto-generate on mount. Prompt user to click button.
       setErrorStr("点击下方按钮进行 AI 智能分析与数据同步。");
