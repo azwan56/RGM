@@ -297,13 +297,13 @@ def test_gemini(request: Request):
     results = {}
     for model in candidates:
         for api_ver in ["v1beta", "v1"]:
-            url  = f"{base_url}/{api_ver}/models/{model}:generateContent?key={api_key}"
+            url  = f"{base_url}/{api_ver}/models/{model}:generateContent"
             body = {
                 "contents": [{"parts": [{"text": "用一句话夸一个跑了14km的跑者，要热情"}]}],
                 "generationConfig": {"maxOutputTokens": 60},
             }
             try:
-                r = requests.post(url, json=body, timeout=10)
+                r = requests.post(url, json=body, headers={"x-goog-api-key": api_key}, timeout=10)
                 if r.status_code == 200:
                     text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                     return {

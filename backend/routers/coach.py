@@ -10,7 +10,7 @@ router = APIRouter()
 _api_key = os.getenv("GEMINI_API_KEY")
 _gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 _gemini_proxy_url = os.getenv("GEMINI_PROXY_URL", "https://us-central1-dailystockrpt.cloudfunctions.net/gemini_proxy")
-_gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "rgm_gemini_proxy_2026")
+_gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "")
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [

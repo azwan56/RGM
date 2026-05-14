@@ -1,6 +1,10 @@
 # Mac
 .DS_Store
 
+# Python bytecode — never track (may contain compiled secrets)
+__pycache__/
+*.pyc
+
 # Frontend (Next.js)
 frontend/node_modules/
 frontend/.next/
