@@ -258,11 +258,13 @@ def sync_user_data(req: SyncRequest):
     wk_hr_sum = 0.0
     wk_hr_count = 0
     wk_runs = 0
+    wk_elev = 0.0
     for a in week_acts:
         d = a.to_dict()
         wk_runs += 1
         wk_dist += d.get("distance_km", 0) or 0
         wk_time += d.get("moving_time", 0) or 0
+        wk_elev += d.get("total_elevation_gain", 0) or 0
         hr = d.get("avg_heart_rate", 0) or 0
         if hr > 0:
             wk_hr_sum += hr
@@ -270,14 +272,17 @@ def sync_user_data(req: SyncRequest):
             
     wk_pace = pace_str(wk_dist * 1000, wk_time)
     wk_avg_hr = round(wk_hr_sum / wk_hr_count) if wk_hr_count > 0 else 0
+    wk_goal_pct = round((wk_dist / target_dist) * 100) if period == "weekly" and target_dist > 0 else 0
     
     db.collection("leaderboard_weekly").document(req.uid).set({
         "uid": req.uid,
         "display_name": display_name,
         "email": user_data.get("email", ""),
         "total_distance_km": round(wk_dist, 2),
+        "total_elevation_gain": round(wk_elev, 1),
         "avg_pace": wk_pace,
         "avg_heart_rate": wk_avg_hr,
+        "goal_completion_percentage": min(wk_goal_pct, 100),
         "run_count": wk_runs,
         "period": "weekly",
         "period_start": get_period_start("weekly").isoformat(),
