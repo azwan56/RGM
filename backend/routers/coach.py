@@ -751,14 +751,32 @@ def _build_race_fallback(nearest_race, nearest_days, runner_name, stats, avg_wee
 
 @router.get("/cache/{uid}")
 def get_cached_feedback(uid: str):
-    """Returns the latest stored AI feedback if available, without triggering generation."""
+    """Returns the latest stored AI feedback if available, without triggering generation.
+    Checks meta/coach_cache first, then falls back to coach/latest_analysis.
+    """
     try:
+        # Primary: fast cache document
         cache_ref = db.collection("users").document(uid).collection("meta").document("coach_cache")
         cache_doc = cache_ref.get()
         if cache_doc.exists:
             cached = cache_doc.to_dict()
-            if "feedback" in cached:
+            if "feedback" in cached and cached["feedback"]:
                 return {"feedback": cached["feedback"], "cached_at": cached.get("cached_at")}
+
+        # Fallback: read from coach/latest_analysis (always written, even before cache fix)
+        analysis_ref = db.collection("users").document(uid).collection("coach").document("latest_analysis")
+        analysis_doc = analysis_ref.get()
+        if analysis_doc.exists:
+            data = analysis_doc.to_dict()
+            # Strip internal fields
+            feedback = {k: v for k, v in data.items() if k not in ("saved_at", "nearest_race_days", "nearest_race_name")}
+            if feedback:
+                # Backfill coach_cache so future loads are fast
+                try:
+                    cache_ref.set({"feedback": feedback, "cached_at": data.get("saved_at", "")})
+                except Exception:
+                    pass
+                return {"feedback": feedback, "cached_at": data.get("saved_at")}
     except Exception as e:
         print(f"[coach] Error fetching cache for {uid}: {e}")
     return {"feedback": None}
