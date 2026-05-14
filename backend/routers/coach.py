@@ -1671,6 +1671,23 @@ async def log_journal_entry(req: JournalLogRequest):
             print(f"[journal] AI generated OK via {resp.get('api_version','?')}, comment length={len(ai.get('ai_comment',''))}")
         except json.JSONDecodeError as e:
             print(f"[journal] AI JSON parse error: {e}, raw text: {text[:200] if 'text' in dir() else 'N/A'}")
+            # Fallback: retry with a simpler plain-text prompt (same approach as WeChat)
+            try:
+                fallback_prompt = (
+                    "你是一位专业的中文跑步教练。请分析这次跑步并给出6-8句教练评语。\n\n"
+                    f"跑步数据：{km}km，配速 {activity.get('avg_pace','—')}/km，"
+                    f"心率 {activity.get('avg_heart_rate', 0)}bpm，爬升 {activity.get('total_elevation_gain', 0)}m\n"
+                    f"本周进度：已跑 {round(week_km,1)}km / 目标 {round(target_wk)}km\n\n"
+                    "要求：语言专业但热情，有温度。只输出纯文本评语，不要JSON或markdown格式。"
+                )
+                fallback_resp = await loop.run_in_executor(
+                    None, lambda: _gemini_generate(fallback_prompt, temperature=0.5, max_tokens=1000, response_json=False))
+                fallback_text = fallback_resp.get("text", "").strip()
+                if fallback_text and len(fallback_text) > 10:
+                    ai["ai_comment"] = fallback_text
+                    print(f"[journal] Fallback plain-text AI succeeded, length={len(fallback_text)}")
+            except Exception as e2:
+                print(f"[journal] Fallback AI also failed: {e2}")
         except Exception as e:
             print(f"[journal] AI error: {type(e).__name__}: {e}")
     else:
