@@ -10,7 +10,7 @@ router = APIRouter()
 _api_key = os.getenv("GEMINI_API_KEY")
 _gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 _gemini_proxy_url = os.getenv("GEMINI_PROXY_URL", "https://us-central1-dailystockrpt.cloudfunctions.net/gemini_proxy")
-_gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "")
+_gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "").strip()
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
@@ -32,6 +32,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
     # ── Strategy 1: Cloud Functions proxy (avoids GeoIP blocks) ──
     if _use_proxy is not False and _gemini_proxy_url:
         try:
+            thinking_budget = min(2048, max_tokens)
             body = {
                 "secret": _gemini_proxy_secret,
                 "model": model_name,
@@ -39,9 +40,10 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                 "generationConfig": {
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
+                    "thinkingConfig": {"thinkingBudget": thinking_budget},
                 },
-                # Cap thinking budget so output tokens aren't starved
-                "thinkingConfig": {"thinkingBudget": min(2048, max_tokens)},
+                # Also at top-level for proxy compatibility
+                "thinkingConfig": {"thinkingBudget": thinking_budget},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
@@ -74,13 +76,14 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
         api_versions = ["v1beta"] if response_json else ["v1beta", "v1"]
         for api_ver in api_versions:
             url = f"{_gemini_base_url}/{api_ver}/models/{mn}:generateContent?key={_api_key}"
+            thinking_budget = min(2048, max_tokens)
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
+                    "thinkingConfig": {"thinkingBudget": thinking_budget},
                 },
-                "thinkingConfig": {"thinkingBudget": min(2048, max_tokens)},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
