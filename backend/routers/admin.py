@@ -326,6 +326,64 @@ def test_gemini(request: Request):
     return {"status": "all_failed", "base_url": base_url, "results": results}
 
 
+@router.get("/test-proxy")
+def test_proxy(request: Request):
+    """Admin: tests Gemini via _gemini_generate (proxy → direct fallback), same path as webhooks."""
+    _check_admin(request)
+
+    import os as _os
+    proxy_url = _os.getenv("GEMINI_PROXY_URL", "")
+    proxy_secret = _os.getenv("GEMINI_PROXY_SECRET", "")
+
+    diag = {
+        "proxy_url": proxy_url or "(not set)",
+        "proxy_secret_set": bool(proxy_secret),
+        "proxy_secret_len": len(proxy_secret),
+    }
+
+    # Test 1: raw proxy call
+    try:
+        body = {
+            "secret": proxy_secret,
+            "model": "gemini-2.5-flash",
+            "contents": [{"parts": [{"text": "说一句鼓励跑者的话，不超过20字"}]}],
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 100},
+            "thinkingConfig": {"thinkingBudget": 1024},
+        }
+        r = requests.post(proxy_url, json=body, timeout=30)
+        if r.status_code == 200:
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            diag["raw_proxy"] = {"status": "ok", "response": text}
+        else:
+            diag["raw_proxy"] = {"status": r.status_code, "error": r.text[:300]}
+    except Exception as e:
+        diag["raw_proxy"] = {"status": "exception", "error": str(e)[:200]}
+
+    # Test 2: via _gemini_generate (same code path as webhook/journal)
+    try:
+        from routers.coach import _gemini_generate, _use_proxy, _resolved_model
+        diag["cached_state"] = {"use_proxy": _use_proxy, "resolved_model": _resolved_model}
+
+        result = _gemini_generate("说一句鼓励跑者的话，不超过20字", temperature=0.5, max_tokens=100, response_json=False)
+        diag["gemini_generate"] = {
+            "status": "ok",
+            "response": result.get("text", "")[:100],
+            "model": result.get("model"),
+            "api_version": result.get("api_version"),
+        }
+    except Exception as e:
+        diag["gemini_generate"] = {"status": "failed", "error": str(e)[:300]}
+
+    # Re-check cached state after the call
+    try:
+        from routers.coach import _use_proxy as _up2, _resolved_model as _rm2
+        diag["cached_state_after"] = {"use_proxy": _up2, "resolved_model": _rm2}
+    except Exception:
+        pass
+
+    return diag
+
+
 # ── Strava Rate Limit Status ─────────────────────────────────────────────────
 
 @router.get("/strava-rate-limit")
