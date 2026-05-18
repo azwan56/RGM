@@ -764,7 +764,20 @@ def get_cached_feedback(uid: str):
         if cache_doc.exists:
             cached = cache_doc.to_dict()
             if "feedback" in cached and cached["feedback"]:
-                return {"feedback": cached["feedback"], "cached_at": cached.get("cached_at")}
+                fb = cached["feedback"]
+                cycle_created = cached.get("cycle_created_at")
+                if cycle_created and "weekly_cycle" in fb:
+                    from datetime import datetime, timedelta
+                    cycle_time = datetime.fromisoformat(cycle_created)
+                    _now_dt = datetime.now()
+                    _mon_cycle = cycle_time.date() - timedelta(days=cycle_time.weekday())
+                    _mon_now = _now_dt.date() - timedelta(days=_now_dt.weekday())
+                    weeks_since_cycle = (_mon_now - _mon_cycle).days // 7
+                    if 0 <= weeks_since_cycle < 3:
+                        week_idx = min(int(weeks_since_cycle), len(fb["weekly_cycle"]) - 1)
+                        for i, w in enumerate(fb["weekly_cycle"]):
+                            w["is_current"] = (i == week_idx)
+                return {"feedback": fb, "cached_at": cached.get("cached_at")}
 
         # Fallback: read from coach/latest_analysis (always written, even before cache fix)
         analysis_ref = db.collection("users").document(uid).collection("coach").document("latest_analysis")
@@ -774,12 +787,25 @@ def get_cached_feedback(uid: str):
             # Strip internal fields
             feedback = {k: v for k, v in data.items() if k not in ("saved_at", "nearest_race_days", "nearest_race_name")}
             if feedback:
+                saved_at = data.get("saved_at")
+                if saved_at and "weekly_cycle" in feedback:
+                    from datetime import datetime, timedelta
+                    cycle_time = datetime.fromisoformat(saved_at)
+                    _now_dt = datetime.now()
+                    _mon_cycle = cycle_time.date() - timedelta(days=cycle_time.weekday())
+                    _mon_now = _now_dt.date() - timedelta(days=_now_dt.weekday())
+                    weeks_since_cycle = (_mon_now - _mon_cycle).days // 7
+                    if 0 <= weeks_since_cycle < 3:
+                        week_idx = min(int(weeks_since_cycle), len(feedback["weekly_cycle"]) - 1)
+                        for i, w in enumerate(feedback["weekly_cycle"]):
+                            w["is_current"] = (i == week_idx)
+
                 # Backfill coach_cache so future loads are fast
                 try:
-                    cache_ref.set({"feedback": feedback, "cached_at": data.get("saved_at", "")})
+                    cache_ref.set({"feedback": feedback, "cached_at": saved_at, "cycle_created_at": saved_at})
                 except Exception:
                     pass
-                return {"feedback": feedback, "cached_at": data.get("saved_at")}
+                return {"feedback": feedback, "cached_at": saved_at}
     except Exception as e:
         print(f"[coach] Error fetching cache for {uid}: {e}")
     return {"feedback": None}
@@ -811,6 +837,19 @@ async def generate_coach_feedback(req: CoachRequest):
             if cached_at:
                 cache_time = datetime.fromisoformat(cached_at)
 
+                if cycle_created:
+                    cycle_time = datetime.fromisoformat(cycle_created)
+                    _now_dt = datetime.now()
+                    _mon_cycle = cycle_time.date() - timedelta(days=cycle_time.weekday())
+                    _mon_now = _now_dt.date() - timedelta(days=_now_dt.weekday())
+                    weeks_since_cycle = (_mon_now - _mon_cycle).days // 7
+                    cached_fb = cached.get("feedback", {})
+
+                    if weeks_since_cycle < CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
+                        week_idx = min(int(weeks_since_cycle), len(cached_fb["weekly_cycle"]) - 1)
+                        for i, w in enumerate(cached_fb["weekly_cycle"]):
+                            w["is_current"] = (i == week_idx)
+
                 # Return full cache if within TTL and not force refreshing
                 if not req.force_refresh and datetime.now() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
                     print(f"[coach] Cache hit for {req.uid} (cached {cached_at})")
@@ -819,17 +858,11 @@ async def generate_coach_feedback(req: CoachRequest):
                 # Preserve weekly_cycle if cycle is < 3 weeks old (full preserve)
                 # OR if cycle is >= 3 weeks, save completed weeks for merging
                 if cycle_created:
-                    cycle_time = datetime.fromisoformat(cycle_created)
-                    weeks_since_cycle = (datetime.now() - cycle_time).days / 7
-                    cached_fb = cached.get("feedback", {})
-
                     if weeks_since_cycle < CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
                         # Cycle is still fresh — preserve entire cycle
                         cached_weekly_cycle = cached_fb["weekly_cycle"]
                         cycle_created_at = cycle_created
                         week_idx = min(int(weeks_since_cycle), len(cached_weekly_cycle) - 1)
-                        for i, w in enumerate(cached_weekly_cycle):
-                            w["is_current"] = (i == week_idx)
                         print(f"[coach] Preserving weekly_cycle (week {week_idx + 1}/{len(cached_weekly_cycle)}, created {cycle_created})")
 
                     elif weeks_since_cycle >= CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
