@@ -161,133 +161,139 @@ export default function TrainingJournal({ uid }: { uid: string }) {
                   <div className="h-px flex-1 bg-white/10" />
                 </div>
 
-                {/* Weekly summary card */}
-                {weeklySummary && (
-                  <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/5 border border-purple-500/15 p-4 rounded-2xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-bold text-purple-300">📊 周度总结</h4>
-                      {weeklySummary.weekly_score && (
-                        <span className="text-xs font-bold text-white bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded-lg">
-                          {weeklySummary.weekly_score}/10
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-zinc-300 leading-relaxed">{weeklySummary.summary}</p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                  {/* Left Column: Weekly Summary */}
+                  <div className="space-y-3">
+                    {weeklySummary && (
+                      <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/5 border border-purple-500/15 p-4 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold text-purple-300">📊 周度总结</h4>
+                          {weeklySummary.weekly_score && (
+                            <span className="text-xs font-bold text-white bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded-lg">
+                              {weeklySummary.weekly_score}/10
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-zinc-300 leading-relaxed">{weeklySummary.summary}</p>
 
-                    {weeklySummary.week_stats && (
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-black/20 rounded-xl p-2 text-center">
-                          <span className="text-[10px] text-zinc-500 block">总里程</span>
-                          <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_km}km</span>
-                        </div>
-                        <div className="bg-black/20 rounded-xl p-2 text-center">
-                          <span className="text-[10px] text-zinc-500 block">训练次数</span>
-                          <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_runs}</span>
-                        </div>
-                        <div className="bg-black/20 rounded-xl p-2 text-center">
-                          <span className="text-[10px] text-zinc-500 block">累计爬升</span>
-                          <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_elevation}m</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {weeklySummary.achievements && weeklySummary.achievements.length > 0 && (
-                      <div className="space-y-1">
-                        {weeklySummary.achievements.map((a, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-green-400">
-                            <span>✅</span><span>{a}</span>
+                        {weeklySummary.week_stats && (
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="bg-black/20 rounded-xl p-2 text-center">
+                              <span className="text-[10px] text-zinc-500 block">总里程</span>
+                              <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_km}km</span>
+                            </div>
+                            <div className="bg-black/20 rounded-xl p-2 text-center">
+                              <span className="text-[10px] text-zinc-500 block">训练次数</span>
+                              <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_runs}</span>
+                            </div>
+                            <div className="bg-black/20 rounded-xl p-2 text-center">
+                              <span className="text-[10px] text-zinc-500 block">累计爬升</span>
+                              <span className="text-sm font-bold text-white">{weeklySummary.week_stats.total_elevation}m</span>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                    {weeklySummary.concerns && weeklySummary.concerns.length > 0 && (
-                      <div className="space-y-1">
-                        {weeklySummary.concerns.map((c, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-yellow-400">
-                            <span>⚠️</span><span>{c}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                        )}
 
-                    {weeklySummary.next_week_plan && (
-                      <div className="bg-black/20 border border-white/5 p-3 rounded-xl space-y-1.5">
-                        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">下周计划调整</span>
-                        <p className="text-xs text-zinc-300"><strong className="text-blue-400">重点：</strong>{weeklySummary.next_week_plan.focus}</p>
-                        <p className="text-xs text-zinc-300"><strong className="text-blue-400">跑量：</strong>{weeklySummary.next_week_plan.target_km}</p>
-                        {weeklySummary.next_week_plan.adjustments && (
-                          <p className="text-xs text-orange-300/80">{weeklySummary.next_week_plan.adjustments}</p>
+                        {weeklySummary.achievements && weeklySummary.achievements.length > 0 && (
+                          <div className="space-y-1">
+                            {weeklySummary.achievements.map((a, i) => (
+                              <div key={i} className="flex items-start gap-2 text-xs text-green-400">
+                                <span>✅</span><span>{a}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {weeklySummary.concerns && weeklySummary.concerns.length > 0 && (
+                          <div className="space-y-1">
+                            {weeklySummary.concerns.map((c, i) => (
+                              <div key={i} className="flex items-start gap-2 text-xs text-yellow-400">
+                                <span>⚠️</span><span>{c}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {weeklySummary.next_week_plan && (
+                          <div className="bg-black/20 border border-white/5 p-3 rounded-xl space-y-1.5">
+                            <span className="text-[10px] text-zinc-500 uppercase tracking-wider">下周计划调整</span>
+                            <p className="text-xs text-zinc-300"><strong className="text-blue-400">重点：</strong>{weeklySummary.next_week_plan.focus}</p>
+                            <p className="text-xs text-zinc-300"><strong className="text-blue-400">跑量：</strong>{weeklySummary.next_week_plan.target_km}</p>
+                            {weeklySummary.next_week_plan.adjustments && (
+                              <p className="text-xs text-orange-300/80">{weeklySummary.next_week_plan.adjustments}</p>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
                   </div>
-                )}
 
-                {/* Daily entries */}
-                {dailyEntries.map((entry, idx) => {
-                  const snap = entry.activity_snapshot;
-                  const fb = fatigueBadge[entry.fatigue_level || "moderate"] || fatigueBadge.moderate;
-                  const prog = entry.weekly_progress;
+                  {/* Right Column: Daily entries */}
+                  <div className="space-y-3">
+                    {dailyEntries.map((entry, idx) => {
+                      const snap = entry.activity_snapshot;
+                      const fb = fatigueBadge[entry.fatigue_level || "moderate"] || fatigueBadge.moderate;
+                      const prog = entry.weekly_progress;
 
-                  return (
-                    <div key={idx} className="bg-black/20 border border-white/5 p-4 rounded-2xl space-y-3 hover:border-white/10 transition-colors group">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-white">{entry.date}</span>
-                          {snap && <span className="text-xs text-zinc-500">{snap.name}</span>}
-                          {entry.training_type && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/20">
-                              {entry.training_type}
-                            </span>
+                      return (
+                        <div key={idx} className="bg-black/20 border border-white/5 p-4 rounded-2xl space-y-3 hover:border-white/10 transition-colors group">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold text-white">{entry.date}</span>
+                              {snap && <span className="text-xs text-zinc-500">{snap.name}</span>}
+                              {entry.training_type && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                                  {entry.training_type}
+                                </span>
+                              )}
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${fb.cls} shrink-0`}>{fb.label}</span>
+                          </div>
+
+                          {/* Activity stats row */}
+                          {snap && (
+                            <div className="flex flex-wrap gap-3 text-xs">
+                              <span className="text-white font-semibold">{snap.distance_km}km</span>
+                              <span className="text-zinc-400">⏱ {snap.duration_str}</span>
+                              <span className="text-zinc-400">🏃 {snap.avg_pace}/km</span>
+                              <span className="text-zinc-400">❤️ {snap.avg_heart_rate}bpm</span>
+                              {snap.total_elevation_gain > 0 && <span className="text-zinc-400">⛰ {snap.total_elevation_gain}m</span>}
+                            </div>
                           )}
-                        </div>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${fb.cls} shrink-0`}>{fb.label}</span>
-                      </div>
 
-                      {/* Activity stats row */}
-                      {snap && (
-                        <div className="flex flex-wrap gap-3 text-xs">
-                          <span className="text-white font-semibold">{snap.distance_km}km</span>
-                          <span className="text-zinc-400">⏱ {snap.duration_str}</span>
-                          <span className="text-zinc-400">🏃 {snap.avg_pace}/km</span>
-                          <span className="text-zinc-400">❤️ {snap.avg_heart_rate}bpm</span>
-                          {snap.total_elevation_gain > 0 && <span className="text-zinc-400">⛰ {snap.total_elevation_gain}m</span>}
-                        </div>
-                      )}
+                          {/* Weekly progress bar */}
+                          {prog && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-zinc-500">
+                                <span>本周 {prog.week_km}km / {prog.target_km}km</span>
+                                <span>{prog.completion_pct}%</span>
+                              </div>
+                              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all"
+                                     style={{ width: `${Math.min(100, prog.completion_pct)}%` }} />
+                              </div>
+                            </div>
+                          )}
 
-                      {/* Weekly progress bar */}
-                      {prog && (
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-[10px] text-zinc-500">
-                            <span>本周 {prog.week_km}km / {prog.target_km}km</span>
-                            <span>{prog.completion_pct}%</span>
+                          {/* AI comment */}
+                          {entry.ai_comment && (
+                            <p className="text-sm text-zinc-300 leading-relaxed border-l-2 border-purple-500/30 pl-3">
+                              {entry.ai_comment}
+                            </p>
+                          )}
+
+                          {/* Performance note + tomorrow */}
+                          <div className="flex flex-col gap-1">
+                            {entry.performance_note && (
+                              <p className="text-xs text-blue-400">💡 {entry.performance_note}</p>
+                            )}
+                            {entry.tomorrow_suggestion && (
+                              <p className="text-xs text-emerald-400/70">→ 明日：{entry.tomorrow_suggestion}</p>
+                            )}
                           </div>
-                          <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all"
-                                 style={{ width: `${Math.min(100, prog.completion_pct)}%` }} />
-                          </div>
                         </div>
-                      )}
-
-                      {/* AI comment */}
-                      {entry.ai_comment && (
-                        <p className="text-sm text-zinc-300 leading-relaxed border-l-2 border-purple-500/30 pl-3">
-                          {entry.ai_comment}
-                        </p>
-                      )}
-
-                      {/* Performance note + tomorrow */}
-                      <div className="flex flex-col gap-1">
-                        {entry.performance_note && (
-                          <p className="text-xs text-blue-400">💡 {entry.performance_note}</p>
-                        )}
-                        {entry.tomorrow_suggestion && (
-                          <p className="text-xs text-emerald-400/70">→ 明日：{entry.tomorrow_suggestion}</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             );
           })}
