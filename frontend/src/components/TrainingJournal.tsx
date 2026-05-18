@@ -106,9 +106,13 @@ export default function TrainingJournal({ uid }: { uid: string }) {
 
   // Group entries by week
   const groupedByWeek = entries.reduce<Record<string, JournalEntry[]>>((acc, e) => {
-    const d = new Date(e.date);
+    // Parse as UTC to avoid local timezone offset issues
+    const dateStr = e.date.split("T")[0];
+    const d = new Date(dateStr + "T00:00:00Z");
     const weekStart = new Date(d);
-    weekStart.setDate(d.getDate() - d.getDay() + 1); // Monday
+    const day = d.getUTCDay();
+    const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday is start of week
+    weekStart.setUTCDate(diff);
     const key = weekStart.toISOString().slice(0, 10);
     if (!acc[key]) acc[key] = [];
     acc[key].push(e);
