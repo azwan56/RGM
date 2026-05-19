@@ -95,7 +95,7 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
       {/* Chart */}
       <div className="relative z-10">
         <ResponsiveContainer width="100%" height={260}>
-          <ComposedChart data={data} margin={{ top: 10, right: 0, bottom: 0, left: -20 }}>
+          <ComposedChart data={data.slice(-30)} margin={{ top: 10, right: 0, bottom: 0, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0f" vertical={false} />
             <XAxis 
               dataKey="date" 
