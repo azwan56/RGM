@@ -551,3 +551,195 @@ def send_rest_day_wecom_notification(user_data: dict, rest_date: str, uid: str =
     except Exception as e:
         print(f"[wecom] Rest-day reminder error: {e}")
         return False
+
+
+# ── Weekly Report Notification ──────────────────────────────────────────────────
+
+def send_weekly_report_discord_notification(user_data: dict, uid: str, report: dict) -> bool:
+    """
+    Sends a Discord embed notification for an automatically generated weekly report.
+    """
+    webhook_url = (user_data.get("discord_webhook_url") or "").strip()
+    if not webhook_url:
+        return False
+
+    try:
+        runner_name = (
+            user_data.get("display_name") or
+            user_data.get("strava_name") or
+            user_data.get("email", "").split("@")[0] or
+            "跑者"
+        )
+        
+        week_num = report.get("week_number", "?")
+        score = report.get("weekly_score", 7)
+        stats = report.get("week_stats", {})
+        
+        # Color based on score
+        if score >= 8:
+            color = 0x22C55E # Green
+        elif score >= 6:
+            color = 0x3B82F6 # Blue
+        else:
+            color = 0xEAB308 # Yellow
+            
+        desc = report.get("summary", "")
+        
+        fields = []
+        
+        # Stats row
+        km = stats.get("total_km", 0)
+        runs = stats.get("total_runs", 0)
+        elev = stats.get("total_elevation", 0)
+        fields.append({
+            "name": "📊 本周数据",
+            "value": f"**{km}km** · {runs}次 · 爬升{elev}m",
+            "inline": False
+        })
+        
+        # Achievements & Concerns
+        achievements = report.get("achievements", [])
+        if achievements:
+            fields.append({
+                "name": "✅ 本周亮点",
+                "value": "\n".join([f"- {a}" for a in achievements]),
+                "inline": False
+            })
+            
+        concerns = report.get("concerns", [])
+        if concerns:
+            fields.append({
+                "name": "⚠️ 需要注意",
+                "value": "\n".join([f"- {c}" for c in concerns]),
+                "inline": False
+            })
+            
+        # Suggestions (if new format)
+        suggestions = report.get("constructive_suggestions", [])
+        if suggestions:
+            sugg_text = "\n".join([f"- **{s.get('area','')}**: {s.get('suggestion','')} ({s.get('rationale','')})" for s in suggestions])
+            if len(sugg_text) > 1024:
+                sugg_text = sugg_text[:1020] + "..."
+            fields.append({
+                "name": "💡 建设性建议",
+                "value": sugg_text,
+                "inline": False
+            })
+            
+        # Next week plan
+        plan = report.get("next_week_plan", {})
+        if plan:
+            focus = plan.get("focus", "")
+            target_km = plan.get("target_km", "")
+            adj = plan.get("adjustments", "")
+            plan_str = f"**重点**: {focus}\n**目标跑量**: {target_km}"
+            if adj:
+                plan_str += f"\n**调整**: {adj}"
+            fields.append({
+                "name": "📅 下周计划",
+                "value": plan_str,
+                "inline": False
+            })
+            
+        # Goal Progress (if new format)
+        goal_prog = report.get("goal_progress", {})
+        if goal_prog and goal_prog.get("race_name") and goal_prog.get("race_name") != "无":
+            fields.append({
+                "name": "🎯 备赛进度",
+                "value": f"**{goal_prog.get('race_name')}** (剩{goal_prog.get('days_remaining')}天) - {goal_prog.get('training_phase')}\n{goal_prog.get('readiness_assessment','')}",
+                "inline": False
+            })
+
+        embed = {
+            "title": f"📈 {runner_name} 的第 {week_num} 周训练总结 (评分: {score}/10)",
+            "description": desc,
+            "color": color,
+            "fields": fields,
+            "footer": {"text": "RGM 跑团管理平台 · AI 教练周报"},
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+        avatar = user_data.get("strava_profile_url") or user_data.get("photoURL")
+        if avatar:
+            embed["thumbnail"] = {"url": avatar}
+
+        payload = {"embeds": [embed], "username": "RGM 跑团助手"}
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        ok = resp.status_code in (200, 204)
+        if ok:
+            print(f"[discord] Weekly report sent for {runner_name}")
+        else:
+            print(f"[discord] Weekly report failed: {resp.status_code}")
+        return ok
+
+    except Exception as e:
+        print(f"[discord] Weekly report error: {e}")
+        return False
+
+
+def send_weekly_report_wecom_notification(user_data: dict, uid: str, report: dict) -> bool:
+    """
+    Sends a WeCom markdown notification for an automatically generated weekly report.
+    """
+    webhook_url = (user_data.get("wecom_webhook_url") or "").strip()
+    if not webhook_url:
+        return False
+
+    try:
+        runner_name = (
+            user_data.get("display_name") or
+            user_data.get("strava_name") or
+            user_data.get("email", "").split("@")[0] or
+            "跑者"
+        )
+        
+        week_num = report.get("week_number", "?")
+        score = report.get("weekly_score", 7)
+        stats = report.get("week_stats", {})
+        
+        km = stats.get("total_km", 0)
+        runs = stats.get("total_runs", 0)
+        elev = stats.get("total_elevation", 0)
+        
+        md = f"📈 **{runner_name} 的第 {week_num} 周训练总结** (评分: {score}/10)\n\n"
+        md += f"📊 **本周数据**: **{km}km** · {runs}次 · 爬升{elev}m\n\n"
+        md += f"> {report.get('summary', '')}\n\n"
+        
+        achievements = report.get("achievements", [])
+        if achievements:
+            md += "**✅ 亮点**:\n"
+            for a in achievements:
+                md += f"- {a}\n"
+            md += "\n"
+            
+        suggestions = report.get("constructive_suggestions", [])
+        if suggestions:
+            md += "**💡 建议**:\n"
+            for s in suggestions:
+                md += f"- **{s.get('area','')}**: {s.get('suggestion','')}\n"
+            md += "\n"
+            
+        plan = report.get("next_week_plan", {})
+        if plan:
+            md += f"**📅 下周计划**: {plan.get('focus', '')} (目标: {plan.get('target_km', '')})\n"
+            
+        goal_prog = report.get("goal_progress", {})
+        if goal_prog and goal_prog.get("race_name") and goal_prog.get("race_name") != "无":
+            md += f"**🎯 备赛**: {goal_prog.get('race_name')} (剩{goal_prog.get('days_remaining')}天) - {goal_prog.get('training_phase')}\n"
+
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {"content": md},
+        }
+
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code == 200 and resp.json().get("errcode") == 0:
+            print(f"[wecom] Weekly report sent for {runner_name}")
+            return True
+        else:
+            print(f"[wecom] Weekly report failed: {resp.status_code} {resp.text[:100]}")
+            return False
+
+    except Exception as e:
+        print(f"[wecom] Weekly report error: {e}")
+        return False

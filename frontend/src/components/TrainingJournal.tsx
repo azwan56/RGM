@@ -44,6 +44,27 @@ interface JournalEntry {
   next_week_plan?: NextWeekPlan;
   weekly_score?: number;
   week_stats?: { total_km: number; total_runs: number; total_elevation: number };
+  // Auto-generated enhanced fields
+  auto_generated?: boolean;
+  goal_progress?: {
+    race_name?: string;
+    days_remaining?: number;
+    training_phase?: string;
+    readiness_assessment?: string;
+    weekly_target_vs_actual?: string;
+  };
+  constructive_suggestions?: Array<{
+    area: string;
+    suggestion: string;
+    rationale: string;
+  }>;
+  week_stats_analysis?: {
+    avg_pace?: string;
+    avg_heart_rate?: number;
+    training_types?: string[];
+    analysis?: string;
+  };
+  encouragement?: string;
 }
 
 interface Journal {
@@ -171,14 +192,36 @@ export default function TrainingJournal({ uid }: { uid: string }) {
                     {weeklySummary && (
                       <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/5 border border-purple-500/15 p-4 rounded-2xl space-y-3">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-purple-300">📊 周度总结</h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-purple-300">📊 周度总结</h4>
+                            {weeklySummary.auto_generated && (
+                              <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <span>🤖</span> 自动生成
+                              </span>
+                            )}
+                          </div>
                           {weeklySummary.weekly_score && (
                             <span className="text-xs font-bold text-white bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded-lg">
                               {weeklySummary.weekly_score}/10
                             </span>
                           )}
                         </div>
+                        
+                        {weeklySummary.goal_progress && weeklySummary.goal_progress.race_name && weeklySummary.goal_progress.race_name !== "无" && (
+                          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-2.5 flex justify-between items-center">
+                            <div>
+                              <span className="text-[10px] text-orange-400 block font-bold">🎯 备赛进度 · {weeklySummary.goal_progress.training_phase}</span>
+                              <span className="text-xs text-white font-medium">{weeklySummary.goal_progress.race_name}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] text-orange-400 block">倒计时</span>
+                              <span className="text-sm font-bold text-white">{weeklySummary.goal_progress.days_remaining} 天</span>
+                            </div>
+                          </div>
+                        )}
+                        
                         <p className="text-sm text-zinc-300 leading-relaxed">{weeklySummary.summary}</p>
+
 
                         {weeklySummary.week_stats && (
                           <div className="grid grid-cols-3 gap-2">
@@ -211,6 +254,19 @@ export default function TrainingJournal({ uid }: { uid: string }) {
                             {weeklySummary.concerns.map((c, i) => (
                               <div key={i} className="flex items-start gap-2 text-xs text-yellow-400">
                                 <span>⚠️</span><span>{c}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {weeklySummary.constructive_suggestions && weeklySummary.constructive_suggestions.length > 0 && (
+                          <div className="mt-3 bg-blue-500/5 border border-blue-500/10 p-3 rounded-xl space-y-2">
+                            <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider block mb-1">💡 建设性建议</span>
+                            {weeklySummary.constructive_suggestions.map((s, i) => (
+                              <div key={i} className="text-xs">
+                                <span className="text-blue-300 font-semibold">{s.area}: </span>
+                                <span className="text-zinc-300">{s.suggestion}</span>
+                                <p className="text-zinc-500 text-[10px] mt-0.5 ml-2 border-l border-white/10 pl-2">依据: {s.rationale}</p>
                               </div>
                             ))}
                           </div>

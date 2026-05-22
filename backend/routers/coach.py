@@ -2039,6 +2039,250 @@ async def generate_weekly_review(req: WeeklyReviewRequest):
     return {"review": review, "journal_id": journal_id}
 
 
+async def generate_auto_weekly_report(uid: str) -> dict:
+    """Generate a highly detailed auto weekly summary for the previous week (Mon-Sun)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    user_ref = db.collection("users").document(uid)
+    journal = _get_or_create_journal(uid)
+    journal_id = journal["journal_id"]
+
+    from datetime import date as _dt, timedelta
+    today = _dt.today()
+    # Calculate previous week's Monday and Sunday
+    last_week_monday = today - timedelta(days=today.weekday() + 7)
+    last_week_sunday = last_week_monday + timedelta(days=6)
+    
+    start_date_str = last_week_monday.isoformat()
+    end_date_str = last_week_sunday.isoformat()
+    week_number = last_week_monday.isocalendar()[1]
+    week_year = last_week_monday.isocalendar()[0]
+
+    entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+    
+    # Query entries for the previous week
+    # Note: date format is YYYY-MM-DD
+    docs = entries_ref.where("date", ">=", start_date_str).where("date", "<=", end_date_str).order_by("date").stream()
+    daily = []
+    for d in docs:
+        d_dict = d.to_dict()
+        if d_dict.get("entry_type") == "daily":
+            daily.append(d_dict)
+    
+    if not daily:
+        return {"error": "上周暂无训练记录"}
+
+    training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
+
+    # Race context
+    race_ctx = ""
+    races_doc = user_ref.collection("goals").document("races").get()
+    if races_doc.exists:
+        future = sorted([r for r in races_doc.to_dict().get("upcoming", [])
+                         if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
+        if future:
+            days_to = (_dt.fromisoformat(future[0]["date"]) - today).days
+            race_ctx = f"目标赛事：{future[0].get('name','')}，距比赛{days_to}天\n"
+
+    total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
+    total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
+    
+    # Analyze training types
+    training_types = set()
+    total_time_min = 0
+    total_hr_sum = 0
+    hr_count = 0
+    for e in daily:
+        ttype = e.get("training_type")
+        if ttype: training_types.add(ttype)
+        snap = e.get("activity_snapshot", {})
+        
+        # Calculate time from avg_pace (MM:SS) and distance
+        pace_str = snap.get("avg_pace", "") or ""
+        if ":" in pace_str:
+            try:
+                parts = pace_str.split(":")
+                m, s = int(parts[0]), int(parts[1])
+                mins_per_km = m + s / 60.0
+                total_time_min += mins_per_km * snap.get("distance_km", 0)
+            except (ValueError, IndexError):
+                pass  # Skip malformed pace values
+        hr = snap.get("avg_heart_rate", 0)
+        if hr > 0:
+            total_hr_sum += hr
+            hr_count += 1
+            
+    avg_hr_week = round(total_hr_sum / hr_count) if hr_count > 0 else 0
+    
+    def _fmt_pace(min_per_km):
+        if min_per_km <= 0: return "—"
+        m = int(min_per_km)
+        s = int((min_per_km - m) * 60)
+        return f"{m}:{s:02d}"
+        
+    avg_pace_week = _fmt_pace(total_time_min / total_km) if total_km > 0 else "—"
+
+    entries_str = "\n".join(
+        f"- {e['date']}: {e.get('activity_snapshot',{}).get('name','')} "
+        f"{e.get('activity_snapshot',{}).get('distance_km',0)}km "
+        f"@{e.get('activity_snapshot',{}).get('avg_pace','—')}/km "
+        f"HR:{e.get('activity_snapshot',{}).get('avg_heart_rate',0)} "
+        f"疲劳:{e.get('fatigue_level','—')}"
+        for e in daily
+    )
+    
+    # Try to fetch last week's summary to see if we can get next_week_plan
+    last_week_number = week_number - 1
+    last_week_year = week_year
+    if last_week_number < 1:
+        last_week_number = 52
+        last_week_year -= 1
+        
+    last_summary_doc = entries_ref.document(f"week-{last_week_number:02d}-summary").get()
+    last_plan_ctx = ""
+    if last_summary_doc.exists:
+        last_summary_data = last_summary_doc.to_dict()
+        last_plan = last_summary_data.get("next_week_plan", {})
+        if last_plan:
+            last_plan_ctx = f"上周计划摘要：目标跑量 {last_plan.get('target_km', '—')}，重点：{last_plan.get('focus', '—')}。实际完成：{total_km:.1f}km。\n"
+
+    # Get fitness state (CTL/ATL/TSB)
+    # Import directly from sports_science to avoid circular dependency through discord.py
+    user_doc = user_ref.get()
+    user_data = user_doc.to_dict() if user_doc.exists else {}
+    fitness_ctx = ""
+    try:
+        from utils.sports_science import compute_fitness_fatigue_timeseries
+        max_hr = user_data.get("max_heart_rate", 190)
+        rest_hr = user_data.get("resting_heart_rate", 60)
+        # Fetch recent activities for fitness calculation (same pattern as discord._get_fitness_state)
+        fitness_docs = (
+            user_ref.collection("activities")
+            .order_by("start_date_local", direction="DESCENDING")
+            .limit(90)
+            .stream()
+        )
+        fitness_activities = [d.to_dict() for d in fitness_docs]
+        fitness_activities.reverse()  # Chronological order for timeseries
+        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3)
+        if ts:
+            latest = ts[-1]
+            fitness_state = {"ctl": round(latest.get("ctl", 0), 1), "atl": round(latest.get("atl", 0), 1), "tsb": round(latest.get("tsb", 0), 1)}
+            fitness_ctx = f"当前体能状态：CTL体能={fitness_state['ctl']}，ATL疲劳={fitness_state['atl']}，TSB状态值={fitness_state['tsb']}\n"
+    except Exception as e:
+        print(f"[journal] Failed to get fitness state for {uid}: {e}")
+
+    prompt = (
+        "你是专业且富有激情的马拉松教练，正在撰写跑者上一周的详细训练周总结。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
+        f"【日志名称】{journal.get('title','')}\n{race_ctx}"
+        f"【上周训练记录 ({start_date_str} 至 {end_date_str})】\n{entries_str}\n"
+        f"合计数据：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m / 平均配速{avg_pace_week} / 平均心率{avg_hr_week}\n"
+        f"训练类型覆盖：{', '.join(training_types) if training_types else '未分类'}\n"
+        f"{last_plan_ctx}"
+        f"{fitness_ctx}"
+        f"【过去8周宏观数据】周均{training_summary.get('avg_weekly_km',0)}km | 趋势:{training_summary.get('volume_trend','stable')}\n\n"
+        "要求：深度分析训练负荷、目标进展、长处与短板，并给出具体的下周指导。\n"
+        'JSON格式要求：\n'
+        '{\n'
+        '  "weekly_overview": "<2-3句总体概述>",\n'
+        '  "week_stats_analysis": {\n'
+        '    "total_km": <数值>,\n'
+        '    "total_elevation": <数值>,\n'
+        '    "total_runs": <数值>,\n'
+        '    "avg_pace": "<配速>",\n'
+        '    "avg_heart_rate": <数值>,\n'
+        '    "training_types": ["类型1", "类型2"],\n'
+        '    "analysis": "<对本周训练负荷和结构的专业分析>"\n'
+        '  },\n'
+        '  "goal_progress": {\n'
+        '    "race_name": "<赛事名称，无则填无>",\n'
+        '    "days_remaining": <距今天数，无则填0>,\n'
+        '    "training_phase": "<当前所处训练期，如基础期/专项期/减量期>",\n'
+        '    "readiness_assessment": "<基于本周训练对备赛就绪度的专业评估>",\n'
+        '    "weekly_target_vs_actual": "<计划跑量 vs 实际跑量的对比分析>"\n'
+        '  },\n'
+        '  "highlights": ["<本周亮点1>", "<亮点2>"],\n'
+        '  "concerns": ["<需要注意的问题1>", "<问题2>"],\n'
+        '  "constructive_suggestions": [\n'
+        '    {"area": "<改进领域，如配速控制/心率/休息等>", "suggestion": "<具体建议>", "rationale": "<背后原理>"}\n'
+        '  ],\n'
+        '  "next_week_plan": {\n'
+        '    "focus": "<下周核心重点>",\n'
+        '    "target_km": "<建议跑量>",\n'
+        '    "key_sessions": ["<关键课次1>", "<课次2>"],\n'
+        '    "adjustments": "<基于本周表现对下周原计划的调整建议>",\n'
+        '    "rest_days": "<建议休息日安排>"\n'
+        '  },\n'
+        '  "weekly_score": <1-10整数评分>,\n'
+        '  "encouragement": "<一句教练视角的走心鼓励语>"\n'
+        '}'
+    )
+
+    ai_result = {}
+    if _api_key:
+        try:
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=2000))
+            text = resp["text"].strip()
+            # Strip markdown code fences if present
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1]  # Remove first line (```json)
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            ai_result = json.loads(text)
+        except Exception as e:
+            print(f"[journal] Auto Weekly review AI error: {e}")
+            return {"error": str(e)}
+    else:
+        # No API key — return error instead of saving empty report
+        return {"error": "Gemini API key not configured"}
+
+    review = {
+        "date": end_date_str, # Use Sunday's date as the entry date
+        "entry_type": "weekly_summary",
+        "week_number": week_number,
+        "week_year": week_year,
+        "auto_generated": True,
+        
+        # Enhanced fields mapped back to compatible structure where possible
+        "summary": ai_result.get("weekly_overview", ""),
+        "achievements": ai_result.get("highlights", []),
+        "concerns": ai_result.get("concerns", []),
+        "next_week_plan": ai_result.get("next_week_plan", {}),
+        "weekly_score": ai_result.get("weekly_score", 7),
+        "week_stats": {
+            "total_km": round(total_km, 1), 
+            "total_runs": len(daily), 
+            "total_elevation": round(total_elev)
+        },
+        
+        # New enriched fields
+        "goal_progress": ai_result.get("goal_progress", {}),
+        "constructive_suggestions": ai_result.get("constructive_suggestions", []),
+        "week_stats_analysis": ai_result.get("week_stats_analysis", {}),
+        "encouragement": ai_result.get("encouragement", ""),
+        
+        "created_at": __import__("datetime").datetime.now().isoformat(),
+    }
+    
+    doc_id = f"week-{week_number:02d}-summary"
+    entries_ref.document(doc_id).set(review, merge=True)
+    
+    # Also save a copy to weekly_reports collection for easy global querying if needed
+    db.collection("users").document(uid).collection("weekly_reports").document(f"{week_year}-W{week_number:02d}").set(review, merge=True)
+    
+    return {"review": review, "journal_id": journal_id}
+
+
+@router.post("/journal/auto-weekly-report")
+async def trigger_auto_weekly_report(req: WeeklyReviewRequest):
+    """Admin/Test endpoint to manually trigger the auto weekly report generation for previous week."""
+    return await generate_auto_weekly_report(req.uid)
+
+
 # ── Training Plan Generator ──────────────────────────────────────────────────
 
 class TrainingPlanRequest(BaseModel):

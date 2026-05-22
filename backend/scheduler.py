@@ -246,6 +246,66 @@ def run_rest_day_reminders() -> dict:
     return results
 
 
+def run_weekly_reports() -> dict:
+    """
+    Runs at 17:00 UTC every Sunday (= Monday 01:00 CST/UTC+8).
+    For each Strava-connected user, generates a comprehensive weekly training report for the previous week
+    and sends it via Discord and WeCom.
+    """
+    import asyncio
+    from firebase_config import db
+    from routers.coach import generate_auto_weekly_report
+    from utils.discord import send_weekly_report_discord_notification, send_weekly_report_wecom_notification
+
+    logger.info(f"[scheduler] Starting automatic weekly reports generation...")
+
+    users = db.collection("users").where("strava_connected", "==", True).stream()
+    user_list = [(doc.id, doc.to_dict()) for doc in users]
+
+    results = {"generated": 0, "failed": 0, "errors": []}
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    for uid, user_data in user_list:
+        try:
+            # Generate the report
+            res = loop.run_until_complete(generate_auto_weekly_report(uid))
+            
+            if "error" in res:
+                if res["error"] == "上周暂无训练记录":
+                    logger.info(f"[scheduler] {uid} had no runs last week, skipped.")
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(f"{uid}: {res['error']}")
+                continue
+
+            report = res.get("review", {})
+            if not report:
+                continue
+
+            # Send notifications
+            send_weekly_report_discord_notification(user_data, uid, report)
+            send_weekly_report_wecom_notification(user_data, uid, report)
+            
+            results["generated"] += 1
+            logger.info(f"[scheduler] Weekly report generated and sent for uid={uid}")
+
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append(f"{uid}: {str(e)}")
+            logger.error(f"[scheduler] Weekly report failed for uid={uid}: {e}")
+
+    loop.close()
+    
+    logger.info(
+        f"[scheduler] Weekly reports done — "
+        f"{results['generated']} generated, {results['failed']} failed, "
+        f"{len(results['errors'])} errors"
+    )
+    return results
+
+
 def start_scheduler():
     """Initialize and start the APScheduler background scheduler."""
     global _scheduler
@@ -273,11 +333,24 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    
+    # Weekly report at 17:00 UTC every Monday (01:00 CST Monday night/Tuesday morning)
+    # The requirement says "每周一凌晨1点自动生成上一周的报告" (Monday 1:00 AM CST).
+    # CST is UTC+8. Monday 1:00 AM CST is Sunday 17:00 UTC.
+    _scheduler.add_job(
+        run_weekly_reports,
+        trigger=CronTrigger(day_of_week='sun', hour=17, minute=0),
+        id="weekly_reports",
+        name="Weekly Reports",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
 
     _scheduler.start()
     logger.info(
         "[scheduler] Background scheduler started — "
-        "daily sync at 04:00 UTC, rest-day reminder at 22:00 UTC"
+        "daily sync at 04:00 UTC, rest-day reminder at 22:00 UTC, "
+        "weekly reports at Sunday 17:00 UTC (Mon 01:00 CST)"
     )
 
 
