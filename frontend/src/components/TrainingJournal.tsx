@@ -215,7 +215,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
                             </div>
                             <div className="text-right">
                               <span className="text-[10px] text-orange-400 block">倒计时</span>
-                              <span className="text-sm font-bold text-white">{weeklySummary.goal_progress.days_remaining} 天</span>
+                              <span className="text-sm font-bold text-white">{journal?.race_date ? Math.max(0, Math.ceil((new Date(journal.race_date).getTime() - Date.now()) / 86400000)) : weeklySummary.goal_progress.days_remaining} 天</span>
                             </div>
                           </div>
                         )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import axios from "@/lib/apiClient";
 
 interface RaceAnalysis {
@@ -58,11 +58,56 @@ const metricLabels: Record<string, string> = {
 const CACHE_KEY = (uid: string) => `coach_feedback_${uid}`;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+/** Replace stale day counts in AI-generated text with live values.
+ *  Matches patterns like "还有 102 天", "仅剩 7 天", "距今 30 天" */
+function fixDaysInText(text: string, raceDaysMap: Map<string, number>): string {
+  if (!text || raceDaysMap.size === 0) return text;
+  let result = text;
+  for (const [raceName, liveDays] of raceDaysMap) {
+    // Match: 距{raceName}还有 N 天 / 距{raceName}仅剩 N 天 / 距{raceName}（...）仅剩 N 天
+    const escaped = raceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(距${escaped}[^\\d]{0,20})(\\d+)(\\s*天)`, 'g');
+    result = result.replace(pattern, `$1${liveDays}$3`);
+  }
+  // Generic fallback: "还有 N 天" without specific race name
+  if (raceDaysMap.size === 1) {
+    const liveDays = raceDaysMap.values().next().value;
+    result = result.replace(/(还有\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
+    result = result.replace(/(仅剩\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
+    result = result.replace(/(距今\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
+  }
+  return result;
+}
+
 export default function AiCoachWidget({ uid }: { uid: string }) {
   const [feedback, setFeedback] = useState<CoachFeedback | null>(null);
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [raceDaysMap, setRaceDaysMap] = useState<Map<string, number>>(new Map());
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+  // Fetch race dates from profile for live countdown
+  useEffect(() => {
+    const fetchRaceDates = async () => {
+      try {
+        const res = await axios.get(`${backendUrl}/api/profile/${uid}`);
+        const races = res.data?.upcoming_races || [];
+        const map = new Map<string, number>();
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        for (const r of races) {
+          if (r.name && r.date) {
+            const raceDate = new Date(r.date);
+            raceDate.setHours(0, 0, 0, 0);
+            const days = Math.ceil((raceDate.getTime() - now.getTime()) / 86400000);
+            if (days >= 0) map.set(r.name, days);
+          }
+        }
+        if (map.size > 0) setRaceDaysMap(map);
+      } catch { /* profile fetch is best-effort */ }
+    };
+    fetchRaceDates();
+  }, [uid, backendUrl]);
 
   useEffect(() => {
     const fetchFeedback = async () => {
@@ -99,6 +144,16 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
     };
     fetchFeedback();
   }, [uid, backendUrl]);
+
+  // Compute live-corrected summary and status
+  const liveSummary = useMemo(
+    () => feedback?.summary ? fixDaysInText(feedback.summary, raceDaysMap) : "",
+    [feedback?.summary, raceDaysMap]
+  );
+  const liveStatus = useMemo(
+    () => feedback?.status ? fixDaysInText(feedback.status, raceDaysMap) : "",
+    [feedback?.status, raceDaysMap]
+  );
 
   const triggerSync = async () => {
     setLoading(true);
@@ -149,8 +204,8 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         </div>
         
         {feedback && !loading && (
-          <span className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${getBadgeColor(feedback.status)}`}>
-            {feedback.status}
+          <span className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${getBadgeColor(liveStatus)}`}>
+            {liveStatus}
           </span>
         )}
       </div>
@@ -253,7 +308,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
             <svg className="w-6 h-6 text-white/10 absolute -top-2 -left-2" fill="currentColor" viewBox="0 0 24 24">
               <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
             </svg>
-            <span className="relative z-10 ml-2">{feedback.summary}</span>
+            <span className="relative z-10 ml-2">{liveSummary}</span>
           </div>
 
           {/* Key Metrics */}
