@@ -2082,15 +2082,26 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
 
     training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
 
-    # Race context
+    # Race context — check both goals/races and profile.upcoming_races
     race_ctx = ""
+    nearest_race = None
     races_doc = user_ref.collection("goals").document("races").get()
     if races_doc.exists:
         future = sorted([r for r in races_doc.to_dict().get("upcoming", [])
                          if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
         if future:
-            days_to = (_date.fromisoformat(future[0]["date"]) - today).days
-            race_ctx = f"目标赛事：{future[0].get('name','')}，距比赛{days_to}天\n"
+            nearest_race = future[0]
+    # Fallback: check upcoming_races from user profile
+    if not nearest_race:
+        user_doc_data = user_ref.get().to_dict() or {}
+        for r in user_doc_data.get("upcoming_races", []):
+            rdate = r.get("date", "")
+            if rdate and rdate >= today.isoformat():
+                nearest_race = r
+                break
+    if nearest_race:
+        days_to = (_date.fromisoformat(nearest_race["date"]) - today).days
+        race_ctx = f"目标赛事：{nearest_race.get('name','')}, 距比赛{days_to}天\n"
 
     total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
     total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
@@ -2303,17 +2314,8 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
     }
     
     # Override AI-generated days_remaining with actual computed value
-    if review.get("goal_progress") and race_ctx:
-        # Re-fetch the race date to compute accurate days_remaining
-        try:
-            races_doc_re = user_ref.collection("goals").document("races").get()
-            if races_doc_re.exists:
-                future_re = sorted([r for r in races_doc_re.to_dict().get("upcoming", [])
-                                    if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
-                if future_re:
-                    review["goal_progress"]["days_remaining"] = (_date.fromisoformat(future_re[0]["date"]) - today).days
-        except Exception:
-            pass
+    if review.get("goal_progress") and nearest_race:
+        review["goal_progress"]["days_remaining"] = (_date.fromisoformat(nearest_race["date"]) - today).days
     
     doc_id = f"week-{week_number:02d}-summary"
     entries_ref.document(doc_id).set(review, merge=True)

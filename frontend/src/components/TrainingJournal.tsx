@@ -88,6 +88,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
   const [logging, setLogging] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [backfilling, setBackfilling] = useState<string>("");
+  const [liveRaceDays, setLiveRaceDays] = useState<number | null>(null);
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
   const fetchJournal = useCallback(async () => {
@@ -99,6 +100,30 @@ export default function TrainingJournal({ uid }: { uid: string }) {
       console.error("Journal fetch error:", err);
     }
     setLoading(false);
+  }, [uid, backendUrl]);
+
+  // Fetch live race countdown from profile
+  useEffect(() => {
+    const fetchRaceDays = async () => {
+      try {
+        const res = await axios.get(`${backendUrl}/api/profile/${uid}`);
+        const races = res.data?.upcoming_races || [];
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        for (const r of races) {
+          if (r.date) {
+            const raceDate = new Date(r.date);
+            raceDate.setHours(0, 0, 0, 0);
+            const days = Math.ceil((raceDate.getTime() - now.getTime()) / 86400000);
+            if (days >= 0) {
+              setLiveRaceDays(days);
+              break;
+            }
+          }
+        }
+      } catch { /* best-effort */ }
+    };
+    fetchRaceDays();
   }, [uid, backendUrl]);
 
   useEffect(() => { fetchJournal(); }, [fetchJournal]);
@@ -215,7 +240,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
                             </div>
                             <div className="text-right">
                               <span className="text-[10px] text-orange-400 block">倒计时</span>
-                              <span className="text-sm font-bold text-white">{journal?.race_date ? Math.max(0, Math.ceil((new Date(journal.race_date).getTime() - Date.now()) / 86400000)) : weeklySummary.goal_progress.days_remaining} 天</span>
+                              <span className="text-sm font-bold text-white">{liveRaceDays !== null ? liveRaceDays : (journal?.race_date ? Math.max(0, Math.ceil((new Date(journal.race_date).getTime() - Date.now()) / 86400000)) : weeklySummary.goal_progress.days_remaining)} 天</span>
                             </div>
                           </div>
                         )}
