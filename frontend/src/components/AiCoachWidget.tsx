@@ -180,6 +180,51 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
     [feedback?.status, raceDaysMap]
   );
 
+  // Live-correct weekly_cycle: update is_current and status based on today's date
+  const liveWeeklyCycle = useMemo(() => {
+    if (!feedback?.weekly_cycle || feedback.weekly_cycle.length === 0) return [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentYear = today.getFullYear();
+
+    // Parse week_label like "5/18-5/24" into start/end Date objects
+    const parseWeekLabel = (label: string | undefined): { start: Date; end: Date } | null => {
+      if (!label) return null;
+      const match = label.match(/(\d{1,2})\/(\d{1,2})-(\d{1,2})\/(\d{1,2})/);
+      if (!match) return null;
+      const [, sm, sd, em, ed] = match;
+      const start = new Date(currentYear, parseInt(sm) - 1, parseInt(sd));
+      const end = new Date(currentYear, parseInt(em) - 1, parseInt(ed));
+      // Handle year boundary (e.g., 12/29-1/4)
+      if (end < start) end.setFullYear(currentYear + 1);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    };
+
+    let currentFound = false;
+    return feedback.weekly_cycle.map((w) => {
+      const range = parseWeekLabel(w.week_label);
+      const updated = { ...w };
+      if (range) {
+        if (today >= range.start && today <= range.end) {
+          updated.is_current = true;
+          updated.status = undefined;
+          currentFound = true;
+        } else if (today > range.end) {
+          updated.is_current = false;
+          updated.status = 'completed';
+        } else {
+          updated.is_current = false;
+          updated.status = undefined;
+        }
+      } else if (!currentFound) {
+        // No parseable label — keep original is_current
+      }
+      return updated;
+    });
+  }, [feedback?.weekly_cycle]);
+
   const triggerSync = async () => {
     setLoading(true);
     setErrorStr(null);
@@ -379,11 +424,11 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           )}
 
           {/* Weekly Cycle */}
-          {feedback.weekly_cycle && feedback.weekly_cycle.length > 0 && (
+          {liveWeeklyCycle.length > 0 && (
             <div className="space-y-3">
               <h4 className="text-xs font-semibold text-zinc-500 tracking-wider">📅 周期性训练规划</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {feedback.weekly_cycle.map((w, idx) => (
+                {liveWeeklyCycle.map((w, idx) => (
                   <div key={idx} className={`bg-black/20 border p-4 rounded-xl flex flex-col gap-2.5 relative overflow-hidden group transition-colors ${
                     w.is_current 
                       ? 'border-[#FC4C02]/40 ring-1 ring-[#FC4C02]/20' 
