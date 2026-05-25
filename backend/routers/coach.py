@@ -2231,7 +2231,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         last_err = None
         for attempt in range(3):
             try:
-                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=2000))
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
                 text = resp["text"].strip()
                 # Strip markdown code fences if present
                 if text.startswith("```"):
@@ -2239,7 +2239,28 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
                 if text.endswith("```"):
                     text = text[:-3]
                 text = text.strip()
-                ai_result = json.loads(text)
+                # Attempt to repair truncated JSON
+                try:
+                    ai_result = json.loads(text)
+                except json.JSONDecodeError:
+                    # Try closing any unclosed strings/braces
+                    repaired = text.rstrip()
+                    if not repaired.endswith("}"):
+                        # Close unclosed strings and structures
+                        open_braces = repaired.count("{") - repaired.count("}")
+                        open_brackets = repaired.count("[") - repaired.count("]")
+                        if repaired.endswith(","):
+                            repaired = repaired[:-1]
+                        # Close any open string
+                        in_string = False
+                        for ch in repaired:
+                            if ch == '"' and (not in_string or repaired[repaired.index(ch)-1:repaired.index(ch)] != '\\'):
+                                in_string = not in_string
+                        if in_string:
+                            repaired += '"'
+                        repaired += "]" * max(0, open_brackets)
+                        repaired += "}" * max(0, open_braces)
+                    ai_result = json.loads(repaired)
                 break
             except Exception as e:
                 last_err = e
