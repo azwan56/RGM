@@ -9,6 +9,7 @@ Uses APScheduler to run periodic jobs:
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 import logging
 
@@ -16,6 +17,27 @@ logger = logging.getLogger("scheduler")
 
 _scheduler: Optional[BackgroundScheduler] = None
 _last_sync_result: dict = {}
+
+
+def _get_user_tz_name(user_data, uid, db) -> str:
+    """Determine the user's timezone from recent activities, fallback to Asia/Singapore."""
+    from collections import Counter
+    recent_acts = [d.to_dict() for d in
+                   db.collection("users").document(uid)
+                   .collection("activities")
+                   .order_by("start_date_local", direction="DESCENDING")
+                   .limit(10).stream()]
+    tz_names = [a.get("timezone", "") for a in recent_acts if a.get("timezone", "")]
+    if tz_names:
+        clean_tzs = []
+        for tz in tz_names:
+            if " " in tz:
+                clean_tzs.append(tz.split(" ", 1)[1])
+            else:
+                clean_tzs.append(tz)
+        if clean_tzs:
+            return Counter(clean_tzs).most_common(1)[0][0]
+    return "Asia/Singapore"
 
 
 def run_daily_sync() -> dict:
@@ -182,26 +204,17 @@ def run_daily_sync() -> dict:
 
 def run_rest_day_reminders() -> dict:
     """
-    Runs at 22:00 UTC (06:00 CST) every day.
-    For each Strava-connected user, checks whether they had any run
-    recorded for the previous calendar day (CST).  If not, sends
-    a rest-day reminder to Discord and/or WeCom — without writing
-    any training journal entry.
+    Runs hourly. For each Strava-connected user, checks if it's 06:00 in their local time.
+    If so, checks whether they had any run recorded for the previous calendar day.
+    If not, sends a rest-day reminder.
     """
     from firebase_config import db
     from utils.discord import send_rest_day_discord_notification, send_rest_day_wecom_notification
 
-    # "Yesterday" in CST (UTC+8)
-    cst_now = datetime.now(timezone.utc) + timedelta(hours=8)
-    yesterday = (cst_now - timedelta(days=1)).date()
-    yesterday_str = yesterday.isoformat()  # "YYYY-MM-DD"
-
-    logger.info(f"[scheduler] Rest-day reminder check for {yesterday_str}")
-
     users = db.collection("users").where("strava_connected", "==", True).stream()
     user_list = [(doc.id, doc.to_dict()) for doc in users]
 
-    results = {"reminded": 0, "skipped": 0, "errors": [], "date": yesterday_str}
+    results = {"reminded": 0, "skipped": 0, "errors": []}
 
     for uid, user_data in user_list:
         try:
@@ -209,6 +222,19 @@ def run_rest_day_reminders() -> dict:
             if not user_data.get("rest_day_reminder", True):
                 results["skipped"] += 1
                 continue
+
+            tz_name = _get_user_tz_name(user_data, uid, db)
+            tz = ZoneInfo(tz_name)
+            local_now = datetime.now(tz)
+
+            # Only process if it's 06:00 local time
+            if local_now.hour != 6:
+                continue
+
+            yesterday = (local_now - timedelta(days=1)).date()
+            yesterday_str = yesterday.isoformat()  # "YYYY-MM-DD"
+
+            logger.info(f"[scheduler] Rest-day reminder check for {uid} in {tz_name} for {yesterday_str}")
 
             # Check Firestore activities for any run dated yesterday
             acts = (
@@ -248,16 +274,14 @@ def run_rest_day_reminders() -> dict:
 
 def run_weekly_reports() -> dict:
     """
-    Runs at 17:00 UTC every Sunday (= Monday 01:00 CST/UTC+8).
-    For each Strava-connected user, generates a comprehensive weekly training report for the previous week
+    Runs hourly. For each Strava-connected user, checks if it's Monday 01:00 in their local time.
+    If so, generates a comprehensive weekly training report for the previous week
     and sends it via Discord and WeCom.
     """
     import asyncio
     from firebase_config import db
     from routers.coach import generate_auto_weekly_report
     from utils.discord import send_weekly_report_discord_notification, send_weekly_report_wecom_notification
-
-    logger.info(f"[scheduler] Starting automatic weekly reports generation...")
 
     users = db.collection("users").where("strava_connected", "==", True).stream()
     user_list = [(doc.id, doc.to_dict()) for doc in users]
@@ -269,8 +293,28 @@ def run_weekly_reports() -> dict:
 
     for uid, user_data in user_list:
         try:
+            tz_name = _get_user_tz_name(user_data, uid, db)
+            tz = ZoneInfo(tz_name)
+            local_now = datetime.now(tz)
+
+            # We want to run this at ~01:00 AM on Monday local time
+            if local_now.weekday() != 0 or local_now.hour != 1:
+                continue
+
+            # Avoid duplicates
+            last_week_monday = (local_now.date() - timedelta(days=local_now.weekday() + 7))
+            week_number = last_week_monday.isocalendar()[1]
+            week_year = last_week_monday.isocalendar()[0]
+            
+            doc_id = f"{week_year}-W{week_number:02d}"
+            report_doc = db.collection("users").document(uid).collection("weekly_reports").document(doc_id).get()
+            if report_doc.exists:
+                continue
+
+            logger.info(f"[scheduler] Triggering weekly report for uid={uid} in {tz_name}")
+
             # Generate the report
-            res = loop.run_until_complete(generate_auto_weekly_report(uid))
+            res = loop.run_until_complete(generate_auto_weekly_report(uid, tz_name=tz_name))
             
             if "error" in res:
                 if res["error"] == "上周暂无训练记录":
@@ -324,22 +368,20 @@ def start_scheduler():
         misfire_grace_time=3600,  # 1 hour grace period
     )
 
-    # Rest-day reminder at 22:00 UTC (06:00 CST next day)
+    # Rest-day reminder (runs hourly, checks per-user local time for 06:00)
     _scheduler.add_job(
         run_rest_day_reminders,
-        trigger=CronTrigger(hour=22, minute=0),
+        trigger=CronTrigger(minute=0),
         id="rest_day_reminder",
         name="Rest Day Reminder",
         replace_existing=True,
         misfire_grace_time=3600,
     )
     
-    # Weekly report at 17:00 UTC every Monday (01:00 CST Monday night/Tuesday morning)
-    # The requirement says "每周一凌晨1点自动生成上一周的报告" (Monday 1:00 AM CST).
-    # CST is UTC+8. Monday 1:00 AM CST is Sunday 17:00 UTC.
+    # Weekly report (runs hourly, checks per-user local time for Monday 01:00)
     _scheduler.add_job(
         run_weekly_reports,
-        trigger=CronTrigger(day_of_week='sun', hour=17, minute=0),
+        trigger=CronTrigger(minute=0),
         id="weekly_reports",
         name="Weekly Reports",
         replace_existing=True,
@@ -349,8 +391,8 @@ def start_scheduler():
     _scheduler.start()
     logger.info(
         "[scheduler] Background scheduler started — "
-        "daily sync at 04:00 UTC, rest-day reminder at 22:00 UTC, "
-        "weekly reports at Sunday 17:00 UTC (Mon 01:00 CST)"
+        "daily sync at 04:00 UTC, rest-day reminder hourly, "
+        "weekly reports hourly (checks per-user local time)"
     )
 
 

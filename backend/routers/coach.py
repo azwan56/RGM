@@ -2039,7 +2039,7 @@ async def generate_weekly_review(req: WeeklyReviewRequest):
     return {"review": review, "journal_id": journal_id}
 
 
-async def generate_auto_weekly_report(uid: str) -> dict:
+async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore") -> dict:
     """Generate a highly detailed auto weekly summary for the previous week (Mon-Sun)."""
     try:
         loop = asyncio.get_running_loop()
@@ -2050,8 +2050,13 @@ async def generate_auto_weekly_report(uid: str) -> dict:
     journal = _get_or_create_journal(uid)
     journal_id = journal["journal_id"]
 
-    from datetime import date as _dt, timedelta
-    today = _dt.today()
+    from datetime import date as _date, datetime as _dt_cls, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("Asia/Singapore")
+    today = _dt_cls.now(tz).date()
     # Calculate previous week's Monday and Sunday
     last_week_monday = today - timedelta(days=today.weekday() + 7)
     last_week_sunday = last_week_monday + timedelta(days=6)
@@ -2084,7 +2089,7 @@ async def generate_auto_weekly_report(uid: str) -> dict:
         future = sorted([r for r in races_doc.to_dict().get("upcoming", [])
                          if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
         if future:
-            days_to = (_dt.fromisoformat(future[0]["date"]) - today).days
+            days_to = (_date.fromisoformat(future[0]["date"]) - today).days
             race_ctx = f"目标赛事：{future[0].get('name','')}，距比赛{days_to}天\n"
 
     total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
