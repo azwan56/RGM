@@ -2228,19 +2228,27 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
 
     ai_result = {}
     if _api_key:
-        try:
-            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=2000))
-            text = resp["text"].strip()
-            # Strip markdown code fences if present
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1]  # Remove first line (```json)
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            ai_result = json.loads(text)
-        except Exception as e:
-            print(f"[journal] Auto Weekly review AI error: {e}")
-            return {"error": str(e)}
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=2000))
+                text = resp["text"].strip()
+                # Strip markdown code fences if present
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1]  # Remove first line (```json)
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+                ai_result = json.loads(text)
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[journal] Auto Weekly review AI error (attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    import time
+                    time.sleep(2)
+        if not ai_result and last_err:
+            return {"error": str(last_err)}
     else:
         # No API key — return error instead of saving empty report
         return {"error": "Gemini API key not configured"}
