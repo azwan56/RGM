@@ -2302,6 +2302,19 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         "created_at": __import__("datetime").datetime.now().isoformat(),
     }
     
+    # Override AI-generated days_remaining with actual computed value
+    if review.get("goal_progress") and race_ctx:
+        # Re-fetch the race date to compute accurate days_remaining
+        try:
+            races_doc_re = user_ref.collection("goals").document("races").get()
+            if races_doc_re.exists:
+                future_re = sorted([r for r in races_doc_re.to_dict().get("upcoming", [])
+                                    if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
+                if future_re:
+                    review["goal_progress"]["days_remaining"] = (_date.fromisoformat(future_re[0]["date"]) - today).days
+        except Exception:
+            pass
+    
     doc_id = f"week-{week_number:02d}-summary"
     entries_ref.document(doc_id).set(review, merge=True)
     

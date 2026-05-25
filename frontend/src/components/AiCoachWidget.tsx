@@ -63,18 +63,43 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 function fixDaysInText(text: string, raceDaysMap: Map<string, number>): string {
   if (!text || raceDaysMap.size === 0) return text;
   let result = text;
+  
+  // Build a combined map that includes partial matches
+  // e.g., if profile has "UTMB 2026" but AI says "距UTMB还有 95 天"
+  const allPatterns: { pattern: RegExp; liveDays: number }[] = [];
+  
   for (const [raceName, liveDays] of raceDaysMap) {
-    // Match: 距{raceName}还有 N 天 / 距{raceName}仅剩 N 天 / 距{raceName}（...）仅剩 N 天
     const escaped = raceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(距${escaped}[^\\d]{0,20})(\\d+)(\\s*天)`, 'g');
+    // Full name match
+    allPatterns.push({
+      pattern: new RegExp(`(距${escaped}[^\\d]{0,20})(\\d+)(\\s*天)`, 'g'),
+      liveDays,
+    });
+    // Also match individual words in race name (e.g., "UTMB" from "UTMB 2026")
+    const words = raceName.split(/[\s·\-]+/).filter(w => w.length >= 2);
+    for (const word of words) {
+      const wEscaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (wEscaped !== escaped) {
+        allPatterns.push({
+          pattern: new RegExp(`(距${wEscaped}[^\\d]{0,20})(\\d+)(\\s*天)`, 'g'),
+          liveDays,
+        });
+      }
+    }
+  }
+  
+  for (const { pattern, liveDays } of allPatterns) {
     result = result.replace(pattern, `$1${liveDays}$3`);
   }
+  
   // Generic fallback: "还有 N 天" without specific race name
   if (raceDaysMap.size === 1) {
     const liveDays = raceDaysMap.values().next().value;
     result = result.replace(/(还有\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
     result = result.replace(/(仅剩\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
     result = result.replace(/(距今\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
+    result = result.replace(/(距比赛\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
+    result = result.replace(/(距赛事\s*)\d+(\s*天)/g, `$1${liveDays}$2`);
   }
   return result;
 }
