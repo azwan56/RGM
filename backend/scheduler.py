@@ -272,11 +272,14 @@ def run_rest_day_reminders() -> dict:
     return results
 
 
-def run_weekly_reports() -> dict:
+def run_weekly_reports(force: bool = False) -> dict:
     """
-    Runs hourly. For each Strava-connected user, checks if it's Monday 01:00 in their local time.
+    Runs hourly. For each Strava-connected user, checks if it's Monday 01:00-05:00 in their local time.
     If so, generates a comprehensive weekly training report for the previous week
     and sends it via Discord and WeCom.
+    
+    When force=True (admin trigger), skips day-of-week and hour checks but still
+    respects the duplicate report check.
     """
     import asyncio
     from firebase_config import db
@@ -286,7 +289,7 @@ def run_weekly_reports() -> dict:
     users = db.collection("users").where("strava_connected", "==", True).stream()
     user_list = [(doc.id, doc.to_dict()) for doc in users]
 
-    results = {"generated": 0, "failed": 0, "errors": []}
+    results = {"generated": 0, "failed": 0, "skipped": 0, "errors": [], "force": force}
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -297,9 +300,10 @@ def run_weekly_reports() -> dict:
             tz = ZoneInfo(tz_name)
             local_now = datetime.now(tz)
 
-            # We want to run this at ~01:00 AM on Monday local time
-            if local_now.weekday() != 0 or local_now.hour != 1:
-                continue
+            # Time check: skip if not Monday 1-5 AM local time (unless force=True)
+            if not force:
+                if local_now.weekday() != 0 or local_now.hour not in (1, 2, 3, 4, 5):
+                    continue
 
             # Avoid duplicates
             last_week_monday = (local_now.date() - timedelta(days=local_now.weekday() + 7))

@@ -394,6 +394,24 @@ def strava_rate_limit(request: Request):
     return get_rate_limit_status()
 
 
+# ── Weekly Reports Trigger ───────────────────────────────────────────────────
+
+@router.post("/trigger-weekly-reports")
+def trigger_weekly_reports(request: Request):
+    """
+    Admin: manually trigger weekly report generation for all users.
+    
+    This endpoint can be called by an external cron service (e.g., cron-job.org)
+    to ensure weekly reports are generated reliably, even when Render free tier
+    sleeps the backend process. Duplicate reports are prevented by the existing
+    doc_id check in run_weekly_reports().
+    """
+    _check_admin(request)
+    from scheduler import run_weekly_reports
+    result = run_weekly_reports(force=True)
+    return result
+
+
 @router.post("/refresh-journal")
 def refresh_journal(request: Request, uid: str, activity_id: str):
     """Admin: force-refresh an AI journal entry for a specific activity."""

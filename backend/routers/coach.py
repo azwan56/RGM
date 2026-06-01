@@ -461,6 +461,27 @@ def _fetch_training_summary(uid: str, weeks: int = 8) -> dict:
     }
 
 
+def _fetch_recent_weekly_reports(uid: str, n: int = 3) -> list:
+    """Fetch the most recent N weekly reports for training history context."""
+    try:
+        docs = (
+            db.collection("users").document(uid)
+            .collection("weekly_reports")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(n)
+            .stream()
+        )
+        reports = []
+        for d in docs:
+            r = d.to_dict()
+            r["doc_id"] = d.id
+            reports.append(r)
+        return list(reversed(reports))  # chronological order
+    except Exception as e:
+        print(f"[coach] Failed to fetch weekly reports for {uid}: {e}")
+        return []
+
+
 def _build_race_analysis(rtype, rname, avg_weekly_km, goal_data=None, est_weekly_km=None):
     """Build race analysis section from knowledge base + actual weekly km + user goal."""
     race_info = _RACE_KNOWLEDGE.get(rtype, {})
@@ -856,8 +877,8 @@ async def generate_coach_feedback(req: CoachRequest):
                     return {"feedback": cached.get("feedback", {})}
 
                 # Preserve weekly_cycle if cycle is < 3 weeks old (full preserve)
-                # OR if cycle is >= 3 weeks, save completed weeks for merging
-                if cycle_created:
+                # BUT: if force_refresh, always regenerate to incorporate latest training data
+                if cycle_created and not req.force_refresh:
                     if weeks_since_cycle < CYCLE_STABLE_WEEKS and cached_fb.get("weekly_cycle"):
                         # Cycle is still fresh — preserve entire cycle
                         cached_weekly_cycle = cached_fb["weekly_cycle"]
@@ -883,6 +904,8 @@ async def generate_coach_feedback(req: CoachRequest):
                             # Store completed weeks separately for merge
                             _completed_cycle_weeks = completed_weeks
                             print(f"[coach] Cycle expired, will merge {len(completed_weeks)} completed weeks into new cycle")
+                elif req.force_refresh:
+                    print(f"[coach] force_refresh=True, will regenerate weekly_cycle based on latest training data")
     except Exception as e:
         print(f"[coach] Cache read error: {e}")
 
@@ -896,6 +919,11 @@ async def generate_coach_feedback(req: CoachRequest):
     )
     avg_weekly_km = training_summary.get("avg_weekly_km", 0)
     est_weekly_km = training_summary.get("est_weekly_km", avg_weekly_km)
+
+    # Fetch recent weekly reports for training history context (used in prompt for intelligent replanning)
+    recent_weekly_reports = []
+    if req.force_refresh:
+        recent_weekly_reports = await loop.run_in_executor(None, _fetch_recent_weekly_reports, req.uid)
 
     if not stats:
         return {"feedback": {
@@ -1143,6 +1171,34 @@ async def generate_coach_feedback(req: CoachRequest):
         f"- 总里程：{stats.get('total_distance_km', 0)} km，目标完成：{completion_pct}%\n\n"
         f"【近期跑步记录】\n{runs_str}\n\n"
     )
+
+    # Inject recent weekly reports for intelligent replanning (only on force_refresh)
+    if recent_weekly_reports:
+        report_lines = []
+        for rpt in recent_weekly_reports:
+            ws = rpt.get("week_stats", {})
+            np = rpt.get("next_week_plan", {})
+            score = rpt.get("weekly_score", "—")
+            summary = rpt.get("summary", "")
+            concerns = rpt.get("concerns", [])
+            highlights = rpt.get("achievements", [])
+            report_lines.append(
+                f"  · {rpt.get('doc_id', '?')}: 跑量{ws.get('total_km', 0)}km/{ws.get('total_runs', 0)}次, "
+                f"爬升{ws.get('total_elevation', 0)}m, 评分{score}/10\n"
+                f"    总结: {summary[:100]}{'...' if len(summary) > 100 else ''}\n"
+                f"    亮点: {', '.join(highlights[:2]) if highlights else '无'}\n"
+                f"    问题: {', '.join(concerns[:2]) if concerns else '无'}\n"
+                f"    下周建议: 目标{np.get('target_km', '—')}km, 重点: {np.get('focus', '—')}"
+            )
+        prompt += (
+            "【⚠️ 最近几周训练执行情况（用户已手动刷新，请务必参考以下数据重新规划）】\n"
+            + "\n".join(report_lines) + "\n\n"
+            "⚠️ 这是用户主动刷新，你必须根据以上实际训练执行情况来制定新的4周计划，"
+            "而非简单重复之前的计划。重点关注：\n"
+            "  1. 实际跑量与建议跑量的差距，适当调整新计划的目标跑量\n"
+            "  2. 上周总结中提到的问题（如疲劳、心率偏高等），在新计划中做出针对性调整\n"
+            "  3. 训练评分趋势，判断是否需要加量或减量\n\n"
+        )
 
     if nearest_race and nearest_days <= 120:
         prompt += (
