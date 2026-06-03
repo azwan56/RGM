@@ -342,16 +342,18 @@ def generate_share_card(
     # ── Encouragement ─────────────────────────────────────────────────
     if encouragement:
         y_cursor += 10
-        _draw_rounded_rect(draw, (52, y_cursor, CARD_W - 52, y_cursor + 120),
-                            radius=16, fill=(20, 30, 50))
         enc_wrapped = _wrap_text('"' + encouragement + '"', font_body, CARD_W - 164)
+        enc_lines = enc_wrapped[:4]  # max 4 lines
+        box_h = max(120, len(enc_lines) * 48 + 40)
+        _draw_rounded_rect(draw, (52, y_cursor, CARD_W - 52, y_cursor + box_h),
+                            radius=16, fill=(20, 30, 50))
         enc_y = y_cursor + 20
-        for line in enc_wrapped[:2]:
+        for line in enc_lines:
             line_bbox = font_body.getbbox(line)
             line_w = line_bbox[2] - line_bbox[0]
             draw.text(((CARD_W - line_w) // 2, enc_y), line, font=font_body, fill=(56, 189, 248))
-            enc_y += 46
-        y_cursor += 140
+            enc_y += 48
+        y_cursor += box_h + 20
 
     # ── Bottom branding ───────────────────────────────────────────────
     # Pin to bottom
