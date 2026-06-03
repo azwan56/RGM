@@ -142,10 +142,17 @@ def generate_share_card(
     encouragement = encouragement_override or report.get("encouragement", "")
     achievements = report.get("achievements", [])
     
-    year = report.get("month_year", None) or report.get("week_year", None)
-    if not year:
+    month = report.get("month_number")
+    week = report.get("week_number")
+    year = report.get("month_year") or report.get("week_year")
+    
+    if month:
+        date_text = f"{year}年{month}月"
+    elif week:
+        date_text = f"{year} 第{week}周"
+    else:
         from datetime import datetime
-        year = datetime.now().year
+        date_text = str(year) if year else str(datetime.now().year)
 
     # ── Create image with dark gradient background ────────────────────
     img = Image.new("RGB", (CARD_W, CARD_H), "#0a0a0a")
@@ -194,15 +201,14 @@ def generate_share_card(
     # ── Header: RGM branding + year badge ────────────────────────────
     draw.text((72, y_cursor), "RGM 跑团", font=font_title, fill=LIGHT_BLUE)
     
-    # Year badge
-    year_text = str(year)
-    year_bbox = font_badge.getbbox(year_text)
-    year_w = year_bbox[2] - year_bbox[0] + 24
-    year_h = year_bbox[3] - year_bbox[1] + 16
-    badge_x = CARD_W - 72 - year_w
-    _draw_rounded_rect(draw, (badge_x, y_cursor, badge_x + year_w, y_cursor + year_h + 8),
+    # Date badge
+    date_bbox = font_badge.getbbox(date_text)
+    date_w = date_bbox[2] - date_bbox[0] + 32
+    date_h = date_bbox[3] - date_bbox[1] + 16
+    badge_x = CARD_W - 72 - date_w
+    _draw_rounded_rect(draw, (badge_x, y_cursor, badge_x + date_w, y_cursor + date_h + 8),
                         radius=12, fill=(30, 58, 138))
-    draw.text((badge_x + 12, y_cursor + 4), year_text, font=font_badge, fill=(96, 165, 250))
+    draw.text((badge_x + 16, y_cursor + 4), date_text, font=font_badge, fill=(96, 165, 250))
 
     y_cursor += 56
     draw.text((72, y_cursor), f"{period_name}度训练总结", font=font_small, fill=GRAY)
@@ -253,7 +259,52 @@ def generate_share_card(
             draw.line([(div_x, stats_bg_y + 30), (div_x, stats_bg_y + 170)],
                       fill=(40, 40, 50), width=1)
 
-    y_cursor = stats_bg_y + 230
+    y_cursor = stats_bg_y + 240
+
+    # ── Chart section ─────────────────────────────────────────────────
+    daily_km = report.get("daily_km", [])
+    if daily_km and len(daily_km) > 1:
+        daily_km.sort(key=lambda x: x["date"])
+        chart_h = 120
+        chart_w = CARD_W - 144
+        chart_x = 72
+        chart_y = y_cursor + 30
+        
+        max_km = max((d["km"] for d in daily_km), default=0.1)
+        if max_km == 0: max_km = 0.1
+        
+        # Draw background lines
+        draw.line([(chart_x, chart_y), (chart_x + chart_w, chart_y)], fill=(40, 40, 50), width=1) # Top
+        draw.line([(chart_x, chart_y + chart_h), (chart_x + chart_w, chart_y + chart_h)], fill=(40, 40, 50), width=1) # Bottom
+        
+        # Draw text for max_km
+        font_chart = _load_font(20, bold=False)
+        draw.text((chart_x, chart_y - 26), f"最高单次: {max_km} km", font=font_chart, fill=GRAY)
+        
+        # Calculate points
+        pts = []
+        n = len(daily_km)
+        for i, d in enumerate(daily_km):
+            px = chart_x + (i / (n - 1)) * chart_w
+            py = chart_y + chart_h - (d["km"] / max_km) * chart_h
+            pts.append((px, py))
+            
+        # Draw fill poly (requires RGBA temp image for transparency)
+        poly_img = Image.new("RGBA", (CARD_W, CARD_H), (0,0,0,0))
+        poly_draw = ImageDraw.Draw(poly_img)
+        poly_pts = [(chart_x, chart_y + chart_h)] + pts + [(chart_x + chart_w, chart_y + chart_h)]
+        poly_draw.polygon(poly_pts, fill=(59, 130, 246, 40)) # 40/255 alpha blue
+        img.paste(poly_img, (0, 0), poly_img)
+        
+        # Draw line
+        draw.line(pts, fill=BLUE, width=4)
+        
+        # Draw points
+        for px, py in pts:
+            # Only draw point if km > 0 to keep it clean, or draw all? Draw all looks better for continuity
+            draw.ellipse([(px-4, py-4), (px+4, py+4)], fill=WHITE, outline=BLUE, width=2)
+            
+        y_cursor += chart_h + 80
 
     # ── Summary section ───────────────────────────────────────────────
     draw.text((72, y_cursor), "📝", font=font_section, fill=WHITE)

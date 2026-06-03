@@ -344,7 +344,7 @@ def run_weekly_reports(force: bool = False) -> dict:
             if period == "weekly" and user_data.get("email"):
                 send_report_email(
                     to_email=user_data["email"],
-                    user_name=user_data.get("display_name") or user_data.get("strava_name"),
+                    user_name=user_data.get("strava_name") or user_data.get("display_name"),
                     period_name="周",
                     report=report
                 )
@@ -439,7 +439,7 @@ def run_monthly_reports(force: bool = False) -> dict:
             if user_data.get("email"):
                 send_report_email(
                     to_email=user_data["email"],
-                    user_name=user_data.get("display_name") or user_data.get("strava_name"),
+                    user_name=user_data.get("strava_name") or user_data.get("display_name"),
                     period_name="月",
                     report=report
                 )

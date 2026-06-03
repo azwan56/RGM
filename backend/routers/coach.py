@@ -2367,6 +2367,12 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         "week_stats_analysis": ai_result.get("week_stats_analysis", {}),
         "encouragement": ai_result.get("encouragement", ""),
         
+        # Per-day km data for share card chart
+        "daily_km": [
+            {"date": e["date"], "km": round(e.get("activity_snapshot", {}).get("distance_km", 0), 1)}
+            for e in daily
+        ],
+        
         "created_at": __import__("datetime").datetime.now().isoformat(),
     }
     
@@ -2630,6 +2636,12 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         "constructive_suggestions": ai_result.get("constructive_suggestions", []),
         "week_stats_analysis": ai_result.get("week_stats_analysis", {}),
         "encouragement": ai_result.get("encouragement", ""),
+        
+        # Per-day km data for share card chart
+        "daily_km": [
+            {"date": e["date"], "km": round(e.get("activity_snapshot", {}).get("distance_km", 0), 1)}
+            for e in daily
+        ],
         
         "created_at": __import__("datetime").datetime.now().isoformat(),
     }
