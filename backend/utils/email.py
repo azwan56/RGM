@@ -416,6 +416,74 @@ def _get_report_html(period_name: str, display_name: str, report: dict) -> str:
     </td>
   </tr>
 
+  <!-- Share Card Section -->
+  <tr>
+    <td style="padding:0 20px 32px;text-align:center;">
+      <p style="margin:0 0 12px;font-size:12px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;">
+        ⬇️ 截图下方卡片与跑友分享 ⬇️
+      </p>
+      
+      <!-- The Card -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:400px;margin:0 auto;background:linear-gradient(145deg,#1f2937,#111827);border:1px solid rgba(255,255,255,0.1);border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+        <tr>
+          <td style="padding:32px 24px 24px;">
+            <!-- Header -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td align="left">
+                  <h3 style="margin:0;font-size:16px;font-weight:600;color:#93c5fd;">RGM 跑团</h3>
+                  <p style="margin:4px 0 0;font-size:13px;color:#9ca3af;">{period_name}度训练总结</p>
+                </td>
+                <td align="right" style="vertical-align:top;">
+                  <div style="background:rgba(59,130,246,0.1);color:#60a5fa;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">
+                    {year}
+                  </div>
+                </td>
+              </tr>
+            </table>
+            
+            <!-- Runner Name -->
+            <h2 style="margin:0 0 20px;font-size:28px;font-weight:700;color:#ffffff;text-align:left;">
+              {display_name}
+            </h2>
+
+            <!-- Core Stats -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:rgba(0,0,0,0.2);border-radius:16px;padding:20px;margin-bottom:24px;">
+              <tr>
+                <td width="33%" style="text-align:center;border-right:1px solid rgba(255,255,255,0.05);">
+                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">跑量</p>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{km}<span style="font-size:12px;color:#6b7280;font-weight:normal;">km</span></p>
+                </td>
+                <td width="33%" style="text-align:center;border-right:1px solid rgba(255,255,255,0.05);">
+                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">次数</p>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{runs}</p>
+                </td>
+                <td width="34%" style="text-align:center;">
+                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">AI评分</p>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#fcd34d;">{score}</p>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Footer mark -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td align="center">
+                  <p style="margin:0;font-size:13px;font-weight:600;color:#3b82f6;letter-spacing:0.5px;">
+                    RGM.vanpower.live
+                  </p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#6b7280;">
+                    智能跑团管理 · AI 教练分析
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
   <!-- Footer -->
   <tr>
     <td style="padding:20px 36px 28px;text-align:center;border-top:1px solid rgba(255,255,255,0.04);">
