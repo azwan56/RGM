@@ -2259,7 +2259,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         print(f"[journal] Failed to get fitness state for {uid}: {e}")
 
     prompt = (
-        f"你是专业且富有激情的马拉松教练，正在为运动员【{runner_name}】撰写上一周的详细训练周总结。请直接称呼对方的名字【{runner_name}】，不要用"跑者"来称呼。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
+        f"你是专业且富有激情的马拉松教练，正在为运动员【{runner_name}】撰写上一周的详细训练周总结。请直接称呼对方的名字，不要称呼为跑者。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
         f"【日志名称】{journal.get('title','')}\n{race_ctx}"
         f"【上周训练记录 ({start_date_str} 至 {end_date_str})】\n{entries_str}\n"
         f"合计数据：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m / 平均配速{avg_pace_week} / 平均心率{avg_hr_week}\n"
@@ -2552,7 +2552,7 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         print(f"[journal] Failed to get fitness state for monthly report {uid}: {e}")
 
     prompt = (
-        f"你是专业且富有激情的马拉松教练，正在为运动员【{runner_name}】撰写上一【月】的宏观训练总结报告。请直接称呼对方的名字【{runner_name}】，不要用"跑者"来称呼。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
+        f"你是专业且富有激情的马拉松教练，正在为运动员【{runner_name}】撰写上一【月】的宏观训练总结报告。请直接称呼对方的名字，不要称呼为跑者。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
         f"【日志名称】{journal.get('title','')}\n{race_ctx}"
         f"【上月训练结构 ({month_year}年{month_number}月)】\n{entries_str}\n"
         f"合计数据：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m / 平均配速{avg_pace_month} / 平均心率{avg_hr_month}\n"
