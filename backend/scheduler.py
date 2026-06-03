@@ -75,7 +75,8 @@ def run_daily_sync() -> dict:
         try:
             # Refresh token (skip throttle for auth requests)
             from utils.strava_rate_limiter import strava_request, get_rate_limit_status
-            token_resp = strava_request("POST", "https://www.strava.com/oauth/token", data={
+            from utils.strava_config import STRAVA_OAUTH_TOKEN_URL, STRAVA_API_BASE
+            token_resp = strava_request("POST", STRAVA_OAUTH_TOKEN_URL, data={
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "grant_type": "refresh_token",
@@ -114,7 +115,7 @@ def run_daily_sync() -> dict:
             headers = {"Authorization": f"Bearer {access_token}"}
             act_resp = strava_request(
                 "GET",
-                "https://www.strava.com/api/v3/athlete/activities",
+                f"{STRAVA_API_BASE}/athlete/activities",
                 params={"after": epoch_start, "per_page": 200},
                 headers=headers,
                 timeout=20,
@@ -276,15 +277,13 @@ def run_weekly_reports(force: bool = False) -> dict:
     """
     Runs hourly. For each Strava-connected user, checks if it's Monday 01:00-05:00 in their local time.
     If so, generates a comprehensive weekly training report for the previous week
-    and sends it via Discord and WeCom.
-    
-    When force=True (admin trigger), skips day-of-week and hour checks but still
-    respects the duplicate report check.
+    and sends it via Discord and WeCom. Also emails it if the user's goal period is 'weekly'.
     """
     import asyncio
     from firebase_config import db
     from routers.coach import generate_auto_weekly_report
     from utils.discord import send_weekly_report_discord_notification, send_weekly_report_wecom_notification
+    from utils.email import send_report_email
 
     users = db.collection("users").where("strava_connected", "==", True).stream()
     user_list = [(doc.id, doc.to_dict()) for doc in users]
@@ -336,6 +335,20 @@ def run_weekly_reports(force: bool = False) -> dict:
             send_weekly_report_discord_notification(user_data, uid, report)
             send_weekly_report_wecom_notification(user_data, uid, report)
             
+            # Send Email IF user's goal period is 'weekly'
+            goal_snap = db.collection("users").document(uid).collection("goals").document("current").get()
+            period = "monthly"
+            if goal_snap.exists:
+                period = goal_snap.to_dict().get("period", "monthly")
+                
+            if period == "weekly" and user_data.get("email"):
+                send_report_email(
+                    to_email=user_data["email"],
+                    user_name=user_data.get("display_name") or user_data.get("strava_name"),
+                    period_name="周",
+                    report=report
+                )
+            
             results["generated"] += 1
             logger.info(f"[scheduler] Weekly report generated and sent for uid={uid}")
 
@@ -348,6 +361,101 @@ def run_weekly_reports(force: bool = False) -> dict:
     
     logger.info(
         f"[scheduler] Weekly reports done — "
+        f"{results['generated']} generated, {results['failed']} failed, "
+        f"{len(results['errors'])} errors"
+    )
+    return results
+
+
+def run_monthly_reports(force: bool = False) -> dict:
+    """
+    Runs hourly. For each Strava-connected user, checks if it's the 1st of the month 
+    between 01:00-05:00 in their local time.
+    If so, generates a comprehensive monthly training report for the previous month
+    and emails it IF the user's goal period is 'monthly'.
+    """
+    import asyncio
+    from firebase_config import db
+    from routers.coach import generate_auto_monthly_report
+    from utils.email import send_report_email
+
+    users = db.collection("users").where("strava_connected", "==", True).stream()
+    user_list = [(doc.id, doc.to_dict()) for doc in users]
+
+    results = {"generated": 0, "failed": 0, "skipped": 0, "errors": [], "force": force}
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    for uid, user_data in user_list:
+        try:
+            # Only process if goal period is monthly
+            goal_snap = db.collection("users").document(uid).collection("goals").document("current").get()
+            period = "monthly"
+            if goal_snap.exists:
+                period = goal_snap.to_dict().get("period", "monthly")
+                
+            if period != "monthly":
+                continue
+
+            tz_name = _get_user_tz_name(user_data, uid, db)
+            tz = ZoneInfo(tz_name)
+            local_now = datetime.now(tz)
+
+            # Time check: skip if not 1st of month 1-5 AM local time (unless force=True)
+            if not force:
+                if local_now.day != 1 or local_now.hour not in (1, 2, 3, 4, 5):
+                    continue
+
+            # Avoid duplicates
+            first_of_current = local_now.date().replace(day=1)
+            last_day_prev = first_of_current - timedelta(days=1)
+            month_number = last_day_prev.month
+            month_year = last_day_prev.year
+            
+            doc_id = f"{month_year}-{month_number:02d}"
+            report_doc = db.collection("users").document(uid).collection("monthly_reports").document(doc_id).get()
+            if report_doc.exists:
+                continue
+
+            logger.info(f"[scheduler] Triggering monthly report for uid={uid} in {tz_name}")
+
+            # Generate the report
+            res = loop.run_until_complete(generate_auto_monthly_report(uid, tz_name=tz_name))
+            
+            if "error" in res:
+                if res["error"] == "上月暂无训练记录":
+                    logger.info(f"[scheduler] {uid} had no runs last month, skipped.")
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(f"{uid}: {res['error']}")
+                continue
+
+            report = res.get("review", {})
+            if not report:
+                continue
+                
+            # Send Email
+            if user_data.get("email"):
+                send_report_email(
+                    to_email=user_data["email"],
+                    user_name=user_data.get("display_name") or user_data.get("strava_name"),
+                    period_name="月",
+                    report=report
+                )
+            
+            results["generated"] += 1
+            logger.info(f"[scheduler] Monthly report generated and sent for uid={uid}")
+
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append(f"{uid}: {str(e)}")
+            logger.error(f"[scheduler] Monthly report failed for uid={uid}: {e}")
+
+    loop.close()
+    
+    logger.info(
+        f"[scheduler] Monthly reports done — "
         f"{results['generated']} generated, {results['failed']} failed, "
         f"{len(results['errors'])} errors"
     )
@@ -391,12 +499,22 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    
+    # Monthly report (runs hourly, checks per-user local time for 1st of month 01:00)
+    _scheduler.add_job(
+        run_monthly_reports,
+        trigger=CronTrigger(minute=0),
+        id="monthly_reports",
+        name="Monthly Reports",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
 
     _scheduler.start()
     logger.info(
         "[scheduler] Background scheduler started — "
         "daily sync at 04:00 UTC, rest-day reminder hourly, "
-        "weekly reports hourly (checks per-user local time)"
+        "weekly/monthly reports hourly (checks per-user local time)"
     )
 
 

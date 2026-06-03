@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
+from typing import Optional
 import requests
 import os
 from firebase_config import db
+from utils.strava_config import STRAVA_OAUTH_TOKEN_URL
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ def auth_strava(request: StravaAuthRequest):
         raise HTTPException(status_code=500, detail="Strava credentials not configured on backend.")
 
     # Exchange code for token
-    url = "https://www.strava.com/oauth/token"
+    url = STRAVA_OAUTH_TOKEN_URL
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
@@ -84,3 +86,48 @@ def auth_strava(request: StravaAuthRequest):
         pass
 
     return {"message": "Strava connected successfully", "athlete_id": athlete.get("id"), "name": strava_name}
+
+
+# ── Welcome Email ────────────────────────────────────────────────────────────
+
+class WelcomeEmailRequest(BaseModel):
+    uid: str
+    email: str
+    display_name: Optional[str] = None
+
+
+def _send_welcome_email_task(uid: str, email: str, display_name: Optional[str]):
+    """Background task: send welcome email and mark as sent in Firestore."""
+    try:
+        from utils.email import send_welcome_email
+        name = display_name or email.split("@")[0]
+        ok = send_welcome_email(email, name)
+        if ok:
+            db.collection("users").document(uid).set(
+                {"welcome_email_sent": True}, merge=True
+            )
+    except Exception as e:
+        print(f"[auth] Welcome email background task failed: {e}")
+
+
+@router.post("/welcome-email")
+def send_welcome(request: WelcomeEmailRequest, background_tasks: BackgroundTasks):
+    """
+    Sends a one-time welcome email to a newly registered user.
+    Idempotent: checks Firestore flag to avoid duplicate sends.
+    """
+    # Check if already sent
+    user_ref = db.collection("users").document(request.uid)
+    user_doc = user_ref.get()
+    if user_doc.exists and user_doc.to_dict().get("welcome_email_sent"):
+        return {"message": "Welcome email already sent", "skipped": True}
+
+    # Fire in background so response is instant
+    background_tasks.add_task(
+        _send_welcome_email_task,
+        request.uid,
+        request.email,
+        request.display_name,
+    )
+    return {"message": "Welcome email queued", "skipped": False}
+

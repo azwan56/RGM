@@ -11,6 +11,7 @@ from firebase_config import db
 import os
 import requests
 from datetime import datetime
+from utils.strava_config import STRAVA_OAUTH_TOKEN_URL, STRAVA_API_BASE
 
 router = APIRouter()
 
@@ -221,7 +222,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
 
         # Refresh access token (skip_throttle=True: token refresh is critical)
         from utils.strava_rate_limiter import strava_request
-        token_resp = strava_request("POST", "https://www.strava.com/oauth/token", data={
+        token_resp = strava_request("POST", STRAVA_OAUTH_TOKEN_URL, data={
             "client_id": client_id,
             "client_secret": client_secret,
             "grant_type": "refresh_token",
@@ -242,7 +243,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         # Fetch the specific activity
         act_resp = strava_request(
             "GET",
-            f"https://www.strava.com/api/v3/activities/{activity_id}",
+            f"{STRAVA_API_BASE}/activities/{activity_id}",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=15,
         )
@@ -295,7 +296,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
 
             stream_resp = strava_request(
                 "GET",
-                f"https://www.strava.com/api/v3/activities/{activity_id}/streams",
+                f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
                 params={
                     "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
                     "key_by_type": "true",

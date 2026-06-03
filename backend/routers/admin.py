@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from firebase_config import db
 import os
 import requests
+from utils.strava_config import STRAVA_API_BASE
 from datetime import datetime
 
 router = APIRouter()
@@ -47,7 +48,7 @@ def register_webhook(request: Request):
     callback_url = f"{backend_url.rstrip('/')}/api/webhook/strava"
 
     resp = requests.post(
-        "https://www.strava.com/api/v3/push_subscriptions",
+        f"{STRAVA_API_BASE}/push_subscriptions",
         data={
             "client_id": client_id,
             "client_secret": client_secret,
@@ -89,7 +90,7 @@ def webhook_status(request: Request):
         raise HTTPException(status_code=400, detail="Strava credentials not configured")
 
     resp = requests.get(
-        "https://www.strava.com/api/v3/push_subscriptions",
+        f"{STRAVA_API_BASE}/push_subscriptions",
         params={"client_id": client_id, "client_secret": client_secret},
         timeout=15,
     )
@@ -114,7 +115,7 @@ def delete_webhook(request: Request, subscription_id: int):
     client_secret = os.getenv("STRAVA_CLIENT_SECRET", "")
 
     resp = requests.delete(
-        f"https://www.strava.com/api/v3/push_subscriptions/{subscription_id}",
+        f"{STRAVA_API_BASE}/push_subscriptions/{subscription_id}",
         data={"client_id": client_id, "client_secret": client_secret},
         timeout=15,
     )
@@ -409,6 +410,20 @@ def trigger_weekly_reports(request: Request):
     _check_admin(request)
     from scheduler import run_weekly_reports
     result = run_weekly_reports(force=True)
+    return result
+
+
+@router.post("/trigger-monthly-reports")
+def trigger_monthly_reports(request: Request):
+    """
+    Admin: manually trigger monthly report generation for all users.
+    
+    This endpoint can be called by an external cron service on the 1st of every month.
+    Duplicate reports are prevented by the existing doc_id check in run_monthly_reports().
+    """
+    _check_admin(request)
+    from scheduler import run_monthly_reports
+    result = run_monthly_reports(force=True)
     return result
 
 

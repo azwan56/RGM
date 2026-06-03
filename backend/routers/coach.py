@@ -1468,6 +1468,7 @@ async def log_journal_entry(req: JournalLogRequest):
         # Stream stats not yet cached — try to fetch from Strava on-demand
         try:
             from utils.strava_rate_limiter import strava_request
+            from utils.strava_config import STRAVA_API_BASE
             from utils.stream_analyzer import analyze_streams
 
             access_token = user_data.get("strava_access_token")
@@ -1475,7 +1476,7 @@ async def log_journal_entry(req: JournalLogRequest):
             if access_token and act_id_num:
                 stream_resp = strava_request(
                     "GET",
-                    f"https://www.strava.com/api/v3/activities/{act_id_num}/streams",
+                    f"{STRAVA_API_BASE}/activities/{act_id_num}/streams",
                     params={
                         "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
                         "key_by_type": "true",
@@ -2380,6 +2381,270 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
     db.collection("users").document(uid).collection("weekly_reports").document(f"{week_year}-W{week_number:02d}").set(review, merge=True)
     
     return {"review": review, "journal_id": journal_id}
+
+
+async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore") -> dict:
+    """Generate a highly detailed auto monthly summary for the previous month."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    user_ref = db.collection("users").document(uid)
+    journal = _get_or_create_journal(uid)
+    journal_id = journal["journal_id"]
+
+    from datetime import date as _date, datetime as _dt_cls, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("Asia/Singapore")
+    today = _dt_cls.now(tz).date()
+    
+    # Calculate previous month's first and last day
+    # Go to the 1st of current month, then subtract 1 day to get last day of prev month
+    first_of_current = today.replace(day=1)
+    last_day_prev = first_of_current - timedelta(days=1)
+    first_day_prev = last_day_prev.replace(day=1)
+    
+    start_date_str = first_day_prev.isoformat()
+    end_date_str = last_day_prev.isoformat()
+    month_number = last_day_prev.month
+    month_year = last_day_prev.year
+
+    entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+    
+    # Query entries for the previous month
+    docs = entries_ref.where("date", ">=", start_date_str).where("date", "<=", end_date_str).order_by("date").stream()
+    daily = []
+    for d in docs:
+        d_dict = d.to_dict()
+        if d_dict.get("entry_type") == "daily":
+            daily.append(d_dict)
+    
+    if not daily:
+        return {"error": "上月暂无训练记录"}
+
+    # Increase fetch window to 12 weeks (3 months) for macro context
+    training_summary = await loop.run_in_executor(None, lambda: _fetch_training_summary(uid, weeks=12))
+
+    # Race context
+    race_ctx = ""
+    nearest_race = None
+    races_doc = user_ref.collection("goals").document("races").get()
+    if races_doc.exists:
+        future = sorted([r for r in races_doc.to_dict().get("upcoming", [])
+                         if r.get("date", "") >= today.isoformat()], key=lambda r: r.get("date", "9999"))
+        if future:
+            nearest_race = future[0]
+    if not nearest_race:
+        user_doc_data = user_ref.get().to_dict() or {}
+        for r in user_doc_data.get("upcoming_races", []):
+            rdate = r.get("date", "")
+            if rdate and rdate >= today.isoformat():
+                nearest_race = r
+                break
+    if nearest_race:
+        days_to = (_date.fromisoformat(nearest_race["date"]) - today).days
+        race_ctx = f"目标赛事：{nearest_race.get('name','')}, 距比赛{days_to}天\n"
+
+    total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
+    total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
+    
+    # Analyze training types
+    training_types = set()
+    total_time_min = 0
+    total_hr_sum = 0
+    hr_count = 0
+    for e in daily:
+        ttype = e.get("training_type")
+        if ttype: training_types.add(ttype)
+        snap = e.get("activity_snapshot", {})
+        pace_str = snap.get("avg_pace", "") or ""
+        if ":" in pace_str:
+            try:
+                parts = pace_str.split(":")
+                m, s = int(parts[0]), int(parts[1])
+                mins_per_km = m + s / 60.0
+                total_time_min += mins_per_km * snap.get("distance_km", 0)
+            except (ValueError, IndexError):
+                pass
+        hr = snap.get("avg_heart_rate", 0)
+        if hr > 0:
+            total_hr_sum += hr
+            hr_count += 1
+            
+    avg_hr_month = round(total_hr_sum / hr_count) if hr_count > 0 else 0
+    
+    def _fmt_pace(min_per_km):
+        if min_per_km <= 0: return "—"
+        m = int(min_per_km)
+        s = int((min_per_km - m) * 60)
+        return f"{m}:{s:02d}"
+        
+    avg_pace_month = _fmt_pace(total_time_min / total_km) if total_km > 0 else "—"
+
+    # Summarize month into weekly chunks to reduce token size and make it readable
+    from collections import defaultdict
+    weekly_sums = defaultdict(lambda: {"km": 0, "runs": 0, "elev": 0, "time_min": 0})
+    for e in daily:
+        edate = _date.fromisoformat(e["date"])
+        w_idx = edate.isocalendar()[1]
+        snap = e.get("activity_snapshot", {})
+        weekly_sums[w_idx]["km"] += snap.get("distance_km", 0)
+        weekly_sums[w_idx]["runs"] += 1
+        weekly_sums[w_idx]["elev"] += snap.get("total_elevation_gain", 0)
+    
+    entries_str = "\n".join(
+        f"- 第{w}周: {stats['km']:.1f}km / {stats['runs']}次 / 爬升{stats['elev']}m"
+        for w, stats in sorted(weekly_sums.items())
+    )
+
+    # Get fitness state
+    user_doc = user_ref.get()
+    user_data = user_doc.to_dict() if user_doc.exists else {}
+    fitness_ctx = ""
+    try:
+        from utils.sports_science import compute_fitness_fatigue_timeseries
+        max_hr = user_data.get("max_heart_rate", 190)
+        rest_hr = user_data.get("resting_heart_rate", 60)
+        fitness_docs = (
+            user_ref.collection("activities")
+            .order_by("start_date_local", direction="DESCENDING")
+            .limit(180)  # Double the limit for monthly context
+            .stream()
+        )
+        fitness_activities = [d.to_dict() for d in fitness_docs]
+        fitness_activities.reverse()
+        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3)
+        if ts:
+            latest = ts[-1]
+            fitness_state = {"ctl": round(latest.get("ctl", 0), 1), "atl": round(latest.get("atl", 0), 1), "tsb": round(latest.get("tsb", 0), 1)}
+            fitness_ctx = f"月底体能状态：CTL体能={fitness_state['ctl']}，ATL疲劳={fitness_state['atl']}，TSB状态值={fitness_state['tsb']}\n"
+    except Exception as e:
+        print(f"[journal] Failed to get fitness state for monthly report {uid}: {e}")
+
+    prompt = (
+        "你是专业且富有激情的马拉松教练，正在撰写跑者上一【月】的宏观训练总结报告。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
+        f"【日志名称】{journal.get('title','')}\n{race_ctx}"
+        f"【上月训练结构 ({month_year}年{month_number}月)】\n{entries_str}\n"
+        f"合计数据：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m / 平均配速{avg_pace_month} / 平均心率{avg_hr_month}\n"
+        f"训练类型覆盖：{', '.join(training_types) if training_types else '未分类'}\n"
+        f"{fitness_ctx}"
+        f"【过去12周宏观数据】周均{training_summary.get('avg_weekly_km',0)}km | 趋势:{training_summary.get('volume_trend','stable')}\n\n"
+        "要求：从【月度宏观视角】分析训练周期、长短期目标的进展，并给出下月的整体规划。\n"
+        'JSON格式要求：\n'
+        '{\n'
+        '  "weekly_overview": "<2-3句总体概述（作为月报的开场）>",\n'
+        '  "week_stats_analysis": {\n'
+        '    "total_km": <数值>,\n'
+        '    "total_elevation": <数值>,\n'
+        '    "total_runs": <数值>,\n'
+        '    "avg_pace": "<配速>",\n'
+        '    "avg_heart_rate": <数值>,\n'
+        '    "training_types": ["类型1", "类型2"],\n'
+        '    "analysis": "<对本月整体训练连贯性、负荷分布的专业宏观分析>"\n'
+        '  },\n'
+        '  "goal_progress": {\n'
+        '    "race_name": "<赛事名称，无则填无>",\n'
+        '    "days_remaining": <距今天数，无则填0>,\n'
+        '    "training_phase": "<当前所处训练期>",\n'
+        '    "readiness_assessment": "<基于整个月训练对备赛进度的宏观评估>",\n'
+        '    "weekly_target_vs_actual": "<月度跑量/目标完成度分析>"\n'
+        '  },\n'
+        '  "highlights": ["<本月突破1>", "<本月高光2>"],\n'
+        '  "concerns": ["<长期隐患或本月积累的问题1>"],\n'
+        '  "constructive_suggestions": [\n'
+        '    {"area": "<改进领域>", "suggestion": "<具体建议>", "rationale": "<背后原理>"}\n'
+        '  ],\n'
+        '  "next_week_plan": {\n'
+        '    "focus": "<下月核心目标与周期重点>",\n'
+        '    "target_km": "<下月建议总跑量>",\n'
+        '    "key_sessions": ["<下月必做的专项课次>"],\n'
+        '    "adjustments": "<周期性调整建议>",\n'
+        '    "rest_days": "<恢复周或休息安排建议>"\n'
+        '  },\n'
+        '  "weekly_score": <1-10整数评分>,\n'
+        '  "encouragement": "<一句月度视角的走心鼓励语>"\n'
+        '}'
+    )
+
+    ai_result = {}
+    if _api_key:
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
+                text = resp["text"].strip()
+                if text.startswith("```"): text = text.split("\n", 1)[-1]
+                if text.endswith("```"): text = text[:-3]
+                text = text.strip()
+                try:
+                    ai_result = json.loads(text)
+                except json.JSONDecodeError:
+                    repaired = text.rstrip()
+                    if not repaired.endswith("}"):
+                        open_braces = repaired.count("{") - repaired.count("}")
+                        open_brackets = repaired.count("[") - repaired.count("]")
+                        if repaired.endswith(","): repaired = repaired[:-1]
+                        in_string = False
+                        for ch in repaired:
+                            if ch == '"' and (not in_string or repaired[repaired.index(ch)-1:repaired.index(ch)] != '\\'):
+                                in_string = not in_string
+                        if in_string: repaired += '"'
+                        repaired += "]" * max(0, open_brackets)
+                        repaired += "}" * max(0, open_braces)
+                    ai_result = json.loads(repaired)
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[journal] Auto Monthly review AI error (attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    import time
+                    time.sleep(2)
+        if not ai_result and last_err:
+            return {"error": str(last_err)}
+    else:
+        return {"error": "Gemini API key not configured"}
+
+    review = {
+        "date": end_date_str,
+        "entry_type": "monthly_summary",
+        "month_number": month_number,
+        "month_year": month_year,
+        "auto_generated": True,
+        
+        "summary": ai_result.get("weekly_overview", ""),
+        "achievements": ai_result.get("highlights", []),
+        "concerns": ai_result.get("concerns", []),
+        "next_week_plan": ai_result.get("next_week_plan", {}),
+        "weekly_score": ai_result.get("weekly_score", 7),
+        "week_stats": {
+            "total_km": round(total_km, 1), 
+            "total_runs": len(daily), 
+            "total_elevation": round(total_elev)
+        },
+        
+        "goal_progress": ai_result.get("goal_progress", {}),
+        "constructive_suggestions": ai_result.get("constructive_suggestions", []),
+        "week_stats_analysis": ai_result.get("week_stats_analysis", {}),
+        "encouragement": ai_result.get("encouragement", ""),
+        
+        "created_at": __import__("datetime").datetime.now().isoformat(),
+    }
+    
+    if review.get("goal_progress") and nearest_race:
+        review["goal_progress"]["days_remaining"] = (_date.fromisoformat(nearest_race["date"]) - today).days
+    
+    doc_id = f"month-{month_year}-{month_number:02d}-summary"
+    entries_ref.document(doc_id).set(review, merge=True)
+    
+    # Save a copy to monthly_reports collection
+    db.collection("users").document(uid).collection("monthly_reports").document(f"{month_year}-{month_number:02d}").set(review, merge=True)
+    
+    return {"review": review, "journal_id": journal_id}
+
 
 
 @router.post("/journal/auto-weekly-report")

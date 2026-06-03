@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from firebase_config import db
 import requests
 from utils.strava_rate_limiter import strava_request
+from utils.strava_config import STRAVA_OAUTH_TOKEN_URL, STRAVA_API_BASE
 import os
 import calendar
 from datetime import datetime, date, timedelta
@@ -110,7 +111,7 @@ def sync_user_data(req: SyncRequest):
     if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="Strava credentials missing.")
 
-    token_resp = strava_request("POST", "https://www.strava.com/oauth/token", data={
+    token_resp = strava_request("POST", STRAVA_OAUTH_TOKEN_URL, data={
         "client_id":     client_id,
         "client_secret": client_secret,
         "grant_type":    "refresh_token",
@@ -143,7 +144,7 @@ def sync_user_data(req: SyncRequest):
     headers = {"Authorization": f"Bearer {access_token}"}
     activities_resp = strava_request(
         "GET",
-        f"https://www.strava.com/api/v3/athlete/activities",
+        f"{STRAVA_API_BASE}/athlete/activities",
         params={"after": epoch_start, "per_page": 200},
         headers=headers,
         timeout=20,
@@ -330,7 +331,7 @@ def _run_full_sync_bg(uid: str, since_date: str, access_token: str, period: str,
         while True:
             resp = strava_request(
                 "GET",
-                "https://www.strava.com/api/v3/athlete/activities",
+                f"{STRAVA_API_BASE}/athlete/activities",
                 params={"after": epoch_start, "per_page": PER_PAGE, "page": page},
                 headers=headers,
                 timeout=30,
@@ -401,7 +402,7 @@ def sync_full_history(req: FullSyncRequest, background_tasks: BackgroundTasks):
     if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="Strava credentials missing.")
 
-    token_resp = requests.post("https://www.strava.com/oauth/token", data={
+    token_resp = requests.post(STRAVA_OAUTH_TOKEN_URL, data={
         "client_id":     client_id,
         "client_secret": client_secret,
         "grant_type":    "refresh_token",
@@ -458,7 +459,7 @@ def get_activity_detail(activity_id: int, uid: str):
 
     resp = strava_request(
         "GET",
-        f"https://www.strava.com/api/v3/activities/{activity_id}",
+        f"{STRAVA_API_BASE}/activities/{activity_id}",
         headers={"Authorization": f"Bearer {access_token}"},
     )
     if not resp.ok:
@@ -488,7 +489,7 @@ def get_activity_streams(activity_id: int, uid: str):
 
     resp = strava_request(
         "GET",
-        "https://www.strava.com/api/v3/activities/{}/streams".format(activity_id),
+        f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
         params={
             "keys": "time,distance,velocity_smooth,heartrate,cadence,altitude",
             "key_by_type": "true"
@@ -544,7 +545,7 @@ def get_activity_vdot(activity_id: int, uid: str):
     # Fetch streams needed for VDOT (no cadence needed — saves bandwidth)
     resp = strava_request(
         "GET",
-        "https://www.strava.com/api/v3/activities/{}/streams".format(activity_id),
+        f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
         params={"keys": "time,distance,velocity_smooth,heartrate,altitude", "key_by_type": "true"},
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=20,
