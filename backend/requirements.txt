@@ -11,3 +11,4 @@ apscheduler
 pytest
 pytest-asyncio
 httpx
+Pillow

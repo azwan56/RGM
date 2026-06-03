@@ -19,7 +19,11 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime
+from typing import Optional, List, Tuple
 
 
 SMTP_SERVER = "smtp.gmail.com"
@@ -199,8 +203,17 @@ def _get_welcome_html(user_name: str) -> str:
 </html>"""
 
 
-def _send_via_gmail(to_email: str, subject: str, plain_text: str, html_content: str) -> bool:
-    """Internal helper to send email via Gmail SMTP."""
+def _send_via_gmail(
+    to_email: str,
+    subject: str,
+    plain_text: str,
+    html_content: str,
+    attachments: "Optional[List[Tuple[str, bytes, str]]]" = None,
+) -> bool:
+    """
+    Internal helper to send email via Gmail SMTP.
+    attachments: optional list of (filename, data_bytes, mime_subtype) tuples.
+    """
     gmail_address = os.getenv("GMAIL_ADDRESS", "").strip()
     gmail_app_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
 
@@ -209,14 +222,28 @@ def _send_via_gmail(to_email: str, subject: str, plain_text: str, html_content: 
         return False
 
     try:
-        msg = MIMEMultipart("alternative")
+        # Use "mixed" as the top-level type when we have attachments
+        msg = MIMEMultipart("mixed")
         msg["From"] = f"RGM 跑团助手 <{gmail_address}>"
         msg["To"] = to_email
         msg["Subject"] = subject
         msg["Reply-To"] = gmail_address
 
-        msg.attach(MIMEText(plain_text, "plain", "utf-8"))
-        msg.attach(MIMEText(html_content, "html", "utf-8"))
+        # Text/HTML alternative part
+        alt_part = MIMEMultipart("alternative")
+        alt_part.attach(MIMEText(plain_text, "plain", "utf-8"))
+        alt_part.attach(MIMEText(html_content, "html", "utf-8"))
+        msg.attach(alt_part)
+
+        # Attachments
+        if attachments:
+            for filename, data, subtype in attachments:
+                img_part = MIMEImage(data, _subtype=subtype)
+                img_part.add_header("Content-Disposition", "attachment", filename=filename)
+                # Also set Content-ID so it can be referenced inline
+                cid = filename.replace(".", "_")
+                img_part.add_header("Content-ID", f"<{cid}>")
+                msg.attach(img_part)
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
             server.ehlo()
@@ -416,71 +443,12 @@ def _get_report_html(period_name: str, display_name: str, report: dict) -> str:
     </td>
   </tr>
 
-  <!-- Share Card Section -->
+  <!-- Share Card Note -->
   <tr>
-    <td style="padding:0 20px 32px;text-align:center;">
-      <p style="margin:0 0 12px;font-size:12px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;">
-        ⬇️ 截图下方卡片与跑友分享 ⬇️
+    <td style="padding:0 36px 32px;text-align:center;">
+      <p style="margin:0;font-size:13px;color:#a1a1aa;">
+        📎 分享卡片已附在邮件附件中，可直接保存并分享给跑友
       </p>
-      
-      <!-- The Card -->
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:400px;margin:0 auto;background:linear-gradient(145deg,#1f2937,#111827);border:1px solid rgba(255,255,255,0.1);border-radius:20px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-        <tr>
-          <td style="padding:32px 24px 24px;">
-            <!-- Header -->
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-              <tr>
-                <td align="left">
-                  <h3 style="margin:0;font-size:16px;font-weight:600;color:#93c5fd;">RGM 跑团</h3>
-                  <p style="margin:4px 0 0;font-size:13px;color:#9ca3af;">{period_name}度训练总结</p>
-                </td>
-                <td align="right" style="vertical-align:top;">
-                  <div style="background:rgba(59,130,246,0.1);color:#60a5fa;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">
-                    {year}
-                  </div>
-                </td>
-              </tr>
-            </table>
-            
-            <!-- Runner Name -->
-            <h2 style="margin:0 0 20px;font-size:28px;font-weight:700;color:#ffffff;text-align:left;">
-              {display_name}
-            </h2>
-
-            <!-- Core Stats -->
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:rgba(0,0,0,0.2);border-radius:16px;padding:20px;margin-bottom:24px;">
-              <tr>
-                <td width="33%" style="text-align:center;border-right:1px solid rgba(255,255,255,0.05);">
-                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">跑量</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{km}<span style="font-size:12px;color:#6b7280;font-weight:normal;">km</span></p>
-                </td>
-                <td width="33%" style="text-align:center;border-right:1px solid rgba(255,255,255,0.05);">
-                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">次数</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{runs}</p>
-                </td>
-                <td width="34%" style="text-align:center;">
-                  <p style="margin:0 0 4px;font-size:11px;color:#9ca3af;">AI评分</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#fcd34d;">{score}</p>
-                </td>
-              </tr>
-            </table>
-
-            <!-- Footer mark -->
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td align="center">
-                  <p style="margin:0;font-size:13px;font-weight:600;color:#3b82f6;letter-spacing:0.5px;">
-                    RGM.vanpower.live
-                  </p>
-                  <p style="margin:4px 0 0;font-size:11px;color:#6b7280;">
-                    智能跑团管理 · AI 教练分析
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
     </td>
   </tr>
 
@@ -503,7 +471,7 @@ def _get_report_html(period_name: str, display_name: str, report: dict) -> str:
 
 def send_report_email(to_email: str, user_name: "str | None", period_name: str, report: dict) -> bool:
     """
-    Sends a styled weekly/monthly report email.
+    Sends a styled weekly/monthly report email with a PNG share card attachment.
     period_name should be "周" or "月".
     """
     display_name = user_name or to_email.split("@")[0]
@@ -527,7 +495,23 @@ def send_report_email(to_email: str, user_name: "str | None", period_name: str, 
     )
     
     html_content = _get_report_html(period_name, display_name, report)
-    ok = _send_via_gmail(to_email, subject, plain_text, html_content)
+    
+    # Generate PNG share card
+    attachments = []
+    try:
+        from utils.share_card import generate_share_card
+        png_bytes = generate_share_card(
+            display_name=display_name,
+            period_name=period_name,
+            report=report,
+        )
+        card_filename = f"RGM_{period_name}报_{display_name}.png"
+        attachments.append((card_filename, png_bytes, "png"))
+        print(f"[email] Share card generated: {len(png_bytes)} bytes")
+    except Exception as e:
+        print(f"[email] Share card generation failed (sending email without it): {e}")
+    
+    ok = _send_via_gmail(to_email, subject, plain_text, html_content, attachments=attachments)
     if ok:
         print(f"[email] {period_name} report email sent to {to_email}")
     return ok
