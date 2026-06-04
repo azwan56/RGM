@@ -283,7 +283,7 @@ export default function ProfilePage() {
         <div className="space-y-8">
 
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
-        <RunnerPersona persona={persona!} loading={personaLoading || !persona} />
+        <RunnerPersona persona={persona!} loading={personaLoading || !persona} displayName={form.display_name} stravaName={stravaName} />
 
         {/* ── Goal Setting ─────────────────────────────────────────────────── */}
         <GoalSettingForm />

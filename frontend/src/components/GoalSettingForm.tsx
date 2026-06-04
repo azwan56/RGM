@@ -18,7 +18,7 @@ export default function GoalSettingForm() {
   // Goals
   const [period,   setPeriod]   = useState<"weekly" | "monthly">("monthly");
   const [distance, setDistance] = useState<number | "">(300);
-  const [pace,     setPace]     = useState("");
+
 
   // Per-month targets (1–12 index, stored 0-based)
   const [monthlyTargets, setMonthlyTargets] = useState<number[]>(defaultMonthlyTargets(300));
@@ -46,7 +46,7 @@ export default function GoalSettingForm() {
           setPeriod(goal.period || "monthly");
           const overall = goal.target_distance || 300;
           setDistance(overall);
-          setPace(goal.target_pace || "");
+
           if (goal.monthly_targets && Array.isArray(goal.monthly_targets)) {
             setMonthlyTargets(goal.monthly_targets);
           } else {
@@ -69,7 +69,7 @@ export default function GoalSettingForm() {
             setPeriod(data.period || "monthly");
             const overall = data.target_distance || 300;
             setDistance(overall);
-            setPace(data.target_pace || "");
+
             if (data.monthly_targets && Array.isArray(data.monthly_targets)) {
               setMonthlyTargets(data.monthly_targets);
             } else {
@@ -128,7 +128,7 @@ export default function GoalSettingForm() {
         period,
         target_distance:    Number(distance),
         monthly_targets:    monthlyTargets,
-        target_pace:        pace,
+
         max_heart_rate:     Number(maxHr),
         resting_heart_rate: Number(restHr),
       });
@@ -171,26 +171,16 @@ export default function GoalSettingForm() {
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">跑量目标</h3>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-zinc-400 text-xs font-medium mb-2">
-                {period === "weekly" ? "周目标 (km)" : "月默认目标 (km)"}
-              </label>
-              <input
-                type="number" required min="1"
-                value={distance}
-                onChange={e => handleOverallChange(e.target.value ? Number(e.target.value) : "")}
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#FC4C02]/60 transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-400 text-xs font-medium mb-2">目标配速 (/km)</label>
-              <input
-                type="text" value={pace} onChange={e => setPace(e.target.value)}
-                placeholder="5:30"
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#FC4C02]/60 transition-all"
-              />
-            </div>
+          <div>
+            <label className="block text-zinc-400 text-xs font-medium mb-2">
+              {period === "weekly" ? "周目标 (km)" : "月默认目标 (km)"}
+            </label>
+            <input
+              type="number" required min="1"
+              value={distance}
+              onChange={e => handleOverallChange(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#FC4C02]/60 transition-all"
+            />
           </div>
 
           {/* Per-month targets — only show for monthly period */}
