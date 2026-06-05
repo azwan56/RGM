@@ -213,9 +213,8 @@ async def _process_chat_message(frame, client: WSClient):
             await client.reply_stream(frame, sid, md, finish=True)
             return
 
-        # ── Stream reply start (loading state) ────────────────────────────
+        # ── Stream setup ────────────────────────────────────────────────────
         stream_id = generate_req_id("stream")
-        await client.reply_stream(frame, stream_id, "💨 容我先喝口水…", finish=False)
 
         # ── Build AI context ──────────────────────────────────────────────
         runner_name = user_data.get("display_name", "跑者") if user_data else "跑者"
@@ -328,11 +327,11 @@ async def _process_chat_message(frame, client: WSClient):
         prompt = (
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
-            f"请用你的'团宠'人设回复。严格要求：\n"
-            f"- 最多2句话！第一句给数据，第二句给调侃。就这样，不要多说\n"
-            f"- 总字数严格控制在60字以内（包括emoji和标点），超过会被截断\n"
-            f"- 语言风格：诙谐、接地气、毒舌但好玩\n"
-            f"- 用1-2个emoji\n"
+            f"请用你的'团宠'人设回复。要求：\n"
+            f"- 2-3句话，第一句给数据，后面加调侃/激将\n"
+            f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
+            f"- 善用跑圈黑话（配速、撞墙、LSD、间歇等），但让小白也能看懂\n"
+            f"- 用1-2个emoji增加群聊感\n"
             f"- 纯文本，不要用markdown格式如**加粗**\n"
             f"- 如果用户心情低落，收起嬉皮，认真关心"
         )
@@ -340,7 +339,7 @@ async def _process_chat_message(frame, client: WSClient):
         # ── Call Gemini ───────────────────────────────────────────────────
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=200, response_json=False
+            temperature=0.7, max_tokens=1024, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers
