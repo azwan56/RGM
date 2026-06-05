@@ -261,28 +261,33 @@ async def _process_chat_message(frame, client: WSClient):
                 goal_period = goal.get("period", "monthly")
                 target_dist = goal.get("target_distance", 0)
                 monthly_targets = goal.get("monthly_targets", [])
-                this_month_target = monthly_targets[current_month] if len(monthly_targets) > current_month else target_dist
+                this_month_target = monthly_targets[current_month] if len(monthly_targets) > current_month else 0
 
+                # Show primary plan
                 if goal_period == "weekly":
-                    # User set a WEEKLY plan
                     wk_actual = wk.get('total_distance_km', 0) if wk else 0
                     pct = round(wk_actual / target_dist * 100) if target_dist else 0
                     context_str += (
-                        f"- 用户设置的是【周计划】\n"
-                        f"- 周跑量目标: {target_dist}km\n"
+                        f"- 主要计划：【周计划】，周目标 {target_dist}km\n"
                         f"- 本周已跑: {wk_actual}km，完成度: {pct}%\n"
-                        f"- 该用户没有设月计划（不要编造月目标数字）\n"
                     )
                 else:
-                    # User set a MONTHLY plan
                     lb_actual = lb.get('total_distance_km', 0) if lb else 0
                     pct = round(lb_actual / this_month_target * 100) if this_month_target else 0
                     context_str += (
-                        f"- 用户设置的是【月计划】\n"
-                        f"- 本月跑量目标: {this_month_target}km\n"
+                        f"- 主要计划：【月计划】，本月目标 {this_month_target}km\n"
                         f"- 本月已跑: {lb_actual}km，完成度: {pct}%\n"
-                        f"- 该用户没有设周计划（不要编造周目标数字）\n"
                     )
+
+                # Also show the other plan if data exists
+                if this_month_target and goal_period == "weekly":
+                    lb_actual = lb.get('total_distance_km', 0) if lb else 0
+                    m_pct = round(lb_actual / this_month_target * 100) if this_month_target else 0
+                    context_str += f"- 月度目标也有设: 本月目标 {this_month_target}km，已跑 {lb_actual}km ({m_pct}%)\n"
+                elif target_dist and goal_period == "monthly":
+                    wk_actual = wk.get('total_distance_km', 0) if wk else 0
+                    w_pct = round(wk_actual / target_dist * 100) if target_dist else 0
+                    context_str += f"- 周目标也有设: 每周 {target_dist}km，本周已跑 {wk_actual}km ({w_pct}%)\n"
             else:
                 context_str += "- 该用户还没有设跑量目标\n"
 
@@ -324,19 +329,19 @@ async def _process_chat_message(frame, client: WSClient):
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
-            f"- 简短有力（群聊场景，不超过120字）\n"
+            f"- 必须简短！最多80字，绝对不能超过100字！群聊场景不需要长篇大论\n"
             f"- 语言风格：诙谐、接地气、像朋友聊天，可以适度调侃但不恶意\n"
             f"- 如果问到数据/排名，先给出数据，再加一句有梗的点评\n"
-            f"- 善用跑圈黑话（配速、撞墙、LSD、间歇、乳酸阈值等），但要让小白也能看懂\n"
+            f"- 善用跑圈黑话，但要让小白也能看懂\n"
             f"- 多用 emoji 增加群聊感\n"
-            f"- 不要用markdown标题格式，不要用JSON，纯文本+emoji即可\n"
+            f"- 不要用markdown标题格式，纯文本+emoji即可\n"
             f"- 如果用户明显心情低落或受伤，收起嬉皮，认真关心"
         )
 
         # ── Call Gemini ───────────────────────────────────────────────────
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=1024, response_json=False
+            temperature=0.7, max_tokens=300, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
 
