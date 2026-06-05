@@ -440,7 +440,10 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
 
 
 def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid: str, coach_tip: str):
-    """Send Bonnie's fun follow-up comment a few seconds after the coach notification."""
+    """Send Bonnie's fun follow-up comment a few seconds after the coach notification.
+    Uses the Bonnie bot's send_message API so it appears as Bonnie, not the webhook robot.
+    Falls back to webhook if the bot is not connected.
+    """
     import time, random
     delay = random.randint(5, 10)
     time.sleep(delay)
@@ -481,21 +484,44 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
         if not bonnie_comment or len(bonnie_comment.strip()) < 3:
             return
 
-        md = f"🐾 **Bonnie**：{bonnie_comment.strip()}"
+        comment_text = bonnie_comment.strip()
 
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {"content": md},
-        }
-        resp = requests.post(webhook_url, json=payload, timeout=10)
-        if resp.status_code == 200 and resp.json().get("errcode") == 0:
-            print(f"[wecom] Bonnie follow-up sent ({delay}s delay)")
-        else:
-            print(f"[wecom] Bonnie follow-up failed: {resp.status_code}")
+        # Try to send via Bonnie bot (appears as Bonnie with her avatar)
+        sent_via_bot = False
+        try:
+            from utils.wecom_bot import _bot_client
+            chatid = os.environ.get("WECOM_GROUP_CHATID", "").strip()
+            if _bot_client and _bot_client.is_connected and chatid:
+                import asyncio
+                from wecom_aibot_sdk.types.message import SendMarkdownMsgBody
+                body = SendMarkdownMsgBody(markdown={"content": comment_text})
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        _bot_client.send_message(chatid, body), loop
+                    ).result(timeout=10)
+                else:
+                    loop.run_until_complete(_bot_client.send_message(chatid, body))
+                sent_via_bot = True
+                print(f"[wecom] Bonnie follow-up sent via bot ({delay}s delay)")
+        except Exception as bot_err:
+            print(f"[wecom] Bonnie bot send failed, falling back to webhook: {bot_err}")
+
+        # Fallback: send via webhook
+        if not sent_via_bot:
+            md = f"🐾 **Bonnie**：{comment_text}"
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {"content": md},
+            }
+            resp = requests.post(webhook_url, json=payload, timeout=10)
+            if resp.status_code == 200 and resp.json().get("errcode") == 0:
+                print(f"[wecom] Bonnie follow-up sent via webhook ({delay}s delay)")
+            else:
+                print(f"[wecom] Bonnie follow-up failed: {resp.status_code}")
 
     except Exception as e:
         print(f"[wecom] Bonnie follow-up error: {e}")
-
 
 
 # ── Rest Day Reminder ─────────────────────────────────────────────────────────
