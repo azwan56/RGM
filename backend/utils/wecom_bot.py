@@ -354,21 +354,23 @@ def start_wecom_bot():
             client.on("message.text", on_text)
             print("[wecom_bot] Handler registered for 'message.text'")
 
-            # connect_async() blocks while connected, returns on disconnect
-            backoff = 10
-            while True:
-                try:
-                    print(f"[wecom_bot] Connecting via connect_async()...")
-                    await client.connect_async()
-                    # If we get here, connection was lost
-                    print("[wecom_bot] connect_async() returned (disconnected)")
-                    backoff = 10  # reset on clean disconnect
-                except Exception as e:
-                    print(f"[wecom_bot] Connection error: {e}")
+            # connect_async() establishes connection and returns immediately.
+            # SDK handles messages via internal tasks — we just keep the loop alive.
+            print("[wecom_bot] Connecting...")
+            await client.connect_async()
+            print("[wecom_bot] Connected! Keeping event loop alive for message handlers.")
 
-                print(f"[wecom_bot] Will reconnect in {backoff}s...")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60)
+            # Keep alive + reconnect monitor
+            while True:
+                await asyncio.sleep(10)
+                if not client.is_connected:
+                    print("[wecom_bot] Connection lost. Reconnecting in 10s...")
+                    await asyncio.sleep(10)
+                    try:
+                        await client.connect_async()
+                        print("[wecom_bot] Reconnected!")
+                    except Exception as e:
+                        print(f"[wecom_bot] Reconnect failed: {e}")
 
         try:
             loop.run_until_complete(_async_main())
