@@ -315,71 +315,62 @@ async def _process_chat_message(frame, client: WSClient):
 # ── Bot lifecycle ─────────────────────────────────────────────────────────────
 
 _bot_client = None
+_bot_task = None
 
 
-def start_wecom_bot():
-    """Start the WeCom bot in a dedicated background thread."""
-    import threading
-
+async def _bot_loop():
+    """Main bot loop — runs as a background asyncio task in FastAPI's event loop."""
+    global _bot_client
     bot_id = os.getenv("WECOM_BOT_ID", "").strip()
     secret = os.getenv("WECOM_BOT_SECRET", "").strip()
-    if not bot_id or not secret:
-        print("[wecom_bot] Skipped: WECOM_BOT_ID or WECOM_BOT_SECRET not set.")
-        return
 
-    def _run():
-        global _bot_client
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    print(f"[wecom_bot] Creating WSClient with bot_id={bot_id[:8]}...")
+    client = WSClient({
+        "bot_id": bot_id,
+        "secret": secret,
+    })
+    _bot_client = client
 
-        async def _async_main():
-            global _bot_client
-            print(f"[wecom_bot] Creating WSClient with bot_id={bot_id[:8]}...")
-            client = WSClient({
-                "bot_id": bot_id,
-                "secret": secret,
-            })
-            _bot_client = client
-
-            # Register message handler
-            async def on_text(frame):
-                print(f"[wecom_bot] >>> Message from={frame.body.get('from')}")
-                try:
-                    await _process_chat_message(frame, client)
-                except Exception as e:
-                    print(f"[wecom_bot] Error in handler: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-            client.on("message.text", on_text)
-            print("[wecom_bot] Handler registered for 'message.text'")
-
-            # connect_async() establishes connection and returns immediately.
-            # SDK handles messages via internal tasks — we just keep the loop alive.
-            print("[wecom_bot] Connecting...")
-            await client.connect_async()
-            print("[wecom_bot] Connected! Keeping event loop alive for message handlers.")
-
-            # Keep alive + reconnect monitor
-            while True:
-                await asyncio.sleep(10)
-                if not client.is_connected:
-                    print("[wecom_bot] Connection lost. Reconnecting in 10s...")
-                    await asyncio.sleep(10)
-                    try:
-                        await client.connect_async()
-                        print("[wecom_bot] Reconnected!")
-                    except Exception as e:
-                        print(f"[wecom_bot] Reconnect failed: {e}")
-
+    # Register message handler
+    async def on_text(frame):
+        print(f"[wecom_bot] >>> Message from={frame.body.get('from')}")
         try:
-            loop.run_until_complete(_async_main())
+            await _process_chat_message(frame, client)
         except Exception as e:
-            print(f"[wecom_bot] Bot thread crashed: {e}")
+            print(f"[wecom_bot] Error in handler: {e}")
             import traceback
             traceback.print_exc()
 
-    t = threading.Thread(target=_run, name="wecom-bot", daemon=True)
-    t.start()
-    print("[wecom_bot] Background thread launched.")
+    client.on("message.text", on_text)
+    print("[wecom_bot] Handler registered.")
+
+    # Initial connect
+    print("[wecom_bot] Connecting...")
+    await client.connect_async()
+    print("[wecom_bot] Connected! Monitoring connection health...")
+
+    # Health check loop
+    while True:
+        await asyncio.sleep(15)
+        if not client.is_connected:
+            print("[wecom_bot] Connection lost, waiting 15s before reconnect...")
+            await asyncio.sleep(15)
+            try:
+                await client.connect_async()
+                print("[wecom_bot] Reconnected!")
+            except Exception as e:
+                print(f"[wecom_bot] Reconnect failed: {e}")
+
+
+async def start_wecom_bot_async():
+    """Start the bot as a background task in the current event loop."""
+    global _bot_task
+    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
+    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
+    if not bot_id or not secret:
+        print("[wecom_bot] Skipped: credentials not set.")
+        return
+
+    _bot_task = asyncio.create_task(_bot_loop())
+    print("[wecom_bot] Background task created in FastAPI event loop.")
 

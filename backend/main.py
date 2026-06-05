@@ -57,7 +57,7 @@ except ImportError:
 
 @app.on_event("startup")
 def on_startup():
-    """Start the APScheduler background scheduler for daily auto-sync and the WeCom bot."""
+    """Start the APScheduler background scheduler."""
     try:
         from scheduler import start_scheduler
         start_scheduler()
@@ -65,10 +65,14 @@ def on_startup():
     except Exception as e:
         print(f"[startup] Scheduler failed to start: {e}")
 
+
+@app.on_event("startup")
+async def on_startup_async():
+    """Start the WeCom bot in FastAPI's event loop."""
     try:
-        from utils.wecom_bot import start_wecom_bot
-        start_wecom_bot()
-        print("[startup] WeCom interactive bot initialization checked")
+        from utils.wecom_bot import start_wecom_bot_async
+        await start_wecom_bot_async()
+        print("[startup] WeCom bot started")
     except Exception as e:
         print(f"[startup] WeCom bot failed to start: {e}")
 
