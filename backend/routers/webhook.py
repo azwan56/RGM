@@ -86,9 +86,17 @@ def _find_uid_by_strava_id(strava_athlete_id: int) -> Optional[str]:
 
 
 def _recalculate_leaderboards(uid: str, user_ref):
-    """Re-aggregates all activities for the current period and yearly leaderboards."""
+    """Re-aggregates all activities for the current month/week and yearly leaderboards.
+
+    Uses start_date_local range queries (consistent with sync.py) instead of
+    period_start exact match — the latter breaks after full-history syncs
+    because all historical activities share the same period_start value.
+    """
     try:
         from routers.sync import get_period_start, _update_yearly_leaderboard, pace_str
+        import calendar
+        from zoneinfo import ZoneInfo
+
         user_doc = user_ref.get()
         if not user_doc.exists: return
         user_data = user_doc.to_dict()
@@ -107,40 +115,87 @@ def _recalculate_leaderboards(uid: str, user_ref):
             goal_data = goal_snap.to_dict()
             period = goal_data.get("period", "monthly")
             target_dist = goal_data.get("target_distance", 0)
-            
-        period_start = get_period_start(period)
 
-        all_acts = (user_ref.collection("activities")
-                    .where("period_start", "==", period_start.isoformat())
-                    .stream())
-        
-        p_dist, p_time, p_hr_sum, p_hr_cnt, p_runs = 0.0, 0, 0, 0, 0
-        for adoc in all_acts:
+        # ── Monthly leaderboard (always based on current calendar month) ──
+        month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
+        month_acts = (user_ref.collection("activities")
+                      .where("start_date_local", ">=", month_start_str)
+                      .stream())
+
+        lb_dist, lb_time, lb_hr_sum, lb_hr_cnt, lb_runs, lb_elev = 0.0, 0, 0.0, 0, 0, 0.0
+        for adoc in month_acts:
             ad = adoc.to_dict()
-            p_dist += ad.get("distance_km", 0) * 1000
-            p_time += ad.get("moving_time", 0)
-            p_runs += 1
+            lb_runs += 1
+            lb_dist += ad.get("distance_km", 0) or 0
+            lb_time += ad.get("moving_time", 0) or 0
+            lb_elev += ad.get("total_elevation_gain", 0) or 0
             hr = ad.get("avg_heart_rate", 0) or 0
-            if hr:
-                p_hr_sum += hr
-                p_hr_cnt += 1
+            if hr > 0:
+                lb_hr_sum += hr
+                lb_hr_cnt += 1
 
-        km = p_dist / 1000
-        pct = round((km / target_dist) * 100) if target_dist > 0 else 0
+        lb_pace = pace_str(lb_dist * 1000, lb_time)
+        lb_avg_hr = round(lb_hr_sum / lb_hr_cnt) if lb_hr_cnt > 0 else 0
+
+        # Estimate monthly goal for weekly-plan users
+        now = datetime.now(ZoneInfo("Asia/Singapore"))
+        days_in_month = calendar.monthrange(now.year, now.month)[1]
+        monthly_target_dist = target_dist
+        if period == "weekly" and target_dist > 0:
+            monthly_target_dist = target_dist * (days_in_month / 7.0)
+        pct = round((lb_dist / monthly_target_dist) * 100) if monthly_target_dist > 0 else 0
 
         db.collection("leaderboard").document(uid).set({
             "uid": uid,
             "display_name": display_name,
             "email": user_data.get("email", ""),
-            "total_distance_km": round(km, 2),
-            "avg_pace": pace_str(p_dist, p_time),
-            "avg_heart_rate": round(p_hr_sum / p_hr_cnt) if p_hr_cnt else 0,
+            "total_distance_km": round(lb_dist, 2),
+            "total_elevation_gain": round(lb_elev, 1),
+            "avg_pace": lb_pace,
+            "avg_heart_rate": lb_avg_hr,
             "goal_completion_percentage": min(pct, 100),
-            "run_count": p_runs,
-            "period": period,
-            "period_start": period_start.isoformat(),
+            "run_count": lb_runs,
+            "period": "monthly",
+            "period_start": get_period_start("monthly").isoformat(),
             "last_sync": datetime.now().isoformat(),
-        }, merge=True)
+        })  # Full set (not merge) to prevent stale data
+
+        # ── Weekly leaderboard ──
+        week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
+        week_acts = (user_ref.collection("activities")
+                     .where("start_date_local", ">=", week_start_str)
+                     .stream())
+
+        wk_dist, wk_time, wk_hr_sum, wk_hr_cnt, wk_runs, wk_elev = 0.0, 0, 0.0, 0, 0, 0.0
+        for adoc in week_acts:
+            ad = adoc.to_dict()
+            wk_runs += 1
+            wk_dist += ad.get("distance_km", 0) or 0
+            wk_time += ad.get("moving_time", 0) or 0
+            wk_elev += ad.get("total_elevation_gain", 0) or 0
+            hr = ad.get("avg_heart_rate", 0) or 0
+            if hr > 0:
+                wk_hr_sum += hr
+                wk_hr_cnt += 1
+
+        wk_pace = pace_str(wk_dist * 1000, wk_time)
+        wk_avg_hr = round(wk_hr_sum / wk_hr_cnt) if wk_hr_cnt > 0 else 0
+        wk_goal_pct = round((wk_dist / target_dist) * 100) if period == "weekly" and target_dist > 0 else 0
+
+        db.collection("leaderboard_weekly").document(uid).set({
+            "uid": uid,
+            "display_name": display_name,
+            "email": user_data.get("email", ""),
+            "total_distance_km": round(wk_dist, 2),
+            "total_elevation_gain": round(wk_elev, 1),
+            "avg_pace": wk_pace,
+            "avg_heart_rate": wk_avg_hr,
+            "goal_completion_percentage": min(wk_goal_pct, 100),
+            "run_count": wk_runs,
+            "period": "weekly",
+            "period_start": get_period_start("weekly").isoformat(),
+            "last_sync": datetime.now().isoformat(),
+        })  # Full set (not merge)
 
         _update_yearly_leaderboard(uid, user_data, display_name)
     except Exception as e:

@@ -171,7 +171,7 @@ def run_daily_sync() -> dict:
                 "period": period,
                 "period_start": period_start.isoformat(),
                 "last_sync": datetime.now().isoformat(),
-            }, merge=True)
+            })  # Full set (not merge) — prevents stale data from persisting
 
             _update_yearly_leaderboard(uid, user_data, display_name)
             results["synced"] += 1
