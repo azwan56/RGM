@@ -166,13 +166,16 @@ async def _process_chat_message(frame, client: WSClient):
         if content.startswith("绑定 ") or content.startswith("绑定"):
             bind_code = content.replace("绑定", "").strip()
             if not bind_code:
-                await client.reply_text(frame, "请输入你的 RGM 注册邮箱来绑定，格式：\n**绑定 your@email.com**")
+                sid = generate_req_id("stream")
+                await client.reply_stream(frame, sid, "请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**", finish=True)
                 return
             name = _bind_user(wecom_user_id, bind_code)
             if name:
-                await client.reply_text(frame, f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了。")
+                sid = generate_req_id("stream")
+                await client.reply_stream(frame, sid, f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉", finish=True)
             else:
-                await client.reply_text(frame, "❌ 绑定失败，未找到匹配的用户。请确认邮箱是否与 RGM 注册邮箱一致。")
+                sid = generate_req_id("stream")
+                await client.reply_stream(frame, sid, "❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？", finish=True)
             return
 
         # ── Identify user ─────────────────────────────────────────────────
@@ -183,13 +186,15 @@ async def _process_chat_message(frame, client: WSClient):
         if intent == "leaderboard_monthly":
             entries = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
             md = _format_leaderboard_markdown(entries, "📊 本月跑量排行榜")
-            await client.reply_text(frame, md)
+            sid = generate_req_id("stream")
+            await client.reply_stream(frame, sid, md, finish=True)
             return
 
         if intent == "leaderboard_weekly":
             entries = await asyncio.to_thread(_fetch_weekly_leaderboard, 10)
             md = _format_leaderboard_markdown(entries, "📊 本周跑量排行榜")
-            await client.reply_text(frame, md)
+            sid = generate_req_id("stream")
+            await client.reply_stream(frame, sid, md, finish=True)
             return
 
         # ── Stream reply start (loading state) ────────────────────────────
@@ -292,7 +297,8 @@ async def _process_chat_message(frame, client: WSClient):
     except Exception as e:
         logger.error(f"[wecom_bot] Error processing message: {e}")
         try:
-            await client.reply_text(frame, "💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！")
+            sid = generate_req_id("stream")
+            await client.reply_stream(frame, sid, "💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！", finish=True)
         except Exception:
             pass
 
