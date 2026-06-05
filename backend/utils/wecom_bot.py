@@ -159,6 +159,10 @@ async def _process_chat_message(frame, client: WSClient):
         content = frame.body.get("text", {}).get("content", "").strip()
         wecom_user_id = frame.body.get("sender", "")
 
+        # Strip @mention prefix (WeCom group messages include "@BotName " at the start)
+        import re
+        content = re.sub(r'^@\S+\s*', '', content).strip()
+
         if not content:
             return
 
