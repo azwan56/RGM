@@ -352,12 +352,15 @@ def start_wecom_bot():
         client.on("message.text", on_text)
         print("[wecom_bot] Handler registered for 'message.text'")
 
-        # Connect with auto-reconnect
+        # Connect with auto-reconnect (exponential backoff)
+        import time as _time
+        backoff = 5
         while True:
             try:
-                print("[wecom_bot] Connecting to WeCom WebSocket...")
+                print(f"[wecom_bot] Connecting to WeCom WebSocket... (backoff={backoff}s)")
                 loop.run_until_complete(client.connect_async())
                 print("[wecom_bot] connect_async() returned (disconnected)")
+                backoff = 5  # Reset on successful connection
             except KeyboardInterrupt:
                 print("[wecom_bot] Interrupted.")
                 break
@@ -366,9 +369,9 @@ def start_wecom_bot():
                 import traceback
                 traceback.print_exc()
 
-            print("[wecom_bot] Reconnecting in 5s...")
-            import time
-            time.sleep(5)
+            print(f"[wecom_bot] Reconnecting in {backoff}s...")
+            _time.sleep(backoff)
+            backoff = min(backoff * 2, 60)  # Max 60s backoff
 
     t = threading.Thread(target=_run, name="wecom-bot", daemon=True)
     t.start()
