@@ -328,47 +328,26 @@ async def _process_chat_message(frame, client: WSClient):
         prompt = (
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
-            f"请用你的'团宠'人设回复。要求：\n"
-            f"- 控制在2-4句话（约100-150字），既要有数据也要有梗\n"
-            f"- 语言风格：诙谐、接地气、像朋友聊天，可以适度调侃但不恶意\n"
-            f"- 如果问到数据/排名，先给出关键数据，再加一句有梗的点评\n"
-            f"- 善用跑圈黑话，但要让小白也能看懂\n"
-            f"- 多用 emoji 增加群聊感\n"
-            f"- 不要用markdown标题格式，纯文本+emoji即可\n"
-            f"- 如果用户明显心情低落或受伤，收起嬉皮，认真关心"
+            f"请用你的'团宠'人设回复。严格要求：\n"
+            f"- 最多2句话！第一句给数据，第二句给调侃。就这样，不要多说\n"
+            f"- 总字数严格控制在60字以内（包括emoji和标点），超过会被截断\n"
+            f"- 语言风格：诙谐、接地气、毒舌但好玩\n"
+            f"- 用1-2个emoji\n"
+            f"- 纯文本，不要用markdown格式如**加粗**\n"
+            f"- 如果用户心情低落，收起嬉皮，认真关心"
         )
 
         # ── Call Gemini ───────────────────────────────────────────────────
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=500, response_json=False
+            temperature=0.7, max_tokens=200, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
+        # Strip any markdown bold markers
+        reply_text = reply_text.replace("**", "")
 
-        # ── Stream reply (chunked to avoid WeCom per-message limits) ─────
-        # WeCom stream content accumulates: each chunk sends the FULL text so far.
-        # We split into chunks and send progressively.
-        chunk_size = 500  # bytes per chunk (~160 Chinese chars)
-        encoded = reply_text.encode("utf-8")
-        if len(encoded) <= chunk_size:
-            # Short reply — send in one shot
-            await client.reply_stream(frame, stream_id, reply_text, finish=True)
-        else:
-            # Long reply — send in progressive chunks
-            sent = ""
-            chars = list(reply_text)
-            chunk_chars = []
-            for ch in chars:
-                chunk_chars.append(ch)
-                current = "".join(chunk_chars)
-                if len(current.encode("utf-8")) >= chunk_size:
-                    sent += current
-                    await client.reply_stream(frame, stream_id, sent, finish=False)
-                    chunk_chars = []
-                    await asyncio.sleep(0.3)  # Small delay between chunks
-            # Send remaining with finish=True
-            sent += "".join(chunk_chars)
-            await client.reply_stream(frame, stream_id, sent, finish=True)
+        # ── Stream reply finish ───────────────────────────────────────────
+        await client.reply_stream(frame, stream_id, reply_text, finish=True)
 
     except Exception as e:
         logger.error(f"[wecom_bot] Error processing message: {e}")
