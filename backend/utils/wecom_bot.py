@@ -157,17 +157,16 @@ async def _process_chat_message(frame, client: WSClient):
     """Core logic to process incoming text and generate a response."""
     try:
         content = frame.body.get("text", {}).get("content", "").strip()
-        wecom_user_id = frame.body.get("sender", "")
+        wecom_user_id = frame.body.get("from", {}).get("userid", "")
 
-        # Debug: log full frame structure to find sender ID location
-        print(f"[wecom_bot] Frame body keys: {list(frame.body.keys())}")
-        print(f"[wecom_bot] Frame body: {frame.body}")
-        if hasattr(frame, 'headers'):
-            print(f"[wecom_bot] Frame headers: {frame.headers}")
+        print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}'")
 
-        # Strip @mention prefix (WeCom group messages include "@BotName " at the start)
+        # Strip bot @mention prefix.
+        # WeCom sends content like "@Bonnie 你好" or "aBonnie 你好" (@ sometimes stripped).
+        # Remove any leading mention of the bot name.
         import re
-        content = re.sub(r'^@\S+\s*', '', content).strip()
+        bot_name = "Bonnie"  # Must match the bot's display name in WeCom
+        content = re.sub(rf'^[@a]?{re.escape(bot_name)}\s*', '', content, flags=re.IGNORECASE).strip()
 
         if not content:
             return
