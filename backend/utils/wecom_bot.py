@@ -320,7 +320,6 @@ _bot_client = None
 def start_wecom_bot():
     """Start the WeCom bot in a dedicated background thread."""
     import threading
-    import time as _time
 
     bot_id = os.getenv("WECOM_BOT_ID", "").strip()
     secret = os.getenv("WECOM_BOT_SECRET", "").strip()
@@ -344,7 +343,7 @@ def start_wecom_bot():
 
             # Register message handler
             async def on_text(frame):
-                print(f"[wecom_bot] >>> Received message! from={frame.body.get('from')}")
+                print(f"[wecom_bot] >>> Message from={frame.body.get('from')}")
                 try:
                     await _process_chat_message(frame, client)
                 except Exception as e:
@@ -355,17 +354,21 @@ def start_wecom_bot():
             client.on("message.text", on_text)
             print("[wecom_bot] Handler registered for 'message.text'")
 
-            # Use connect() which calls create_task internally — needs a running loop
-            print("[wecom_bot] Calling connect()...")
-            client.connect()
-            print("[wecom_bot] connect() returned, connection task scheduled.")
-
-            # Keep the async loop alive forever (handlers run as tasks)
+            # connect_async() blocks while connected, returns on disconnect
+            backoff = 10
             while True:
-                await asyncio.sleep(30)
-                if not client.is_connected:
-                    print("[wecom_bot] Connection lost, reconnecting...")
-                    client.connect()
+                try:
+                    print(f"[wecom_bot] Connecting via connect_async()...")
+                    await client.connect_async()
+                    # If we get here, connection was lost
+                    print("[wecom_bot] connect_async() returned (disconnected)")
+                    backoff = 10  # reset on clean disconnect
+                except Exception as e:
+                    print(f"[wecom_bot] Connection error: {e}")
+
+                print(f"[wecom_bot] Will reconnect in {backoff}s...")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
 
         try:
             loop.run_until_complete(_async_main())
