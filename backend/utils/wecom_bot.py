@@ -329,9 +329,9 @@ async def _process_chat_message(frame, client: WSClient):
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
-            f"- 必须简短！最多80字，绝对不能超过100字！群聊场景不需要长篇大论\n"
+            f"- 控制在2-4句话（约100-150字），既要有数据也要有梗\n"
             f"- 语言风格：诙谐、接地气、像朋友聊天，可以适度调侃但不恶意\n"
-            f"- 如果问到数据/排名，先给出数据，再加一句有梗的点评\n"
+            f"- 如果问到数据/排名，先给出关键数据，再加一句有梗的点评\n"
             f"- 善用跑圈黑话，但要让小白也能看懂\n"
             f"- 多用 emoji 增加群聊感\n"
             f"- 不要用markdown标题格式，纯文本+emoji即可\n"
@@ -341,7 +341,7 @@ async def _process_chat_message(frame, client: WSClient):
         # ── Call Gemini ───────────────────────────────────────────────────
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=300, response_json=False
+            temperature=0.7, max_tokens=500, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
 
