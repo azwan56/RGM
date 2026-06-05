@@ -345,8 +345,30 @@ async def _process_chat_message(frame, client: WSClient):
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
 
-        # ── Stream reply finish ───────────────────────────────────────────
-        await client.reply_stream(frame, stream_id, reply_text, finish=True)
+        # ── Stream reply (chunked to avoid WeCom per-message limits) ─────
+        # WeCom stream content accumulates: each chunk sends the FULL text so far.
+        # We split into chunks and send progressively.
+        chunk_size = 500  # bytes per chunk (~160 Chinese chars)
+        encoded = reply_text.encode("utf-8")
+        if len(encoded) <= chunk_size:
+            # Short reply — send in one shot
+            await client.reply_stream(frame, stream_id, reply_text, finish=True)
+        else:
+            # Long reply — send in progressive chunks
+            sent = ""
+            chars = list(reply_text)
+            chunk_chars = []
+            for ch in chars:
+                chunk_chars.append(ch)
+                current = "".join(chunk_chars)
+                if len(current.encode("utf-8")) >= chunk_size:
+                    sent += current
+                    await client.reply_stream(frame, stream_id, sent, finish=False)
+                    chunk_chars = []
+                    await asyncio.sleep(0.3)  # Small delay between chunks
+            # Send remaining with finish=True
+            sent += "".join(chunk_chars)
+            await client.reply_stream(frame, stream_id, sent, finish=True)
 
     except Exception as e:
         logger.error(f"[wecom_bot] Error processing message: {e}")
