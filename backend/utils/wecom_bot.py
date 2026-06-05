@@ -320,10 +320,11 @@ async def _bot_main_loop():
         "secret": secret,
     })
 
-    @_client.on("message.text")
     async def on_text(frame):
         logger.info(f"[wecom_bot] Received text message from {frame.body.get('sender')}")
         asyncio.create_task(_process_chat_message(frame, _client))
+
+    _client.on("message.text", on_text)
 
     # Connect and keep alive with auto-reconnect
     while True:
