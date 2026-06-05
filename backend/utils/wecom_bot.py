@@ -315,66 +315,62 @@ async def _process_chat_message(frame, client: WSClient):
 
 # ── Bot lifecycle ─────────────────────────────────────────────────────────────
 
-async def _bot_main_loop():
-    global _client
-    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
-    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
-
-    if not bot_id or not secret:
-        logger.info("[wecom_bot] WECOM_BOT_ID or WECOM_BOT_SECRET not set. Bot is disabled.")
-        return
-
-    logger.info(f"[wecom_bot] Initializing bot {bot_id}...")
-    _client = WSClient({
-        "bot_id": bot_id,
-        "secret": secret,
-    })
-
-    async def on_text(frame):
-        logger.info(f"[wecom_bot] Received text message from {frame.body.get('sender')}")
-        asyncio.create_task(_process_chat_message(frame, _client))
-
-    _client.on("message.text", on_text)
-
-    # Connect and keep alive with auto-reconnect
-    while True:
-        try:
-            logger.info("[wecom_bot] Connecting to WeCom WebSocket...")
-            await _client.connect_async()
-
-            while _client.is_connected:
-                await asyncio.sleep(5)
-
-        except asyncio.CancelledError:
-            logger.info("[wecom_bot] Bot task cancelled.")
-            break
-        except Exception as e:
-            logger.error(f"[wecom_bot] Connection error: {e}")
-            await asyncio.sleep(5)
+_bot_client = None
 
 
 def start_wecom_bot():
-    """Start the WeCom bot in a dedicated background thread with its own event loop."""
+    """Start the WeCom bot in a dedicated background thread."""
     import threading
 
     bot_id = os.getenv("WECOM_BOT_ID", "").strip()
     secret = os.getenv("WECOM_BOT_SECRET", "").strip()
     if not bot_id or not secret:
-        logger.info("[wecom_bot] Skipped starting bot: credentials missing.")
+        print("[wecom_bot] Skipped: WECOM_BOT_ID or WECOM_BOT_SECRET not set.")
         return
 
-    def _run_bot_thread():
-        """Runs the bot's async loop in a separate thread."""
+    def _run():
+        global _bot_client
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_bot_main_loop())
-        except Exception as e:
-            logger.error(f"[wecom_bot] Bot thread crashed: {e}")
-        finally:
-            loop.close()
 
-    t = threading.Thread(target=_run_bot_thread, name="wecom-bot", daemon=True)
+        print(f"[wecom_bot] Creating WSClient with bot_id={bot_id[:8]}...")
+        client = WSClient({
+            "bot_id": bot_id,
+            "secret": secret,
+        })
+        _bot_client = client
+
+        # Register message handler
+        async def on_text(frame):
+            print(f"[wecom_bot] >>> Received message! body={frame.body}")
+            try:
+                await _process_chat_message(frame, client)
+            except Exception as e:
+                print(f"[wecom_bot] Error in message handler: {e}")
+                import traceback
+                traceback.print_exc()
+
+        client.on("message.text", on_text)
+        print("[wecom_bot] Handler registered for 'message.text'")
+
+        # Connect with auto-reconnect
+        while True:
+            try:
+                print("[wecom_bot] Connecting to WeCom WebSocket...")
+                loop.run_until_complete(client.connect_async())
+                print("[wecom_bot] connect_async() returned (disconnected)")
+            except KeyboardInterrupt:
+                print("[wecom_bot] Interrupted.")
+                break
+            except Exception as e:
+                print(f"[wecom_bot] Connection error: {e}")
+                import traceback
+                traceback.print_exc()
+
+            print("[wecom_bot] Reconnecting in 5s...")
+            import time
+            time.sleep(5)
+
+    t = threading.Thread(target=_run, name="wecom-bot", daemon=True)
     t.start()
-    logger.info("[wecom_bot] Background thread started.")
-
+    print("[wecom_bot] Background thread launched.")
