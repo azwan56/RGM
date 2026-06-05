@@ -258,23 +258,33 @@ async def _process_chat_message(frame, client: WSClient):
             if goal:
                 from datetime import datetime
                 current_month = datetime.now().month - 1  # 0-based index
-                period = goal.get("period", "monthly")
+                goal_period = goal.get("period", "monthly")
                 target_dist = goal.get("target_distance", 0)
                 monthly_targets = goal.get("monthly_targets", [])
                 this_month_target = monthly_targets[current_month] if len(monthly_targets) > current_month else target_dist
 
-                if period == "weekly":
-                    context_str += f"- 周跑量目标: {target_dist}km\n"
-                    # Calculate weekly progress
+                if goal_period == "weekly":
+                    # User set a WEEKLY plan
                     wk_actual = wk.get('total_distance_km', 0) if wk else 0
                     pct = round(wk_actual / target_dist * 100) if target_dist else 0
-                    context_str += f"- 周目标完成度: {pct}% ({wk_actual}/{target_dist}km)\n"
+                    context_str += (
+                        f"- 用户设置的是【周计划】\n"
+                        f"- 周跑量目标: {target_dist}km\n"
+                        f"- 本周已跑: {wk_actual}km，完成度: {pct}%\n"
+                        f"- 该用户没有设月计划（不要编造月目标数字）\n"
+                    )
                 else:
-                    context_str += f"- 本月跑量目标: {this_month_target}km\n"
-                    # Calculate monthly progress
+                    # User set a MONTHLY plan
                     lb_actual = lb.get('total_distance_km', 0) if lb else 0
                     pct = round(lb_actual / this_month_target * 100) if this_month_target else 0
-                    context_str += f"- 月目标完成度: {pct}% ({lb_actual}/{this_month_target}km)\n"
+                    context_str += (
+                        f"- 用户设置的是【月计划】\n"
+                        f"- 本月跑量目标: {this_month_target}km\n"
+                        f"- 本月已跑: {lb_actual}km，完成度: {pct}%\n"
+                        f"- 该用户没有设周计划（不要编造周目标数字）\n"
+                    )
+            else:
+                context_str += "- 该用户还没有设跑量目标\n"
 
             # Recent activities
             acts = await asyncio.to_thread(_fetch_recent_activities, uid, 5)
