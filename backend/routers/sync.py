@@ -12,6 +12,24 @@ from zoneinfo import ZoneInfo
 # Default user timezone — all current users are in UTC+8
 _DEFAULT_TZ = "Asia/Singapore"
 
+# Activity types considered cross-training (saved to Firestore but excluded from run leaderboard)
+CROSS_TRAINING_TYPES = {
+    "WeightTraining", "Yoga", "Crossfit", "Workout",
+    "HighIntensityIntervalTraining", "Swim",
+}
+# All activity types we sync from Strava
+SYNCABLE_TYPES = {"Run"} | CROSS_TRAINING_TYPES
+
+# Human-readable Chinese labels for cross-training types
+CROSS_TRAINING_LABELS = {
+    "WeightTraining": "力量训练",
+    "Yoga": "瑜伽",
+    "Crossfit": "CrossFit",
+    "Workout": "综合训练",
+    "HighIntensityIntervalTraining": "HIIT",
+    "Swim": "游泳",
+}
+
 router = APIRouter()
 
 
@@ -60,6 +78,8 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
     dist = act.get("distance", 0)
     t    = act.get("moving_time", 0)
     avg_hr = act.get("average_heartrate") or 0
+    strava_type = act.get("type", "Run")
+    is_run = (strava_type == "Run")
     return {
         "activity_id":          act["id"],
         "name":                 act.get("name", "Run"),
@@ -68,7 +88,7 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
         "moving_time":          t,
         "elapsed_time":         act.get("elapsed_time", t),
         "duration_str":         format_duration(t),
-        "avg_pace":             pace_str(dist, t),
+        "avg_pace":             pace_str(dist, t) if is_run else "—",
         "avg_speed_kmh":        round(act.get("average_speed", 0) * 3.6, 1),
         "max_speed_kmh":        round(act.get("max_speed", 0) * 3.6, 1),
         "avg_heart_rate":       round(avg_hr) if avg_hr else 0,
@@ -80,7 +100,9 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
         "kudos_count":          act.get("kudos_count", 0),
         "summary_polyline":     act.get("map", {}).get("summary_polyline", ""),
         "start_latlng":         act.get("start_latlng", []),    # [lat, lng] from Strava
-        "sport_type":           act.get("sport_type", "Run"),  # "Run" | "TrailRun" | etc.
+        "sport_type":           act.get("sport_type", strava_type),  # "Run" | "TrailRun" | etc.
+        "strava_type":          strava_type,                    # Original Strava type
+        "activity_type":        "run" if is_run else "cross_training",
         "timezone":             act.get("timezone", ""),       # e.g. "(GMT+08:00) Asia/Singapore"
         "utc_offset":           act.get("utc_offset", 0),      # seconds, e.g. 28800 = UTC+8
         "period":               period,
@@ -163,7 +185,17 @@ def sync_user_data(req: SyncRequest):
     batch          = db.batch()
 
     for act in activities:
-        if act.get("type") != "Run":
+        act_type = act.get("type", "")
+        if act_type not in SYNCABLE_TYPES:
+            continue
+        is_run = (act_type == "Run")
+
+        # Save all syncable activities to Firestore
+        act_ref = user_ref.collection("activities").document(str(act["id"]))
+        batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
+
+        # Only count runs for leaderboard stats
+        if not is_run:
             continue
         run_count += 1
         dist   = act.get("distance", 0)
@@ -174,8 +206,6 @@ def sync_user_data(req: SyncRequest):
         if act.get("has_heartrate") and avg_hr:
             heart_rate_sum += avg_hr
             hr_count       += 1
-        act_ref = user_ref.collection("activities").document(str(act["id"]))
-        batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
 
     batch.commit()
 
@@ -210,6 +240,9 @@ def sync_user_data(req: SyncRequest):
     lb_elev    = 0.0
     for a in month_acts:
         d = a.to_dict()
+        # Only count runs for leaderboard (skip cross-training)
+        if d.get("activity_type", "run") != "run":
+            continue
         lb_runs    += 1
         lb_dist    += d.get("distance_km", 0) or 0
         lb_time    += d.get("moving_time", 0) or 0
@@ -262,6 +295,9 @@ def sync_user_data(req: SyncRequest):
     wk_elev = 0.0
     for a in week_acts:
         d = a.to_dict()
+        # Only count runs for leaderboard (skip cross-training)
+        if d.get("activity_type", "run") != "run":
+            continue
         wk_runs += 1
         wk_dist += d.get("distance_km", 0) or 0
         wk_time += d.get("moving_time", 0) or 0
@@ -349,7 +385,7 @@ def _run_full_sync_bg(uid: str, since_date: str, access_token: str, period: str,
             batch_count = 0
 
             for act in page_acts:
-                if act.get("type") != "Run":
+                if act.get("type", "") not in SYNCABLE_TYPES:
                     continue
                 act_ref = user_ref.collection("activities").document(str(act["id"]))
                 batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
@@ -607,6 +643,9 @@ def _update_yearly_leaderboard(uid: str, user_data: dict, display_name: str):
 
         for doc in acts:
             a = doc.to_dict()
+            # Only count runs for leaderboard (skip cross-training)
+            if a.get("activity_type", "run") != "run":
+                continue
             d = a.get("distance_km", 0) * 1000   # back to metres
             t = a.get("moving_time", 0)
             total_dist  += d
@@ -677,6 +716,9 @@ def get_goal_history(uid: str):
     monthly: dict = defaultdict(lambda: {"km": 0.0, "runs": 0, "moving_time": 0})
     for doc in acts:
         a  = doc.to_dict()
+        # Only count runs for goal history (skip cross-training)
+        if a.get("activity_type", "run") != "run":
+            continue
         mk = a.get("start_date_local", "")[:7]
         monthly[mk]["km"]          += a.get("distance_km", 0)
         monthly[mk]["runs"]        += 1

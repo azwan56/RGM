@@ -125,6 +125,9 @@ def _recalculate_leaderboards(uid: str, user_ref):
         lb_dist, lb_time, lb_hr_sum, lb_hr_cnt, lb_runs, lb_elev = 0.0, 0, 0.0, 0, 0, 0.0
         for adoc in month_acts:
             ad = adoc.to_dict()
+            # Only count runs for leaderboard (skip cross-training)
+            if ad.get("activity_type", "run") != "run":
+                continue
             lb_runs += 1
             lb_dist += ad.get("distance_km", 0) or 0
             lb_time += ad.get("moving_time", 0) or 0
@@ -169,6 +172,9 @@ def _recalculate_leaderboards(uid: str, user_ref):
         wk_dist, wk_time, wk_hr_sum, wk_hr_cnt, wk_runs, wk_elev = 0.0, 0, 0.0, 0, 0, 0.0
         for adoc in week_acts:
             ad = adoc.to_dict()
+            # Only count runs for leaderboard (skip cross-training)
+            if ad.get("activity_type", "run") != "run":
+                continue
             wk_runs += 1
             wk_dist += ad.get("distance_km", 0) or 0
             wk_time += ad.get("moving_time", 0) or 0
@@ -312,9 +318,12 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             return
 
         act = act_resp.json()
-        if act.get("type") != "Run":
-            print(f"[webhook] Skipping non-run activity {activity_id} (type={act.get('type')})")
+        act_type = act.get("type", "")
+        from routers.sync import SYNCABLE_TYPES
+        if act_type not in SYNCABLE_TYPES:
+            print(f"[webhook] Skipping unsupported activity type {act_type} for {activity_id}")
             return
+        is_run = (act_type == "Run")
             
         # Ensure compliance by strictly dropping private visibility runs
         if act.get("visibility") == "private":
@@ -323,7 +332,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             return
 
         # Save activity using the same format as sync.py
-        from routers.sync import _build_act_doc, get_period_start, _update_yearly_leaderboard
+        from routers.sync import _build_act_doc, get_period_start, _update_yearly_leaderboard, CROSS_TRAINING_LABELS
 
         # Determine period
         goal_snap = user_ref.collection("goals").document("current").get()
@@ -336,56 +345,60 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         act_ref = user_ref.collection("activities").document(str(activity_id))
         act_ref.set(act_doc, merge=True)
 
-        print(f"[webhook] Synced activity {activity_id} for uid={uid} "
-              f"({act_doc['distance_km']}km, {act_doc['avg_pace']}/km)")
+        ct_label = CROSS_TRAINING_LABELS.get(act_type, act_type)
+        if is_run:
+            print(f"[webhook] Synced run {activity_id} for uid={uid} "
+                  f"({act_doc['distance_km']}km, {act_doc['avg_pace']}/km)")
+        else:
+            print(f"[webhook] Synced cross-training {activity_id} for uid={uid} "
+                  f"(type={ct_label}, {act_doc['duration_str']})")
 
-        _recalculate_leaderboards(uid, user_ref)
+        # Only recalculate run leaderboards for run activities
+        if is_run:
+            _recalculate_leaderboards(uid, user_ref)
 
-        # ── Fetch & cache stream stats (per-km splits, HR zones, etc.) ──────
-        # This costs 1 extra Strava API call but gives the AI coach much richer
-        # data for training analysis (pace variability, HR drift, cadence, etc.)
+        # ── Fetch & cache stream stats (runs only — cross-training has no pace/cadence data) ──
         stream_stats = {}
-        try:
-            from utils.strava_rate_limiter import strava_request
-            from utils.stream_analyzer import analyze_streams
+        if is_run:
+            try:
+                from utils.strava_rate_limiter import strava_request
+                from utils.stream_analyzer import analyze_streams
 
-            stream_resp = strava_request(
-                "GET",
-                f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
-                params={
-                    "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
-                    "key_by_type": "true",
-                },
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=15,
-            )
-            if stream_resp.ok:
-                raw = stream_resp.json()
-                max_hr = user_data.get("max_heart_rate", 190)
-                rest_hr = user_data.get("resting_heart_rate", 60)
-                stream_stats = analyze_streams(
-                    distances=raw.get("distance", {}).get("data", []),
-                    velocities=raw.get("velocity_smooth", {}).get("data", []),
-                    heartrates=raw.get("heartrate", {}).get("data", []),
-                    cadences=raw.get("cadence", {}).get("data", []),
-                    altitudes=raw.get("altitude", {}).get("data", []),
-                    max_hr=max_hr,
-                    rest_hr=rest_hr,
+                stream_resp = strava_request(
+                    "GET",
+                    f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
+                    params={
+                        "keys": "distance,velocity_smooth,heartrate,cadence,altitude",
+                        "key_by_type": "true",
+                    },
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=15,
                 )
-                # Cache stream stats to the activity doc (avoid re-fetching from Strava)
-                if stream_stats:
-                    act_ref.set({"stream_stats": stream_stats}, merge=True)
-                    print(f"[webhook] Stream stats cached for {activity_id} "
-                          f"({len(stream_stats.get('pace_splits', []))} km splits)")
-            else:
-                print(f"[webhook] Streams fetch returned {stream_resp.status_code} — skipping")
-        except Exception as _stream_err:
-            print(f"[webhook] Stream analysis failed (non-critical): {_stream_err}")
+                if stream_resp.ok:
+                    raw = stream_resp.json()
+                    max_hr = user_data.get("max_heart_rate", 190)
+                    rest_hr = user_data.get("resting_heart_rate", 60)
+                    stream_stats = analyze_streams(
+                        distances=raw.get("distance", {}).get("data", []),
+                        velocities=raw.get("velocity_smooth", {}).get("data", []),
+                        heartrates=raw.get("heartrate", {}).get("data", []),
+                        cadences=raw.get("cadence", {}).get("data", []),
+                        altitudes=raw.get("altitude", {}).get("data", []),
+                        max_hr=max_hr,
+                        rest_hr=rest_hr,
+                    )
+                    # Cache stream stats to the activity doc (avoid re-fetching from Strava)
+                    if stream_stats:
+                        act_ref.set({"stream_stats": stream_stats}, merge=True)
+                        print(f"[webhook] Stream stats cached for {activity_id} "
+                              f"({len(stream_stats.get('pace_splits', []))} km splits)")
+                else:
+                    print(f"[webhook] Streams fetch returned {stream_resp.status_code} — skipping")
+            except Exception as _stream_err:
+                print(f"[webhook] Stream analysis failed (non-critical): {_stream_err}")
 
         # ── Generate journal entry (produces AI coach comment) ──
-        # Uses the same _gemini_generate method that works in backfill.
-        # The AI comment is then reused for Discord/WeChat notifications
-        # to ensure consistency across all channels.
+        # Works for both runs and cross-training — coach.py detects the type
         coach_tip = ""
         journal_entry = {}
         try:

@@ -15,6 +15,8 @@ interface Activity {
   has_heartrate: boolean;
   total_elevation_gain: number;
   period_start: string;
+  activity_type?: string;
+  strava_type?: string;
 }
 
 function formatActivityDate(iso: string): string {
@@ -99,64 +101,94 @@ export default function ActivityList({ uid, month, initialActivities }: Props) {
   }
 
   // Summary stats
-  const totalKm = activities.reduce((s, a) => s + a.distance_km, 0);
-  const count = activities.length;
+  const totalKm = activities.reduce((s, a) => s + (a.activity_type !== "cross_training" ? a.distance_km : 0), 0);
+  const runCount = activities.filter(a => a.activity_type !== "cross_training").length;
+  const ctCount = activities.length - runCount;
 
   return (
     <div className="space-y-3">
       {/* Month summary */}
       <div className="flex items-center justify-between px-1 pb-2 border-b border-white/5">
-        <span className="text-xs text-zinc-500">{count} 次跑步</span>
+        <span className="text-xs text-zinc-500">
+          {runCount} 次跑步 {ctCount > 0 && `· ${ctCount} 次交叉训练`}
+        </span>
         <span className="text-xs font-semibold text-[#FC4C02]">{totalKm.toFixed(1)} km</span>
       </div>
 
-      {activities.map((act) => (
-        <button
-          key={act.activity_id}
-          onClick={() => router.push(`/dashboard/activity/${act.activity_id}`)}
-          className="w-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#FC4C02]/30 rounded-2xl px-5 py-4 flex items-center gap-4 transition-all group text-left"
-        >
-          {/* Run icon */}
-          <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-[#FC4C02]/15 flex items-center justify-center group-hover:bg-[#FC4C02]/25 transition-colors">
-            <svg className="w-5 h-5 text-[#FC4C02]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-
-          {/* Main info */}
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-semibold text-sm truncate">{act.name}</p>
-            <p className="text-zinc-500 text-xs mt-0.5">{formatActivityDate(act.start_date_local)}</p>
-          </div>
-
-          {/* Stats */}
-          <div className="flex items-center gap-5 flex-shrink-0">
-            <div className="text-right">
-              <p className="text-white font-bold text-sm">{act.distance_km.toFixed(2)}</p>
-              <p className="text-zinc-500 text-xs">km</p>
-            </div>
-            <div className="text-right">
-              <p className="text-white font-bold text-sm">{act.avg_pace}</p>
-              <p className="text-zinc-500 text-xs">/km</p>
-            </div>
-            {act.has_heartrate && act.avg_heart_rate > 0 && (
-              <div className="text-right">
-                <p className="text-white font-bold text-sm">{act.avg_heart_rate}</p>
-                <p className="text-zinc-500 text-xs">bpm</p>
+      {activities.map((act) => {
+        const isCT = act.activity_type === "cross_training";
+        const st = act.strava_type || "";
+        const ctIcon = st === "Yoga" ? "🧘" : st === "Swim" ? "🏊" : ["WeightTraining", "Workout", "Crossfit", "HighIntensityIntervalTraining"].includes(st) ? "🏋️" : "💪";
+        
+        return (
+          <button
+            key={act.activity_id}
+            onClick={() => router.push(`/dashboard/activity/${act.activity_id}`)}
+            className={`w-full bg-white/5 hover:bg-white/10 border border-white/10 ${isCT ? "hover:border-[#06b6d4]/30" : "hover:border-[#FC4C02]/30"} rounded-2xl px-5 py-4 flex items-center gap-4 transition-all group text-left`}
+          >
+            {/* Icon */}
+            {isCT ? (
+              <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-[#06b6d4]/15 flex items-center justify-center group-hover:bg-[#06b6d4]/25 transition-colors text-lg">
+                {ctIcon}
+              </div>
+            ) : (
+              <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-[#FC4C02]/15 flex items-center justify-center group-hover:bg-[#FC4C02]/25 transition-colors">
+                <svg className="w-5 h-5 text-[#FC4C02]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
               </div>
             )}
-            <div className="hidden md:block text-right">
-              <p className="text-white font-bold text-sm">{act.total_elevation_gain}m</p>
-              <p className="text-zinc-500 text-xs">爬升</p>
+
+            {/* Main info */}
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-semibold text-sm truncate">{act.name}</p>
+              <p className="text-zinc-500 text-xs mt-0.5">{formatActivityDate(act.start_date_local)}</p>
             </div>
 
-            {/* Chevron */}
-            <svg className="w-4 h-4 text-zinc-600 group-hover:text-[#FC4C02] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </div>
-        </button>
-      ))}
+            {/* Stats */}
+            <div className="flex items-center gap-5 flex-shrink-0">
+              {!isCT && (
+                <>
+                  <div className="text-right">
+                    <p className="text-white font-bold text-sm">{act.distance_km.toFixed(2)}</p>
+                    <p className="text-zinc-500 text-xs">km</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-white font-bold text-sm">{act.avg_pace}</p>
+                    <p className="text-zinc-500 text-xs">/km</p>
+                  </div>
+                </>
+              )}
+              
+              {isCT && (
+                <div className="text-right">
+                  <p className="text-white font-bold text-sm">{act.duration_str}</p>
+                  <p className="text-zinc-500 text-xs">时长</p>
+                </div>
+              )}
+
+              {act.has_heartrate && act.avg_heart_rate > 0 && (
+                <div className="text-right">
+                  <p className="text-white font-bold text-sm">{act.avg_heart_rate}</p>
+                  <p className="text-zinc-500 text-xs">bpm</p>
+                </div>
+              )}
+              
+              {!isCT && (
+                <div className="hidden md:block text-right">
+                  <p className="text-white font-bold text-sm">{act.total_elevation_gain}m</p>
+                  <p className="text-zinc-500 text-xs">爬升</p>
+                </div>
+              )}
+
+              {/* Chevron */}
+              <svg className={`w-4 h-4 text-zinc-600 transition-colors ${isCT ? "group-hover:text-[#06b6d4]" : "group-hover:text-[#FC4C02]"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

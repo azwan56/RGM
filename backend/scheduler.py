@@ -128,12 +128,22 @@ def run_daily_sync() -> dict:
 
             activities = act_resp.json()
 
-            # Process runs
+            # Process activities (runs + cross-training)
+            from routers.sync import SYNCABLE_TYPES
             total_dist, total_time, hr_sum, hr_cnt, run_count = 0.0, 0, 0, 0, 0
             batch = db.batch()
 
             for act in activities:
-                if act.get("type") != "Run":
+                act_type = act.get("type", "")
+                if act_type not in SYNCABLE_TYPES:
+                    continue
+
+                # Save all syncable activities to Firestore
+                act_ref = user_ref.collection("activities").document(str(act["id"]))
+                batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
+
+                # Only count runs for leaderboard stats
+                if act_type != "Run":
                     continue
                 run_count += 1
                 dist = act.get("distance", 0)
@@ -144,8 +154,6 @@ def run_daily_sync() -> dict:
                 if act.get("has_heartrate") and avg_hr:
                     hr_sum += avg_hr
                     hr_cnt += 1
-                act_ref = user_ref.collection("activities").document(str(act["id"]))
-                batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
 
             batch.commit()
 

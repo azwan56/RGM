@@ -172,49 +172,60 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     duration = act_doc.get("duration_str", "—")
     run_name = act_doc.get("name", "跑步")
     date_str = act_doc.get("start_date_local", "")[:10]
+    act_type = act_doc.get("activity_type", "run")
+    strava_type = act_doc.get("strava_type", "Run")
+
+    is_ct = (act_type == "cross_training")
 
     monthly_km = context.get("monthly_km", 0)
     ctl = context.get("ctl")
     atl = context.get("atl")
     tsb = context.get("tsb")
 
-    # Colour based on distance
-    if dist >= 21:
-        colour = 0xFC4C02   # Strava orange — long run
-    elif dist >= 10:
-        colour = 0x3B82F6   # Blue — medium run
+    # Colour and icon based on type / distance
+    if is_ct:
+        colour = 0x06B6D4  # Cyan — cross training
+        title_icon = "🏋️" if strava_type in ("WeightTraining", "Workout", "Crossfit", "HighIntensityIntervalTraining") else "🧘" if strava_type == "Yoga" else "🏊" if strava_type == "Swim" else "💪"
+        title_text = "完成了一次交叉训练！"
     else:
-        colour = 0x22C55E   # Green — short run
+        title_icon = "🏃"
+        title_text = "完成了一次跑步！"
+        if dist >= 21:
+            colour = 0xFC4C02   # Strava orange — long run
+        elif dist >= 10:
+            colour = 0x3B82F6   # Blue — medium run
+        else:
+            colour = 0x22C55E   # Green — short run
 
     # ── Activity link ─────────────────────────────────────────────────────────
     activity_id = act_doc.get("activity_id")
     strava_link = f"https://www.strava.com/activities/{activity_id}" if activity_id else ""
 
     # ── Description: all basic stats as compact flowing text ──────────────────
-    # Stats live in description (markdown text) rather than embed fields.
-    # On Discord mobile every field renders as "label\nvalue" stacked
-    # vertically — description text stays compact on any screen width.
     desc_lines = [f"**{run_name}**  ·  📅 {date_str}"]
     if strava_link:
         desc_lines.append(f"[查看 Strava 详情]({strava_link})")
     desc_lines.append("")  # blank separator
 
-    # Row 1: distance · pace · duration (always shown)
-    desc_lines.append(f"🏁 **{dist} km**  ·  ⚡ **{pace}/km**  ·  ⏱ **{duration}**")
+    # Row 1: distance · pace · duration (or just duration for CT)
+    if is_ct:
+        desc_lines.append(f"⏱ **{duration}**")
+    else:
+        desc_lines.append(f"🏁 **{dist} km**  ·  ⚡ **{pace}/km**  ·  ⏱ **{duration}**")
 
     # Row 2: HR and/or elevation (optional)
     row2_parts = []
     if hr:
         row2_parts.append(f"❤️ **{hr} bpm**")
-    if elev and elev > 5:
+    if not is_ct and elev and elev > 5:
         row2_parts.append(f"⛰ **{elev} m**")
     if row2_parts:
         desc_lines.append("  ·  ".join(row2_parts))
 
     # Row 3: monthly mileage
-    if monthly_km:
+    if monthly_km and not is_ct:
         month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
-        desc_lines.append(f"📅 {month_label} 月累计：**{monthly_km} km**")
+        desc_lines.append(f"📅 {month_label} 月累计跑量：**{monthly_km} km**")
 
     description = "\n".join(desc_lines)
 
@@ -246,7 +257,7 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
 
 
     embed = {
-        "title":       f"🏃 {runner_name} 完成了一次跑步！",
+        "title":       f"{title_icon} {runner_name} {title_text}",
         "description": description,
         "color":       colour,
         "fields":      fields,
@@ -367,23 +378,32 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         pace       = act_doc.get("avg_pace", "—")
         duration   = act_doc.get("duration_str", "—")
         elev       = act_doc.get("total_elevation_gain", 0)
+        act_type   = act_doc.get("activity_type", "run")
+        strava_type = act_doc.get("strava_type", "Run")
+        is_ct      = (act_type == "cross_training")
 
-        md  = f"🏃 **{runner_name} 完成了一次跑步！**\n"
-        md += f"> **{run_name}** · {date_short}\n\n"
+        if is_ct:
+            title_icon = "🏋️" if strava_type in ("WeightTraining", "Workout", "Crossfit", "HighIntensityIntervalTraining") else "🧘" if strava_type == "Yoga" else "🏊" if strava_type == "Swim" else "💪"
+            title_text = "完成了一次交叉训练！"
+            md  = f"{title_icon} **{runner_name} {title_text}**\n"
+            md += f"> **{run_name}** · {date_short}\n\n"
+            md += f"⏱ 时长：**{duration}**\n"
+        else:
+            md  = f"🏃 **{runner_name} 完成了一次跑步！**\n"
+            md += f"> **{run_name}** · {date_short}\n\n"
+            md += f"🏁 距离：**{dist} km**\n"
+            md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
+            if elev and elev > 5:
+                md += f"🏔 爬升：{elev} m\n"
 
-        # Basic run stats only — no heart rate, no biometric scores
-        md += f"🏁 距离：**{dist} km**\n"
-        md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
-        if elev and elev > 5:
-            md += f"🏔 爬升：{elev} m\n"
-
-        # Weekly/monthly mileage (non-biometric)
-        wp = journal_entry.get("weekly_progress", {})
-        if wp and wp.get("target_km"):
-            md += f"📊 本周进度：**{wp['week_km']}km / {wp['target_km']}km** ({wp.get('completion_pct', 0)}%)\n"
-        elif monthly_km:
-            month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
-            md += f"📅 {month_label} 月累计：**{monthly_km} km**\n"
+        # Weekly/monthly mileage (non-biometric, only for runs)
+        if not is_ct:
+            wp = journal_entry.get("weekly_progress", {})
+            if wp and wp.get("target_km"):
+                md += f"📊 本周进度：**{wp['week_km']}km / {wp['target_km']}km** ({wp.get('completion_pct', 0)}%)\n"
+            elif monthly_km:
+                month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
+                md += f"📅 {month_label} 月累计：**{monthly_km} km**\n"
 
         # Privacy-safe AI coach comment (no biometric numbers)
         if wecom_tip:

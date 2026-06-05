@@ -1462,6 +1462,126 @@ async def log_journal_entry(req: JournalLogRequest):
     if not activity:
         return {"error": "No activity found"}
 
+    # ── 1a. Detect cross-training activities ──────────────────────────────────
+    activity_type = activity.get("activity_type", "run")  # "run" or "cross_training"
+    strava_type = activity.get("strava_type", activity.get("sport_type", "Run"))
+    is_cross_training = (activity_type == "cross_training" or strava_type in
+                         {"WeightTraining", "Yoga", "Crossfit", "Workout",
+                          "HighIntensityIntervalTraining", "Swim"})
+
+    if is_cross_training:
+        # ── Cross-training fast path: dedicated prompt, no stream analysis ──
+        from routers.sync import CROSS_TRAINING_LABELS
+
+        ct_label = CROSS_TRAINING_LABELS.get(strava_type, strava_type)
+        act_name = activity.get("name", ct_label)
+        duration_str = activity.get("duration_str", "—")
+        act_hr = activity.get("avg_heart_rate", 0)
+        act_id = str(activity.get("activity_id", ""))
+        entry_date = activity.get("start_date_local", "")[:10]
+
+        # Get/create journal
+        journal = _get_or_create_journal(uid)
+        journal_id = journal["journal_id"]
+        entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
+
+        # Check if entry already exists
+        existing = entries_ref.document(f"{entry_date}_{act_id}").get()
+        if existing.exists and not req.force:
+            return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
+
+        # Fetch this week's run context for the AI
+        from datetime import date as _dt, timedelta
+        today = _dt.today()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        all_week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
+
+        week_runs = sum(1 for e in all_week_entries
+                        if e.get("activity_snapshot", {}).get("distance_km", 0) > 0)
+
+        # Build cross-training prompt
+        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        try:
+            activity_date = _dt.fromisoformat(entry_date)
+        except (ValueError, TypeError):
+            activity_date = today
+        today_weekday = weekday_names[activity_date.weekday()]
+        tomorrow_date = activity_date + timedelta(days=1)
+        tomorrow_weekday = weekday_names[tomorrow_date.weekday()]
+        tomorrow_date_str = tomorrow_date.isoformat()
+
+        hr_line = f"- 平均心率：{act_hr}bpm\n" if act_hr else ""
+        ct_prompt = (
+            f"你是Canova教练（意大利著名马拉松教练），正在为学员{runner_name}评价今日的交叉训练。\n"
+            f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
+            "回复必须是纯 JSON，不含 markdown 标记。\n\n"
+            f"【交叉训练详情】\n"
+            f"- 训练类型：{ct_label}\n"
+            f"- 活动名称：{act_name}\n"
+            f"- 训练时长：{duration_str}\n"
+            f"{hr_line}"
+            f"- 日期：{entry_date}（{today_weekday}）\n"
+            f"- 本周已有 {week_runs} 次跑步训练\n\n"
+            "作为一位专业的跑步教练，你深知交叉训练对跑步表现的重要性。\n"
+            "请从以下角度给出3-5句专业但温暖的评语：\n"
+            "1. 这种交叉训练对跑步的具体益处（如：力量训练→跑姿稳定/蹬地效率、瑜伽→柔韧性/恢复、游泳→有氧耐力/全身协调）\n"
+            "2. 与本周跑步训练的搭配是否合理（是否在合适的时间做了交叉训练）\n"
+            "3. 温暖有力的鼓励，肯定跑者全面训练的意识\n\n"
+            f"明天是{tomorrow_date_str}（{tomorrow_weekday}），请给出明日训练建议。\n\n"
+            '返回JSON格式：\n'
+            '{\n'
+            '  "ai_comment": "<3-5句教练评语，分析交叉训练的价值和与跑步的协同效应>",\n'
+            '  "fatigue_level": "<low|moderate|high>",\n'
+            '  "performance_note": "<交叉训练的核心价值，1-2句话>",\n'
+            f'  "tomorrow_suggestion": "<明日训练建议，明确写出\'明天（{tomorrow_date_str}，{tomorrow_weekday}）\'>",\n'
+            '  "training_type": "交叉训练",\n'
+            '  "encouragement": "<1-2句温暖有力的鼓励，肯定全面训练的意识>"\n'
+            '}\n'
+        )
+
+        ai = {"ai_comment": f"完成了一次{ct_label}，交叉训练是跑步训练的重要补充！",
+              "fatigue_level": "low", "performance_note": "", "tomorrow_suggestion": "",
+              "training_type": "交叉训练", "encouragement": "全面训练，全面提升！💪"}
+
+        if _api_key or _gemini_proxy_url:
+            try:
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(ct_prompt, temperature=0.5, max_tokens=2000))
+                text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+                ai = json.loads(text)
+                print(f"[journal] Cross-training AI generated OK, type={ct_label}")
+            except Exception as e:
+                print(f"[journal] Cross-training AI error: {e}")
+
+        entry = {
+            "date": entry_date, "entry_type": "daily",
+            "activity_id": act_id,
+            "activity_snapshot": {
+                "name": act_name, "distance_km": 0,
+                "avg_pace": "—",
+                "avg_heart_rate": act_hr,
+                "total_elevation_gain": 0,
+                "duration_str": duration_str,
+                "max_heart_rate": activity.get("max_heart_rate", 0),
+                "strava_type": strava_type,
+                "activity_type": "cross_training",
+            },
+            "ai_comment": ai.get("ai_comment", ""),
+            "fatigue_level": ai.get("fatigue_level", "low"),
+            "performance_note": ai.get("performance_note", ""),
+            "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
+            "training_type": ai.get("training_type", "交叉训练"),
+            "encouragement": ai.get("encouragement", ""),
+            "weekly_progress": {
+                "week_km": 0, "week_runs": week_runs,
+                "target_km": 0, "completion_pct": 0,
+            },
+            "created_at": __import__("datetime").datetime.now().isoformat(),
+        }
+        entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+        return {"entry": entry, "journal_id": journal_id}
+
+    # ── Run activity path (existing logic) ────────────────────────────────────
+
     # 1b. Load or fetch stream stats for deeper analysis
     stream_stats = activity.get("stream_stats", {})
     if not stream_stats and req.activity_id:
