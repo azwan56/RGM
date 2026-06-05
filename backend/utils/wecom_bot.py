@@ -343,14 +343,27 @@ async def _bot_main_loop():
 
 
 def start_wecom_bot():
-    """Start the WeCom bot background task if not already running."""
-    global _bot_task
-    if _bot_task is None or _bot_task.done():
-        bot_id = os.getenv("WECOM_BOT_ID", "").strip()
-        secret = os.getenv("WECOM_BOT_SECRET", "").strip()
-        if bot_id and secret:
-            loop = asyncio.get_event_loop()
-            _bot_task = loop.create_task(_bot_main_loop())
-            logger.info("[wecom_bot] Background task scheduled.")
-        else:
-            logger.info("[wecom_bot] Skipped starting bot: credentials missing.")
+    """Start the WeCom bot in a dedicated background thread with its own event loop."""
+    import threading
+
+    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
+    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
+    if not bot_id or not secret:
+        logger.info("[wecom_bot] Skipped starting bot: credentials missing.")
+        return
+
+    def _run_bot_thread():
+        """Runs the bot's async loop in a separate thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_bot_main_loop())
+        except Exception as e:
+            logger.error(f"[wecom_bot] Bot thread crashed: {e}")
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run_bot_thread, name="wecom-bot", daemon=True)
+    t.start()
+    logger.info("[wecom_bot] Background thread started.")
+
