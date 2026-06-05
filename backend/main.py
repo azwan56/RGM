@@ -57,13 +57,20 @@ except ImportError:
 
 @app.on_event("startup")
 def on_startup():
-    """Start the APScheduler background scheduler for daily auto-sync."""
+    """Start the APScheduler background scheduler for daily auto-sync and the WeCom bot."""
     try:
         from scheduler import start_scheduler
         start_scheduler()
         print("[startup] Background scheduler started")
     except Exception as e:
         print(f"[startup] Scheduler failed to start: {e}")
+
+    try:
+        from utils.wecom_bot import start_wecom_bot
+        start_wecom_bot()
+        print("[startup] WeCom interactive bot initialization checked")
+    except Exception as e:
+        print(f"[startup] WeCom bot failed to start: {e}")
 
 
 @app.get("/")
