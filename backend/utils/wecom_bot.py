@@ -122,6 +122,12 @@ def _fetch_user_weekly_stats(uid: str) -> dict:
     return doc.to_dict() if doc.exists else {}
 
 
+def _fetch_user_goal(uid: str) -> dict:
+    """Fetch a user's current goal settings."""
+    doc = db.collection("users").document(uid).collection("goals").document("current").get()
+    return doc.to_dict() if doc.exists else {}
+
+
 def _detect_intent(content: str) -> str:
     """
     Simple keyword-based intent detection.
@@ -137,7 +143,8 @@ def _detect_intent(content: str) -> str:
         return "leaderboard_monthly"
 
     # Personal stats
-    if any(kw in c for kw in ["我跑了", "我的数据", "我的统计", "我这周", "我这个月", "我本月", "我本周", "我的跑量"]):
+    if any(kw in c for kw in ["我跑了", "我的数据", "我的统计", "我这周", "我这个月", "我本月", "我本周", "我的跑量",
+                               "计划", "目标", "plan", "goal", "完成度", "进度"]):
         return "my_stats"
 
     # Recent activity analysis
@@ -245,6 +252,29 @@ async def _process_chat_message(frame, client: WSClient):
                     f"- 本周累计: {wk.get('total_distance_km', 0)}km, "
                     f"跑步{wk.get('run_count', 0)}次\n"
                 )
+
+            # Goals / targets
+            goal = await asyncio.to_thread(_fetch_user_goal, uid)
+            if goal:
+                from datetime import datetime
+                current_month = datetime.now().month - 1  # 0-based index
+                period = goal.get("period", "monthly")
+                target_dist = goal.get("target_distance", 0)
+                monthly_targets = goal.get("monthly_targets", [])
+                this_month_target = monthly_targets[current_month] if len(monthly_targets) > current_month else target_dist
+
+                if period == "weekly":
+                    context_str += f"- 周跑量目标: {target_dist}km\n"
+                    # Calculate weekly progress
+                    wk_actual = wk.get('total_distance_km', 0) if wk else 0
+                    pct = round(wk_actual / target_dist * 100) if target_dist else 0
+                    context_str += f"- 周目标完成度: {pct}% ({wk_actual}/{target_dist}km)\n"
+                else:
+                    context_str += f"- 本月跑量目标: {this_month_target}km\n"
+                    # Calculate monthly progress
+                    lb_actual = lb.get('total_distance_km', 0) if lb else 0
+                    pct = round(lb_actual / this_month_target * 100) if this_month_target else 0
+                    context_str += f"- 月目标完成度: {pct}% ({lb_actual}/{this_month_target}km)\n"
 
             # Recent activities
             acts = await asyncio.to_thread(_fetch_recent_activities, uid, 5)
