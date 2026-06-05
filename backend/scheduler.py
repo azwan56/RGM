@@ -336,8 +336,8 @@ def run_rest_day_reminders() -> dict:
                 continue
 
             # Send reminders (both platforms; each silently skips if no webhook configured)
-            send_rest_day_discord_notification(user_data, uid, yesterday_str)
-            send_rest_day_wecom_notification(user_data, uid, yesterday_str)
+            send_rest_day_discord_notification(user_data, yesterday_str, uid)
+            send_rest_day_wecom_notification(user_data, yesterday_str, uid)
             results["reminded"] += 1
             logger.info(f"[scheduler] Rest-day reminder sent to uid={uid}")
 
