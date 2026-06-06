@@ -703,6 +703,11 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
                     else:
                         context_str += f"  - 计划: 月目标 {m_this_month}km\n"
 
+                # Recent activities for this member
+                m_acts = await asyncio.to_thread(_fetch_recent_activities, m_uid, 5)
+                if m_acts:
+                    context_str += f"  - 最近活动: {_build_runs_str(m_acts)}\n"
+
         # Build conversation context for AI prompt
         quoted_context = ""
         if quoted_text:
