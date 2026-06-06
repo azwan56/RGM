@@ -409,6 +409,12 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
         wecom_user_id = frame.body.get("from", {}).get("userid", "")
         media_type = None
 
+        # Auto-capture group chatid for send_bonnie_message()
+        global _last_chatid
+        msg_chatid = frame.body.get("chatid", "")
+        if msg_chatid:
+            _last_chatid = msg_chatid
+
         if msgtype == "text":
             content = frame.body.get("text", {}).get("content", "").strip()
         elif msgtype == "image":
@@ -810,11 +816,40 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
 
 _bot_client = None
 _bot_task = None
+_bot_loop_ref = None  # Reference to the asyncio event loop the bot runs on
+_last_chatid = None   # Auto-captured from last incoming message
+
+
+def send_bonnie_message(chatid: str, content: str) -> bool:
+    """Thread-safe function to send a message as Bonnie via the AI Bot SDK.
+    
+    Can be called from any thread (including daemon threads).
+    Returns True on success, False on failure.
+    """
+    global _bot_client, _bot_loop_ref
+    if not _bot_client or not _bot_loop_ref or not chatid:
+        return False
+    try:
+        if not _bot_client.is_connected:
+            print("[wecom_bot] send_bonnie_message: bot not connected")
+            return False
+        
+        from wecom_aibot_sdk.types.message import SendMarkdownMsgBody
+        body = SendMarkdownMsgBody(markdown={"content": content})
+        future = asyncio.run_coroutine_threadsafe(
+            _bot_client.send_message(chatid, body), _bot_loop_ref
+        )
+        future.result(timeout=15)
+        return True
+    except Exception as e:
+        print(f"[wecom_bot] send_bonnie_message failed: {e}")
+        return False
 
 
 async def _bot_loop():
     """Main bot loop — runs as a background asyncio task in FastAPI's event loop."""
-    global _bot_client
+    global _bot_client, _bot_loop_ref
+    _bot_loop_ref = asyncio.get_running_loop()
     bot_id = os.getenv("WECOM_BOT_ID", "").strip()
     secret = os.getenv("WECOM_BOT_SECRET", "").strip()
 
