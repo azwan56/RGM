@@ -531,9 +531,9 @@ async def _process_chat_message(frame, client: WSClient):
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
-            f"- 严格限制在50-70个中文字以内（包括标点和emoji），这是硬性限制！\n"
+            f"- 控制在80-120个中文字以内（包括标点和emoji），简洁但把话说完整\n"
             f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
-            f"- 如果用户问跑量/数据：一句数据+一句调侃，精炼不啰嗦\n"
+            f"- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半\n"
             f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据\n"
             f"- 用1-2个emoji\n"
             f"- 纯文本，不要用markdown格式如**加粗**\n"
@@ -549,8 +549,8 @@ async def _process_chat_message(frame, client: WSClient):
         # Strip any markdown bold markers
         reply_text = reply_text.replace("**", "")
 
-        # ── Safety truncation (WeCom stream limit ~240 bytes) ─────────────
-        MAX_BYTES = 220  # Leave margin below 240
+        # ── Safety truncation (WeCom text limit is 2048 bytes) ─────────────
+        MAX_BYTES = 2000  # Leave margin below 2048
         encoded = reply_text.encode("utf-8")
         if len(encoded) > MAX_BYTES:
             # Find the last sentence-ending punctuation within the limit
