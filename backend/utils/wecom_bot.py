@@ -403,6 +403,7 @@ def _detect_intent(content: str) -> str:
 
 async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
     """Core logic to process incoming text and generate a response."""
+    global _last_chatid
     try:
         content = ""
         inline_data = None
@@ -410,7 +411,6 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
         media_type = None
 
         # Auto-capture group chatid for send_bonnie_message()
-        global _last_chatid
         msg_chatid = frame.body.get("chatid", "")
         if msg_chatid:
             _last_chatid = msg_chatid
@@ -681,8 +681,12 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
                 
                 m_lb = await asyncio.to_thread(_fetch_leaderboard, m_uid)
                 if m_lb:
-                    context_str += f"  - 本月已跑: {m_lb.get('total_distance_km', 0)}km\n"
-                    
+                    context_str += f"  - 本月已跑: {m_lb.get('total_distance_km', 0)}km, 跑步{m_lb.get('run_count', 0)}次, 平均配速: {m_lb.get('avg_pace', '—')}/km\n"
+
+                m_wk = await asyncio.to_thread(_fetch_user_weekly_stats, m_uid)
+                if m_wk:
+                    context_str += f"  - 本周已跑: {m_wk.get('total_distance_km', 0)}km, 跑步{m_wk.get('run_count', 0)}次\n"
+
                 m_goal = await asyncio.to_thread(_fetch_user_goal, m_uid)
                 if m_goal:
                     from datetime import datetime
@@ -693,7 +697,9 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
                     m_this_month = m_monthly_targets[current_month] if len(m_monthly_targets) > current_month else 0
                     
                     if m_goal_period == "weekly":
-                        context_str += f"  - 计划: 周目标 {m_target_dist}km\n"
+                        m_wk_actual = m_wk.get('total_distance_km', 0) if m_wk else 0
+                        m_w_pct = round(m_wk_actual / m_target_dist * 100) if m_target_dist else 0
+                        context_str += f"  - 计划: 周目标 {m_target_dist}km, 本周完成 {m_w_pct}%\n"
                     else:
                         context_str += f"  - 计划: 月目标 {m_this_month}km\n"
 
