@@ -401,6 +401,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         # Works for both runs and cross-training — coach.py detects the type
         coach_tip = ""
         journal_entry = {}
+        journal_cached = False
         try:
             from routers.coach import log_journal_entry, JournalLogRequest
             import asyncio
@@ -413,21 +414,26 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             finally:
                 loop.close()
 
+            journal_cached = journal_result.get("cached", False)
             journal_entry = journal_result.get("entry", {})
             coach_tip = journal_entry.get("ai_comment", "")
             if coach_tip:
-                print(f"[webhook] Journal entry created, AI comment will be reused for notifications")
+                print(f"[webhook] Journal entry {'cached' if journal_cached else 'created'}, AI comment will be reused for notifications")
         except Exception as _journal_err:
             print(f"[webhook] Journal entry generation failed (notifications will generate their own): {_journal_err}")
 
         # ── Notifications (non-blocking, never crashes the webhook) ──
-        # Pass coach_tip + journal_entry so Discord/WeChat reuse the same AI content
-        try:
-            from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
-            send_activity_discord_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip)
-            send_activity_wecom_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip, journal_entry=journal_entry)
-        except Exception as _notify_err:
-            print(f"[webhook] Notification delivery failed: {_notify_err}")
+        # Skip notifications if journal was cached (duplicate webhook event — notifications already sent)
+        if journal_cached:
+            print(f"[webhook] Skipping notifications for activity {activity_id} — already processed (duplicate event)")
+        else:
+            # Pass coach_tip + journal_entry so Discord/WeChat reuse the same AI content
+            try:
+                from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
+                send_activity_discord_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip)
+                send_activity_wecom_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip, journal_entry=journal_entry)
+            except Exception as _notify_err:
+                print(f"[webhook] Notification delivery failed: {_notify_err}")
 
     except Exception as e:
         print(f"[webhook] Processing failed: {e}")

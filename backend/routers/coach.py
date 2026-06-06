@@ -1674,6 +1674,26 @@ async def log_journal_entry(req: JournalLogRequest):
     # Exclude current activity to avoid double-counting when force=True
     week_entries = [e for e in all_week_entries if e.get("activity_id") != act_id]
 
+    # 3b. Calculate week_km from activities (source of truth, journal entries may be incomplete)
+    km = activity.get("distance_km", 0)
+    week_start_ts = f"{week_start}T00:00:00"
+    week_activities = list(
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", week_start_ts)
+        .stream()
+    )
+    # Sum only runs (exclude cross-training), exclude current activity
+    week_km = sum(
+        a.to_dict().get("distance_km", 0) for a in week_activities
+        if a.to_dict().get("activity_type", "run") == "run"
+        and str(a.to_dict().get("activity_id", "")) != act_id
+    ) + km
+    week_runs = sum(
+        1 for a in week_activities
+        if a.to_dict().get("activity_type", "run") == "run"
+        and str(a.to_dict().get("activity_id", "")) != act_id
+    ) + 1
+
     # 4. Training summary + user goal + weather (parallel)
     from utils.weather import get_training_weather, get_forecast_weather
     training_summary, goal_data, training_weather, forecast_weather = await asyncio.gather(
@@ -1690,10 +1710,7 @@ async def log_journal_entry(req: JournalLogRequest):
     act_elev = activity.get("total_elevation_gain", 0)
     act_max_hr = activity.get("max_heart_rate", 0)
     act_cadence = activity.get("avg_cadence", 0)
-    week_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in week_entries) + km
-    week_runs = len(week_entries) + 1
 
-    # Use user's actual goal for weekly target
     if goal_data and goal_data.get("target_distance"):
         goal_dist = goal_data["target_distance"]
         goal_period = goal_data.get("period", "monthly")

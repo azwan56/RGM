@@ -480,11 +480,10 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
             "- 直接输出评论文字，不要加引号或前缀"
         )
 
-        bonnie_comment = _gemini_generate(prompt, max_tokens=100)
-        if not bonnie_comment or len(bonnie_comment.strip()) < 3:
+        result = _gemini_generate(prompt, max_tokens=100, response_json=False)
+        comment_text = result.get("text", "").strip() if isinstance(result, dict) else str(result).strip()
+        if not comment_text or len(comment_text) < 3:
             return
-
-        comment_text = bonnie_comment.strip()
 
         # Try to send via Bonnie bot (appears as Bonnie with her avatar)
         sent_via_bot = False
