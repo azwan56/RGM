@@ -108,6 +108,77 @@ def _find_mentioned_users(content: str) -> list:
     return mentioned
 
 
+def _detect_month_query(content: str):
+    """
+    Check if the user is asking about a specific month.
+    Returns (year, month) tuple or None.
+    """
+    import re
+    from datetime import datetime
+    now = datetime.now()
+    
+    # Match patterns like "5月", "五月", "上个月", "上月"
+    m = re.search(r'(\d{1,2})\s*月', content)
+    if m:
+        month = int(m.group(1))
+        if 1 <= month <= 12:
+            # If asking about a future month this year, assume last year
+            year = now.year if month <= now.month else now.year - 1
+            return (year, month)
+    
+    if any(kw in content for kw in ["上个月", "上月"]):
+        prev = now.month - 1
+        year = now.year if prev >= 1 else now.year - 1
+        prev = prev if prev >= 1 else 12
+        return (year, prev)
+    
+    return None
+
+
+def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
+    """
+    Compute a leaderboard for a specific historical month by summing activities.
+    Returns a list of dicts sorted by total_distance_km descending.
+    """
+    from datetime import datetime
+    month_prefix = f"{year}-{month:02d}"
+    
+    results = []
+    users = db.collection("users").stream()
+    for udoc in users:
+        uid = udoc.id
+        udata = udoc.to_dict()
+        name = udata.get("display_name") or udata.get("strava_name") or uid[:8]
+        gender = udata.get("gender", "")
+        
+        acts = (db.collection("users").document(uid)
+                  .collection("activities")
+                  .order_by("start_date_local", direction="DESCENDING")
+                  .limit(100)
+                  .stream())
+        
+        total_km = 0.0
+        run_count = 0
+        for a in acts:
+            ad = a.to_dict()
+            date_str = ad.get("start_date_local", "")[:7]  # "YYYY-MM"
+            if date_str == month_prefix:
+                total_km += ad.get("distance_km", 0)
+                run_count += 1
+        
+        if total_km > 0:
+            results.append({
+                "display_name": name,
+                "total_distance_km": round(total_km, 2),
+                "run_count": run_count,
+                "uid": uid,
+                "gender": gender,
+            })
+    
+    results.sort(key=lambda x: x["total_distance_km"], reverse=True)
+    return results
+
+
 # ── Data query helpers ────────────────────────────────────────────────────────
 
 def _fetch_monthly_leaderboard(limit_n: int = 20) -> list:
@@ -336,21 +407,40 @@ async def _process_chat_message(frame, client: WSClient):
 
             # Team leaderboard context (so AI can reference rankings)
             if intent in ("my_stats", "my_activity", "general"):
-                monthly_lb = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
-                if monthly_lb:
-                    # Find user's rank
-                    user_rank = next(
-                        (i + 1 for i, e in enumerate(monthly_lb)
-                         if e.get("uid") == uid),
-                        None
-                    )
-                    top3 = ", ".join(
-                        f"{e.get('display_name', '—')}({e.get('total_distance_km', 0)}km)"
-                        for e in monthly_lb[:3]
-                    )
-                    context_str += f"- 本月排行前三: {top3}\n"
-                    if user_rank:
-                        context_str += f"- {runner_name}当前排名第{user_rank}名\n"
+                from datetime import datetime
+                now = datetime.now()
+                
+                # Check if user is asking about a specific month
+                month_query = _detect_month_query(content)
+                
+                if month_query and (month_query[1] != now.month or month_query[0] != now.year):
+                    # Historical month query
+                    q_year, q_month = month_query
+                    hist_lb = await asyncio.to_thread(_fetch_historical_month_leaderboard, q_year, q_month)
+                    if hist_lb:
+                        top_all = ", ".join(
+                            f"{e['display_name']}({e['total_distance_km']}km)"
+                            for e in hist_lb
+                        )
+                        context_str += f"- 【{q_year}年{q_month}月】跑量排名: {top_all}\n"
+                    else:
+                        context_str += f"- {q_year}年{q_month}月暂无跑步记录\n"
+                else:
+                    # Current month
+                    monthly_lb = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
+                    if monthly_lb:
+                        user_rank = next(
+                            (i + 1 for i, e in enumerate(monthly_lb)
+                             if e.get("uid") == uid),
+                            None
+                        )
+                        top3 = ", ".join(
+                            f"{e.get('display_name', '—')}({e.get('total_distance_km', 0)}km)"
+                            for e in monthly_lb[:3]
+                        )
+                        context_str += f"- 【{now.year}年{now.month}月·本月】排行前三: {top3}\n"
+                        if user_rank:
+                            context_str += f"- {runner_name}当前排名第{user_rank}名\n"
 
         else:
             context_str += (
