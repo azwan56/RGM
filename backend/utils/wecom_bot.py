@@ -48,14 +48,18 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
 
 def _fetch_chat_history(wecom_user_id: str, uid: str, limit: int = 10) -> list:
     """Fetch recent chat history for the user from Firestore."""
-    if uid:
-        ref = db.collection("users").document(uid).collection("wecom_chat_history")
-    else:
-        ref = db.collection("wecom_guests").document(wecom_user_id).collection("chat_history")
+    try:
+        if uid:
+            ref = db.collection("users").document(uid).collection("wecom_chat_history")
+        else:
+            ref = db.collection("wecom_guests").document(wecom_user_id).collection("chat_history")
         
-    docs = ref.order_by("timestamp", direction="DESCENDING").limit(limit).stream()
-    history = [d.to_dict() for d in docs]
-    return list(reversed(history))
+        docs = ref.order_by("timestamp", direction="DESCENDING").limit(limit).stream()
+        history = [d.to_dict() for d in docs]
+        return list(reversed(history))
+    except Exception as e:
+        print(f"[wecom_bot] Failed to fetch chat history: {e}")
+        return []
 
 
 def _save_chat_message(wecom_user_id: str, uid: str, role: str, content: str, media_type: str = None):
@@ -484,9 +488,7 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
 
         # Save user message to history
         asyncio.create_task(asyncio.to_thread(
-            _save_chat_message, wecom_user_id, uid, "user", 
-            content if msgtype == "text" else f"{content} {combined_text}".strip(), 
-            media_type
+            _save_chat_message, wecom_user_id, uid, "user", content, media_type
         ))
 
         # Combine current message + quoted text for intent/keyword detection
@@ -695,6 +697,7 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
             quoted_context = f"【用户引用了之前的消息】：\n\"{quoted_text}\"\n\n"
 
         prompt = (
+            f"{context_str}\n\n"
             f"{quoted_context}"
             f"用户当前的输入是：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
@@ -713,14 +716,34 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
         history = await asyncio.to_thread(_fetch_chat_history, wecom_user_id, uid, 10)
         
         gemini_contents = []
+        last_role = None
         for msg in history:
-            # We only send text history to save context limit and complexity
-            gemini_contents.append({
-                "role": msg["role"],
-                "parts": [{"text": msg["content"]}]
-            })
+            role = msg.get("role", "user")
+            text = msg.get("content", "")
+            if not text:
+                continue
+            # Gemini requires alternating user/model roles
+            # Skip consecutive same-role messages (keep the latest)
+            if role == last_role:
+                gemini_contents[-1] = {
+                    "role": role,
+                    "parts": [{"text": text}]
+                }
+            else:
+                gemini_contents.append({
+                    "role": role,
+                    "parts": [{"text": text}]
+                })
+                last_role = role
             
-        # Add current message
+        # Add current message - ensure no consecutive user roles
+        if gemini_contents and gemini_contents[-1]["role"] == "user":
+            gemini_contents.pop()  # Remove last user msg to avoid duplicate role
+        
+        # Gemini requires first message to be 'user' role
+        while gemini_contents and gemini_contents[0]["role"] != "user":
+            gemini_contents.pop(0)
+            
         current_parts = []
         if inline_data:
             current_parts.append({"inlineData": inline_data})
