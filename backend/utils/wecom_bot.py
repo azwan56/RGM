@@ -158,16 +158,46 @@ def _detect_year_query(content: str):
 
 
 def _fetch_yearly_leaderboard(year: int) -> list:
-    """Fetch yearly leaderboard from leaderboard_yearly collection."""
+    """Fetch yearly leaderboard. Tries leaderboard_yearly first, falls back to computing from activities."""
+    # Try the pre-computed collection first
     docs = (db.collection("leaderboard_yearly")
-              .order_by("total_distance_km", direction="DESCENDING")
+              .where("year", "==", year)
               .stream())
-    results = []
-    for d in docs:
-        data = d.to_dict()
-        if data.get("year") == year:
-            results.append(data)
-    results.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+    results = [d.to_dict() for d in docs]
+    if results:
+        results.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+        return results
+
+    # Fallback: compute from all users' activities for that year
+    year_start = f"{year}-01-01"
+    year_end = f"{year + 1}-01-01"
+    users = db.collection("users").where("strava_connected", "==", True).stream()
+    for udoc in users:
+        uid = udoc.id
+        udata = udoc.to_dict()
+        name = udata.get("display_name") or udata.get("strava_name") or uid[:8]
+        acts = (db.collection("users").document(uid)
+                  .collection("activities")
+                  .where("start_date_local", ">=", year_start)
+                  .where("start_date_local", "<", year_end)
+                  .stream())
+        total_km = 0.0
+        run_count = 0
+        for a in acts:
+            ad = a.to_dict()
+            if ad.get("activity_type", "run") != "run":
+                continue
+            total_km += ad.get("distance_km", 0)
+            run_count += 1
+        if total_km > 0:
+            results.append({
+                "display_name": name,
+                "total_distance_km": round(total_km, 2),
+                "run_count": run_count,
+                "uid": uid,
+                "year": year,
+            })
+    results.sort(key=lambda x: x["total_distance_km"], reverse=True)
     return results
 
 
@@ -537,17 +567,19 @@ async def _process_chat_message(frame, client: WSClient):
             f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据\n"
             f"- 用1-2个emoji\n"
             f"- 纯文本，不要用markdown格式如**加粗**\n"
-            f"- 如果用户心情低落或受伤，收起嬉皮，认真关心"
+            f"- 如果用户心情低落或受伤，收起嬉皮，认真关心\n"
+            f"- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'"
         )
 
         # ── Call Gemini ───────────────────────────────────────────────────
-        # NOTE: For Gemini 2.5 Flash (thinking model), maxOutputTokens
-        # includes BOTH thinking tokens AND response tokens. With 300,
-        # the model spends 200+ tokens thinking → <100 left for reply
-        # → reply gets cut mid-sentence. 1024 gives ample room.
+        # For Gemini 2.5 Flash (thinking model), maxOutputTokens includes
+        # BOTH thinking tokens AND response tokens. We need:
+        #   - Low thinking budget (casual chat, not complex reasoning)
+        #   - Enough total tokens for thinking + full reply
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=1024, response_json=False
+            temperature=0.7, max_tokens=1024, response_json=False,
+            thinking_budget=128
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers

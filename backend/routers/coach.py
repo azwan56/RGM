@@ -23,7 +23,7 @@ _use_proxy = None  # None = auto-detect, True = proxy, False = direct
 
 import requests as http_requests
 
-def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True) -> dict:
+def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None) -> dict:
     """Call Gemini API — tries Cloud Functions proxy first, falls back to direct REST."""
     global _resolved_model, _use_proxy
 
@@ -32,7 +32,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
     # ── Strategy 1: Cloud Functions proxy (avoids GeoIP blocks) ──
     if _use_proxy is not False and _gemini_proxy_url:
         try:
-            thinking_budget = min(2048, max_tokens)
+            tb = thinking_budget if thinking_budget is not None else min(2048, max_tokens)
             body = {
                 "secret": _gemini_proxy_secret,
                 "model": model_name,
@@ -40,10 +40,10 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                 "generationConfig": {
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
-                    "thinkingConfig": {"thinkingBudget": thinking_budget},
+                    "thinkingConfig": {"thinkingBudget": tb},
                 },
                 # Also at top-level for proxy compatibility
-                "thinkingConfig": {"thinkingBudget": thinking_budget},
+                "thinkingConfig": {"thinkingBudget": tb},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
@@ -76,13 +76,13 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
         api_versions = ["v1beta"] if response_json else ["v1beta", "v1"]
         for api_ver in api_versions:
             url = f"{_gemini_base_url}/{api_ver}/models/{mn}:generateContent?key={_api_key}"
-            thinking_budget = min(2048, max_tokens)
+            tb = thinking_budget if thinking_budget is not None else min(2048, max_tokens)
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature": temperature,
                     "maxOutputTokens": max_tokens,
-                    "thinkingConfig": {"thinkingBudget": thinking_budget},
+                    "thinkingConfig": {"thinkingBudget": tb},
                 },
             }
             if response_json:
@@ -109,7 +109,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
                     if resp.status_code == 404 and _resolved_model:
                         print(f"[gemini] Cached model {_resolved_model} is gone, clearing cache")
                         _resolved_model = None
-                        return _gemini_generate(prompt, temperature, max_tokens, response_json)
+                        return _gemini_generate(prompt, temperature, max_tokens, response_json, thinking_budget)
             except Exception as e:
                 last_error = f"{mn}@{api_ver}: {e}"
                 print(f"[gemini] {last_error}")
