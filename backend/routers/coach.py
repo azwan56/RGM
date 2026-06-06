@@ -66,8 +66,6 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                 "maxOutputTokens": max_tokens,
                 "thinkingConfig": {"thinkingBudget": tb},
             }
-            # Also at top-level for proxy compatibility
-            body["thinkingConfig"] = {"thinkingBudget": tb}
             if tools:
                 body["tools"] = tools
             if response_json:
