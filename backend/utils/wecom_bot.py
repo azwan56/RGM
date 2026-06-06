@@ -393,11 +393,11 @@ async def _process_chat_message(frame, client: WSClient):
             f"{context_str}\n\n"
             f"用户说：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
+            f"- 严格限制在50-70个中文字以内（包括标点和emoji），这是硬性限制！\n"
             f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
-            f"- 如果用户问跑量/数据：2-3句话，第一句给数据，后面加调侃/激将\n"
-            f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设自由发挥，不用强行播报数据\n"
-            f"- 善用跑圈黑话（配速、撞墙、LSD、间歇等），但让小白也能看懂\n"
-            f"- 用1-2个emoji增加群聊感\n"
+            f"- 如果用户问跑量/数据：一句数据+一句调侃，精炼不啰嗦\n"
+            f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据\n"
+            f"- 用1-2个emoji\n"
             f"- 纯文本，不要用markdown格式如**加粗**\n"
             f"- 如果用户心情低落或受伤，收起嬉皮，认真关心"
         )
@@ -405,11 +405,25 @@ async def _process_chat_message(frame, client: WSClient):
         # ── Call Gemini ───────────────────────────────────────────────────
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=1024, response_json=False
+            temperature=0.7, max_tokens=300, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers
         reply_text = reply_text.replace("**", "")
+
+        # ── Safety truncation (WeCom stream limit ~240 bytes) ─────────────
+        MAX_BYTES = 220  # Leave margin below 240
+        encoded = reply_text.encode("utf-8")
+        if len(encoded) > MAX_BYTES:
+            # Find the last sentence-ending punctuation within the limit
+            truncated = encoded[:MAX_BYTES].decode("utf-8", errors="ignore")
+            # Try to cut at last sentence boundary
+            for sep in ["！", "！", "。", "？", "~", "…", "!", "?", ".", "\n"]:
+                idx = truncated.rfind(sep)
+                if idx > 0:
+                    truncated = truncated[:idx + len(sep)]
+                    break
+            reply_text = truncated
 
         # ── Stream reply finish ───────────────────────────────────────────
         await client.reply_stream(frame, stream_id, reply_text, finish=True)
