@@ -480,7 +480,7 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
             "- 直接输出评论文字，不要加引号或前缀"
         )
 
-        result = _gemini_generate(prompt, max_tokens=100, response_json=False)
+        result = _gemini_generate(prompt, max_tokens=200, response_json=False, thinking_budget=0)
         comment_text = result.get("text", "").strip() if isinstance(result, dict) else str(result).strip()
         if not comment_text or len(comment_text) < 3:
             return
