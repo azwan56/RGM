@@ -78,6 +78,36 @@ def _bind_user(wecom_user_id: str, bind_code: str):
     return None
 
 
+def _find_mentioned_users(content: str) -> list:
+    """
+    Scan the message content for names of other users.
+    Returns a list of (uid, user_data) tuples.
+    """
+    mentioned = []
+    # Fetch all users with connected strava
+    docs = db.collection("users").where("strava_connected", "==", True).stream()
+    content_lower = content.lower()
+    
+    for doc in docs:
+        d = doc.to_dict()
+        names_to_check = []
+        if d.get("display_name"):
+            names_to_check.append(d["display_name"].lower())
+            # Also check first name / shorthand (e.g. "Vivian" from "Vivian CHEN")
+            names_to_check.append(d["display_name"].split()[0].lower())
+        if d.get("strava_name"):
+            names_to_check.append(d["strava_name"].lower())
+            names_to_check.append(d["strava_name"].split()[0].lower())
+            
+        # Remove duplicates and short fragments (like single letters)
+        names_to_check = list(set(n for n in names_to_check if len(n) > 1))
+        
+        if any(name in content_lower for name in names_to_check):
+            mentioned.append((doc.id, d))
+            
+    return mentioned
+
+
 # ── Data query helpers ────────────────────────────────────────────────────────
 
 def _fetch_monthly_leaderboard(limit_n: int = 20) -> list:
@@ -218,6 +248,9 @@ async def _process_chat_message(frame, client: WSClient):
 
         # ── Build AI context ──────────────────────────────────────────────
         runner_name = user_data.get("display_name", "跑者") if user_data else "跑者"
+        gender_val = user_data.get("gender", "") if user_data else ""
+        gender_str = "女" if gender_val == "female" else ("男" if gender_val == "male" else "未知")
+        
         context_str = (
             "你是 RGM 跑团的群聊吉祥物，外号「团宠」。\n"
             "你的性格特点：\n"
@@ -231,7 +264,7 @@ async def _process_chat_message(frame, client: WSClient):
             "重要：你和自动推送通知里的'AI教练'是不同的角色。\n"
             "AI教练负责专业分析和训练建议（严肃、有数据），你负责群里互动和气氛（轻松、好玩）。\n"
             "\n"
-            f"正在和你聊天的人是：{runner_name}。\n"
+            f"正在和你聊天的人是：{runner_name} (性别: {gender_str})。\n"
         )
 
         if uid:
@@ -318,11 +351,43 @@ async def _process_chat_message(frame, client: WSClient):
                     context_str += f"- 本月排行前三: {top3}\n"
                     if user_rank:
                         context_str += f"- {runner_name}当前排名第{user_rank}名\n"
+
         else:
             context_str += (
                 "（注：该用户尚未绑定 RGM 账号，无法查询其具体的跑步数据。"
                 "请友好地提示他可以通过回复『绑定 邮箱』来绑定。）\n"
             )
+
+        # ── Include data for mentioned users ──────────────────────────────
+        mentioned_users = await asyncio.to_thread(_find_mentioned_users, content)
+        # Filter out the speaker themselves if they were included
+        mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid]
+        
+        if mentioned_users:
+            context_str += "\n【聊天中提到其他成员的数据，可供参考】：\n"
+            for m_uid, m_data in mentioned_users:
+                m_name = m_data.get("display_name", m_data.get("strava_name", "某队员"))
+                m_gender_val = m_data.get("gender", "")
+                m_gender_str = "女" if m_gender_val == "female" else ("男" if m_gender_val == "male" else "未知")
+                context_str += f"队员 [{m_name}] (性别: {m_gender_str}):\n"
+                
+                m_lb = await asyncio.to_thread(_fetch_leaderboard, m_uid)
+                if m_lb:
+                    context_str += f"  - 本月已跑: {m_lb.get('total_distance_km', 0)}km\n"
+                    
+                m_goal = await asyncio.to_thread(_fetch_user_goal, m_uid)
+                if m_goal:
+                    from datetime import datetime
+                    current_month = datetime.now().month - 1
+                    m_goal_period = m_goal.get("period", "monthly")
+                    m_target_dist = m_goal.get("target_distance", 0)
+                    m_monthly_targets = m_goal.get("monthly_targets", [])
+                    m_this_month = m_monthly_targets[current_month] if len(m_monthly_targets) > current_month else 0
+                    
+                    if m_goal_period == "weekly":
+                        context_str += f"  - 计划: 周目标 {m_target_dist}km\n"
+                    else:
+                        context_str += f"  - 计划: 月目标 {m_this_month}km\n"
 
         prompt = (
             f"{context_str}\n\n"
