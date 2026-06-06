@@ -397,6 +397,11 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             except Exception as _stream_err:
                 print(f"[webhook] Stream analysis failed (non-critical): {_stream_err}")
 
+        # ── For 'update' events (user edited title/photo on Strava): only sync data, skip notifications ──
+        if aspect_type == "update":
+            print(f"[webhook] Activity {activity_id} updated (metadata change) — data synced, skipping notifications")
+            return
+
         # ── Generate journal entry (produces AI coach comment) ──
         # Works for both runs and cross-training — coach.py detects the type
         coach_tip = ""
