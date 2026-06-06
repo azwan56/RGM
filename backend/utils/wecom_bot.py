@@ -135,6 +135,42 @@ def _detect_month_query(content: str):
     return None
 
 
+def _detect_year_query(content: str):
+    """
+    Check if the user is asking about yearly stats.
+    Returns year (int) or None.
+    """
+    import re
+    from datetime import datetime
+    now = datetime.now()
+
+    if any(kw in content for kw in ["今年", "年跑量", "年度", "全年"]):
+        return now.year
+
+    m = re.search(r'(\d{4})\s*年', content)
+    if m:
+        return int(m.group(1))
+
+    if "去年" in content:
+        return now.year - 1
+
+    return None
+
+
+def _fetch_yearly_leaderboard(year: int) -> list:
+    """Fetch yearly leaderboard from leaderboard_yearly collection."""
+    docs = (db.collection("leaderboard_yearly")
+              .order_by("total_distance_km", direction="DESCENDING")
+              .stream())
+    results = []
+    for d in docs:
+        data = d.to_dict()
+        if data.get("year") == year:
+            results.append(data)
+    results.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+    return results
+
+
 def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
     """
     Compute a leaderboard for a specific historical month by summing activities.
@@ -410,10 +446,22 @@ async def _process_chat_message(frame, client: WSClient):
                 from datetime import datetime
                 now = datetime.now()
                 
+                # Check if user is asking about yearly stats
+                year_query = _detect_year_query(content)
                 # Check if user is asking about a specific month
                 month_query = _detect_month_query(content)
                 
-                if month_query and (month_query[1] != now.month or month_query[0] != now.year):
+                if year_query:
+                    yearly_lb = await asyncio.to_thread(_fetch_yearly_leaderboard, year_query)
+                    if yearly_lb:
+                        all_entries = ", ".join(
+                            f"{e.get('display_name', '—')}({e.get('total_distance_km', 0)}km/{e.get('run_count', 0)}次)"
+                            for e in yearly_lb
+                        )
+                        context_str += f"- 【{year_query}年度】跑量排名: {all_entries}\n"
+                    else:
+                        context_str += f"- {year_query}年暂无跑步记录\n"
+                elif month_query and (month_query[1] != now.month or month_query[0] != now.year):
                     # Historical month query
                     q_year, q_month = month_query
                     hist_lb = await asyncio.to_thread(_fetch_historical_month_leaderboard, q_year, q_month)
