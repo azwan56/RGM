@@ -23,7 +23,19 @@ _use_proxy = None  # None = auto-detect, True = proxy, False = direct
 
 import requests as http_requests
 
-def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None, contents_obj: list = None, system_instruction: str = None) -> dict:
+def _extract_text_from_response(data: dict) -> str:
+    """Extract text from Gemini response, handling multi-part responses (e.g. with google_search grounding)."""
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        # Collect all text parts (skip non-text parts like search grounding metadata)
+        texts = [p["text"] for p in parts if "text" in p]
+        if texts:
+            return "\n".join(texts)
+    except (KeyError, IndexError, TypeError):
+        pass
+    return None
+
+def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None, contents_obj: list = None, system_instruction: str = None, tools: list = None) -> dict:
     """Call Gemini API — tries Cloud Functions proxy first, falls back to direct REST."""
     global _resolved_model, _use_proxy
 
@@ -56,6 +68,8 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
             }
             # Also at top-level for proxy compatibility
             body["thinkingConfig"] = {"thinkingBudget": tb}
+            if tools:
+                body["tools"] = tools
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
 
@@ -64,10 +78,9 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                 _use_proxy = True  # Cache: proxy works
                 _resolved_model = model_name
                 data = resp.json()
-                # Robustly extract text — thinking models may return empty content
-                try:
-                    text = data["candidates"][0]["content"]["parts"][0]["text"]
-                except (KeyError, IndexError, TypeError):
+                # Robustly extract text — handles thinking models and search grounding
+                text = _extract_text_from_response(data)
+                if not text:
                     finish_reason = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
                     print(f"[gemini] Proxy returned empty content (finishReason={finish_reason})")
                     raise Exception(f"Gemini returned no text (finishReason={finish_reason})")
@@ -101,6 +114,8 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                 "maxOutputTokens": max_tokens,
                 "thinkingConfig": {"thinkingBudget": tb},
             }
+            if tools:
+                body["tools"] = tools
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
 
@@ -110,9 +125,8 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                     _resolved_model = mn  # Cache working model
                     _use_proxy = False  # Direct works, skip proxy next time
                     data = resp.json()
-                    try:
-                        text = data["candidates"][0]["content"]["parts"][0]["text"]
-                    except (KeyError, IndexError, TypeError):
+                    text = _extract_text_from_response(data)
+                    if not text:
                         finish_reason = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
                         last_error = f"{mn}@{api_ver}: empty response (finishReason={finish_reason})"
                         print(f"[gemini] {last_error}")

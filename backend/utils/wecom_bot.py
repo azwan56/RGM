@@ -767,7 +767,8 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
             response_json=False,
             thinking_budget=128,
             contents_obj=gemini_contents,
-            system_instruction=context_str
+            system_instruction=context_str,
+            tools=[{"google_search": {}}]
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers
