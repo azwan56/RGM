@@ -541,9 +541,13 @@ async def _process_chat_message(frame, client: WSClient):
         )
 
         # ── Call Gemini ───────────────────────────────────────────────────
+        # NOTE: For Gemini 2.5 Flash (thinking model), maxOutputTokens
+        # includes BOTH thinking tokens AND response tokens. With 300,
+        # the model spends 200+ tokens thinking → <100 left for reply
+        # → reply gets cut mid-sentence. 1024 gives ample room.
         result = await asyncio.to_thread(
             _gemini_generate, prompt,
-            temperature=0.7, max_tokens=300, response_json=False
+            temperature=0.7, max_tokens=1024, response_json=False
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers
