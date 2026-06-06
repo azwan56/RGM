@@ -23,7 +23,7 @@ _use_proxy = None  # None = auto-detect, True = proxy, False = direct
 
 import requests as http_requests
 
-def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None) -> dict:
+def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None, contents_obj: list = None, system_instruction: str = None) -> dict:
     """Call Gemini API — tries Cloud Functions proxy first, falls back to direct REST."""
     global _resolved_model, _use_proxy
 
@@ -33,18 +33,29 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
     if _use_proxy is not False and _gemini_proxy_url:
         try:
             tb = thinking_budget if thinking_budget is not None else min(2048, max_tokens)
-            body = {
-                "secret": _gemini_proxy_secret,
-                "model": model_name,
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens,
-                    "thinkingConfig": {"thinkingBudget": tb},
-                },
-                # Also at top-level for proxy compatibility
+            if contents_obj:
+                body = {
+                    "secret": _gemini_proxy_secret,
+                    "model": model_name,
+                    "contents": contents_obj,
+                }
+            else:
+                body = {
+                    "secret": _gemini_proxy_secret,
+                    "model": model_name,
+                    "contents": [{"parts": [{"text": prompt}]}],
+                }
+            
+            if system_instruction:
+                body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+            body["generationConfig"] = {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
                 "thinkingConfig": {"thinkingBudget": tb},
             }
+            # Also at top-level for proxy compatibility
+            body["thinkingConfig"] = {"thinkingBudget": tb}
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"
 
@@ -77,13 +88,18 @@ def _gemini_generate(prompt: str, temperature: float = 0.6, max_tokens: int = 60
         for api_ver in api_versions:
             url = f"{_gemini_base_url}/{api_ver}/models/{mn}:generateContent?key={_api_key}"
             tb = thinking_budget if thinking_budget is not None else min(2048, max_tokens)
-            body = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens,
-                    "thinkingConfig": {"thinkingBudget": tb},
-                },
+            if contents_obj:
+                body = {"contents": contents_obj}
+            else:
+                body = {"contents": [{"parts": [{"text": prompt}]}]}
+
+            if system_instruction:
+                body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+            body["generationConfig"] = {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "thinkingConfig": {"thinkingBudget": tb},
             }
             if response_json:
                 body["generationConfig"]["responseMimeType"] = "application/json"

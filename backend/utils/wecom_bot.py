@@ -12,6 +12,9 @@ Capabilities:
 import os
 import asyncio
 import logging
+import base64
+import time
+from datetime import datetime
 from wecom_aibot_sdk import WSClient, generate_req_id
 from firebase_config import db
 from routers.coach import _gemini_generate, _fetch_recent_activities, _build_runs_str, _fetch_leaderboard
@@ -39,6 +42,39 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
     for doc in docs:
         return doc.id, doc.to_dict()
     return None, None
+
+
+# ── Chat History ─────────────────────────────────────────────────────────────
+
+def _fetch_chat_history(wecom_user_id: str, uid: str, limit: int = 10) -> list:
+    """Fetch recent chat history for the user from Firestore."""
+    if uid:
+        ref = db.collection("users").document(uid).collection("wecom_chat_history")
+    else:
+        ref = db.collection("wecom_guests").document(wecom_user_id).collection("chat_history")
+        
+    docs = ref.order_by("timestamp", direction="DESCENDING").limit(limit).stream()
+    history = [d.to_dict() for d in docs]
+    return list(reversed(history))
+
+
+def _save_chat_message(wecom_user_id: str, uid: str, role: str, content: str, media_type: str = None):
+    """Save a single chat message to history."""
+    if not content and not media_type:
+        return
+        
+    if uid:
+        ref = db.collection("users").document(uid).collection("wecom_chat_history")
+    else:
+        ref = db.collection("wecom_guests").document(wecom_user_id).collection("chat_history")
+        
+    msg_id = str(int(time.time() * 1000))
+    ref.document(msg_id).set({
+        "role": role,
+        "content": content,
+        "media_type": media_type,
+        "timestamp": datetime.now().isoformat()
+    })
 
 
 def _bind_user(wecom_user_id: str, bind_code: str):
@@ -361,12 +397,55 @@ def _detect_intent(content: str) -> str:
 
 # ── Message processing ────────────────────────────────────────────────────────
 
-async def _process_chat_message(frame, client: WSClient):
+async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
     """Core logic to process incoming text and generate a response."""
     try:
-        content = frame.body.get("text", {}).get("content", "").strip()
+        content = ""
+        inline_data = None
         wecom_user_id = frame.body.get("from", {}).get("userid", "")
+        media_type = None
 
+        if msgtype == "text":
+            content = frame.body.get("text", {}).get("content", "").strip()
+        elif msgtype == "image":
+            img_obj = frame.body.get("image", {})
+            url = img_obj.get("url")
+            aes_key = img_obj.get("aeskey")
+            if url:
+                try:
+                    file_bytes, ext = await client.download_file(url, aes_key)
+                    b64 = base64.b64encode(file_bytes).decode("utf-8")
+                    inline_data = {
+                        "mimeType": "image/jpeg",
+                        "data": b64
+                    }
+                    media_type = "image"
+                    content = "[用户发送了一张图片]"
+                except Exception as e:
+                    logger.error(f"[wecom_bot] Image download failed: {e}")
+                    content = "[接收到图片，但无法下载]"
+        elif msgtype == "mixed":
+            # For mixed messages with image and text
+            items = frame.body.get("mixed", {}).get("msg_item", [])
+            for item in items:
+                if item.get("msgtype") == "text":
+                    content += (item.get("text", {}).get("content", "") or "").strip() + " "
+                elif item.get("msgtype") == "image":
+                    url = item.get("image", {}).get("url")
+                    aes_key = item.get("image", {}).get("aeskey")
+                    if url and not inline_data: # only take first image for now
+                        try:
+                            file_bytes, ext = await client.download_file(url, aes_key)
+                            b64 = base64.b64encode(file_bytes).decode("utf-8")
+                            inline_data = {
+                                "mimeType": "image/jpeg",
+                                "data": b64
+                            }
+                            media_type = "image"
+                        except Exception as e:
+                            logger.error(f"[wecom_bot] Mixed image download failed: {e}")
+            content = content.strip()
+        
         # ── Extract quoted message context ────────────────────────────────
         quoted_text = _extract_quoted_text(frame.body)
         if quoted_text:
@@ -403,26 +482,32 @@ async def _process_chat_message(frame, client: WSClient):
         # ── Identify user ─────────────────────────────────────────────────
         uid, user_data = _resolve_user_by_wecom_id(wecom_user_id)
 
+        # Save user message to history
+        asyncio.create_task(asyncio.to_thread(
+            _save_chat_message, wecom_user_id, uid, "user", 
+            content if msgtype == "text" else f"{content} {combined_text}".strip(), 
+            media_type
+        ))
+
         # Combine current message + quoted text for intent/keyword detection
-        # This ensures that when a user quotes a previous message to correct
-        # or follow up, the context from the quote is also considered.
         combined_text = f"{quoted_text} {content}" if quoted_text else content
         intent = _detect_intent(combined_text)
 
         # ── Quick-reply: Leaderboard (no AI needed) ───────────────────────
-        if intent == "leaderboard_monthly":
-            entries = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
-            md = _format_leaderboard_markdown(entries, "📊 本月跑量排行榜")
-            sid = generate_req_id("stream")
-            await client.reply_stream(frame, sid, md, finish=True)
-            return
+        if msgtype == "text" and not inline_data:
+            if intent == "leaderboard_monthly":
+                entries = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
+                md = _format_leaderboard_markdown(entries, "📊 本月跑量排行榜")
+                sid = generate_req_id("stream")
+                await client.reply_stream(frame, sid, md, finish=True)
+                return
 
-        if intent == "leaderboard_weekly":
-            entries = await asyncio.to_thread(_fetch_weekly_leaderboard, 10)
-            md = _format_leaderboard_markdown(entries, "📊 本周跑量排行榜")
-            sid = generate_req_id("stream")
-            await client.reply_stream(frame, sid, md, finish=True)
-            return
+            if intent == "leaderboard_weekly":
+                entries = await asyncio.to_thread(_fetch_weekly_leaderboard, 10)
+                md = _format_leaderboard_markdown(entries, "📊 本周跑量排行榜")
+                sid = generate_req_id("stream")
+                await client.reply_stream(frame, sid, md, finish=True)
+                return
 
         # ── Stream setup ────────────────────────────────────────────────────
         stream_id = generate_req_id("stream")
@@ -610,12 +695,12 @@ async def _process_chat_message(frame, client: WSClient):
             quoted_context = f"【用户引用了之前的消息】：\n\"{quoted_text}\"\n\n"
 
         prompt = (
-            f"{context_str}\n\n"
             f"{quoted_context}"
-            f"用户说：{content}\n\n"
+            f"用户当前的输入是：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
             f"- 控制在80-120个中文字以内（包括标点和emoji），简洁但把话说完整\n"
             f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
+            f"- 如果用户发送了图片，请结合图片内容进行调侃或鼓励\n"
             f"- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半\n"
             f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据\n"
             f"- 用1-2个emoji\n"
@@ -624,19 +709,51 @@ async def _process_chat_message(frame, client: WSClient):
             f"- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'"
         )
 
+        # ── Build Gemini Contents with History ────────────────────────────
+        history = await asyncio.to_thread(_fetch_chat_history, wecom_user_id, uid, 10)
+        
+        gemini_contents = []
+        for msg in history:
+            # We only send text history to save context limit and complexity
+            gemini_contents.append({
+                "role": msg["role"],
+                "parts": [{"text": msg["content"]}]
+            })
+            
+        # Add current message
+        current_parts = []
+        if inline_data:
+            current_parts.append({"inlineData": inline_data})
+        current_parts.append({"text": prompt})
+        
+        gemini_contents.append({
+            "role": "user",
+            "parts": current_parts
+        })
+
         # ── Call Gemini ───────────────────────────────────────────────────
         # For Gemini 2.5 Flash (thinking model), maxOutputTokens includes
         # BOTH thinking tokens AND response tokens. We need:
         #   - Low thinking budget (casual chat, not complex reasoning)
         #   - Enough total tokens for thinking + full reply
         result = await asyncio.to_thread(
-            _gemini_generate, prompt,
-            temperature=0.7, max_tokens=1024, response_json=False,
-            thinking_budget=128
+            _gemini_generate, 
+            prompt=None, # use contents_obj instead
+            temperature=0.7, 
+            max_tokens=1024, 
+            response_json=False,
+            thinking_budget=128,
+            contents_obj=gemini_contents,
+            system_instruction=context_str
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers
         reply_text = reply_text.replace("**", "")
+
+        # Save bot reply to history
+        asyncio.create_task(asyncio.to_thread(
+            _save_chat_message, wecom_user_id, uid, "model", reply_text
+        ))
 
         # ── Safety truncation (WeCom text limit is 2048 bytes) ─────────────
         MAX_BYTES = 2000  # Leave margin below 2048
@@ -685,16 +802,32 @@ async def _bot_loop():
 
     # Register message handler
     async def on_text(frame):
-        print(f"[wecom_bot] >>> Message from={frame.body.get('from')}")
+        print(f"[wecom_bot] >>> Text Message from={frame.body.get('from')}")
         try:
-            await _process_chat_message(frame, client)
+            await _process_chat_message(frame, client, msgtype="text")
         except Exception as e:
-            print(f"[wecom_bot] Error in handler: {e}")
+            print(f"[wecom_bot] Error in text handler: {e}")
             import traceback
             traceback.print_exc()
+            
+    async def on_image(frame):
+        print(f"[wecom_bot] >>> Image Message from={frame.body.get('from')}")
+        try:
+            await _process_chat_message(frame, client, msgtype="image")
+        except Exception as e:
+            print(f"[wecom_bot] Error in image handler: {e}")
+            
+    async def on_mixed(frame):
+        print(f"[wecom_bot] >>> Mixed Message from={frame.body.get('from')}")
+        try:
+            await _process_chat_message(frame, client, msgtype="mixed")
+        except Exception as e:
+            print(f"[wecom_bot] Error in mixed handler: {e}")
 
     client.on("message.text", on_text)
-    print("[wecom_bot] Handler registered.")
+    client.on("message.image", on_image)
+    client.on("message.mixed", on_mixed)
+    print("[wecom_bot] Handlers registered.")
 
     # Initial connect
     print("[wecom_bot] Connecting...")
