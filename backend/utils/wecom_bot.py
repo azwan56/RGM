@@ -108,6 +108,40 @@ def _find_mentioned_users(content: str) -> list:
     return mentioned
 
 
+def _extract_quoted_text(frame_body: dict) -> str:
+    """
+    Extract text content from a WeCom quoted message.
+    WeCom sends quoted messages in frame.body.quote with various formats:
+      - Simple text: {"msgtype": "text", "text": {"content": "..."}}
+      - Mixed:       {"msgtype": "mixed", "mixed": {"msg_item": [...]}}
+    Returns the extracted text or empty string.
+    """
+    quote = frame_body.get("quote")
+    if not quote:
+        return ""
+
+    msgtype = quote.get("msgtype", "")
+
+    if msgtype == "text":
+        return (quote.get("text", {}).get("content", "") or "").strip()
+
+    if msgtype == "mixed":
+        items = quote.get("mixed", {}).get("msg_item", [])
+        texts = []
+        for item in items:
+            if item.get("msgtype") == "text":
+                t = (item.get("text", {}).get("content", "") or "").strip()
+                if t:
+                    texts.append(t)
+        return " ".join(texts)
+
+    # Fallback: try to find any text content in the quote dict
+    if "text" in quote:
+        return (quote.get("text", {}).get("content", "") or "").strip()
+
+    return ""
+
+
 def _detect_month_query(content: str):
     """
     Check if the user is asking about a specific month.
@@ -333,7 +367,12 @@ async def _process_chat_message(frame, client: WSClient):
         content = frame.body.get("text", {}).get("content", "").strip()
         wecom_user_id = frame.body.get("from", {}).get("userid", "")
 
-        print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}'")
+        # ── Extract quoted message context ────────────────────────────────
+        quoted_text = _extract_quoted_text(frame.body)
+        if quoted_text:
+            print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}', quoted='{quoted_text[:100]}'")
+        else:
+            print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}'")
 
         # Strip bot @mention prefix.
         # WeCom sends content like "@Bonnie 你好" or "aBonnie 你好" (@ sometimes stripped).
@@ -363,7 +402,12 @@ async def _process_chat_message(frame, client: WSClient):
 
         # ── Identify user ─────────────────────────────────────────────────
         uid, user_data = _resolve_user_by_wecom_id(wecom_user_id)
-        intent = _detect_intent(content)
+
+        # Combine current message + quoted text for intent/keyword detection
+        # This ensures that when a user quotes a previous message to correct
+        # or follow up, the context from the quote is also considered.
+        combined_text = f"{quoted_text} {content}" if quoted_text else content
+        intent = _detect_intent(combined_text)
 
         # ── Quick-reply: Leaderboard (no AI needed) ───────────────────────
         if intent == "leaderboard_monthly":
@@ -477,9 +521,11 @@ async def _process_chat_message(frame, client: WSClient):
                 now = datetime.now()
                 
                 # Check if user is asking about yearly stats
-                year_query = _detect_year_query(content)
+                # Use combined_text (current + quoted) so quoted context
+                # keywords like "今年" are also detected
+                year_query = _detect_year_query(combined_text)
                 # Check if user is asking about a specific month
-                month_query = _detect_month_query(content)
+                month_query = _detect_month_query(combined_text)
                 
                 if year_query:
                     yearly_lb = await asyncio.to_thread(_fetch_yearly_leaderboard, year_query)
@@ -527,7 +573,8 @@ async def _process_chat_message(frame, client: WSClient):
             )
 
         # ── Include data for mentioned users ──────────────────────────────
-        mentioned_users = await asyncio.to_thread(_find_mentioned_users, content)
+        # Use combined_text so names mentioned in quoted messages are also found
+        mentioned_users = await asyncio.to_thread(_find_mentioned_users, combined_text)
         # Filter out the speaker themselves if they were included
         mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid]
         
@@ -557,8 +604,14 @@ async def _process_chat_message(frame, client: WSClient):
                     else:
                         context_str += f"  - 计划: 月目标 {m_this_month}km\n"
 
+        # Build conversation context for AI prompt
+        quoted_context = ""
+        if quoted_text:
+            quoted_context = f"【用户引用了之前的消息】：\n\"{quoted_text}\"\n\n"
+
         prompt = (
             f"{context_str}\n\n"
+            f"{quoted_context}"
             f"用户说：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
             f"- 控制在80-120个中文字以内（包括标点和emoji），简洁但把话说完整\n"
