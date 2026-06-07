@@ -63,6 +63,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
+  const [now] = useState(() => Date.now());
   const [uid, setUid]             = useState<string | null>(null);
   const [email, setEmail]         = useState("");
   const [loading, setLoading]     = useState(true);
@@ -466,7 +467,7 @@ export default function ProfilePage() {
           )}
 
           {races.map((race, idx) => {
-            const days = race.date ? Math.ceil((new Date(race.date).getTime() - Date.now()) / 86400000) : null;
+            const days = race.date ? Math.ceil((new Date(race.date).getTime() - now) / 86400000) : null;
             const isPast = days !== null && days < 0;
             if (isPast) return null;
 

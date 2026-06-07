@@ -147,7 +147,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
             return;
           }
         }
-      } catch (_) {}
+      } catch { /* noop */ }
 
       // — Fetch from backend cache —
       try {
@@ -156,7 +156,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           setFeedback(res.data.feedback);
           setLoading(false);
           // Update session storage
-          try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
+          try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch { /* noop */ }
           return;
         }
       } catch (err) {
@@ -235,7 +235,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
         setErrorStr(res.data.feedback);
       } else {
         setFeedback(res.data.feedback);
-        try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch (_) {}
+        try { sessionStorage.setItem(CACHE_KEY(uid), JSON.stringify({ data: res.data.feedback, ts: Date.now() })); } catch { /* noop */ }
       }
     } catch (err: any) {
       console.error("Sync API error:", err?.message || err);

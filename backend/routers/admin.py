@@ -285,6 +285,8 @@ def test_gemini(request: Request):
         return {"error": "GEMINI_API_KEY not set", "base_url": base_url}
 
     candidates = [
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
         "gemini-2.5-flash",
         "gemini-flash-latest",
         "gemini-2.5-flash-lite",
@@ -346,7 +348,7 @@ def test_proxy(request: Request):
     try:
         body = {
             "secret": proxy_secret,
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.5-flash",
             "contents": [{"parts": [{"text": "说一句鼓励跑者的话，不超过20字"}]}],
             "generationConfig": {"temperature": 0.5, "maxOutputTokens": 100},
             "thinkingConfig": {"thinkingBudget": 1024},
@@ -393,6 +395,14 @@ def strava_rate_limit(request: Request):
     _check_admin(request)
     from utils.strava_rate_limiter import get_rate_limit_status
     return get_rate_limit_status()
+
+
+@router.get("/scheduler-status")
+def scheduler_status(request: Request):
+    """Admin: returns current background scheduler status and job list."""
+    _check_admin(request)
+    from scheduler import get_scheduler_status
+    return get_scheduler_status()
 
 
 # ── Weekly Reports Trigger ───────────────────────────────────────────────────

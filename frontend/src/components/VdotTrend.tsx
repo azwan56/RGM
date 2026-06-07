@@ -175,7 +175,7 @@ export default function VdotTrend({ uid, currentActivityId }: { uid: string; cur
       <div className="relative z-10 border-t border-white/5 pt-4">
         <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-3 font-bold">近期对比</p>
         <div className="grid gap-2">
-          {entries.slice(-3).reverse().map((e, idx) => {
+          {entries.slice(-3).reverse().map((e) => {
             const isCurrent = e.activity_id === currentActivityId;
             return (
               <div

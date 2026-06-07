@@ -71,7 +71,22 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const cred = await signInWithPopup(auth, provider);
+      // For Google sign-in, check creation time to detect new users
+      const creationTime = cred.user.metadata.creationTime;
+      const isNewUser = creationTime && (Date.now() - new Date(creationTime).getTime() < 30000);
+      if (isNewUser && cred.user.email) {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        fetch(`${backendUrl}/api/auth/welcome-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid: cred.user.uid,
+            email: cred.user.email,
+            display_name: cred.user.displayName || undefined,
+          }),
+        }).catch(() => {});
+      }
       handleSuccess();
     } catch (e: any) {
       if (e.code !== "auth/popup-closed-by-user") {
@@ -91,7 +106,18 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
     setLoading(true);
     try {
       if (isRegister) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        // Fire-and-forget: send welcome email for new registrations
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        fetch(`${backendUrl}/api/auth/welcome-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid: cred.user.uid,
+            email: cred.user.email,
+            display_name: cred.user.displayName || undefined,
+          }),
+        }).catch(() => {}); // non-blocking, ignore errors
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }

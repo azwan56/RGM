@@ -5,7 +5,7 @@ require('dotenv').config();
 
 // 初始化 Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
 // 读取你手动创建的思想矿石 — 使用 __dirname 确保路径正确
 const canovaKnowledge = fs.readFileSync(path.join(__dirname, 'canova_raw.md'), 'utf8');

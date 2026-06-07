@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import axios from "@/lib/apiClient";
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
+  ComposedChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 
@@ -26,7 +26,7 @@ export default function TrendChart({ uid, initialData }: { uid: string; initialD
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
         const res = await axios.post(`${backendUrl}/api/science/monthly-trend`, { uid, months: 6 });
         setData(res.data.data || []);
-      } catch (_) {}
+      } catch { /* noop */ }
       setLoading(false);
     };
     fetch();

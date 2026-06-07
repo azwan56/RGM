@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "@/lib/apiClient";
 
 interface Challenge {
@@ -47,7 +47,7 @@ export default function ChallengeCard({ challenge, uid }: { challenge: Challenge
   const isEnded = challenge.status === "ended";
   const isUpcoming = challenge.status === "upcoming";
 
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboard = useCallback(async () => {
     setLbLoading(true);
     try {
       const res = await axios.get(`${backendUrl}/api/team/challenge/${challenge.challenge_id}/leaderboard`);
@@ -56,7 +56,7 @@ export default function ChallengeCard({ challenge, uid }: { challenge: Challenge
       if (mine) setMyValue(mine.current_value);
     } catch { /* noop */ }
     setLbLoading(false);
-  };
+  }, [backendUrl, challenge.challenge_id, uid]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -81,7 +81,7 @@ export default function ChallengeCard({ challenge, uid }: { challenge: Challenge
 
   useEffect(() => {
     if (expanded) fetchLeaderboard();
-  }, [expanded]);
+  }, [expanded, fetchLeaderboard]);
 
   const progress = myValue != null && challenge.target_value > 0
     ? Math.min(100, (myValue / challenge.target_value) * 100)

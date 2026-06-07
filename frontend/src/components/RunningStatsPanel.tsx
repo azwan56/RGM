@@ -115,7 +115,7 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
           } else if (s.state === "running") {
             setSyncMsg({ text: `同步中… 已保存 ${s.saved} 条 (第 ${s.pages} 页)`, type: "success" });
           }
-        } catch (_) {}
+        } catch { /* noop */ }
       }, 3000);
 
     } catch (err: any) {

@@ -47,7 +47,8 @@ export default function LeaderboardWidget({ currentUid, fixedHeight, initialEntr
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [tab, backendUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, backendUrl, initialEntries]);
 
   // ── Yearly — backend REST (aggregated from leaderboard_yearly collection) ─
   useEffect(() => {

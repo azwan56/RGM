@@ -14,9 +14,9 @@ _gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "").strip()
 
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
-    "gemini-2.5-flash",          # Latest, confirmed working
-    "gemini-2.5-flash-lite",     # Lightweight variant
-    "gemini-flash-latest",       # Alias for latest flash
+    "gemini-3.5-flash",          # Latest, confirmed working
+    "gemini-3.5-flash-lite",     # Lightweight variant
+    "gemini-2.5-flash",          # Fallback
 ]
 _resolved_model = None  # Will be set on first successful call
 _use_proxy = None  # None = auto-detect, True = proxy, False = direct

@@ -11,7 +11,7 @@ app.use(express.json());
 
 // 初始化 Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
 // 读取思想矿石 — 使用 __dirname 确保路径在任何 CWD 下都正确
 const canovaKnowledge = fs.readFileSync(path.join(__dirname, 'canova_raw.md'), 'utf8');

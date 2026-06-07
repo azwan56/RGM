@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 
 const MONTHS_CN = ["1月","2月","3月","4月","5月","6月",
                    "7月","8月","9月","10月","11月","12月"];
@@ -104,11 +104,7 @@ export default function GoalSettingForm() {
     setMonthlyTargets(prev => prev.map((v, i) => (i === idx ? n : v)));
   };
 
-  // Apply same value to all remaining months (from current month onward)
-  const applyToRemaining = (fromIdx: number, val: number) => {
-    const nowMonth = new Date().getMonth(); // 0-based
-    setMonthlyTargets(prev => prev.map((v, i) => (i >= Math.max(fromIdx, nowMonth) ? val : v)));
-  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

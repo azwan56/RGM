@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
 load_dotenv()
 
@@ -9,7 +10,28 @@ from routers import auth, sync, coach, science, profile
 from routers import admin as admin_router
 from middleware.auth import FirebaseAuthMiddleware
 
-app = FastAPI(title="Running Community Manager API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        from scheduler import start_scheduler
+        start_scheduler()
+        print("[startup] Background scheduler started")
+    except Exception as e:
+        print(f"[startup] Scheduler failed to start: {e}")
+
+    try:
+        from utils.wecom_bot import start_wecom_bot_async
+        await start_wecom_bot_async()
+        print("[startup] WeCom bot started")
+    except Exception as e:
+        print(f"[startup] WeCom bot failed to start: {e}")
+
+    yield
+    # Shutdown (nothing needed)
+
+app = FastAPI(title="Running Community Manager API", lifespan=lifespan)
 
 # Firebase auth middleware — validates Bearer tokens on protected routes
 app.add_middleware(FirebaseAuthMiddleware)
@@ -51,30 +73,6 @@ try:
     app.include_router(team.router, prefix="/api/team", tags=["team"])
 except ImportError:
     pass
-
-
-# ── Startup: launch background scheduler ─────────────────────────────────────
-
-@app.on_event("startup")
-def on_startup():
-    """Start the APScheduler background scheduler."""
-    try:
-        from scheduler import start_scheduler
-        start_scheduler()
-        print("[startup] Background scheduler started")
-    except Exception as e:
-        print(f"[startup] Scheduler failed to start: {e}")
-
-
-@app.on_event("startup")
-async def on_startup_async():
-    """Start the WeCom bot in FastAPI's event loop."""
-    try:
-        from utils.wecom_bot import start_wecom_bot_async
-        await start_wecom_bot_async()
-        print("[startup] WeCom bot started")
-    except Exception as e:
-        print(f"[startup] WeCom bot failed to start: {e}")
 
 
 @app.get("/")

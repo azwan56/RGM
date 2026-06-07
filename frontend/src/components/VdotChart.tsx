@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import {
-  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
+  Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Line, ComposedChart, ReferenceLine
 } from "recharts";
 
@@ -30,7 +30,28 @@ const formatPace = (m_s: number) => {
 };
 
 export default function VdotChart({ data }: Props) {
-  
+
+  const chartData = useMemo(() => {
+    if (!data || data.error || !data.scatter || !data.regression_line) return [];
+    // We need to merge scatter data and the regression line for ComposedChart
+    const combined = data.scatter.map(p => ({
+      hrr: p.hrr,
+      scatter_gap: p.gap,
+      line_gap: p.hrr >= data.regression_line.x[0] && p.hrr <= data.regression_line.x[1] 
+        ? data.regression_line.y[0] + 
+          (p.hrr - data.regression_line.x[0]) * 
+          (data.regression_line.y[1] - data.regression_line.y[0]) / 
+          (data.regression_line.x[1] - data.regression_line.x[0])
+        : null
+    }));
+    return combined.sort((a, b) => a.hrr - b.hrr);
+  }, [data]);
+
+  // Find min and max for Y axis pacing
+  const minGap = data?.scatter ? Math.min(...data.scatter.map(d => d.gap)) : 0;
+  const _maxGap = data?.scatter ? Math.max(...data.scatter.map(d => d.gap)) : 0;
+  const minPace = Math.max(1, minGap - 0.5); // padding
+
   // Guard: data may be an error response
   if (!data || data.error || !data.scatter || !data.regression_line) {
     const msg = data?.error || "数据不足，无法计算跑力值。";
@@ -57,27 +78,6 @@ export default function VdotChart({ data }: Props) {
        </div>
     );
   }
-  
-  const chartData = useMemo(() => {
-    // We need to merge scatter data and the regression line for ComposedChart
-    const combined = data.scatter.map(p => ({
-      hrr: p.hrr,
-      scatter_gap: p.gap,
-      line_gap: p.hrr >= data.regression_line.x[0] && p.hrr <= data.regression_line.x[1] 
-        ? data.regression_line.y[0] + 
-          (p.hrr - data.regression_line.x[0]) * 
-          (data.regression_line.y[1] - data.regression_line.y[0]) / 
-          (data.regression_line.x[1] - data.regression_line.x[0])
-        : null
-    }));
-    return combined.sort((a, b) => a.hrr - b.hrr);
-  }, [data]);
-
-
-  // Find min and max for Y axis pacing
-  const minGap = Math.min(...data.scatter.map(d => d.gap));
-  const maxGap = Math.max(...data.scatter.map(d => d.gap));
-  const minPace = Math.max(1, minGap - 0.5); // padding
 
   return (
     <div className="bg-gradient-to-br from-white/5 to-black/20 border border-white/10 rounded-2xl p-6 h-full flex flex-col relative overflow-hidden">
