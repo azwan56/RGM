@@ -789,18 +789,17 @@ def _get_wecom_access_token():
     return None
 
 def send_bonnie_message(chatid: str, content: str) -> bool:
-    """Send a message using AppChat, User message, or fallback webhook."""
+    """Send a message via WeCom Application Message API.
+    Used as fallback when the WS SDK reply_func is not available (Callback API path).
+    Requires WECOM_CORP_ID + WECOM_CALLBACK_SECRET for access token.
+    """
     token = _get_wecom_access_token()
     if not token:
-        # Fallback to group webhook if no corp secret
-        webhook_url = os.getenv("WECOM_GROUP_WEBHOOK_URL")
-        if webhook_url:
-            resp = requests.post(webhook_url, json={"msgtype": "markdown", "markdown": {"content": content}})
-            return resp.ok
+        print("[wecom_bot] Cannot send message: no access token (WECOM_CORP_ID/WECOM_CALLBACK_SECRET not set)")
         return False
         
-    url2 = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
-    payload2 = {
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+    payload = {
         "touser": chatid,
         "msgtype": "markdown",
         "agentid": int(os.getenv("WECOM_AGENT_ID", "1000002")),
@@ -808,8 +807,8 @@ def send_bonnie_message(chatid: str, content: str) -> bool:
             "content": content
         }
     }
-    resp2 = requests.post(url2, json=payload2)
-    return resp2.ok and resp2.json().get("errcode") == 0
+    resp = requests.post(url, json=payload)
+    return resp.ok and resp.json().get("errcode") == 0
 
 def handle_wecom_message(msg_data: dict):
     """Entry point for incoming messages from WeCom Callback API."""

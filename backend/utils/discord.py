@@ -420,18 +420,6 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         resp = requests.post(webhook_url, json=payload, timeout=10)
         if resp.status_code == 200 and resp.json().get("errcode") == 0:
             print(f"[wecom] Notification sent for activity {act_doc.get('activity_id')}")
-
-            # ── Bonnie follow-up (delayed, non-blocking) ──────────────────
-            try:
-                import threading
-                threading.Thread(
-                    target=_send_bonnie_followup,
-                    args=(webhook_url, act_doc, user_data, uid, wecom_tip),
-                    daemon=True,
-                ).start()
-            except Exception as _bonnie_err:
-                print(f"[wecom] Bonnie follow-up scheduling failed: {_bonnie_err}")
-
             return True
         else:
             print(f"[wecom] Failed to send: {resp.status_code} {resp.text[:200]}")
@@ -442,81 +430,6 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         return False
 
 
-def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid: str, coach_tip: str):
-    """Send Bonnie's fun follow-up comment a few seconds after the coach notification.
-    Uses the Bonnie bot's send_message API so it appears as Bonnie, not the webhook robot.
-    Falls back to webhook if the bot is not connected.
-    """
-    import time, random
-    delay = random.randint(5, 10)
-    time.sleep(delay)
-
-    try:
-        from routers.coach import _gemini_generate
-
-        runner_name = (
-            user_data.get("display_name") or
-            user_data.get("strava_name") or
-            "跑者"
-        )
-        dist = act_doc.get("distance_km", 0)
-        pace = act_doc.get("avg_pace", "—")
-        act_type = act_doc.get("activity_type", "run")
-        run_name = act_doc.get("name", "跑步")
-        gear_name = act_doc.get("gear_name", "")
-        gear_str = f"，装备：{gear_name}" if gear_name else ""
-
-        prompt = (
-            "你是 Bonnie，跑团群聊吉祥物「团宠」。你的性格：\n"
-            "- 接地气、诙谐幽默、偶尔毒舌但不伤人\n"
-            "- 喜欢用夸张比喻和跑圈黑话调侃队友\n"
-            "- 善意激将法，制造竞争氛围\n"
-            "- 嘴上不饶人，内心温暖\n"
-            "\n"
-            f"刚才 AI 教练已经对 {runner_name} 的活动做了专业点评。\n"
-            f"活动信息：{run_name}，{dist}km，配速{pace}/km，类型：{act_type}{gear_str}\n"
-            f"AI教练点评摘要：{coach_tip[:200] if coach_tip else '（无）'}\n"
-            "\n"
-            "请用 Bonnie 的口吻写一段简短的跟评（1-3句话，50字以内），要和AI教练的风格形成反差：\n"
-            "- AI教练说得很专业，你就接一句接地气的\n"
-            "- 可以调侃、可以起哄、可以激将，但要好玩\n"
-            "- 别重复AI教练的分析内容\n"
-            "- 带1-2个emoji\n"
-            "- 直接输出评论文字，不要加引号或前缀"
-        )
-
-        result = _gemini_generate(prompt, max_tokens=200, response_json=False, thinking_budget=0)
-        comment_text = result.get("text", "").strip() if isinstance(result, dict) else str(result).strip()
-        if not comment_text or len(comment_text) < 3:
-            return
-
-        # Try to send via Bonnie bot (appears as Bonnie with her avatar)
-        sent_via_bot = False
-        try:
-            from utils.wecom_bot import send_bonnie_message
-            chatid = os.environ.get("WECOM_GROUP_CHATID", "").strip()
-            if chatid:
-                sent_via_bot = send_bonnie_message(chatid, comment_text)
-                if sent_via_bot:
-                    print(f"[wecom] Bonnie follow-up sent via bot ({delay}s delay)")
-        except Exception as bot_err:
-            print(f"[wecom] Bonnie bot send failed, falling back to webhook: {bot_err}")
-
-        # Fallback: send via webhook (will show as webhook robot name, not Bonnie)
-        if not sent_via_bot:
-            md = f"🐾 **Bonnie**：{comment_text}"
-            payload = {
-                "msgtype": "markdown",
-                "markdown": {"content": md},
-            }
-            resp = requests.post(webhook_url, json=payload, timeout=10)
-            if resp.status_code == 200 and resp.json().get("errcode") == 0:
-                print(f"[wecom] Bonnie follow-up sent via webhook fallback ({delay}s delay)")
-            else:
-                print(f"[wecom] Bonnie follow-up failed: {resp.status_code}")
-
-    except Exception as e:
-        print(f"[wecom] Bonnie follow-up error: {e}")
 
 
 # ── Rest Day Reminder ─────────────────────────────────────────────────────────
