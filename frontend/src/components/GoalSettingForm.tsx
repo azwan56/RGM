@@ -143,13 +143,13 @@ export default function GoalSettingForm() {
   const totalAnnual = monthlyTargets.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="bg-white/5 border border-white/10 backdrop-blur-md p-6 rounded-3xl w-full">
-      <h2 className="text-xl font-bold text-white mb-6">训练目标设置</h2>
+    <div className="bg-white/5 border border-white/10 backdrop-blur-md p-5 rounded-3xl w-full">
+      <h2 className="text-lg font-bold text-white mb-4">训练目标设置</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4">
 
         {/* ── Tracking Period ─────────────────────────────────────────── */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">统计周期</h3>
           <div className="flex gap-4">
             {(["weekly", "monthly"] as const).map(p => (
@@ -164,7 +164,7 @@ export default function GoalSettingForm() {
         </div>
 
         {/* ── Distance Goal ────────────────────────────────────────────── */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">跑量目标</h3>
 
           <div>
@@ -234,7 +234,7 @@ export default function GoalSettingForm() {
         </div>
 
         {/* ── Physiology ───────────────────────────────────────────────── */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">生理参数</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -268,7 +268,7 @@ export default function GoalSettingForm() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 rounded-xl text-sm font-bold transition-all border border-white/10 mt-6 disabled:opacity-50"
+          className="w-full py-2.5 rounded-xl text-sm font-bold transition-all border border-white/10 mt-4 disabled:opacity-50"
           style={{ background: loading ? "rgba(255,255,255,0.08)" : "#FC4C02" }}
         >
           {loading ? "保存中..." : "💾 保存设置"}

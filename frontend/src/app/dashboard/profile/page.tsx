@@ -256,7 +256,7 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-[#0a0a0a] text-white pt-20 md:pt-24 px-4 md:px-6 pb-16 md:pb-20 relative">
       <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-orange-600/10 blur-[160px] pointer-events-none" />
 
-      <main className="max-w-5xl mx-auto space-y-8 relative z-10">
+      <main className="max-w-5xl mx-auto space-y-5 relative z-10">
         {/* Header */}
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
@@ -282,7 +282,7 @@ export default function ProfilePage() {
         </header>
 
         {/* Content area */}
-        <div className="space-y-8">
+        <div className="space-y-5">
 
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
         <RunnerPersona persona={persona!} loading={personaLoading || !persona} displayName={form.display_name} stravaName={stravaName} />
@@ -291,7 +291,7 @@ export default function ProfilePage() {
         <GoalSettingForm />
 
         {/* ── Account Info ─────────────────────────────────────────────────── */}
-        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>账号信息</SectionTitle>
           <div className="grid sm:grid-cols-2 gap-4">
             <Field label="自定义头像" hint="留空则默认使用 Strava 头像">
@@ -384,7 +384,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Runner Profile ────────────────────────────────────────────────── */}
-        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>跑者信息</SectionTitle>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Field label="出生日期">
@@ -444,7 +444,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Race Plan ─────────────────────────────────────────────────────────── */}
-        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <div className="flex items-center justify-between">
             <SectionTitle>🏁 比赛计划</SectionTitle>
             {races.length < 3 && (
@@ -555,7 +555,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Personal Bests ────────────────────────────────────────────────── */}
-        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           {/* Header row with import button */}
           <div className="flex items-center justify-between">
             <SectionTitle>个人最佳成绩 (PB)</SectionTitle>
@@ -649,7 +649,7 @@ export default function ProfilePage() {
         <TeamManagementWidget uid={uid!} />
 
         {/* ── Notification Webhooks ───────────────────────────────────────────── */}
-        <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
+        <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>🔔 跑步通知</SectionTitle>
           <p className="text-zinc-500 text-xs">
             每次 Strava 同步到新跑步记录后，自动发送通知到你的频道。

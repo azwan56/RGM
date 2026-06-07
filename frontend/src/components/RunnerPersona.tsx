@@ -86,12 +86,12 @@ export default function RunnerPersona({ persona, loading, displayName, stravaNam
         style={{ background: accentColor, opacity: 0.07 }}
       />
 
-      <div className="relative z-10 p-6 md:p-8">
-        <div className="flex flex-col sm:flex-row items-center gap-6">
+      <div className="relative z-10 p-5 md:p-6">
+        <div className="flex flex-col sm:flex-row items-center gap-5">
 
           {/* ── Avatar ──────────────────────────────────────────────────── */}
           <div
-            className="relative w-28 h-28 rounded-full overflow-hidden flex-shrink-0"
+            className="relative w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden flex-shrink-0"
             style={{ boxShadow: `0 0 30px ${accentColor}25`, outline: `2px solid ${accentColor}40`, outlineOffset: '2px' }}
           >
             <Image
@@ -123,18 +123,18 @@ export default function RunnerPersona({ persona, loading, displayName, stravaNam
             {(persona.vdot || persona.monthly_km !== undefined) && (
               <div className="flex gap-3 justify-center sm:justify-start">
                 {persona.vdot && (
-                  <div className="rounded-2xl px-5 py-3 text-center"
+                  <div className="rounded-2xl px-4 py-2.5 text-center"
                     style={{ background: `${accentColor}12`, border: `1px solid ${accentColor}25` }}>
                     <p className="text-zinc-500 text-[10px] uppercase tracking-wider">当前跑力</p>
-                    <p className="text-2xl font-black text-white mt-0.5">{persona.vdot.toFixed(1)}</p>
+                    <p className="text-xl font-black text-white mt-0.5">{persona.vdot.toFixed(1)}</p>
                     <p className="text-zinc-600 text-[10px]">VDOT</p>
                   </div>
                 )}
                 {persona.monthly_km !== undefined && (
-                  <div className="rounded-2xl px-5 py-3 text-center"
+                  <div className="rounded-2xl px-4 py-2.5 text-center"
                     style={{ background: `${accentColor}12`, border: `1px solid ${accentColor}25` }}>
                     <p className="text-zinc-500 text-[10px] uppercase tracking-wider">本月跑量</p>
-                    <p className="text-2xl font-black text-white mt-0.5">{persona.monthly_km}</p>
+                    <p className="text-xl font-black text-white mt-0.5">{persona.monthly_km}</p>
                     <p className="text-zinc-600 text-[10px]">km</p>
                   </div>
                 )}
