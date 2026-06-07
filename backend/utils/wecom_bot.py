@@ -808,7 +808,8 @@ def handle_wecom_message(msg_data: dict):
     
     # Check if we should reply (sliding window logic)
     keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
-    should_reply = any(k in content for k in keywords) or random.random() < 0.1 # 10% chance
+    content_lower = content.lower()
+    should_reply = any(k in content_lower for k in keywords) or random.random() < 0.1 # 10% chance
     
     if should_reply:
         # Use asyncio to run the async generate_reply in background
