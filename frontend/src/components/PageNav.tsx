@@ -59,6 +59,18 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    key: "manual",
+    href: "/manual/user_manual.html",
+    label: "手册",
+    color: "emerald",
+    isExternal: true,
+    icon: (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
 ];
 
 const COLOR_MAP: Record<string, { bg: string; bgActive: string; border: string; borderActive: string; text: string; textActive: string }> = {
@@ -87,7 +99,13 @@ export default function PageNav() {
         return (
           <button
             key={item.key}
-            onClick={() => router.push(item.href)}
+            onClick={() => {
+              if ((item as any).isExternal) {
+                window.open(item.href, "_blank");
+              } else {
+                router.push(item.href);
+              }
+            }}
             className={`flex-shrink-0 flex flex-col items-center gap-0.5 group transition-all ${
               active ? "scale-105" : "hover:scale-105"
             }`}
