@@ -396,13 +396,54 @@ def strava_rate_limit(request: Request):
     from utils.strava_rate_limiter import get_rate_limit_status
     return get_rate_limit_status()
 
-
 @router.get("/scheduler-status")
 def scheduler_status(request: Request):
     """Admin: returns current background scheduler status and job list."""
     _check_admin(request)
     from scheduler import get_scheduler_status
     return get_scheduler_status()
+
+
+@router.get("/bonnie-status")
+def bonnie_status(request: Request):
+    """Admin: returns Bonnie WS Bot connection status and diagnostics."""
+    _check_admin(request)
+    import os as _os
+
+    bot_id = _os.getenv("WECOM_BOT_ID", "").strip()
+    bot_secret = _os.getenv("WECOM_BOT_SECRET", "").strip()
+
+    diag = {
+        "bot_id_set": bool(bot_id),
+        "bot_id_preview": bot_id[:8] + "..." if len(bot_id) > 8 else bot_id or "(empty)",
+        "bot_secret_set": bool(bot_secret),
+        "sdk_installed": False,
+        "ws_task_status": "unknown",
+        "ws_client_connected": False,
+    }
+
+    try:
+        from wecom_aibot_sdk import WSClient
+        diag["sdk_installed"] = True
+    except ImportError:
+        diag["sdk_installed"] = False
+
+    try:
+        from utils.wecom_bot import _bot_task, _client
+        if _bot_task is None:
+            diag["ws_task_status"] = "not_started"
+        elif _bot_task.done():
+            exc = _bot_task.exception() if not _bot_task.cancelled() else None
+            diag["ws_task_status"] = f"finished (error: {exc})" if exc else "finished"
+        else:
+            diag["ws_task_status"] = "running"
+
+        if _client is not None:
+            diag["ws_client_connected"] = getattr(_client, "is_connected", False)
+    except Exception as e:
+        diag["ws_task_status"] = f"error: {e}"
+
+    return diag
 
 
 # ── Weekly Reports Trigger ───────────────────────────────────────────────────
