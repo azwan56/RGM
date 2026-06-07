@@ -24,6 +24,7 @@ _PUBLIC_PATHS = frozenset({
 _PUBLIC_PREFIXES = (
     "/api/webhook/",
     "/api/admin/",
+    "/api/wecom/",
 )
 
 # ── Token verification cache (saves 20-100ms per request) ────────────────────
