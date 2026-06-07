@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGM User Manual</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366F1;
+      --secondary: #EC4899;
+      --bg: #F3F4F6;
+      --card-bg: #FFFFFF;
+      --text-main: #1F2937;
+      --text-muted: #4B5563;
+      --accent: #10B981;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Poppins', sans-serif;
+    }
+
+    .header {
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: white;
+      padding: 80px 20px;
+      text-align: center;
+      border-bottom-left-radius: 48px;
+      border-bottom-right-radius: 48px;
+      margin-bottom: 60px;
+      box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2);
+    }
+
+    .header h1 {
+      font-size: 3.5rem;
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: -1px;
+    }
+
+    .header p {
+      font-size: 1.25rem;
+      opacity: 0.95;
+      max-width: 650px;
+      margin: 20px auto 0;
+      font-weight: 500;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: 2.2rem;
+      margin-bottom: 40px;
+      color: var(--text-main);
+      position: relative;
+    }
+
+    .section-title::after {
+      content: '';
+      display: block;
+      width: 60px;
+      height: 4px;
+      background: var(--primary);
+      margin: 15px auto 0;
+      border-radius: 2px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 30px;
+      margin-bottom: 80px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.04);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 6px;
+      background: linear-gradient(90deg, var(--primary), var(--secondary));
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 20px 45px rgba(0,0,0,0.08);
+    }
+
+    .card:hover::before {
+      opacity: 1;
+    }
+
+    .card img {
+      width: 100%;
+      border-radius: 16px;
+      margin-bottom: 24px;
+      object-fit: cover;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+
+    .card h3 {
+      margin-top: 0;
+      font-size: 1.5rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .card p {
+      color: var(--text-muted);
+    }
+
+    .card ul {
+      padding-left: 20px;
+      margin-bottom: 0;
+    }
+
+    .card li {
+      margin-bottom: 12px;
+      color: var(--text-muted);
+    }
+
+    .card li strong {
+      color: var(--text-main);
+    }
+
+    .icon {
+      font-size: 1.8rem;
+    }
+
+    .faq-section {
+      background: white;
+      border-radius: 32px;
+      padding: 50px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.04);
+      margin-bottom: 80px;
+    }
+
+    .faq-item {
+      margin-bottom: 30px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid #F3F4F6;
+    }
+
+    .faq-item:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .faq-q {
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: var(--text-main);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .faq-q::before {
+      content: 'Q';
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 1.4rem;
+    }
+
+    .faq-a {
+      color: var(--text-muted);
+      padding-left: 32px;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 40px 20px 60px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .footer span {
+      color: var(--primary);
+    }
+
+    /* List styling for steps */
+    .step-list {
+      list-style: none;
+      padding: 0;
+      margin-top: 20px;
+    }
+
+    .step-list li {
+      position: relative;
+      padding-left: 44px;
+      margin-bottom: 16px;
+      color: var(--text-muted);
+    }
+
+    .step-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 2px;
+      background: var(--accent);
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: bold;
+      box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+    }
+    
+    .notice {
+      background: #EEF2FF;
+      color: #4338CA;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      margin-top: 16px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>RGM 跑团管理平台</h1>
+    <p>欢迎使用 RGM (Running Community Manager)！本手册将帮助您快速了解和使用平台的核心功能。</p>
+  </div>
+
+  <div class="container">
+    
+    <!-- 1. 快速入门 -->
+    <h2 class="section-title">快速入门</h2>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="icon">👋</span> 1.1 账号注册与登录</h3>
+        <p>轻松开启您的 RGM 之旅：</p>
+        <ul class="step-list">
+          <li>访问平台主页。</li>
+          <li>点击 <strong>"登录 / 注册"</strong>。</li>
+          <li><strong>邮箱登录/注册</strong>：推荐方式。输入邮箱和密码，首次输入即为注册。</li>
+          <li><strong>Google 账号登录</strong>：点击 Google 图标进行一键登录（需科学上网）。</li>
+        </ul>
+        <div class="notice">注意：登录前请确保勾选“同意个人数据声明”。</div>
+      </div>
+      
+      <div class="card">
+        <h3><span class="icon">🔗</span> 1.2 连接 Strava</h3>
+        <p>使平台能够获取您的跑步数据，您必须连接 Strava 账号：</p>
+        <ul class="step-list">
+          <li>登录后，在首页或 Dashboard 点击 <strong>"连接 Strava"</strong>。</li>
+          <li>系统将跳转至 Strava 授权页面。</li>
+          <li>登录您的 Strava 账号并同意授权。</li>
+          <li>授权成功后，您将返回 RGM 平台，并看到“Strava 已连接 ✓”。</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 全局导航 -->
+    <h2 class="section-title">全局导航</h2>
+    <div class="card" style="margin-bottom: 60px;">
+      <h3><span class="icon">🧭</span> 顶部导航栏 (页面标签)</h3>
+      <p>在登录后的每一个页面右上角，您都能看到快捷的全局导航入口，它们分别是：</p>
+      <ul>
+        <li><strong>🏠 首页 (Dashboard)：</strong>返回主控制台，查看本周/本月跑量、体能趋势、排行榜等关键数据。</li>
+        <li><strong>⚡ 深度分析 (Analysis)：</strong>进入长周期数据分析页面，查看体能趋势 (CTL/ATL/TSB) 和跑力诊断 (VDOT)。</li>
+        <li><strong>💡 AI教练 (Coach)：</strong>获取基于 Renato Canova 理论的 AI 个性化训练分析和本周重点建议。</li>
+        <li><strong>👥 我的团队 (Team)：</strong>管理或查看您所在的跑团、团队总跑量以及团队内部排行榜。</li>
+        <li><strong>👤 我的档案 (Profile)：</strong>设置您的个人信息、目标跑量、比赛计划以及系统通知 (Webhook)。</li>
+      </ul>
+    </div>
+
+    <!-- 2. 核心功能介绍 -->
+    <h2 class="section-title">核心功能介绍</h2>
+    <div class="grid">
+      
+      <div class="card">
+        <img src="./images/rgm_dashboard.png" alt="Dashboard UI" onerror="this.style.display='none'">
+        <h3><span class="icon">📊</span> Dashboard (数据面板)</h3>
+        <p>您的个人控制台，集中展示了您最近的跑步状态：</p>
+        <ul>
+          <li><strong>Running Stats：</strong>展示本月/本周的跑量、配速、时长等关键数据。</li>
+          <li><strong>Fitness Chart (体能趋势)：</strong>可视化您的体能增长与疲劳程度。</li>
+          <li><strong>Leaderboard (排行榜)：</strong>展示您在跑团中的排名。</li>
+          <li><strong>活动列表：</strong>按月份查看所有的跑步记录历史。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <img src="./images/rgm_profile.png" alt="Profile UI" onerror="this.style.display='none'">
+        <h3><span class="icon">👤</span> 跑者档案与目标设定</h3>
+        <p>点击导航栏进入 Profile 页面，定制您的个人档案：</p>
+        <ul>
+          <li><strong>基础信息与头像：</strong>填写基本信息并上传自定义头像。</li>
+          <li><strong>比赛计划：</strong>添加即将参加的比赛，获取 AI 针对性建议。</li>
+          <li><strong>个人最佳成绩 (PB)：</strong>支持从 Strava 一键导入。</li>
+          <li><strong>目标设定：</strong>按周/月设定跑量目标，填写心率数据。</li>
+          <li><strong>通知配置：</strong>配置 Discord 或 企业微信机器人自动通知。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <img src="./images/rgm_ai_coach.png" alt="AI Coach UI" onerror="this.style.display='none'">
+        <h3><span class="icon">🤖</span> AI 教练 (Coach)</h3>
+        <p>以 Renato Canova 训练哲学为核心的专业指导：</p>
+        <ul>
+          <li>点击“同步数据并刷新分析”获取最新建议。</li>
+          <li><strong>体能差距评估：</strong>直观了解当前能力与目标的差距。</li>
+          <li><strong>核心训练原则：</strong>量身定制的训练指导。</li>
+          <li><strong>本周重点建议：</strong>告诉您本周该怎么练。</li>
+          <li><strong>周期性训练规划：</strong>科学划分储备期、关键期等阶段。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <img src="./images/rgm_analysis.png" alt="Analysis UI" onerror="this.style.display='none'">
+        <h3><span class="icon">📈</span> 深度分析 (Analysis)</h3>
+        <p>提供长周期的深度数据挖掘功能：</p>
+        <ul>
+          <li><strong>体能趋势 (CTL/ATL/TSB)：</strong>科学追踪长期体能负荷。</li>
+          <li><strong>跑力诊断 (VDOT)：</strong>基于近期成绩预测各项能力指标。</li>
+          <li><strong>月度统计与目标回顾：</strong>全景展现全年跑量完成情况。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <img src="./images/rgm_leaderboard.png" alt="Leaderboard UI" onerror="this.style.display='none'">
+        <h3><span class="icon">🏆</span> 团队功能与排行榜</h3>
+        <p>与跑友们组建团队，共同挑战极限：</p>
+        <ul>
+          <li><strong>创建团队：</strong>输入名称生成您的 6 位专属邀请码。</li>
+          <li><strong>加入团队：</strong>使用跑友分享的邀请码快速加入。</li>
+          <li><strong>团队面板：</strong>查看团队总跑量、成员列表及内部排行榜（按跑量或目标完成率排序）。</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><span class="icon">💬</span> 企业微信与双 AI 助手</h3>
+        <p>绑定企业微信，解锁 RGM 跑团专属的双重 AI 互动体验：</p>
+        <ul>
+          <li><strong>👨‍🏫 Canova 教练 (严肃专业)：</strong>你的专属数据分析师。负责定时在群内推送深度跑力分析与训练规划，严格贯彻 Renato Canova 的科学训练哲学。</li>
+          <li><strong>🐶 团宠 Bonnie (活泼搞怪)：</strong>跑团的群聊吉祥物与气氛组！在群内触发关键词（如“PB”、“偷懒”、“受伤”、“配速”等）时，Bonnie 会立刻和你互动。她诙谐幽默，虽然偶尔毒舌但总能为你加油打气。同时她也精通数据，能直接在群内查询你或团队的本周/本月跑量排名。</li>
+          <li><strong>如何开启互动：</strong>在企业微信群中发送 <strong>“绑定 你的RGM注册邮箱”</strong> 即可无缝接入。</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <!-- 3. 常见问题 (FAQ) -->
+    <h2 class="section-title">常见问题 (FAQ)</h2>
+    <div class="faq-section">
+      
+      <div class="faq-item">
+        <div class="faq-q">为什么我的跑步数据没有更新？</div>
+        <div class="faq-a">数据会在后台每天自动同步。如果您刚刚完成跑步，可以前往“AI 教练”页面点击“同步数据并刷新分析”来手动触发即时同步。</div>
+      </div>
+      
+      <div class="faq-item">
+        <div class="faq-q">如何获取 Discord / 企业微信 Webhook？</div>
+        <div class="faq-a">
+          <strong>Discord:</strong> 在频道设置 -> 整合 -> Webhook 中创建并复制 URL。<br><br>
+          <strong>企业微信:</strong> 在群聊 -> 添加群机器人中创建并复制 Webhook URL。<br><br>
+          获取后，将 URL 填入您的 Profile 页面并保存即可。
+        </div>
+      </div>
+      
+      <div class="faq-item">
+        <div class="faq-q">排行榜是如何排序的？</div>
+        <div class="faq-a">默认按照“目标完成率”排序（即：当前跑量 / 设定的目标跑量）。您也可以在排行榜页面右上角切换为按“跑量 (km)”绝对值排序。</div>
+      </div>
+      
+      <div class="faq-item">
+        <div class="faq-q">AI 教练提到的“专项能力”是什么？</div>
+        <div class="faq-a">AI 教练遵循 Renato Canova 的训练理念，强调“专项性（Specificity）”。即训练配速和环境应当无限接近您目标比赛的要求（如全马配速的95%-105%）。单纯的慢跑（LSD）只是基础，专项能力才是比赛的关键。</div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      RGM 平台 - <span>记录. 竞争. 进化.</span>
+    </div>
+
+  </div>
+
+</body>
+</html>
