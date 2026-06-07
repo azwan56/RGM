@@ -873,7 +873,6 @@ async def _bot_main_loop():
         "secret": secret,
     })
 
-    @_client.on("message.text")
     async def on_text(frame):
         content = frame.body.get("text", {}).get("content", "").strip()
         sender = frame.body.get("sender", "")
@@ -887,12 +886,16 @@ async def _bot_main_loop():
         
         if should_reply:
             async def ws_reply(text):
-                await _client.reply_text(frame, text)
+                # SDK has no reply_text(); use reply_stream with finish=True for single-shot reply
+                stream_id = generate_req_id("stream")
+                await _client.reply_stream(frame, stream_id, text, finish=True)
             
             logger.info("[wecom_bot] Dispatching _generate_reply via WS")
             asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
         else:
             logger.info("[wecom_bot] WS Not replying (no keyword match)")
+
+    _client.on("message.text", on_text)
 
     # Connect and keep alive with auto-reconnect
     while True:
