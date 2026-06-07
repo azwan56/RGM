@@ -21,8 +21,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[startup] Scheduler failed to start: {e}")
 
-    # Removed WS bot
-
+    try:
+        from utils.wecom_bot import start_wecom_bot
+        start_wecom_bot()
+        print("[startup] WeCom WS interactive bot initialized")
+    except Exception as e:
+        print(f"[startup] WeCom WS bot failed to start: {e}")
     yield
     # Shutdown (nothing needed)
 

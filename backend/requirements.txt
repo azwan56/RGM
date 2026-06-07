@@ -13,3 +13,4 @@ pytest-asyncio
 httpx
 Pillow
 pycryptodome
+wecom-aibot-sdk-python

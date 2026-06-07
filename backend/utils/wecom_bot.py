@@ -24,9 +24,16 @@ import requests
 from firebase_config import db
 from routers.coach import _gemini_generate, _fetch_recent_activities, _build_runs_str, _fetch_leaderboard
 
+try:
+    from wecom_aibot_sdk import WSClient, generate_req_id
+except ImportError:
+    WSClient = None
+    generate_req_id = None
+
 logger = logging.getLogger("wecom_bot")
 
-
+_client = None
+_bot_task = None
 
 # ── User identity mapping ────────────────────────────────────────────────────
 
@@ -404,24 +411,30 @@ def _detect_intent(content: str) -> str:
 
 # ── Message processing ────────────────────────────────────────────────────────
 
-async def _generate_reply(content: str, wecom_user_id: str, chatid: str):
+async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_func=None):
     """Core logic to process incoming text and generate a response."""
     quoted_text = ''
     inline_data = None
     media_type = 'text'
+    
+    async def _send_msg(msg: str):
+        if reply_func:
+            await reply_func(msg)
+        else:
+            await asyncio.to_thread(send_bonnie_message, chatid, msg)
 
     try:
         # ── Bind command ──────────────────────────────────────────────────
         if content.startswith("绑定 ") or content.startswith("绑定"):
             bind_code = content.replace("绑定", "").strip()
             if not bind_code:
-                send_bonnie_message(chatid, "请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**")
+                await _send_msg("请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**")
                 return
             name = _bind_user(wecom_user_id, bind_code)
             if name:
-                send_bonnie_message(chatid, f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉")
+                await _send_msg(f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉")
             else:
-                send_bonnie_message(chatid, "❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？")
+                await _send_msg("❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？")
             return
 
         # ── Identify user ─────────────────────────────────────────────────
@@ -441,13 +454,13 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str):
             if intent == "leaderboard_monthly":
                 entries = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
                 md = _format_leaderboard_markdown(entries, "📊 本月跑量排行榜")
-                send_bonnie_message(chatid, md)
+                await _send_msg(md)
                 return
 
             if intent == "leaderboard_weekly":
                 entries = await asyncio.to_thread(_fetch_weekly_leaderboard, 10)
                 md = _format_leaderboard_markdown(entries, "📊 本周跑量排行榜")
-                send_bonnie_message(chatid, md)
+                await _send_msg(md)
                 return
 
         # ── Build AI context ──────────────────────────────────────────────
@@ -735,13 +748,15 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str):
                     break
             reply_text = truncated
 
-        # ── Send reply ───────────────────────────────────────────
-        send_bonnie_message(chatid, reply_text)
-
+        # ── Send reply ───────────────────────────────────────────        # 3) Dispatch to WeCom API
+        await _send_msg(reply_text)
+        
     except Exception as e:
-        logger.error(f"[wecom_bot] Error processing message: {e}")
+        print(f"[wecom_bot] Error generating reply: {e}")
+        import traceback
+        traceback.print_exc()
         try:
-            send_bonnie_message(chatid, "💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！")
+            await _send_msg("💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！")
         except Exception:
             pass
 
@@ -836,4 +851,80 @@ def handle_wecom_message(msg_data: dict):
             print(f"[wecom_bot]   ✗ Failed to dispatch _generate_reply: {e}")
     else:
         print(f"[wecom_bot]   ✗ Not replying (no keyword match, random miss)")
+
+
+# ── WS SDK Bot lifecycle ──────────────────────────────────────────────────────
+
+async def _bot_main_loop():
+    global _client
+    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
+    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
+
+    if not bot_id or not secret:
+        logger.info("[wecom_bot] WECOM_BOT_ID or WECOM_BOT_SECRET not set. WS Bot is disabled.")
+        return
+
+    if not WSClient:
+        logger.error("[wecom_bot] wecom_aibot_sdk not installed. WS Bot cannot start.")
+        return
+
+    logger.info(f"[wecom_bot] Initializing WS bot {bot_id}...")
+    _client = WSClient({
+        "bot_id": bot_id,
+        "secret": secret,
+    })
+
+    @_client.on("message.text")
+    async def on_text(frame):
+        content = frame.body.get("text", {}).get("content", "").strip()
+        sender = frame.body.get("sender", "")
+        logger.info(f"[wecom_bot] WS Received text message from {sender}")
+        
+        # Check if we should reply (sliding window logic)
+        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
+        content_lower = content.lower()
+        matched_keywords = [k for k in keywords if k in content_lower]
+        should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
+        
+        if should_reply:
+            async def ws_reply(text):
+                await _client.reply_text(frame, text)
+            
+            logger.info("[wecom_bot] Dispatching _generate_reply via WS")
+            asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
+        else:
+            logger.info("[wecom_bot] WS Not replying (no keyword match)")
+
+    # Connect and keep alive with auto-reconnect
+    while True:
+        try:
+            logger.info("[wecom_bot] Connecting to WeCom WebSocket...")
+            await _client.connect_async()
+
+            while _client.is_connected:
+                await asyncio.sleep(5)
+
+        except asyncio.CancelledError:
+            logger.info("[wecom_bot] Bot task cancelled.")
+            break
+        except Exception as e:
+            logger.error(f"[wecom_bot] Connection error: {e}")
+            await asyncio.sleep(5)
+
+
+def start_wecom_bot():
+    """Start the WeCom bot background task if not already running."""
+    global _bot_task
+    if _bot_task is None or _bot_task.done():
+        bot_id = os.getenv("WECOM_BOT_ID", "").strip()
+        secret = os.getenv("WECOM_BOT_SECRET", "").strip()
+        if bot_id and secret:
+            try:
+                loop = asyncio.get_running_loop()
+                _bot_task = loop.create_task(_bot_main_loop())
+                logger.info("[wecom_bot] WS Background task scheduled.")
+            except Exception as e:
+                logger.error(f"[wecom_bot] Could not schedule WS task: {e}")
+        else:
+            logger.info("[wecom_bot] Skipped starting WS bot: WECOM_BOT_ID/SECRET missing.")
 
