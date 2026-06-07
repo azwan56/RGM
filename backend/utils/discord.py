@@ -109,6 +109,9 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict, is_wecom:
             f"跑者：{name}，训练目标：{goal or '未设定'}，{pb_str or '无PB记录'}",
             f"本次跑步：{dist}km，配速 {pace}/km，时长 {duration}",
         ]
+        gear_name = act_doc.get("gear_name")
+        if gear_name:
+            context_lines.append(f"跑步装备（跑鞋）：{gear_name}")
         if hr:
             context_lines.append(f"心率：{hr}bpm，步频：{cadence}spm，爬升：{elev}m")
         if vdot and float(vdot) > 20:
@@ -460,6 +463,8 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
         pace = act_doc.get("avg_pace", "—")
         act_type = act_doc.get("activity_type", "run")
         run_name = act_doc.get("name", "跑步")
+        gear_name = act_doc.get("gear_name", "")
+        gear_str = f"，装备：{gear_name}" if gear_name else ""
 
         prompt = (
             "你是 Bonnie，跑团群聊吉祥物「团宠」。你的性格：\n"
@@ -469,7 +474,7 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
             "- 嘴上不饶人，内心温暖\n"
             "\n"
             f"刚才 AI 教练已经对 {runner_name} 的活动做了专业点评。\n"
-            f"活动信息：{run_name}，{dist}km，配速{pace}/km，类型：{act_type}\n"
+            f"活动信息：{run_name}，{dist}km，配速{pace}/km，类型：{act_type}{gear_str}\n"
             f"AI教练点评摘要：{coach_tip[:200] if coach_tip else '（无）'}\n"
             "\n"
             "请用 Bonnie 的口吻写一段简短的跟评（1-3句话，50字以内），要和AI教练的风格形成反差：\n"
@@ -488,8 +493,8 @@ def _send_bonnie_followup(webhook_url: str, act_doc: dict, user_data: dict, uid:
         # Try to send via Bonnie bot (appears as Bonnie with her avatar)
         sent_via_bot = False
         try:
-            from utils.wecom_bot import send_bonnie_message, _last_chatid
-            chatid = os.environ.get("WECOM_GROUP_CHATID", "").strip() or (_last_chatid or "")
+            from utils.wecom_bot import send_bonnie_message
+            chatid = os.environ.get("WECOM_GROUP_CHATID", "").strip()
             if chatid:
                 sent_via_bot = send_bonnie_message(chatid, comment_text)
                 if sent_via_bot:

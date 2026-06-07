@@ -332,7 +332,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             return
 
         # Save activity using the same format as sync.py
-        from routers.sync import _build_act_doc, get_period_start, _update_yearly_leaderboard, CROSS_TRAINING_LABELS
+        from routers.sync import _build_act_doc, get_period_start, _update_yearly_leaderboard, CROSS_TRAINING_LABELS, _get_gear_details
 
         # Determine period
         goal_snap = user_ref.collection("goals").document("current").get()
@@ -341,7 +341,8 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
             period = goal_snap.to_dict().get("period", "monthly")
         period_start = get_period_start(period)
 
-        act_doc = _build_act_doc(act, period, period_start)
+        gear_info = _get_gear_details(act.get("gear_id", ""), access_token, {})
+        act_doc = _build_act_doc(act, period, period_start, gear_info)
         act_ref = user_ref.collection("activities").document(str(activity_id))
         act_ref.set(act_doc, merge=True)
 

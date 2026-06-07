@@ -1,28 +1,31 @@
 """
-WeCom AI Bot (Interactive, Long-Connection)
-Uses wecom-aibot-sdk-python to maintain a WebSocket connection and handle incoming messages.
+WeCom Bot — Passive Message Listener & Active Replier
+
+Receives group messages via the WeCom callback API (see routers/wecom_callback.py),
+decides whether Bonnie should reply, and sends replies via the WeCom Application
+Message API (or webhook fallback).
 
 Capabilities:
   - Personal data queries (individual running stats, recent activities)
   - Team/group leaderboard queries (monthly & weekly rankings)
   - AI coaching responses via Gemini (reuses coach.py)
   - User identity binding (WeCom UserId → RGM uid)
+  - Passive keyword/intent-based "chime-in" for group chats
 """
 
 import os
 import asyncio
 import logging
-import base64
 import time
+import random
+import threading
 from datetime import datetime
-from wecom_aibot_sdk import WSClient, generate_req_id
+import requests
 from firebase_config import db
 from routers.coach import _gemini_generate, _fetch_recent_activities, _build_runs_str, _fetch_leaderboard
 
 logger = logging.getLogger("wecom_bot")
 
-_client = None
-_bot_task = None
 
 
 # ── User identity mapping ────────────────────────────────────────────────────
@@ -401,92 +404,24 @@ def _detect_intent(content: str) -> str:
 
 # ── Message processing ────────────────────────────────────────────────────────
 
-async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
+async def _generate_reply(content: str, wecom_user_id: str, chatid: str):
     """Core logic to process incoming text and generate a response."""
-    global _last_chatid
+    quoted_text = ''
+    inline_data = None
+    media_type = 'text'
+
     try:
-        content = ""
-        inline_data = None
-        wecom_user_id = frame.body.get("from", {}).get("userid", "")
-        media_type = None
-
-        # Auto-capture group chatid for send_bonnie_message()
-        msg_chatid = frame.body.get("chatid", "")
-        if msg_chatid:
-            _last_chatid = msg_chatid
-
-        if msgtype == "text":
-            content = frame.body.get("text", {}).get("content", "").strip()
-        elif msgtype == "image":
-            img_obj = frame.body.get("image", {})
-            url = img_obj.get("url")
-            aes_key = img_obj.get("aeskey")
-            if url:
-                try:
-                    file_bytes, ext = await client.download_file(url, aes_key)
-                    b64 = base64.b64encode(file_bytes).decode("utf-8")
-                    inline_data = {
-                        "mimeType": "image/jpeg",
-                        "data": b64
-                    }
-                    media_type = "image"
-                    content = "[用户发送了一张图片]"
-                except Exception as e:
-                    logger.error(f"[wecom_bot] Image download failed: {e}")
-                    content = "[接收到图片，但无法下载]"
-        elif msgtype == "mixed":
-            # For mixed messages with image and text
-            items = frame.body.get("mixed", {}).get("msg_item", [])
-            for item in items:
-                if item.get("msgtype") == "text":
-                    content += (item.get("text", {}).get("content", "") or "").strip() + " "
-                elif item.get("msgtype") == "image":
-                    url = item.get("image", {}).get("url")
-                    aes_key = item.get("image", {}).get("aeskey")
-                    if url and not inline_data: # only take first image for now
-                        try:
-                            file_bytes, ext = await client.download_file(url, aes_key)
-                            b64 = base64.b64encode(file_bytes).decode("utf-8")
-                            inline_data = {
-                                "mimeType": "image/jpeg",
-                                "data": b64
-                            }
-                            media_type = "image"
-                        except Exception as e:
-                            logger.error(f"[wecom_bot] Mixed image download failed: {e}")
-            content = content.strip()
-        
-        # ── Extract quoted message context ────────────────────────────────
-        quoted_text = _extract_quoted_text(frame.body)
-        if quoted_text:
-            print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}', quoted='{quoted_text[:100]}'")
-        else:
-            print(f"[wecom_bot] sender={wecom_user_id}, raw_content='{content}'")
-
-        # Strip bot @mention prefix.
-        # WeCom sends content like "@Bonnie 你好" or "aBonnie 你好" (@ sometimes stripped).
-        # Remove any leading mention of the bot name.
-        import re
-        bot_name = "Bonnie"  # Must match the bot's display name in WeCom
-        content = re.sub(rf'^[@a]?{re.escape(bot_name)}\s*', '', content, flags=re.IGNORECASE).strip()
-
-        if not content:
-            return
-
         # ── Bind command ──────────────────────────────────────────────────
         if content.startswith("绑定 ") or content.startswith("绑定"):
             bind_code = content.replace("绑定", "").strip()
             if not bind_code:
-                sid = generate_req_id("stream")
-                await client.reply_stream(frame, sid, "请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**", finish=True)
+                send_bonnie_message(chatid, "请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**")
                 return
             name = _bind_user(wecom_user_id, bind_code)
             if name:
-                sid = generate_req_id("stream")
-                await client.reply_stream(frame, sid, f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉", finish=True)
+                send_bonnie_message(chatid, f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉")
             else:
-                sid = generate_req_id("stream")
-                await client.reply_stream(frame, sid, "❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？", finish=True)
+                send_bonnie_message(chatid, "❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？")
             return
 
         # ── Identify user ─────────────────────────────────────────────────
@@ -502,28 +437,25 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
         intent = _detect_intent(combined_text)
 
         # ── Quick-reply: Leaderboard (no AI needed) ───────────────────────
-        if msgtype == "text" and not inline_data:
+        if not inline_data:
             if intent == "leaderboard_monthly":
                 entries = await asyncio.to_thread(_fetch_monthly_leaderboard, 10)
                 md = _format_leaderboard_markdown(entries, "📊 本月跑量排行榜")
-                sid = generate_req_id("stream")
-                await client.reply_stream(frame, sid, md, finish=True)
+                send_bonnie_message(chatid, md)
                 return
 
             if intent == "leaderboard_weekly":
                 entries = await asyncio.to_thread(_fetch_weekly_leaderboard, 10)
                 md = _format_leaderboard_markdown(entries, "📊 本周跑量排行榜")
-                sid = generate_req_id("stream")
-                await client.reply_stream(frame, sid, md, finish=True)
+                send_bonnie_message(chatid, md)
                 return
-
-        # ── Stream setup ────────────────────────────────────────────────────
-        stream_id = generate_req_id("stream")
 
         # ── Build AI context ──────────────────────────────────────────────
         runner_name = user_data.get("display_name", "跑者") if user_data else "跑者"
         gender_val = user_data.get("gender", "") if user_data else ""
-        gender_str = "女" if gender_val == "female" else ("男" if gender_val == "male" else "未知")
+        gender_str = "女" if gender_val == "female" else ("男" if gender_val == "未知" else "未知")
+        if gender_val == "male":
+            gender_str = "男"
         
         context_str = (
             "你是 RGM 跑团的群聊吉祥物，外号「团宠」。\n"
@@ -614,8 +546,6 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
                 now = datetime.now()
                 
                 # Check if user is asking about yearly stats
-                # Use combined_text (current + quoted) so quoted context
-                # keywords like "今年" are also detected
                 year_query = _detect_year_query(combined_text)
                 # Check if user is asking about a specific month
                 month_query = _detect_month_query(combined_text)
@@ -666,9 +596,7 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
             )
 
         # ── Include data for mentioned users ──────────────────────────────
-        # Use combined_text so names mentioned in quoted messages are also found
         mentioned_users = await asyncio.to_thread(_find_mentioned_users, combined_text)
-        # Filter out the speaker themselves if they were included
         mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid]
         
         if mentioned_users:
@@ -773,10 +701,6 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
         })
 
         # ── Call Gemini ───────────────────────────────────────────────────
-        # For Gemini 2.5 Flash (thinking model), maxOutputTokens includes
-        # BOTH thinking tokens AND response tokens. We need:
-        #   - Low thinking budget (casual chat, not complex reasoning)
-        #   - Enough total tokens for thinking + full reply
         result = await asyncio.to_thread(
             _gemini_generate, 
             prompt=None, # use contents_obj instead
@@ -811,122 +735,90 @@ async def _process_chat_message(frame, client: WSClient, msgtype: str = "text"):
                     break
             reply_text = truncated
 
-        # ── Stream reply finish ───────────────────────────────────────────
-        await client.reply_stream(frame, stream_id, reply_text, finish=True)
+        # ── Send reply ───────────────────────────────────────────
+        send_bonnie_message(chatid, reply_text)
 
     except Exception as e:
         logger.error(f"[wecom_bot] Error processing message: {e}")
         try:
-            sid = generate_req_id("stream")
-            await client.reply_stream(frame, sid, "💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！", finish=True)
+            send_bonnie_message(chatid, "💀 不好意思，我刚撞墙了…脑子暂时转不动，等我补个胶再来！")
         except Exception:
             pass
 
-
 # ── Bot lifecycle ─────────────────────────────────────────────────────────────
 
-_bot_client = None
-_bot_task = None
-_bot_loop_ref = None  # Reference to the asyncio event loop the bot runs on
-_last_chatid = None   # Auto-captured from last incoming message
+_token_cache = {"access_token": None, "expires_at": 0}
+_token_lock = threading.Lock()
 
+def _get_wecom_access_token():
+    corpid = os.getenv("WECOM_CORP_ID")
+    corpsecret = os.getenv("WECOM_CALLBACK_SECRET")
+    if not corpid or not corpsecret:
+        return None
+        
+    with _token_lock:
+        if _token_cache["access_token"] and time.time() < _token_cache["expires_at"]:
+            return _token_cache["access_token"]
+            
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corpid}&corpsecret={corpsecret}"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.ok:
+                data = resp.json()
+                if data.get("errcode") == 0:
+                    _token_cache["access_token"] = data["access_token"]
+                    _token_cache["expires_at"] = time.time() + data["expires_in"] - 60
+                    return _token_cache["access_token"]
+        except Exception:
+            pass
+    return None
 
 def send_bonnie_message(chatid: str, content: str) -> bool:
-    """Thread-safe function to send a message as Bonnie via the AI Bot SDK.
-    
-    Can be called from any thread (including daemon threads).
-    Returns True on success, False on failure.
-    """
-    global _bot_client, _bot_loop_ref
-    if not _bot_client or not _bot_loop_ref or not chatid:
+    """Send a message using AppChat, User message, or fallback webhook."""
+    token = _get_wecom_access_token()
+    if not token:
+        # Fallback to group webhook if no corp secret
+        webhook_url = os.getenv("WECOM_GROUP_WEBHOOK_URL")
+        if webhook_url:
+            resp = requests.post(webhook_url, json={"msgtype": "markdown", "markdown": {"content": content}})
+            return resp.ok
         return False
-    try:
-        if not _bot_client.is_connected:
-            print("[wecom_bot] send_bonnie_message: bot not connected")
-            return False
         
-        from wecom_aibot_sdk.types.message import SendMarkdownMsgBody
-        body = SendMarkdownMsgBody(markdown={"content": content})
-        future = asyncio.run_coroutine_threadsafe(
-            _bot_client.send_message(chatid, body), _bot_loop_ref
-        )
-        future.result(timeout=15)
-        return True
-    except Exception as e:
-        print(f"[wecom_bot] send_bonnie_message failed: {e}")
-        return False
+    url2 = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+    payload2 = {
+        "touser": chatid,
+        "msgtype": "markdown",
+        "agentid": int(os.getenv("WECOM_AGENT_ID", "1000002")),
+        "markdown": {
+            "content": content
+        }
+    }
+    resp2 = requests.post(url2, json=payload2)
+    return resp2.ok and resp2.json().get("errcode") == 0
 
-
-async def _bot_loop():
-    """Main bot loop — runs as a background asyncio task in FastAPI's event loop."""
-    global _bot_client, _bot_loop_ref
-    _bot_loop_ref = asyncio.get_running_loop()
-    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
-    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
-
-    print(f"[wecom_bot] Creating WSClient with bot_id={bot_id[:8]}...")
-    client = WSClient({
-        "bot_id": bot_id,
-        "secret": secret,
-    })
-    _bot_client = client
-
-    # Register message handler
-    async def on_text(frame):
-        print(f"[wecom_bot] >>> Text Message from={frame.body.get('from')}")
-        try:
-            await _process_chat_message(frame, client, msgtype="text")
-        except Exception as e:
-            print(f"[wecom_bot] Error in text handler: {e}")
-            import traceback
-            traceback.print_exc()
-            
-    async def on_image(frame):
-        print(f"[wecom_bot] >>> Image Message from={frame.body.get('from')}")
-        try:
-            await _process_chat_message(frame, client, msgtype="image")
-        except Exception as e:
-            print(f"[wecom_bot] Error in image handler: {e}")
-            
-    async def on_mixed(frame):
-        print(f"[wecom_bot] >>> Mixed Message from={frame.body.get('from')}")
-        try:
-            await _process_chat_message(frame, client, msgtype="mixed")
-        except Exception as e:
-            print(f"[wecom_bot] Error in mixed handler: {e}")
-
-    client.on("message.text", on_text)
-    client.on("message.image", on_image)
-    client.on("message.mixed", on_mixed)
-    print("[wecom_bot] Handlers registered.")
-
-    # Initial connect
-    print("[wecom_bot] Connecting...")
-    await client.connect_async()
-    print("[wecom_bot] Connected! Monitoring connection health...")
-
-    # Health check loop
-    while True:
-        await asyncio.sleep(15)
-        if not client.is_connected:
-            print("[wecom_bot] Connection lost, waiting 15s before reconnect...")
-            await asyncio.sleep(15)
-            try:
-                await client.connect_async()
-                print("[wecom_bot] Reconnected!")
-            except Exception as e:
-                print(f"[wecom_bot] Reconnect failed: {e}")
-
-
-async def start_wecom_bot_async():
-    """Start the bot as a background task in the current event loop."""
-    global _bot_task
-    bot_id = os.getenv("WECOM_BOT_ID", "").strip()
-    secret = os.getenv("WECOM_BOT_SECRET", "").strip()
-    if not bot_id or not secret:
-        print("[wecom_bot] Skipped: credentials not set.")
+def handle_wecom_message(msg_data: dict):
+    """Entry point for incoming messages from WeCom Callback API."""
+    msg_type = msg_data.get("MsgType", "")
+    if msg_type != "text":
         return
-
-    _bot_task = asyncio.create_task(_bot_loop())
-    print("[wecom_bot] Background task created in FastAPI event loop.")
-
+        
+    content = msg_data.get("Content", "").strip()
+    from_user = msg_data.get("FromUserName", "")
+    chatid = from_user # Default reply to user
+    
+    # Check if we should reply (sliding window logic)
+    keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
+    should_reply = any(k in content for k in keywords) or random.random() < 0.1 # 10% chance
+    
+    if should_reply:
+        # Use asyncio to run the async generate_reply in background
+        loop = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+            
+        if loop and loop.is_running():
+            loop.create_task(_generate_reply(content, from_user, chatid))
+        else:
+            asyncio.run(_generate_reply(content, from_user, chatid))

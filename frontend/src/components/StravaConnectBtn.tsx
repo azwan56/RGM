@@ -7,7 +7,7 @@ export default function StravaConnectBtn() {
     const handleConnect = () => {
         const clientId = process.env.NEXT_PUBLIC_STRAVA_CLIENT_ID;
         const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL}/auth/strava-callback`;
-        const url = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&approval_prompt=force&scope=activity:read_all`;
+        const url = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&approval_prompt=force&scope=activity:read_all,profile:read_all`;
         window.location.href = url;
     };
 

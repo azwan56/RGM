@@ -63,6 +63,33 @@ def pace_str(distance_m: float, moving_time_s: int) -> str:
     return f"{mins}:{secs:02d}"
 
 
+def _get_gear_details(gear_id: str, access_token: str, gear_cache: dict) -> dict:
+    if not gear_id:
+        return {}
+    if gear_id in gear_cache:
+        return gear_cache[gear_id]
+    
+    resp = strava_request(
+        "GET",
+        f"{STRAVA_API_BASE}/gear/{gear_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    if resp.ok:
+        data = resp.json()
+        gear_info = {
+            "gear_id": gear_id,
+            "gear_name": data.get("name", ""),
+            "gear_brand": data.get("brand_name", ""),
+            "gear_model": data.get("model_name", ""),
+            "gear_distance": data.get("distance", 0)
+        }
+        gear_cache[gear_id] = gear_info
+        return gear_info
+    
+    gear_cache[gear_id] = {}
+    return {}
+
 def format_duration(seconds: int) -> str:
     """Returns duration as H:MM:SS or M:SS."""
     h = seconds // 3600
@@ -73,14 +100,14 @@ def format_duration(seconds: int) -> str:
     return f"{m}:{s:02d}"
 
 
-def _build_act_doc(act: dict, period: str, period_start) -> dict:
+def _build_act_doc(act: dict, period: str, period_start, gear_info: dict = None) -> dict:
     """Convert a raw Strava activity dict to a Firestore document dict."""
     dist = act.get("distance", 0)
     t    = act.get("moving_time", 0)
     avg_hr = act.get("average_heartrate") or 0
     strava_type = act.get("type", "Run")
     is_run = (strava_type == "Run")
-    return {
+    doc = {
         "activity_id":          act["id"],
         "name":                 act.get("name", "Run"),
         "start_date_local":     act.get("start_date_local", ""),
@@ -107,7 +134,11 @@ def _build_act_doc(act: dict, period: str, period_start) -> dict:
         "utc_offset":           act.get("utc_offset", 0),      # seconds, e.g. 28800 = UTC+8
         "period":               period,
         "period_start":         period_start.isoformat(),
+        "gear_id":              act.get("gear_id", ""),
     }
+    if gear_info:
+        doc.update(gear_info)
+    return doc
 
 
 # ── Trigger sync (current period) ────────────────────────────────────────────
@@ -183,6 +214,7 @@ def sync_user_data(req: SyncRequest):
     hr_count       = 0
     run_count      = 0
     batch          = db.batch()
+    gear_cache     = {}
 
     for act in activities:
         act_type = act.get("type", "")
@@ -192,7 +224,8 @@ def sync_user_data(req: SyncRequest):
 
         # Save all syncable activities to Firestore
         act_ref = user_ref.collection("activities").document(str(act["id"]))
-        batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
+        gear_info = _get_gear_details(act.get("gear_id", ""), access_token, gear_cache)
+        batch.set(act_ref, _build_act_doc(act, period, period_start, gear_info), merge=True)
 
         # Only count runs for leaderboard stats
         if not is_run:
@@ -363,6 +396,7 @@ def _run_full_sync_bg(uid: str, since_date: str, access_token: str, period: str,
         PER_PAGE    = 200
         page        = 1
         total_saved = 0
+        gear_cache  = {}
 
         while True:
             resp = strava_request(
@@ -388,7 +422,8 @@ def _run_full_sync_bg(uid: str, since_date: str, access_token: str, period: str,
                 if act.get("type", "") not in SYNCABLE_TYPES:
                     continue
                 act_ref = user_ref.collection("activities").document(str(act["id"]))
-                batch.set(act_ref, _build_act_doc(act, period, period_start), merge=True)
+                gear_info = _get_gear_details(act.get("gear_id", ""), access_token, gear_cache)
+                batch.set(act_ref, _build_act_doc(act, period, period_start, gear_info), merge=True)
                 batch_count += 1
                 total_saved += 1
                 if batch_count >= 400:

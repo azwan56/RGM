@@ -21,12 +21,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[startup] Scheduler failed to start: {e}")
 
-    try:
-        from utils.wecom_bot import start_wecom_bot_async
-        await start_wecom_bot_async()
-        print("[startup] WeCom bot started")
-    except Exception as e:
-        print(f"[startup] WeCom bot failed to start: {e}")
+    # Removed WS bot
 
     yield
     # Shutdown (nothing needed)
@@ -52,6 +47,12 @@ app.include_router(coach.router,    prefix="/api/coach",   tags=["coach"])
 app.include_router(science.router,  prefix="/api/science", tags=["science"])
 app.include_router(profile.router,  prefix="/api/profile", tags=["profile"])
 app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
+
+try:
+    from routers import wecom_callback
+    app.include_router(wecom_callback.router, prefix="/api/wecom/callback", tags=["wecom"])
+except ImportError:
+    pass
 
 # Data proxy router — replaces direct browser-to-Firestore reads for GFW users
 try:
