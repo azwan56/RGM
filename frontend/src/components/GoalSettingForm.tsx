@@ -146,7 +146,7 @@ export default function GoalSettingForm() {
     <div className="bg-white/5 border border-white/10 backdrop-blur-md p-5 rounded-3xl w-full">
       <h2 className="text-lg font-bold text-white mb-4">训练目标设置</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
 
         {/* ── Tracking Period ─────────────────────────────────────────── */}
         <div className="space-y-3">
@@ -181,7 +181,7 @@ export default function GoalSettingForm() {
 
           {/* Per-month targets — only show for monthly period */}
           {period === "monthly" && (
-            <div>
+            <div className="sm:col-span-2">
               <button
                 type="button"
                 onClick={() => setShowMonthly(!showMonthly)}
@@ -234,9 +234,9 @@ export default function GoalSettingForm() {
         </div>
 
         {/* ── Physiology ───────────────────────────────────────────────── */}
-        <div className="space-y-3">
+        <div className="space-y-3 sm:col-span-2">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">生理参数</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-zinc-400 text-xs font-medium mb-2">最大心率 (bpm)</label>
               <input
@@ -257,22 +257,24 @@ export default function GoalSettingForm() {
           <p className="text-[10px] text-zinc-500">精确的 TRIMP / 训练状况计算需要此数据</p>
         </div>
 
-        {message && (
-          <div className={`p-3 rounded-xl text-xs font-medium ${
-            message.type === "success" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-          }`}>
-            {message.text}
-          </div>
-        )}
+        <div className="sm:col-span-2">
+          {message && (
+            <div className={`p-3 rounded-xl text-xs font-medium mb-4 ${
+              message.type === "success" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+            }`}>
+              {message.text}
+            </div>
+          )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2.5 rounded-xl text-sm font-bold transition-all border border-white/10 mt-4 disabled:opacity-50"
-          style={{ background: loading ? "rgba(255,255,255,0.08)" : "#FC4C02" }}
-        >
-          {loading ? "保存中..." : "💾 保存设置"}
-        </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 rounded-xl text-sm font-bold transition-all border border-white/10 disabled:opacity-50"
+            style={{ background: loading ? "rgba(255,255,255,0.08)" : "#FC4C02" }}
+          >
+            {loading ? "保存中..." : "💾 保存设置"}
+          </button>
+        </div>
       </form>
     </div>
   );

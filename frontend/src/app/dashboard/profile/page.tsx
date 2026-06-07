@@ -293,7 +293,7 @@ export default function ProfilePage() {
         {/* ── Account Info ─────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>账号信息</SectionTitle>
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <Field label="自定义头像" hint="留空则默认使用 Strava 头像">
               <div className="flex items-center gap-3">
                 {form.custom_avatar_url ? (
@@ -386,7 +386,7 @@ export default function ProfilePage() {
         {/* ── Runner Profile ────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>跑者信息</SectionTitle>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Field label="出生日期">
               <input className={inputCls} type="date" value={form.date_of_birth} onChange={set("date_of_birth")} />
               {form.date_of_birth && (
@@ -415,32 +415,33 @@ export default function ProfilePage() {
             <Field label="体重 (kg)" hint={form.weight_kg ? undefined : "连接 Strava 可自动导入"}>
               <input className={inputCls} type="number" placeholder="70" min={30} max={200} step={0.1} value={form.weight_kg} onChange={set("weight_kg")} />
             </Field>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-4">
             <Field label="跑龄（年）">
               <input className={inputCls} type="number" placeholder="3" min={0} max={50} value={form.years_running} onChange={set("years_running")} />
             </Field>
           </div>
-          <Field label="训练目标">
-            <select className={selectCls} value={form.training_goal} onChange={set("training_goal")}>
-              <option value="">请选择</option>
-              <option value="fitness">保持健康 / 减脂塑形</option>
-              <option value="finish_marathon">完成人生第一场马拉松</option>
-              <option value="sub4">全马 Sub-4:00</option>
-              <option value="sub3_30">全马 Sub-3:30</option>
-              <option value="sub3">全马 Sub-3:00（精英挑战）</option>
-              <option value="ultra">超马 / 越野挑战</option>
-              <option value="pb">持续破 PB</option>
-            </select>
-          </Field>
-          <Field label="跑步简介 / 签名">
-            <textarea
-              className={`${inputCls} resize-none h-20`}
-              placeholder="一句话介绍你的跑步故事..."
-              value={form.bio}
-              onChange={set("bio")}
-            />
-          </Field>
+          
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="训练目标">
+              <select className={selectCls} value={form.training_goal} onChange={set("training_goal")}>
+                <option value="">请选择</option>
+                <option value="fitness">保持健康 / 减脂塑形</option>
+                <option value="finish_marathon">完成人生第一场马拉松</option>
+                <option value="sub4">全马 Sub-4:00</option>
+                <option value="sub3_30">全马 Sub-3:30</option>
+                <option value="sub3">全马 Sub-3:00（精英挑战）</option>
+                <option value="ultra">超马 / 越野挑战</option>
+                <option value="pb">持续破 PB</option>
+              </select>
+            </Field>
+            <Field label="跑步简介 / 签名">
+              <textarea
+                className={`${inputCls} resize-none h-10 py-2`}
+                placeholder="一句话介绍你的跑步故事..."
+                value={form.bio}
+                onChange={set("bio")}
+              />
+            </Field>
+          </div>
         </div>
 
         {/* ── Race Plan ─────────────────────────────────────────────────────────── */}
