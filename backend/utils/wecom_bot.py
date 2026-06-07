@@ -798,18 +798,24 @@ def send_bonnie_message(chatid: str, content: str) -> bool:
 
 def handle_wecom_message(msg_data: dict):
     """Entry point for incoming messages from WeCom Callback API."""
+    print(f"[wecom_bot] ▶ handle_wecom_message called with keys: {list(msg_data.keys())}")
     msg_type = msg_data.get("MsgType", "")
+    print(f"[wecom_bot]   MsgType={msg_type}")
     if msg_type != "text":
+        print(f"[wecom_bot]   ✗ Skipping non-text message (MsgType={msg_type})")
         return
         
     content = msg_data.get("Content", "").strip()
     from_user = msg_data.get("FromUserName", "")
     chatid = from_user # Default reply to user
+    print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}")
     
     # Check if we should reply (sliding window logic)
     keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
     content_lower = content.lower()
-    should_reply = any(k in content_lower for k in keywords) or random.random() < 0.1 # 10% chance
+    matched_keywords = [k for k in keywords if k in content_lower]
+    should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
+    print(f"[wecom_bot]   matched_keywords={matched_keywords}, should_reply={should_reply}")
     
     if should_reply:
         # Use asyncio to run the async generate_reply in background
@@ -818,8 +824,16 @@ def handle_wecom_message(msg_data: dict):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             pass
-            
-        if loop and loop.is_running():
-            loop.create_task(_generate_reply(content, from_user, chatid))
-        else:
-            asyncio.run(_generate_reply(content, from_user, chatid))
+        
+        print(f"[wecom_bot]   loop={'running' if loop and loop.is_running() else 'none'}")
+        try:
+            if loop and loop.is_running():
+                loop.create_task(_generate_reply(content, from_user, chatid))
+            else:
+                asyncio.run(_generate_reply(content, from_user, chatid))
+            print(f"[wecom_bot]   ✓ _generate_reply dispatched")
+        except Exception as e:
+            print(f"[wecom_bot]   ✗ Failed to dispatch _generate_reply: {e}")
+    else:
+        print(f"[wecom_bot]   ✗ Not replying (no keyword match, random miss)")
+

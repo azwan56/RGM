@@ -43,8 +43,10 @@ async def receive_message(
     nonce: str = Query(...)
 ):
     """Receive pushed messages from WeCom."""
+    print(f"[wecom_callback] ▶ POST received, sig={msg_signature[:16]}...")
     try:
         body = await request.body()
+        print(f"[wecom_callback]   body length={len(body)}")
         xml_tree = ET.fromstring(body)
         encrypt = xml_tree.find("Encrypt").text
         
@@ -53,6 +55,7 @@ async def receive_message(
         
         msg_tree = ET.fromstring(decrypted_xml)
         msg_data = {child.tag: child.text for child in msg_tree}
+        print(f"[wecom_callback]   decrypted msg_data keys={list(msg_data.keys())}, MsgType={msg_data.get('MsgType')}, Content={str(msg_data.get('Content', ''))[:60]!r}")
         
         # WeCom expects an immediate acknowledgment (empty string or "success")
         # Process the actual message in the background
@@ -62,5 +65,7 @@ async def receive_message(
         return PlainTextResponse(content="success")
         
     except Exception as e:
-        print(f"[wecom_callback] Message processing failed: {e}")
+        print(f"[wecom_callback] ✗ Message processing failed: {e}")
+        import traceback
+        traceback.print_exc()
         return PlainTextResponse(content="success") # still return success to prevent retries
