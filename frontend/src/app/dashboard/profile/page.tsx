@@ -287,12 +287,6 @@ export default function ProfilePage() {
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
         <RunnerPersona persona={persona!} loading={personaLoading || !persona} displayName={form.display_name} stravaName={stravaName} />
 
-        {/* ── Goal Setting & Team Management ─────────────────────────────────── */}
-        <div className="grid lg:grid-cols-2 gap-5 items-start">
-          <GoalSettingForm />
-          <TeamManagementWidget uid={uid!} />
-        </div>
-
         {/* ── Account Info ─────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
           <SectionTitle>账号信息</SectionTitle>
@@ -445,6 +439,12 @@ export default function ProfilePage() {
               />
             </Field>
           </div>
+        </div>
+
+        {/* ── Goal Setting & Team Management ─────────────────────────────────── */}
+        <div className="grid lg:grid-cols-2 gap-5 items-start">
+          <GoalSettingForm />
+          <TeamManagementWidget uid={uid!} />
         </div>
 
         {/* ── Race Plan ─────────────────────────────────────────────────────────── */}
