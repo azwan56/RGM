@@ -14,6 +14,7 @@ const GoalSettingForm = dynamic(() => import("@/components/GoalSettingForm"), {
   loading: () => <div className="h-48 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
   ssr: false,
 });
+const TeamManagementWidget = dynamic(() => import("@/components/TeamManagementWidget"), { ssr: false });
 
 // ── Helper: seconds ↔ HH:MM:SS ───────────────────────────────────────────────
 function secsToTime(s: number): string {
@@ -643,6 +644,9 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+
+        {/* ── Team Management ─────────────────────────────────────────────────── */}
+        <TeamManagementWidget uid={uid!} />
 
         {/* ── Notification Webhooks ───────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-5">
