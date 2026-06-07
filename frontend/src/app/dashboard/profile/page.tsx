@@ -287,8 +287,11 @@ export default function ProfilePage() {
         {/* ── Persona Card ─────────────────────────────────────────────────── */}
         <RunnerPersona persona={persona!} loading={personaLoading || !persona} displayName={form.display_name} stravaName={stravaName} />
 
-        {/* ── Goal Setting ─────────────────────────────────────────────────── */}
-        <GoalSettingForm />
+        {/* ── Goal Setting & Team Management ─────────────────────────────────── */}
+        <div className="grid lg:grid-cols-2 gap-5 items-start">
+          <GoalSettingForm />
+          <TeamManagementWidget uid={uid!} />
+        </div>
 
         {/* ── Account Info ─────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
@@ -646,8 +649,6 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* ── Team Management ─────────────────────────────────────────────────── */}
-        <TeamManagementWidget uid={uid!} />
 
         {/* ── Notification Webhooks ───────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">

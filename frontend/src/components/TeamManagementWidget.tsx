@@ -90,7 +90,7 @@ export default function TeamManagementWidget({ uid }: { uid: string }) {
   }
 
   return (
-    <div className="bg-white/3 border border-white/8 rounded-3xl p-6 space-y-6">
+    <div className="bg-white/5 border border-white/10 backdrop-blur-md p-5 rounded-3xl w-full h-full flex flex-col space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
           <div className="w-3 h-px bg-zinc-600" />
