@@ -133,11 +133,6 @@ export default function Dashboard() {
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
 
-        {/* Fitness & Form Chart */}
-        {isStravaConnected && user && (
-          <FitnessChart uid={user.uid} />
-        )}
-
         {/* Leaderboard + Activity List — side by side, fixed height */}
         {isStravaConnected && user && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -177,6 +172,11 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Fitness & Form Chart */}
+        {isStravaConnected && user && (
+          <FitnessChart uid={user.uid} />
         )}
 
 
