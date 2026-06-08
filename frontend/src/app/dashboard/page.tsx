@@ -120,8 +120,8 @@ export default function Dashboard() {
 
         <div className="absolute bottom-8 left-0 right-0 text-center animate-in fade-in duration-1000 delay-500">
           <p className="text-xs text-zinc-500 font-medium tracking-wider flex items-center justify-center gap-2">
-            <svg className="w-4 h-4 text-[#FC4C02]" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.666 2.005C11.83 1.95 12.007 1.95 12.171 2.005L21.504 5.116C21.808 5.217 22 5.498 22 5.818V12.001C22 16.892 18.665 21.134 14.152 22.428L12.502 22.899C12.176 22.993 11.824 22.993 11.498 22.899L9.848 22.428C5.335 21.134 2 16.892 2 12.001V5.818C2 5.498 2.192 5.217 2.496 5.116L11.666 2.005ZM12 4.103L4 6.769V12.001C4 15.962 6.643 19.387 10.395 20.463L12 20.922L13.605 20.463C17.357 19.387 20 15.962 20 12.001V6.769L12 4.103ZM16.03 9.47L11.5 14L8.47 10.97L9.53 9.91L11.5 11.88L14.97 8.41L16.03 9.47Z" />
+            <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C12.3 7.4 16.6 11.7 22 12C16.6 12.3 12.3 16.6 12 22C11.7 16.6 7.4 12.3 2 12C7.4 11.7 11.7 7.4 12 2Z" />
             </svg>
             Powered by Gemini 3.5 Flash
           </p>
