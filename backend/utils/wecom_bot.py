@@ -522,11 +522,14 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             if not bind_code:
                 await _send_msg("请输入你的 RGM 注册邮箱或昵称来绑定，格式：\n**绑定 你的名字**")
                 return
+            print(f"[wecom_bot] Bind attempt: wecom_user_id={wecom_user_id!r}, bind_code={bind_code!r}")
             name = _bind_user(wecom_user_id, bind_code)
             if name:
                 await _send_msg(f"✅ 绑定成功！你好，{name}。现在我可以查询你的跑步数据了 🎉")
+            elif not wecom_user_id:
+                await _send_msg("❌ 绑定失败：系统无法识别你的企微身份（user_id 为空）。请联系管理员检查 Bot 配置。")
             else:
-                await _send_msg("❌ 绑定失败，没找到这个人。试试用 RGM 里的昵称、Strava 名或注册邮箱？")
+                await _send_msg(f"❌ 绑定失败，没找到 \"{bind_code}\"。试试用 RGM 里的昵称、Strava 名或注册邮箱？")
             return
 
         # ── Identify user ─────────────────────────────────────────────────
