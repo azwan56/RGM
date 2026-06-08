@@ -970,8 +970,17 @@ async def _bot_main_loop():
 
     async def on_text(frame):
         content = frame.body.get("text", {}).get("content", "").strip()
-        sender = frame.body.get("from_userid", "")
-        logger.info(f"[wecom_bot] WS Received text message from {sender}")
+        # Debug: dump all body keys to find the correct sender field
+        logger.info(f"[wecom_bot] WS frame.body keys: {list(frame.body.keys())}")
+        logger.info(f"[wecom_bot] WS frame.body (partial): { {k: v for k, v in frame.body.items() if k != 'text'} }")
+        # Try multiple possible field names for sender
+        from_field = frame.body.get("from")
+        sender = (frame.body.get("from_userid", "")
+                  or (from_field.get("userid", "") if isinstance(from_field, dict) else "")
+                  or frame.body.get("FromUserName", "")
+                  or frame.body.get("userid", "")
+                  or "")
+        logger.info(f"[wecom_bot] WS Received text message from sender={sender!r}")
         
         # Check if we should reply (sliding window logic)
         keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
