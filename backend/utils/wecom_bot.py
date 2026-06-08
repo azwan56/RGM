@@ -512,6 +512,10 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             await asyncio.to_thread(send_bonnie_message, chatid, msg)
 
     try:
+        # Strip @BotName mentions from the beginning (WeCom includes @mention in text)
+        import re
+        content = re.sub(r'^@\S+\s*', '', content).strip()
+
         # ── Bind command ──────────────────────────────────────────────────
         if content.startswith("绑定 ") or content.startswith("绑定"):
             bind_code = content.replace("绑定", "").strip()
