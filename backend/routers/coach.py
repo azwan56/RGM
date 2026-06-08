@@ -2290,7 +2290,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
 
     entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
     
-    # Query entries for the previous week
+    # Query journal entries for the previous week (used for AI prompt qualitative data)
     # Note: date format is YYYY-MM-DD
     docs = entries_ref.where("date", ">=", start_date_str).where("date", "<=", end_date_str).order_by("date").stream()
     daily = []
@@ -2299,7 +2299,23 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         if d_dict.get("entry_type") == "daily":
             daily.append(d_dict)
     
-    if not daily:
+    # Calculate stats from raw activities (source of truth, journal entries may be incomplete)
+    week_start_ts = f"{start_date_str}T00:00:00"
+    week_end_ts = f"{end_date_str}T23:59:59"
+    week_activities = list(
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", week_start_ts)
+        .where("start_date_local", "<=", week_end_ts)
+        .stream()
+    )
+    # Only count runs (exclude cross-training) for distance stats
+    run_activities = [a.to_dict() for a in week_activities
+                      if a.to_dict().get("activity_type", "run") == "run"]
+    total_km = sum(a.get("distance_km", 0) for a in run_activities)
+    total_runs = len(run_activities)
+    total_elev = sum(a.get("total_elevation_gain", 0) for a in run_activities)
+    
+    if total_runs == 0 and not daily:
         return {"error": "上周暂无训练记录"}
 
     training_summary = await loop.run_in_executor(None, _fetch_training_summary, uid)
@@ -2334,9 +2350,6 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         or user_doc_data.get("email", "").split("@")[0]
         or "跑者"
     )
-
-    total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
-    total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
     
     # Analyze training types
     training_types = set()
@@ -2427,7 +2440,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         f"你是专业且富有激情的马拉松教练，正在为运动员【{runner_name}】撰写上一周的详细训练周总结。请直接称呼对方的名字，不要称呼为跑者。返回必须是合法的 JSON 格式，不要包含 Markdown 标记。\n\n"
         f"【日志名称】{journal.get('title','')}\n{race_ctx}"
         f"【上周训练记录 ({start_date_str} 至 {end_date_str})】\n{entries_str}\n"
-        f"合计数据：{total_km:.1f}km / {len(daily)}次 / 爬升{total_elev}m / 平均配速{avg_pace_week} / 平均心率{avg_hr_week}\n"
+        f"合计数据：{total_km:.1f}km / {total_runs}次 / 爬升{total_elev}m / 平均配速{avg_pace_week} / 平均心率{avg_hr_week}\n"
         f"训练类型覆盖：{', '.join(training_types) if training_types else '未分类'}\n"
         f"{last_plan_ctx}"
         f"{fitness_ctx}"
@@ -2532,7 +2545,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         "weekly_score": ai_result.get("weekly_score", 7),
         "week_stats": {
             "total_km": round(total_km, 1), 
-            "total_runs": len(daily), 
+            "total_runs": total_runs, 
             "total_elevation": round(total_elev)
         },
         
@@ -2596,7 +2609,7 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
 
     entries_ref = user_ref.collection("training_logs").document(journal_id).collection("entries")
     
-    # Query entries for the previous month
+    # Query journal entries for the previous month (used for AI prompt qualitative data)
     docs = entries_ref.where("date", ">=", start_date_str).where("date", "<=", end_date_str).order_by("date").stream()
     daily = []
     for d in docs:
@@ -2604,7 +2617,23 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         if d_dict.get("entry_type") == "daily":
             daily.append(d_dict)
     
-    if not daily:
+    # Calculate stats from raw activities (source of truth, journal entries may be incomplete)
+    month_start_ts = f"{start_date_str}T00:00:00"
+    month_end_ts = f"{end_date_str}T23:59:59"
+    month_activities = list(
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", month_start_ts)
+        .where("start_date_local", "<=", month_end_ts)
+        .stream()
+    )
+    # Only count runs (exclude cross-training) for distance stats
+    run_activities = [a.to_dict() for a in month_activities
+                      if a.to_dict().get("activity_type", "run") == "run"]
+    total_km = sum(a.get("distance_km", 0) for a in run_activities)
+    total_runs = len(run_activities)
+    total_elev = sum(a.get("total_elevation_gain", 0) for a in run_activities)
+    
+    if total_runs == 0 and not daily:
         return {"error": "上月暂无训练记录"}
 
     # Increase fetch window to 12 weeks (3 months) for macro context
@@ -2639,9 +2668,6 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         or user_doc_data.get("email", "").split("@")[0]
         or "跑者"
     )
-
-    total_km = sum(e.get("activity_snapshot", {}).get("distance_km", 0) for e in daily)
-    total_elev = sum(e.get("activity_snapshot", {}).get("total_elevation_gain", 0) for e in daily)
     
     # Analyze training types
     training_types = set()
@@ -2813,7 +2839,7 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         "weekly_score": ai_result.get("weekly_score", 7),
         "week_stats": {
             "total_km": round(total_km, 1), 
-            "total_runs": len(daily), 
+            "total_runs": total_runs, 
             "total_elevation": round(total_elev)
         },
         

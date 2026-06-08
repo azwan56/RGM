@@ -875,7 +875,7 @@ async def _bot_main_loop():
 
     async def on_text(frame):
         content = frame.body.get("text", {}).get("content", "").strip()
-        sender = frame.body.get("sender", "")
+        sender = frame.body.get("from_userid", "")
         logger.info(f"[wecom_bot] WS Received text message from {sender}")
         
         # Check if we should reply (sliding window logic)
