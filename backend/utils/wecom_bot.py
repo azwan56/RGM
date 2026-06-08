@@ -41,6 +41,10 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
     """
     Find the RGM user by their wecom_user_id.
     Returns (uid, user_data) or (None, None).
+    
+    Auto-rebind fallback: if lookup fails, tries to match by WeCom
+    contact name → RGM display_name/strava_name for users with
+    stale empty wecom_user_id (left by the previous sender bug).
     """
     if not wecom_user_id:
         return None, None
@@ -51,7 +55,55 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
               .stream())
     for doc in docs:
         return doc.id, doc.to_dict()
+
+    # ── Auto-rebind fallback ──────────────────────────────────────────
+    # Try to resolve WeCom user's real name via WeCom Contact API,
+    # then match it against RGM users with empty/missing wecom_user_id.
+    try:
+        wecom_name = _get_wecom_user_name(wecom_user_id)
+        if wecom_name:
+            name_lower = wecom_name.lower()
+            # Scan users with empty or missing wecom_user_id
+            all_users = db.collection("users").stream()
+            for doc in all_users:
+                d = doc.to_dict()
+                existing_wid = d.get("wecom_user_id", "")
+                if existing_wid and existing_wid != "":
+                    continue  # Already bound to someone else
+                # Match by display_name or strava_name
+                dn = (d.get("display_name") or "").lower()
+                sn = (d.get("strava_name") or "").lower()
+                if name_lower in (dn, sn) or dn.startswith(name_lower) or sn.startswith(name_lower):
+                    # Auto-rebind
+                    db.collection("users").document(doc.id).set(
+                        {"wecom_user_id": wecom_user_id}, merge=True
+                    )
+                    print(f"[wecom_bot] Auto-rebound {wecom_name} → uid={doc.id} (wecom_id={wecom_user_id})")
+                    return doc.id, d
+    except Exception as e:
+        print(f"[wecom_bot] Auto-rebind fallback failed: {e}")
+
     return None, None
+
+
+def _get_wecom_user_name(wecom_user_id: str) -> str:
+    """Fetch the WeCom user's real name via Contact API."""
+    try:
+        token = _get_wecom_access_token()
+        if not token:
+            return ""
+        resp = requests.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/user/get",
+            params={"access_token": token, "userid": wecom_user_id},
+            timeout=5,
+        )
+        if resp.ok:
+            data = resp.json()
+            if data.get("errcode", 0) == 0:
+                return data.get("name", "")
+    except Exception as e:
+        print(f"[wecom_bot] WeCom contact API error: {e}")
+    return ""
 
 
 # ── Chat History ─────────────────────────────────────────────────────────────
@@ -97,6 +149,9 @@ def _bind_user(wecom_user_id: str, bind_code: str):
     Tries matching in order: email → display_name → strava_name.
     Returns the display_name on success, None on failure.
     """
+    if not wecom_user_id:
+        print("[wecom_bot] _bind_user called with empty wecom_user_id, rejecting")
+        return None
     bind_code = bind_code.strip()
     if not bind_code:
         return None
