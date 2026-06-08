@@ -829,8 +829,8 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             _save_chat_message, wecom_user_id, uid, "model", reply_text
         ))
 
-        # ── Safety truncation (WeCom text limit is 2048 bytes) ─────────────
-        MAX_BYTES = 2000  # Leave margin below 2048
+        # ── Safety truncation (WeCom WS stream limit is 20480 bytes) ────────
+        MAX_BYTES = 20000  # Leave margin below 20480
         encoded = reply_text.encode("utf-8")
         if len(encoded) > MAX_BYTES:
             # Find the last sentence-ending punctuation within the limit
