@@ -754,7 +754,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             f"{quoted_context}"
             f"用户当前的输入是：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
-            f"- 控制在80-150个中文字以内（包括标点和emoji），简洁但把话说完整\n"
+            f"- 字数控制：如果是闲聊或调侃，控制在80-150个中文字以内；如果是回答跑步知识、赛事信息或长篇科普，请详尽完整地回答，字数不限，务必把话说清楚\n"
             f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
             f"- 如果用户发送了图片，请结合图片内容进行调侃或鼓励\n"
             f"- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半\n"
@@ -763,7 +763,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             f"- 纯文本，不要用markdown格式如**加粗**\n"
             f"- 如果用户心情低落或受伤，收起嬉皮，认真关心\n"
             f"- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'\n"
-            f"- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接。如果搜索不到可靠信息，就诚实说'我搜了一圈没找到靠谱的，建议你去官方渠道确认一下'"
+            f"- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接等详尽信息。如果搜索不到可靠信息，就诚实说'我搜了一圈没找到靠谱的，建议你去官方渠道确认一下'"
         )
 
         # ── Build Gemini Contents with History ────────────────────────────
@@ -813,9 +813,9 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             _gemini_generate, 
             prompt=None, # use contents_obj instead
             temperature=0.7, 
-            max_tokens=1024, 
+            max_tokens=2048, 
             response_json=False,
-            thinking_budget=128,
+            thinking_budget=256,
             contents_obj=gemini_contents,
             system_instruction=context_str,
             tools=[{"google_search": {}}]
