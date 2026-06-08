@@ -1,7 +1,6 @@
 "use client";
 
 import React from 'react';
-import Image from 'next/image';
 
 export default function StravaConnectBtn() {
     const handleConnect = () => {
@@ -17,12 +16,10 @@ export default function StravaConnectBtn() {
             className="transition-transform hover:-translate-y-0.5 focus:outline-none flex items-center justify-center w-full md:w-auto"
             aria-label="Connect with Strava"
         >
-            <Image 
+            <img 
                 src="/icons/btn_strava_connectwith_orange.svg" 
                 alt="Connect with Strava" 
-                width={193} 
-                height={48}
-                priority
+                className="w-[193px] h-[48px] object-contain"
             />
         </button>
     );

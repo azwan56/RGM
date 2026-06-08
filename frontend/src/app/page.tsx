@@ -76,14 +76,6 @@ export default function Home() {
             </>
           )}
 
-          <button
-            onClick={() => router.push("/leaderboard")}
-            className="px-6 py-3 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold rounded-xl transition-all w-full sm:w-auto"
-          >
-            查看排行榜
-          </button>
-        </div>
-
         {/* Logged-in user status strip */}
         {isLoggedIn && (
           <div className="mt-6 flex items-center gap-3 text-sm text-zinc-500">
@@ -118,8 +110,17 @@ export default function Home() {
         </div>
         
         {/* Footer */}
-        <div className="mt-20 text-center">
-          <p className="text-zinc-500 text-sm font-medium">Powered by Strava</p>
+        <div className="mt-20 text-center flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8">
+          <p className="text-[#FC4C02] text-sm font-medium tracking-wide">
+            Fueled by Strava
+          </p>
+          <div className="hidden sm:block w-1.5 h-1.5 rounded-full bg-white/20" />
+          <p className="text-zinc-500 text-sm font-medium tracking-wide flex items-center gap-2">
+            <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C12.3 7.4 16.6 11.7 22 12C16.6 12.3 12.3 16.6 12 22C11.7 16.6 7.4 12.3 2 12C7.4 11.7 11.7 7.4 12 2Z" />
+            </svg>
+            Powered by Gemini 3.5 Flash
+          </p>
         </div>
 
       </main>
