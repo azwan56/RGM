@@ -250,6 +250,32 @@
       margin-top: 16px;
       font-weight: 500;
     }
+
+    .download-btn {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 12px 28px;
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      text-decoration: none;
+      border-radius: 30px;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      transition: all 0.3s ease;
+    }
+
+    .download-btn:hover {
+      background: white;
+      color: var(--primary);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    @media print {
+      .download-btn {
+        display: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -257,6 +283,7 @@
   <div class="header">
     <h1>RGM 跑团管理平台</h1>
     <p>欢迎使用 RGM (Running Community Manager)！本手册将帮助您快速了解和使用平台的核心功能。</p>
+    <a href="./user_manual.pdf" download class="download-btn">⬇️ 下载 PDF 版本</a>
   </div>
 
   <div class="container">
@@ -297,8 +324,8 @@
         <li><strong>🏠 首页 (Dashboard)：</strong>返回主控制台，查看本周/本月跑量、体能趋势、排行榜等关键数据。</li>
         <li><strong>⚡ 深度分析 (Analysis)：</strong>进入长周期数据分析页面，查看体能趋势 (CTL/ATL/TSB) 和跑力诊断 (VDOT)。</li>
         <li><strong>💡 AI教练 (Coach)：</strong>获取基于 Renato Canova 理论的 AI 个性化训练分析和本周重点建议。</li>
-        <li><strong>👥 我的团队 (Team)：</strong>管理或查看您所在的跑团、团队总跑量以及团队内部排行榜。</li>
-        <li><strong>👤 我的档案 (Profile)：</strong>设置您的个人信息、目标跑量、比赛计划以及系统通知 (Webhook)。</li>
+        <li><strong>👤 我的档案 (Profile)：</strong>设置个人信息、目标、比赛计划、通知 (Webhook) 以及进行<strong>团队组建与管理</strong>。</li>
+        <li><strong>📖 手册 (Manual)：</strong>查看系统功能的快速入门和使用指南。</li>
       </ul>
     </div>
 
@@ -328,6 +355,7 @@
           <li><strong>个人最佳成绩 (PB)：</strong>支持从 Strava 一键导入。</li>
           <li><strong>目标设定：</strong>按周/月设定跑量目标，填写心率数据。</li>
           <li><strong>通知配置：</strong>配置 Discord 或 企业微信机器人自动通知。</li>
+          <li><strong>团队管理：</strong>在页面底部创建或加入团队，查看团队排行。</li>
         </ul>
       </div>
 
@@ -373,7 +401,7 @@
         <ul>
           <li><strong>👨‍🏫 Canova 教练 (严肃专业)：</strong>你的专属数据分析师。负责定时在群内推送深度跑力分析与训练规划，严格贯彻 Renato Canova 的科学训练哲学。</li>
           <li><strong>🐶 团宠 Bonnie (活泼搞怪)：</strong>跑团的群聊吉祥物与气氛组！在群内触发关键词（如“PB”、“偷懒”、“受伤”、“配速”等）时，Bonnie 会立刻和你互动。她诙谐幽默，虽然偶尔毒舌但总能为你加油打气。同时她也精通数据，能直接在群内查询你或团队的本周/本月跑量排名。</li>
-          <li><strong>如何开启互动：</strong>在企业微信群中发送 <strong>“绑定 你的RGM注册邮箱”</strong> 即可无缝接入。</li>
+          <li><strong>如何开启互动：</strong>在企业微信群中发送 <strong>“@Bonnie 绑定 你的名字”</strong>（可使用注册邮箱、RGM昵称或Strava名）即可无缝接入。</li>
         </ul>
       </div>
 
