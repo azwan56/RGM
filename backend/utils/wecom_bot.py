@@ -60,9 +60,9 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
     # Try to resolve WeCom user's real name via WeCom Contact API,
     # then match it against RGM users with empty/missing wecom_user_id.
     try:
-        wecom_name = _get_wecom_user_name(wecom_user_id)
-        if wecom_name:
-            name_lower = wecom_name.lower()
+        wecom_names = _get_wecom_user_names(wecom_user_id)
+        if wecom_names:
+            wecom_names_lower = [n.lower() for n in wecom_names]
             # Scan users with empty or missing wecom_user_id
             all_users = db.collection("users").stream()
             for doc in all_users:
@@ -70,15 +70,36 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
                 existing_wid = d.get("wecom_user_id", "")
                 if existing_wid and existing_wid != "":
                     continue  # Already bound to someone else
-                # Match by display_name or strava_name
-                dn = (d.get("display_name") or "").lower()
-                sn = (d.get("strava_name") or "").lower()
-                if name_lower in (dn, sn) or dn.startswith(name_lower) or sn.startswith(name_lower):
-                    # Auto-rebind
+                # Collect all RGM name variants for this user
+                rgm_names = set()
+                for field in ("display_name", "strava_name", "email"):
+                    val = d.get(field, "") or ""
+                    if val:
+                        rgm_names.add(val.lower())
+                        # Also add first-name token (e.g. "Vivian" from "Vivian CHEN")
+                        first = val.split()[0].lower()
+                        if len(first) > 1:
+                            rgm_names.add(first)
+                        # Add email prefix (e.g. "vivian" from "vivian@example.com")
+                        if "@" in val:
+                            rgm_names.add(val.split("@")[0].lower())
+                if not rgm_names:
+                    continue
+                # Bidirectional matching: WeCom name ↔ RGM name
+                matched = False
+                for wn in wecom_names_lower:
+                    for rn in rgm_names:
+                        if wn == rn or wn in rn or rn in wn:
+                            matched = True
+                            break
+                    if matched:
+                        break
+                if matched:
                     db.collection("users").document(doc.id).set(
                         {"wecom_user_id": wecom_user_id}, merge=True
                     )
-                    print(f"[wecom_bot] Auto-rebound {wecom_name} → uid={doc.id} (wecom_id={wecom_user_id})")
+                    matched_wn = next(n for n in wecom_names if n.lower() in str(rgm_names))
+                    print(f"[wecom_bot] Auto-rebound '{matched_wn}' → uid={doc.id} (wecom_id={wecom_user_id})")
                     return doc.id, d
     except Exception as e:
         print(f"[wecom_bot] Auto-rebind fallback failed: {e}")
@@ -86,12 +107,19 @@ def _resolve_user_by_wecom_id(wecom_user_id: str):
     return None, None
 
 
-def _get_wecom_user_name(wecom_user_id: str) -> str:
-    """Fetch the WeCom user's real name via Contact API."""
+def _get_wecom_user_names(wecom_user_id: str) -> list:
+    """Fetch all name variants for a WeCom user (name + alias) via Contact API.
+    
+    WeCom users have:
+    - name: admin-set or real-name-verified name (e.g. 陈晓韵)
+    - alias: user-set display alias (e.g. Vivian CHEN)
+    Both are useful for matching against RGM accounts.
+    """
+    names = []
     try:
         token = _get_wecom_access_token()
         if not token:
-            return ""
+            return names
         resp = requests.get(
             "https://qyapi.weixin.qq.com/cgi-bin/user/get",
             params={"access_token": token, "userid": wecom_user_id},
@@ -100,10 +128,15 @@ def _get_wecom_user_name(wecom_user_id: str) -> str:
         if resp.ok:
             data = resp.json()
             if data.get("errcode", 0) == 0:
-                return data.get("name", "")
+                name = data.get("name", "")
+                alias = data.get("alias", "")
+                if name:
+                    names.append(name)
+                if alias and alias != name:
+                    names.append(alias)
     except Exception as e:
         print(f"[wecom_bot] WeCom contact API error: {e}")
-    return ""
+    return names
 
 
 # ── Chat History ─────────────────────────────────────────────────────────────
