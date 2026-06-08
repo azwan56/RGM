@@ -75,6 +75,7 @@ export default function Home() {
               <StravaConnectBtn />
             </>
           )}
+        </div>
 
         {/* Logged-in user status strip */}
         {isLoggedIn && (
