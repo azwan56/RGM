@@ -917,7 +917,7 @@ def handle_wecom_message(msg_data: dict):
     print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}")
     
     # Check if we should reply (sliding window logic)
-    keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
+    keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
     content_lower = content.lower()
     matched_keywords = [k for k in keywords if k in content_lower]
     should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
@@ -971,7 +971,7 @@ async def _bot_main_loop():
         logger.info(f"[wecom_bot] WS Received text message from {sender}")
         
         # Check if we should reply (sliding window logic)
-        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表"]
+        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
         content_lower = content.lower()
         matched_keywords = [k for k in keywords if k in content_lower]
         should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
