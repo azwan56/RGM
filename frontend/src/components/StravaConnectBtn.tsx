@@ -13,14 +13,14 @@ export default function StravaConnectBtn() {
     return (
         <button 
             onClick={handleConnect}
-            className="transition-transform hover:-translate-y-0.5 focus:outline-none flex items-center justify-center w-full md:w-auto"
+            className="flex items-center gap-2.5 px-6 py-3 bg-[#FC4C02] hover:bg-[#e04400] text-white font-bold rounded-xl transition-all hover:shadow-lg hover:shadow-[#FC4C02]/30 w-full sm:w-auto justify-center"
             aria-label="Connect with Strava"
         >
-            <img 
-                src="/icons/btn_strava_connectwith_orange.svg" 
-                alt="Connect with Strava" 
-                className="w-[193px] h-[48px] object-contain"
-            />
+            {/* Strava logo mark */}
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169" />
+            </svg>
+            Connect with Strava
         </button>
     );
 }
