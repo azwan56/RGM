@@ -85,11 +85,46 @@ export default function Dashboard() {
   }, [user, backendUrl]);
 
   if (loading) {
+    const userName = user?.displayName || user?.email?.split('@')[0] || "跑者";
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-[#FC4C02] border-t-transparent rounded-full animate-spin" />
-          <p className="text-zinc-400 text-sm">加载中...</p>
+      <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center relative overflow-hidden">
+        {/* Decorative background blurs */}
+        <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-[#FC4C02]/15 blur-[160px] pointer-events-none animate-pulse" />
+        <div className="absolute bottom-0 left-0 w-[30%] h-[30%] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none animate-pulse" style={{ animationDelay: "1s" }} />
+        
+        <div className="z-10 flex flex-col items-center gap-8 px-6 text-center animate-in fade-in zoom-in duration-700">
+          <div className="relative">
+            <img 
+              src="/icons/icon-512x512.png" 
+              alt="RGM Logo" 
+              className="w-24 h-24 md:w-32 md:h-32 rounded-3xl shadow-2xl drop-shadow-[0_0_20px_rgba(252,76,2,0.3)] animate-bounce" 
+              style={{ animationDuration: '3s' }} 
+            />
+            <div className="absolute -inset-4 border-2 border-[#FC4C02]/20 rounded-[2.5rem] animate-ping" style={{ animationDuration: '2s' }} />
+          </div>
+          
+          <div className="space-y-3">
+            <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">
+              {user ? `欢迎回来，${userName}` : "正在启动 RGM"}
+            </h1>
+            <p className="text-zinc-400 text-sm md:text-base max-w-sm mx-auto">
+              {user ? "正在同步您的最新跑步数据和体能指标，请稍候..." : "正在验证身份并连接数据源..."}
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-3 mt-4">
+            <div className="w-5 h-5 border-2 border-[#FC4C02] border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm tracking-widest text-[#FC4C02] font-semibold uppercase">Processing</span>
+          </div>
+        </div>
+
+        <div className="absolute bottom-8 left-0 right-0 text-center animate-in fade-in duration-1000 delay-500">
+          <p className="text-xs text-zinc-500 font-medium tracking-wider flex items-center justify-center gap-2">
+            <svg className="w-4 h-4 text-[#FC4C02]" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.666 2.005C11.83 1.95 12.007 1.95 12.171 2.005L21.504 5.116C21.808 5.217 22 5.498 22 5.818V12.001C22 16.892 18.665 21.134 14.152 22.428L12.502 22.899C12.176 22.993 11.824 22.993 11.498 22.899L9.848 22.428C5.335 21.134 2 16.892 2 12.001V5.818C2 5.498 2.192 5.217 2.496 5.116L11.666 2.005ZM12 4.103L4 6.769V12.001C4 15.962 6.643 19.387 10.395 20.463L12 20.922L13.605 20.463C17.357 19.387 20 15.962 20 12.001V6.769L12 4.103ZM16.03 9.47L11.5 14L8.47 10.97L9.53 9.91L11.5 11.88L14.97 8.41L16.03 9.47Z" />
+            </svg>
+            Powered by Gemini 3.5 Flash
+          </p>
         </div>
       </div>
     );
