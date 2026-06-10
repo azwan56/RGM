@@ -467,6 +467,33 @@ def _fetch_user_goal(uid: str) -> dict:
     return doc.to_dict() if doc.exists else {}
 
 
+def _fetch_user_fitness_state(uid: str, max_hr: float = 190, rest_hr: float = 60) -> dict:
+    """Fetch recent activities and compute CTL/ATL/TSB."""
+    try:
+        from utils.sports_science import compute_fitness_fatigue_timeseries
+        user_ref = db.collection("users").document(uid)
+        fitness_docs = (
+            user_ref.collection("activities")
+            .order_by("start_date_local", direction="DESCENDING")
+            .limit(90)
+            .stream()
+        )
+        fitness_activities = [d.to_dict() for d in fitness_docs]
+        fitness_activities.reverse()  # Chronological order for timeseries
+        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3)
+        if ts:
+            latest = ts[-1]
+            return {
+                "ctl": round(latest.get("ctl", 0), 1),
+                "atl": round(latest.get("atl", 0), 1),
+                "tsb": round(latest.get("tsb", 0), 1)
+            }
+    except Exception as e:
+        print(f"[wecom_bot] Failed to compute fitness state for {uid}: {e}")
+    return {}
+
+
+
 def _detect_intent(content: str) -> str:
     """
     Simple keyword-based intent detection.
@@ -574,6 +601,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             "- 会适时制造竞争氛围（善意的激将法），比如'再不跑，排名要被xxx踩到脚底了哦'\n"
             "- 虽然嘴上不饶人，但内心温暖，真正需要鼓励的时候会认真说\n"
             "- 绝对不是那种端着架子的正经教练，而是跑团里最会来事的那个人\n"
+            "- 如果用户问起自己的体能状态、累不累，或者你看到他们疲劳度 ATL 很高，或者 TSB 很低（为负数），可以用幽默诙谐或调侃关心的语气去说（例如：'瞧你这 TSB 都负成啥样了，今天就别卷了，赶紧洗洗睡吧'；'CTL 涨得挺猛啊，体能见长！'）\n"
             "\n"
             "重要：你和自动推送通知里的'AI教练'是不同的角色。\n"
             "AI教练负责专业分析和训练建议（严肃、有数据），你负责群里互动和气氛（轻松、好玩）。\n"
@@ -582,6 +610,18 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
         )
 
         if uid:
+            # Personal fitness stats (CTL, ATL, TSB)
+            max_hr = user_data.get("max_heart_rate", 190)
+            rest_hr = user_data.get("resting_heart_rate", 60)
+            fit = await asyncio.to_thread(_fetch_user_fitness_state, uid, max_hr, rest_hr)
+            if fit:
+                context_str += (
+                    f"- 当前体能指标：CTL(体能/训练负荷)={fit.get('ctl', 0)}, "
+                    f"ATL(疲劳度)={fit.get('atl', 0)}, "
+                    f"TSB(状态值/就绪度)={fit.get('tsb', 0)}\n"
+                    f"  (TSB说明: >5代表恢复状态好，适合拉强或拉量；在-10到5代表适应期/正常负荷；小于-10代表处于疲劳状态需要注意恢复休息)\n"
+                )
+
             # Personal monthly stats
             lb = await asyncio.to_thread(_fetch_leaderboard, uid)
             if lb:
