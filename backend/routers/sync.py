@@ -135,6 +135,7 @@ def _build_act_doc(act: dict, period: str, period_start, gear_info: dict = None)
         "period":               period,
         "period_start":         period_start.isoformat(),
         "gear_id":              act.get("gear_id", ""),
+        "splits_metric":        act.get("splits_metric", []),
     }
     if gear_info:
         doc.update(gear_info)

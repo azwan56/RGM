@@ -24,6 +24,7 @@ def analyze_streams(
     *,
     max_hr: int = 190,
     rest_hr: int = 60,
+    official_splits: Optional[list] = None,
 ) -> dict:
     """
     Analyze raw Strava stream arrays and return structured training metrics.
@@ -36,6 +37,7 @@ def analyze_streams(
         altitudes: altitude in meters at each point
         max_hr: user's max heart rate for zone calculation
         rest_hr: user's resting heart rate
+        official_splits: official per-km splits from Strava
 
     Returns:
         dict with pace_splits, hr_zones, hr_drift, cadence stats, etc.
@@ -43,8 +45,25 @@ def analyze_streams(
     result = {}
 
     # ── Per-km pace splits ────────────────────────────────────────────────────
-    if distances and velocities:
+    if official_splits:
+        result["pace_splits"] = []
+        for s in official_splits:
+            km_num = s.get("split")
+            dist = s.get("distance", 0)
+            t = s.get("moving_time", 0)
+            if dist > 50 and t > 0:  # Ignore extremely short trailing splits (e.g. last 10m)
+                pace_min = (t / 60) / (dist / 1000)
+                mins = int(pace_min)
+                secs = int((pace_min - mins) * 60)
+                result["pace_splits"].append({
+                    "km": km_num,
+                    "pace": f"{mins}:{secs:02d}",
+                    "pace_min": round(pace_min, 2),
+                })
+    elif distances and velocities:
         result["pace_splits"] = _compute_km_splits(distances, velocities)
+    
+    if "pace_splits" in result:
         splits = result["pace_splits"]
         if splits:
             # Best / worst km

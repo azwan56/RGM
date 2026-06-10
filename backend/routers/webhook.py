@@ -387,6 +387,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
                         altitudes=raw.get("altitude", {}).get("data", []),
                         max_hr=max_hr,
                         rest_hr=rest_hr,
+                        official_splits=act.get("splits_metric"),
                     )
                     # Cache stream stats to the activity doc (avoid re-fetching from Strava)
                     if stream_stats:

@@ -1622,6 +1622,23 @@ async def log_journal_entry(req: JournalLogRequest):
             access_token = user_data.get("strava_access_token")
             act_id_num = activity.get("activity_id", req.activity_id)
             if access_token and act_id_num:
+                official_splits = activity.get("splits_metric", [])
+                if not official_splits:
+                    # Fetch detailed activity from Strava to get splits_metric
+                    act_detail_resp = strava_request(
+                        "GET",
+                        f"{STRAVA_API_BASE}/activities/{act_id_num}",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        timeout=15,
+                    )
+                    if act_detail_resp.ok:
+                        act_detail = act_detail_resp.json()
+                        official_splits = act_detail.get("splits_metric", [])
+                        # Save splits_metric in Firestore activity document
+                        user_ref.collection("activities").document(str(act_id_num)).set(
+                            {"splits_metric": official_splits}, merge=True
+                        )
+
                 stream_resp = strava_request(
                     "GET",
                     f"{STRAVA_API_BASE}/activities/{act_id_num}/streams",
@@ -1644,6 +1661,7 @@ async def log_journal_entry(req: JournalLogRequest):
                         altitudes=raw.get("altitude", {}).get("data", []),
                         max_hr=max_hr,
                         rest_hr=rest_hr,
+                        official_splits=official_splits,
                     )
                     # Cache for next time
                     if stream_stats:
