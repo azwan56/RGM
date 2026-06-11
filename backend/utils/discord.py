@@ -11,7 +11,44 @@ Webhook URL stored in user Firestore profile: user_data["discord_webhook_url"]
 
 import os
 import requests
+import re
 from datetime import datetime, date
+
+
+def clean_err(e: Exception) -> str:
+    """Mask any sensitive URLs, tokens, keys or secrets in an exception message."""
+    err_str = str(e)
+    # Mask discord webhooks
+    err_str = re.sub(
+        r'https://discord\.com/api/webhooks/\d+/[a-zA-Z0-9_-]+',
+        'https://discord.com/api/webhooks/MASKED_ID/MASKED_TOKEN',
+        err_str
+    )
+    # Mask WeCom webhooks
+    err_str = re.sub(
+        r'https://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=[a-zA-Z0-9_-]+',
+        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=MASKED_KEY',
+        err_str
+    )
+    # Mask WeCom access tokens
+    err_str = re.sub(
+        r'access_token=[a-zA-Z0-9_-]+',
+        'access_token=MASKED_TOKEN',
+        err_str
+    )
+    # Mask corpsecret in WeChat gettoken URL
+    err_str = re.sub(
+        r'corpsecret=[a-zA-Z0-9_-]+',
+        'corpsecret=MASKED_SECRET',
+        err_str
+    )
+    # Mask Strava client secret
+    err_str = re.sub(
+        r'client_secret=[a-zA-Z0-9_-]+',
+        'client_secret=MASKED_SECRET',
+        err_str
+    )
+    return err_str
 
 
 # ── Helpers: pull extra context from Firestore ────────────────────────────────
@@ -325,7 +362,7 @@ def send_activity_discord_notification(act_doc: dict, user_data: dict, uid: str 
             return False
 
     except Exception as e:
-        print(f"[discord] Notification error: {e}")
+        print(f"[discord] Notification error: {clean_err(e)}")
         return False
 
 
@@ -426,7 +463,7 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             return False
 
     except Exception as e:
-        print(f"[wecom] Notification error: {e}")
+        print(f"[wecom] Notification error: {clean_err(e)}")
         return False
 
 
@@ -526,7 +563,7 @@ def send_rest_day_discord_notification(user_data: dict, rest_date: str, uid: str
         return ok
 
     except Exception as e:
-        print(f"[discord] Rest-day reminder error: {e}")
+        print(f"[discord] Rest-day reminder error: {clean_err(e)}")
         return False
 
 
@@ -574,7 +611,7 @@ def send_rest_day_wecom_notification(user_data: dict, rest_date: str, uid: str =
             return False
 
     except Exception as e:
-        print(f"[wecom] Rest-day reminder error: {e}")
+        print(f"[wecom] Rest-day reminder error: {clean_err(e)}")
         return False
 
 
@@ -698,7 +735,7 @@ def send_weekly_report_discord_notification(user_data: dict, uid: str, report: d
         return ok
 
     except Exception as e:
-        print(f"[discord] Weekly report error: {e}")
+        print(f"[discord] Weekly report error: {clean_err(e)}")
         return False
 
 
@@ -766,5 +803,5 @@ def send_weekly_report_wecom_notification(user_data: dict, uid: str, report: dic
             return False
 
     except Exception as e:
-        print(f"[wecom] Weekly report error: {e}")
+        print(f"[wecom] Weekly report error: {clean_err(e)}")
         return False

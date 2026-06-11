@@ -135,7 +135,8 @@ def _get_wecom_user_names(wecom_user_id: str) -> list:
                 if alias and alias != name:
                     names.append(alias)
     except Exception as e:
-        print(f"[wecom_bot] WeCom contact API error: {e}")
+        from utils.discord import clean_err
+        print(f"[wecom_bot] WeCom contact API error: {clean_err(e)}")
     return names
 
 

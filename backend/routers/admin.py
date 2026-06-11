@@ -196,14 +196,21 @@ def test_discord_notify(request: Request, uid: str, activity_date: str = ""):
     # Send Discord notification
     embed = _build_embed(target_act, user_data, coach_tip, context)
     payload = {"embeds": [embed], "username": "RGM 跑团助手"}
-    resp = requests.post(user_data["discord_webhook_url"], json=payload, timeout=10)
-    ok = resp.status_code in (200, 204)
+    ok = False
+    discord_status = 500
+    try:
+        resp = requests.post(user_data["discord_webhook_url"], json=payload, timeout=10)
+        ok = resp.status_code in (200, 204)
+        discord_status = resp.status_code
+    except Exception as e:
+        from utils.discord import clean_err
+        print(f"[admin] Discord notify test exception: {clean_err(e)}")
 
     return {
         "success": ok,
         "coach_tip_generated": bool(coach_tip),
         "coach_tip_preview": coach_tip[:80] if coach_tip else "(empty — Gemini failed)",
-        "discord_status": resp.status_code,
+        "discord_status": discord_status,
         "activity": {
             "name": target_act.get("name"),
             "date": target_act.get("start_date_local", "")[:10],
