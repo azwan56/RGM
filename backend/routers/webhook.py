@@ -409,6 +409,7 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         coach_tip = ""
         journal_entry = {}
         journal_cached = False
+        journal_result = {}
         try:
             from routers.coach import log_journal_entry, JournalLogRequest
             import asyncio
@@ -434,11 +435,13 @@ def _process_activity_event(strava_athlete_id: int, activity_id: int, aspect_typ
         if journal_cached:
             print(f"[webhook] Skipping notifications for activity {activity_id} — already processed (duplicate event)")
         else:
+            # Use aggregated activity doc for notifications if available
+            notification_act_doc = journal_result.get("aggregated_activity", act_doc) if journal_result else act_doc
             # Pass coach_tip + journal_entry so Discord/WeChat reuse the same AI content
             try:
                 from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
-                send_activity_discord_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip)
-                send_activity_wecom_notification(act_doc, user_data, uid=uid, coach_tip=coach_tip, journal_entry=journal_entry)
+                send_activity_discord_notification(notification_act_doc, user_data, uid=uid, coach_tip=coach_tip)
+                send_activity_wecom_notification(notification_act_doc, user_data, uid=uid, coach_tip=coach_tip, journal_entry=journal_entry)
             except Exception as _notify_err:
                 print(f"[webhook] Notification delivery failed: {_notify_err}")
 

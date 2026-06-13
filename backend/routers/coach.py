@@ -186,18 +186,231 @@ def _fetch_recent_activities(uid: str, n: int = 5):
     )
     return [d.to_dict() for d in docs]
 
+from datetime import datetime, timedelta
+
+def group_activities_into_sessions(activities: list) -> list:
+    """
+    Groups sorted activities into sessions where the gap between consecutive activities is <= 15 minutes.
+    Assumes activities list is already sorted by start_date_local ascending.
+    """
+    if not activities:
+        return []
+    
+    sessions = [[activities[0]]]
+    for act in activities[1:]:
+        last_session = sessions[-1]
+        prev_act = last_session[-1]
+        
+        try:
+            prev_start = datetime.fromisoformat(prev_act.get("start_date_local", ""))
+            prev_elapsed = timedelta(seconds=prev_act.get("elapsed_time", 0))
+            prev_end = prev_start + prev_elapsed
+            
+            curr_start = datetime.fromisoformat(act.get("start_date_local", ""))
+            gap = (curr_start - prev_end).total_seconds()
+        except Exception as e:
+            print(f"[grouping] Error parsing dates: {e}")
+            # Fallback: group in same session if parsing fails
+            last_session.append(act)
+            continue
+        
+        if gap <= 15 * 60:  # 15 minutes in seconds
+            last_session.append(act)
+        else:
+            sessions.append([act])
+            
+    return sessions
+
+def merge_stream_stats(sub_activities: list) -> dict:
+    """
+    Merges stream_stats from multiple sub-activities into a single aggregated stream_stats dictionary.
+    """
+    merged_stats = {}
+    merged_splits = []
+    current_km = 1
+    
+    # Sort sub-activities by start time
+    sub_activities = sorted(sub_activities, key=lambda a: a.get("start_date_local", ""))
+    
+    for act in sub_activities:
+        stats = act.get("stream_stats", {})
+        if not stats:
+            continue
+            
+        splits = stats.get("pace_splits", [])
+        for s in splits:
+            new_split = s.copy()
+            new_split["km"] = current_km
+            merged_splits.append(new_split)
+            current_km += 1
+            
+    if merged_splits:
+        merged_stats["pace_splits"] = merged_splits
+        
+        def pace_to_sec(p_str):
+            try:
+                parts = p_str.split(":")
+                return int(parts[0]) * 60 + int(parts[1])
+            except:
+                return 999999
+        
+        sorted_splits = sorted(merged_splits, key=lambda s: pace_to_sec(s.get("pace", "99:99")))
+        if sorted_splits:
+            merged_stats["best_km"] = sorted_splits[0]
+            merged_stats["worst_km"] = sorted_splits[-1]
+            
+    # Take the stream_stats of the longest activity as the base
+    main_act = max(sub_activities, key=lambda a: a.get("distance_km", 0.0) or 0.0)
+    main_stats = main_act.get("stream_stats", {})
+    if main_stats:
+        for k, v in main_stats.items():
+            if k != "pace_splits":
+                merged_stats[k] = v
+        if merged_splits:
+            merged_stats["pace_splits"] = merged_splits
+            
+    return merged_stats
+
+def aggregate_activities(acts: list) -> dict:
+    """
+    Combines a list of activities (belonging to the same session) into a single aggregated activity dictionary.
+    Acts are sorted by start_date_local ascending.
+    """
+    if not acts:
+        return {}
+    if len(acts) == 1:
+        return acts[0]
+        
+    acts = sorted(acts, key=lambda a: a.get("start_date_local", ""))
+    first_act = acts[0]
+    
+    total_dist = sum(a.get("distance_km", 0.0) or 0.0 for a in acts)
+    total_moving = sum(a.get("moving_time", 0) or 0 for a in acts)
+    total_elapsed = sum(a.get("elapsed_time", 0) or 0 for a in acts)
+    total_elev = sum(a.get("total_elevation_gain", 0.0) or 0.0 for a in acts)
+    
+    # Heart rate aggregation (weighted by moving time)
+    hr_sum = 0
+    hr_time = 0
+    max_hr = 0
+    for a in acts:
+        hr = a.get("avg_heart_rate", 0) or 0
+        m_time = a.get("moving_time", 0) or 0
+        if hr > 0 and m_time > 0:
+            hr_sum += hr * m_time
+            hr_time += m_time
+        mhr = a.get("max_heart_rate", 0) or 0
+        if mhr > max_hr:
+            max_hr = mhr
+            
+    avg_hr = round(hr_sum / hr_time) if hr_time > 0 else 0
+    
+    # Cadence aggregation (weighted by moving time)
+    cad_sum = 0
+    cad_time = 0
+    for a in acts:
+        cad = a.get("avg_cadence", 0) or 0
+        m_time = a.get("moving_time", 0) or 0
+        if cad > 0 and m_time > 0:
+            cad_sum += cad * m_time
+            cad_time += m_time
+            
+    avg_cad = round(cad_sum / cad_time) if cad_time > 0 else 0
+    
+    from routers.sync import pace_str, format_duration
+    avg_pace = pace_str(total_dist * 1000, total_moving)
+    duration_str = format_duration(total_moving)
+    
+    main_act = max(acts, key=lambda a: a.get("distance_km", 0.0) or 0.0)
+    
+    names = []
+    for a in acts:
+        n = a.get("name", "跑步").strip()
+        if n not in names:
+            names.append(n)
+    combined_name = " + ".join(names)
+    if len(combined_name) > 60:
+        combined_name = f"{main_act.get('name', '跑步')} (组合训练)"
+        
+    agg_doc = {
+        "activity_id": first_act.get("activity_id"),
+        "canonical_activity_id": first_act.get("activity_id"),
+        "sub_activity_ids": [a.get("activity_id") for a in acts],
+        "name": combined_name,
+        "start_date_local": first_act.get("start_date_local"),
+        "distance_km": round(total_dist, 2),
+        "moving_time": total_moving,
+        "elapsed_time": total_elapsed,
+        "duration_str": duration_str,
+        "avg_pace": avg_pace,
+        "avg_heart_rate": avg_hr,
+        "max_heart_rate": max_hr,
+        "total_elevation_gain": round(total_elev, 1),
+        "avg_cadence": avg_cad,
+        "activity_type": main_act.get("activity_type", "run"),
+        "sport_type": main_act.get("sport_type", "Run"),
+        "strava_type": main_act.get("strava_type", "Run"),
+        "timezone": first_act.get("timezone", ""),
+        "utc_offset": first_act.get("utc_offset", 0),
+        "period": first_act.get("period", ""),
+        "period_start": first_act.get("period_start", ""),
+        "gear_id": main_act.get("gear_id", ""),
+        "gear_name": main_act.get("gear_name", ""),
+        "is_composite": True,
+        "sub_activities": acts
+    }
+    
+    combined_splits = []
+    for a in acts:
+        splits = a.get("splits_metric", [])
+        if splits:
+            combined_splits.extend(splits)
+    agg_doc["splits_metric"] = combined_splits
+    
+    agg_doc["stream_stats"] = merge_stream_stats(acts)
+    
+    return agg_doc
+
 def _build_runs_str(acts: list) -> str:
     if not acts:
         return "No recent activities."
-    lines = [
-        f"{a.get('start_date_local','')[:10]} "
-        f"{a.get('distance_km',0)}km "
-        f"@{a.get('avg_pace','?')}/km "
-        f"HR:{a.get('avg_heart_rate',0)}bpm "
-        f"Elev:{a.get('total_elevation_gain',0)}m"
-        for a in acts
-    ]
-    return " | ".join(lines)
+        
+    sorted_acts = sorted(acts, key=lambda a: a.get("start_date_local", ""))
+    sessions = group_activities_into_sessions(sorted_acts)
+    
+    # Sort sessions descending by start time (newest first)
+    sessions.sort(key=lambda s: s[0].get("start_date_local", ""), reverse=True)
+    
+    session_strs = []
+    for s in sessions:
+        if len(s) == 1:
+            a = s[0]
+            session_strs.append(
+                f"{a.get('start_date_local','')[:10]} "
+                f"{a.get('name', '跑步')}({a.get('distance_km',0)}km, 配速{a.get('avg_pace','?')}/km, 心率{a.get('avg_heart_rate',0)}bpm, 爬升{a.get('total_elevation_gain',0)}m)"
+            )
+        else:
+            first_a = s[0]
+            total_dist = sum(a.get("distance_km", 0.0) or 0.0 for a in s)
+            total_moving = sum(a.get("moving_time", 0) or 0 for a in s)
+            
+            hr_sum = sum((a.get("avg_heart_rate", 0) or 0) * (a.get("moving_time", 0) or 0) for a in s)
+            hr_time = sum(a.get("moving_time", 0) or 0 for a in s)
+            avg_hr = round(hr_sum / hr_time) if hr_time > 0 else 0
+            
+            from routers.sync import pace_str
+            avg_pace = pace_str(total_dist * 1000, total_moving)
+            
+            sub_strs = []
+            for a in s:
+                sub_strs.append(f"{a.get('name','跑步')}({a.get('distance_km',0)}km,配速{a.get('avg_pace','?')})")
+            
+            session_strs.append(
+                f"{first_a.get('start_date_local','')[:10]} 大课组合训练(总共{total_dist:.2f}km, 综合配速{avg_pace}, 综合心率{avg_hr}bpm, 包含: {' + '.join(sub_strs)})"
+            )
+            
+    return " | ".join(session_strs)
+
 
 _FALLBACK = {
     "status": "继续加油 💪",
@@ -1490,6 +1703,34 @@ async def log_journal_entry(req: JournalLogRequest):
     if not activity:
         return {"error": "No activity found"}
 
+    # ── Group activities on the same day to check if this is part of a training combo ──
+    date_str = activity.get("start_date_local", "")[:10]
+    day_start = f"{date_str}T00:00:00"
+    day_end = f"{date_str}T23:59:59"
+    
+    day_docs = list(user_ref.collection("activities")
+                     .where("start_date_local", ">=", day_start)
+                     .where("start_date_local", "<=", day_end)
+                     .stream())
+    day_acts = [doc.to_dict() for doc in day_docs]
+    day_acts.sort(key=lambda a: a.get("start_date_local", ""))
+    
+    sessions = group_activities_into_sessions(day_acts)
+    
+    current_session_acts = []
+    for s in sessions:
+        if any(a.get("activity_id") == activity.get("activity_id") for a in s):
+            current_session_acts = s
+            break
+            
+    is_composite = False
+    current_sub_ids = []
+    if len(current_session_acts) > 1:
+        print(f"[coach] Aggregating {len(current_session_acts)} activities for {date_str} (gap <= 15 mins)")
+        activity = aggregate_activities(current_session_acts)
+        is_composite = True
+        current_sub_ids = activity.get("sub_activity_ids", [])
+
     # ── 1a. Detect cross-training activities ──────────────────────────────────
     activity_type = activity.get("activity_type", "run")  # "run" or "cross_training"
     strava_type = activity.get("strava_type", activity.get("sport_type", "Run"))
@@ -1516,7 +1757,10 @@ async def log_journal_entry(req: JournalLogRequest):
         # Check if entry already exists
         existing = entries_ref.document(f"{entry_date}_{act_id}").get()
         if existing.exists and not req.force:
-            return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
+            existing_data = existing.to_dict()
+            existing_sub_ids = existing_data.get("sub_activity_ids", [])
+            if set(current_sub_ids) == set(existing_sub_ids):
+                return {"entry": existing_data, "journal_id": journal_id, "cached": True}
 
         # Fetch this week's run context for the AI
         from datetime import date as _dt, timedelta
@@ -1605,8 +1849,26 @@ async def log_journal_entry(req: JournalLogRequest):
             },
             "created_at": __import__("datetime").datetime.now().isoformat(),
         }
+        if is_composite:
+            entry["is_composite"] = True
+            entry["sub_activity_ids"] = current_sub_ids
+            
         entries_ref.document(f"{entry_date}_{act_id}").set(entry)
-        return {"entry": entry, "journal_id": journal_id}
+        
+        # Clean up duplicate entries in composite session
+        if is_composite:
+            for sa_id in current_sub_ids:
+                if str(sa_id) != act_id:
+                    try:
+                        entries_ref.document(f"{entry_date}_{sa_id}").delete()
+                        print(f"[coach] Cleaned up duplicate CT journal entry for {sa_id}")
+                    except Exception as _del_err:
+                        print(f"[coach] Error cleaning up duplicate: {_del_err}")
+                        
+        resp_data = {"entry": entry, "journal_id": journal_id}
+        if is_composite:
+            resp_data["aggregated_activity"] = activity
+        return resp_data
 
     # ── Run activity path (existing logic) ────────────────────────────────────
 
@@ -1682,7 +1944,10 @@ async def log_journal_entry(req: JournalLogRequest):
     entry_date = activity.get("start_date_local", "")[:10]
     existing = entries_ref.document(f"{entry_date}_{act_id}").get()
     if existing.exists and not req.force:
-        return {"entry": existing.to_dict(), "journal_id": journal_id, "cached": True}
+        existing_data = existing.to_dict()
+        existing_sub_ids = existing_data.get("sub_activity_ids", [])
+        if set(current_sub_ids) == set(existing_sub_ids):
+            return {"entry": existing_data, "journal_id": journal_id, "cached": True}
 
     # 3. This week's context (Monday = start, Sunday = end, matching Strava)
     from datetime import date as _dt, timedelta
@@ -1700,16 +1965,17 @@ async def log_journal_entry(req: JournalLogRequest):
         .where("start_date_local", ">=", week_start_ts)
         .stream()
     )
-    # Sum only runs (exclude cross-training), exclude current activity
+    # Sum only runs (exclude cross-training), exclude current activity/activities in the session
+    exclude_ids = set(str(sid) for sid in current_sub_ids) if is_composite else {act_id}
     week_km = sum(
         a.to_dict().get("distance_km", 0) for a in week_activities
         if a.to_dict().get("activity_type", "run") == "run"
-        and str(a.to_dict().get("activity_id", "")) != act_id
+        and str(a.to_dict().get("activity_id", "")) not in exclude_ids
     ) + km
     week_runs = sum(
         1 for a in week_activities
         if a.to_dict().get("activity_type", "run") == "run"
-        and str(a.to_dict().get("activity_id", "")) != act_id
+        and str(a.to_dict().get("activity_id", "")) not in exclude_ids
     ) + 1
 
     # 4. Training summary + user goal + weather (parallel)
@@ -1832,6 +2098,24 @@ async def log_journal_entry(req: JournalLogRequest):
         from utils.stream_analyzer import format_stream_stats_for_prompt
         stream_stats_text = format_stream_stats_for_prompt(stream_stats)
 
+    sub_acts_text = ""
+    composite_instruction = ""
+    if activity.get("is_composite"):
+        sub_acts_text = "【今日连续训练组合详情】\n"
+        for idx, sa in enumerate(activity.get("sub_activities", [])):
+            sub_acts_text += (
+                f"- 部分 {idx+1} · {sa.get('name','跑步')}：距离 {sa.get('distance_km')}km，"
+                f"配速 {sa.get('avg_pace')}/km，平均心率 {sa.get('avg_heart_rate')}bpm，"
+                f"时长 {sa.get('duration_str','—')}\n"
+            )
+        sub_acts_text += "\n"
+        
+        composite_instruction = (
+            "⚠️ 注意：学员今天进行了一次由多个部分组成的连续训练（大课组合训练，如热身+正式训练+冷身，或者中间有短暂休息停表）。"
+            "请你将这些部分当作一堂完整的‘大课’来进行全局点评。你需要分析各个部分的结构是否合理（例如热身和冷身是否到位、正式训练部分是否完成了预定强度），"
+            "并结合各部分的表现给出深度教练反馈。在评语中，请明确认可这种结构化的训练方式。\n"
+        )
+
     prompt = (
         f"你是Canova教练（意大利著名马拉松教练），正在为你的学员{runner_name}撰写今日训练评语。\n"
         f"请直呼{runner_name}的名字，像教练对学员说话一样。\n"
@@ -1840,7 +2124,8 @@ async def log_journal_entry(req: JournalLogRequest):
         f"【训练日志】{journal.get('title','训练日志')}\n"
         f"{race_ctx}"
         f"{travel_ctx}"
-        f"【今日训练详情】（类型：{type_label}{'🏔️' if is_trail else '🛣️'}）\n"
+        f"{composite_instruction}"
+        f"【今日训练详情】（类型：{type_label}{'🏔️' if is_trail else '🛣️'}{' - 聚合大课训练' if activity.get('is_composite') else ''}）\n"
         f"- 活动名称：{activity.get('name','Run')}\n"
         f"- 距离：{km} km\n"
         f"- 配速：{act_pace}/km\n"
@@ -1849,7 +2134,8 @@ async def log_journal_entry(req: JournalLogRequest):
         f"- 步频：{act_cadence}spm\n"
         f"- 时长：{activity.get('duration_str','—')}\n"
         f"- 日期：{entry_date}（{today_weekday}）\n"
-        f"- 所在时区：{current_tz or '未知'}\n"
+        f"- 所在时区：{current_tz or '未知'}\n\n"
+        f"{sub_acts_text}"
     )
 
     # Append detailed stream data when available
@@ -1992,8 +2278,26 @@ async def log_journal_entry(req: JournalLogRequest):
         },
         "created_at": __import__("datetime").datetime.now().isoformat(),
     }
+    if is_composite:
+        entry["is_composite"] = True
+        entry["sub_activity_ids"] = current_sub_ids
+        
     entries_ref.document(f"{entry_date}_{act_id}").set(entry)
-    return {"entry": entry, "journal_id": journal_id}
+    
+    # Clean up duplicate entries in composite session
+    if is_composite:
+        for sa_id in current_sub_ids:
+            if str(sa_id) != act_id:
+                try:
+                    entries_ref.document(f"{entry_date}_{sa_id}").delete()
+                    print(f"[coach] Cleaned up duplicate run journal entry for {sa_id}")
+                except Exception as _del_err:
+                    print(f"[coach] Error cleaning up duplicate: {_del_err}")
+                    
+    resp_data = {"entry": entry, "journal_id": journal_id}
+    if is_composite:
+        resp_data["aggregated_activity"] = activity
+    return resp_data
 
 
 class BackfillRequest(BaseModel):

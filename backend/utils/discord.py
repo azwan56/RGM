@@ -141,11 +141,23 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict, is_wecom:
             h, r = divmod(int(fm_pb), 3600)
             pb_str = f"全马PB {h}:{r//60:02d}"
 
+        is_composite = act_doc.get("is_composite", False)
+        sub_acts = act_doc.get("sub_activities", [])
+
         # Build rich context lines
         context_lines = [
             f"跑者：{name}，训练目标：{goal or '未设定'}，{pb_str or '无PB记录'}",
-            f"本次跑步：{dist}km，配速 {pace}/km，时长 {duration}",
         ]
+        if is_composite:
+            context_lines.append(f"本次连续组合训练总计：{dist}km，综合配速 {pace}/km，总时长 {duration}")
+            for idx, sa in enumerate(sub_acts):
+                context_lines.append(
+                    f"  - 第{idx+1}部分 · {sa.get('name','跑步')}：{sa.get('distance_km')}km，"
+                    f"配速 {sa.get('avg_pace')}/km，平均心率 {sa.get('avg_heart_rate')}bpm，"
+                    f"时长 {sa.get('duration_str','—')}"
+                )
+        else:
+            context_lines.append(f"本次跑步：{dist}km，配速 {pace}/km，时长 {duration}")
         gear_name = act_doc.get("gear_name")
         if gear_name:
             context_lines.append(f"跑步装备（跑鞋）：{gear_name}")
@@ -222,6 +234,8 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     atl = context.get("atl")
     tsb = context.get("tsb")
 
+    is_composite = act_doc.get("is_composite", False)
+
     # Colour and icon based on type / distance
     if is_ct:
         colour = 0x06B6D4  # Cyan — cross training
@@ -229,7 +243,10 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
         title_text = "完成了一次交叉训练！"
     else:
         title_icon = "🏃"
-        title_text = "完成了一次跑步！"
+        if is_composite:
+            title_text = "完成了一组连续训练（大课）！"
+        else:
+            title_text = "完成了一次跑步！"
         if dist >= 21:
             colour = 0xFC4C02   # Strava orange — long run
         elif dist >= 10:
@@ -251,7 +268,10 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     if is_ct:
         desc_lines.append(f"⏱ **{duration}**")
     else:
-        desc_lines.append(f"🏁 **{dist} km**  ·  ⚡ **{pace}/km**  ·  ⏱ **{duration}**")
+        if is_composite:
+            desc_lines.append(f"🏁 **总距离：{dist} km**  ·  ⚡ **综合配速：{pace}/km**  ·  ⏱ **总时长：{duration}**")
+        else:
+            desc_lines.append(f"🏁 **{dist} km**  ·  ⚡ **{pace}/km**  ·  ⏱ **{duration}**")
 
     # Row 2: HR and/or elevation (optional)
     row2_parts = []
@@ -266,6 +286,16 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
     if monthly_km and not is_ct:
         month_label = date_str[:7] if date_str else datetime.now().strftime("%Y-%m")
         desc_lines.append(f"📅 {month_label} 月累计跑量：**{monthly_km} km**")
+
+    if is_composite:
+        desc_lines.append("")
+        desc_lines.append("**📋 训练组合详情**:")
+        for idx, sa in enumerate(act_doc.get("sub_activities", [])):
+            sa_name = sa.get("name", "跑步")
+            sa_dist = sa.get("distance_km", 0)
+            sa_pace = sa.get("avg_pace", "—")
+            sa_dur = sa.get("duration_str", "—")
+            desc_lines.append(f"- **部分 {idx+1}** · {sa_name}：{sa_dist} km ({sa_pace}/km, {sa_dur})")
 
     description = "\n".join(desc_lines)
 
@@ -405,6 +435,9 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         if journal_entry is None:
             journal_entry = {}
 
+        is_composite = act_doc.get("is_composite", False)
+        sub_acts = act_doc.get("sub_activities", [])
+
         # ── Build Markdown ────────────────────────────────────────────────────
         runner_name = (
             user_data.get("display_name") or
@@ -429,12 +462,28 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
             md += f"> **{run_name}** · {date_short}\n\n"
             md += f"⏱ 时长：**{duration}**\n"
         else:
-            md  = f"🏃 **{runner_name} 完成了一次跑步！**\n"
-            md += f"> **{run_name}** · {date_short}\n\n"
-            md += f"🏁 距离：**{dist} km**\n"
-            md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
-            if elev and elev > 5:
-                md += f"🏔 爬升：{elev} m\n"
+            if is_composite:
+                md  = f"🏃 **{runner_name} 完成了一组连续训练（大课）！**\n"
+                md += f"> **{run_name}** · {date_short}\n\n"
+                md += f"🏁 总距离：**{dist} km**\n"
+                md += f"⚡ 综合配速：**{pace}/km**  |  ⏱ 总时长：{duration}\n"
+                if elev and elev > 5:
+                    md += f"🏔 总爬升：{elev} m\n"
+                
+                md += "\n📋 **训练组合详情**：\n"
+                for idx, sa in enumerate(sub_acts):
+                    sa_name = sa.get("name", "跑步")
+                    sa_dist = sa.get("distance_km", 0)
+                    sa_pace = sa.get("avg_pace", "—")
+                    sa_dur = sa.get("duration_str", "—")
+                    md += f"- **部分 {idx+1}** · {sa_name}：{sa_dist} km ({sa_pace}/km, {sa_dur})\n"
+            else:
+                md  = f"🏃 **{runner_name} 完成了一次跑步！**\n"
+                md += f"> **{run_name}** · {date_short}\n\n"
+                md += f"🏁 距离：**{dist} km**\n"
+                md += f"⚡ 配速：**{pace}/km**  |  ⏱ 时长：{duration}\n"
+                if elev and elev > 5:
+                    md += f"🏔 爬升：{elev} m\n"
 
         # Weekly/monthly mileage (non-biometric, only for runs)
         if not is_ct:
