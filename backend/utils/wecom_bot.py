@@ -745,8 +745,21 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             )
 
         # ── Include data for mentioned users ──────────────────────────────
+        history = await asyncio.to_thread(_fetch_chat_history, wecom_user_id, uid, 10)
         mentioned_users = await asyncio.to_thread(_find_mentioned_users, combined_text)
         mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid]
+        
+        # If no user mentioned in current message, resolve context user from history
+        if not mentioned_users:
+            for msg in reversed(history):
+                h_content = msg.get("content", "")
+                if h_content:
+                    h_mentions = _find_mentioned_users(h_content)
+                    h_mentions = [(m_uid, m_data) for m_uid, m_data in h_mentions if m_uid != uid]
+                    if h_mentions:
+                        mentioned_users = h_mentions
+                        print(f"[wecom_bot] Resolved context user from history: {[m[1].get('display_name') for m in mentioned_users]}")
+                        break
         
         if mentioned_users:
             context_str += "\n【聊天中提到其他成员的数据，可供参考】：\n"
@@ -808,7 +821,8 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
         )
 
         # ── Build Gemini Contents with History ────────────────────────────
-        history = await asyncio.to_thread(_fetch_chat_history, wecom_user_id, uid, 10)
+        # history is already fetched early
+        
         
         gemini_contents = []
         last_role = None
