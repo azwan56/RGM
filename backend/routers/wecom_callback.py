@@ -54,7 +54,14 @@ async def receive_message(
         decrypted_xml = crypto.decrypt_msg(msg_signature, timestamp, nonce, encrypt)
         
         msg_tree = ET.fromstring(decrypted_xml)
-        msg_data = {child.tag: child.text for child in msg_tree}
+        msg_data = {}
+        for child in msg_tree:
+            if len(child) == 0:
+                msg_data[child.tag] = child.text
+            else:
+                msg_data[child.tag] = child.text
+                for sub in child:
+                    msg_data[sub.tag] = sub.text
         print(f"[wecom_callback]   decrypted msg_data keys={list(msg_data.keys())}, MsgType={msg_data.get('MsgType')}, Content={str(msg_data.get('Content', ''))[:60]!r}")
         
         # WeCom expects an immediate acknowledgment (empty string or "success")

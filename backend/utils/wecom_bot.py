@@ -217,6 +217,31 @@ def _bind_user(wecom_user_id: str, bind_code: str):
     return None
 
 
+def _download_wecom_media(media_id: str) -> dict:
+    """Download media from WeCom and return Gemini-compatible inlineData dict."""
+    token = _get_wecom_access_token()
+    if not token:
+        logger.error("[wecom_bot] Cannot download media: no access token")
+        return None
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token={token}&media_id={media_id}"
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.ok:
+            content_type = resp.headers.get("Content-Type", "")
+            if content_type.startswith("image/"):
+                import base64
+                mime = content_type
+                b64 = base64.b64encode(resp.content).decode("utf-8")
+                return {"mimeType": mime, "data": b64}
+            else:
+                logger.warning(f"[wecom_bot] Downloaded media content-type {content_type} is not an image")
+        else:
+            logger.error(f"[wecom_bot] Failed to download media: HTTP {resp.status_code}")
+    except Exception as e:
+        logger.error(f"[wecom_bot] Exception downloading media: {e}")
+    return None
+
+
 def _find_mentioned_users(content: str) -> list:
     """
     Scan the message content for names of other users.
@@ -527,11 +552,10 @@ def _detect_intent(content: str) -> str:
 
 # ── Message processing ────────────────────────────────────────────────────────
 
-async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_func=None):
+async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_func=None, inline_data=None):
     """Core logic to process incoming text and generate a response."""
     quoted_text = ''
-    inline_data = None
-    media_type = 'text'
+    media_type = 'text' if not inline_data else 'image'
     
     async def _send_msg(msg: str):
         if reply_func:
@@ -803,21 +827,28 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
         if quoted_text:
             quoted_context = f"【用户引用了之前的消息】：\n\"{quoted_text}\"\n\n"
 
+        prompt_reqs = [
+            "- 字数控制：如果是闲聊或调侃，控制在80-150个中文字以内；如果是回答跑步知识、赛事信息或长篇科普，请详尽完整地回答，字数不限，务必把话说清楚",
+            "- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条",
+            "- 如果用户发送了图片，请结合图片内容进行调侃或鼓励",
+            "- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半",
+            "- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据",
+            "- 用1-2个emoji",
+            "- 纯文本，不要用markdown格式如**加粗**",
+            "- 如果用户心情低落或受伤，收起嬉皮，认真关心",
+            "- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'",
+            "- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接等详尽信息。如果搜索不到可靠信息，就诚实说'我搜了一圈没找到靠谱的，建议你去官方渠道确认一下'"
+        ]
+        if inline_data:
+            prompt_reqs.append("- 用户提供了一张图片/文件。你需要对该图片/文件进行OCR与识别。如果是训练计划、课表、跑步记录截图等，请识别其中的距离、配速、时间、训练日期和动作等关键数据，为用户进行细致的解读和点评（必要时进行毒舌调侃）。")
+
+        reqs_str = "\n".join(prompt_reqs)
         prompt = (
             f"{context_str}\n\n"
             f"{quoted_context}"
             f"用户当前的输入是：{content}\n\n"
             f"请用你的'团宠'人设回复。要求：\n"
-            f"- 字数控制：如果是闲聊或调侃，控制在80-150个中文字以内；如果是回答跑步知识、赛事信息或长篇科普，请详尽完整地回答，字数不限，务必把话说清楚\n"
-            f"- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条\n"
-            f"- 如果用户发送了图片，请结合图片内容进行调侃或鼓励\n"
-            f"- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半\n"
-            f"- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据\n"
-            f"- 用1-2个emoji\n"
-            f"- 纯文本，不要用markdown格式如**加粗**\n"
-            f"- 如果用户心情低落或受伤，收起嬉皮，认真关心\n"
-            f"- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'\n"
-            f"- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接等详尽信息。如果搜索不到可靠信息，就诚实说'我搜了一圈没找到靠谱的，建议你去官方渠道确认一下'"
+            f"{reqs_str}"
         )
 
         # ── Build Gemini Contents with History ────────────────────────────
@@ -965,21 +996,51 @@ def handle_wecom_message(msg_data: dict):
     print(f"[wecom_bot] ▶ handle_wecom_message called with keys: {list(msg_data.keys())}")
     msg_type = msg_data.get("MsgType", "")
     print(f"[wecom_bot]   MsgType={msg_type}")
-    if msg_type != "text":
-        print(f"[wecom_bot]   ✗ Skipping non-text message (MsgType={msg_type})")
+    if msg_type not in ["text", "image", "file"]:
+        print(f"[wecom_bot]   ✗ Skipping non-text/image/file message (MsgType={msg_type})")
         return
         
-    content = msg_data.get("Content", "").strip()
+    content = ""
+    inline_data = None
+    
+    if msg_type == "text":
+        content = msg_data.get("Content", "").strip()
+    elif msg_type == "image":
+        media_id = msg_data.get("MediaId", "")
+        print(f"[wecom_bot]   Downloading Callback image MediaId={media_id}")
+        inline_data = _download_wecom_media(media_id) if media_id else None
+        content = "请帮我看看这张图片"
+    elif msg_type == "file":
+        filename = msg_data.get("Title", "") or msg_data.get("FileName", "") or ""
+        media_id = msg_data.get("MediaId", "")
+        suffix = filename.split(".")[-1].lower() if "." in filename else ""
+        if suffix in ["jpg", "jpeg", "png", "webp", "gif"]:
+            print(f"[wecom_bot]   Downloading Callback image file {filename} MediaId={media_id}")
+            inline_data = _download_wecom_media(media_id) if media_id else None
+            content = f"请帮我看看这个文件：{filename}"
+        else:
+            from_user = msg_data.get("FromUserName", "")
+            if from_user:
+                asyncio.run(asyncio.to_thread(
+                    send_bonnie_message, 
+                    from_user, 
+                    "不好意思，我目前只能识别图片或者图片格式的文件（如 .jpg, .png）。如果是其他类型文件，我暂时还看不懂哦~"
+                ))
+            return
+
     from_user = msg_data.get("FromUserName", "")
     chatid = from_user # Default reply to user
-    print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}")
+    print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}, has_inline_data={inline_data is not None}")
     
-    # Check if we should reply (sliding window logic)
-    keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
-    content_lower = content.lower()
-    matched_keywords = [k for k in keywords if k in content_lower]
-    should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
-    print(f"[wecom_bot]   matched_keywords={matched_keywords}, should_reply={should_reply}")
+    if msg_type in ["image", "file"]:
+        should_reply = True
+    else:
+        # Check if we should reply (sliding window logic)
+        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
+        content_lower = content.lower()
+        matched_keywords = [k for k in keywords if k in content_lower]
+        should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
+        print(f"[wecom_bot]   matched_keywords={matched_keywords}, should_reply={should_reply}")
     
     if should_reply:
         # Use asyncio to run the async generate_reply in background
@@ -992,9 +1053,9 @@ def handle_wecom_message(msg_data: dict):
         print(f"[wecom_bot]   loop={'running' if loop and loop.is_running() else 'none'}")
         try:
             if loop and loop.is_running():
-                loop.create_task(_generate_reply(content, from_user, chatid))
+                loop.create_task(_generate_reply(content, from_user, chatid, inline_data=inline_data))
             else:
-                asyncio.run(_generate_reply(content, from_user, chatid))
+                asyncio.run(_generate_reply(content, from_user, chatid, inline_data=inline_data))
             print(f"[wecom_bot]   ✓ _generate_reply dispatched")
         except Exception as e:
             print(f"[wecom_bot]   ✗ Failed to dispatch _generate_reply: {e}")
@@ -1046,6 +1107,73 @@ async def _bot_main_loop():
             asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
         else:
             logger.info("[wecom_bot] WS Not replying (no keyword match)")
+
+    async def on_image(frame):
+        sender = frame.body.get("from", {}).get("userid", "")
+        image_info = frame.body.get("image", {})
+        img_url = image_info.get("url", "")
+        aes_key = image_info.get("aeskey", "") or image_info.get("aes_key", "")
+        
+        logger.info(f"[wecom_bot] WS Received image from sender={sender!r}, url={img_url!r}")
+        if not img_url:
+            return
+            
+        try:
+            buf, filename = await _client.download_file(img_url, aes_key)
+            import base64
+            b64 = base64.b64encode(buf).decode("utf-8")
+            inline_data = {"mimeType": "image/jpeg", "data": b64}
+            
+            content = "请帮我看看这张图片"
+            async def ws_reply(text):
+                stream_id = generate_req_id("stream")
+                await _client.reply_stream(frame, stream_id, text, finish=True)
+                
+            asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
+        except Exception as e:
+            logger.error(f"[wecom_bot] Failed to download/decrypt WS image: {e}")
+
+    async def on_file(frame):
+        sender = frame.body.get("from", {}).get("userid", "")
+        file_info = frame.body.get("file", {})
+        file_url = file_info.get("url", "")
+        aes_key = file_info.get("aeskey", "") or file_info.get("aes_key", "")
+        filename = file_info.get("name", "") or file_info.get("filename", "") or ""
+        
+        logger.info(f"[wecom_bot] WS Received file from sender={sender!r}, name={filename!r}, url={file_url!r}")
+        if not file_url:
+            return
+            
+        suffix = filename.split(".")[-1].lower() if "." in filename else ""
+        if suffix not in ["jpg", "jpeg", "png", "webp", "gif"]:
+            async def ws_reply(text):
+                stream_id = generate_req_id("stream")
+                await _client.reply_stream(frame, stream_id, text, finish=True)
+            await ws_reply("不好意思，我目前只能识别图片或者图片格式的文件（如 .jpg, .png）。其他类型文件我暂时看不懂哦~")
+            return
+            
+        try:
+            buf, filename = await _client.download_file(file_url, aes_key)
+            import base64
+            mime_map = {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "webp": "image/webp",
+                "gif": "image/gif"
+            }
+            mime = mime_map.get(suffix, "image/jpeg")
+            b64 = base64.b64encode(buf).decode("utf-8")
+            inline_data = {"mimeType": mime, "data": b64}
+            
+            content = f"请帮我看看这个文件：{filename}"
+            async def ws_reply(text):
+                stream_id = generate_req_id("stream")
+                await _client.reply_stream(frame, stream_id, text, finish=True)
+                
+            asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
+        except Exception as e:
+            logger.error(f"[wecom_bot] Failed to download/decrypt WS file: {e}")
 
     _client.on("message.text", on_text)
 
