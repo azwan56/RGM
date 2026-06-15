@@ -1179,7 +1179,8 @@ async def _bot_main_loop():
         """Handle mixed messages (text + image combined, e.g. @Bot + image + text)."""
         sender = frame.body.get("from", {}).get("userid", "")
         mixed_info = frame.body.get("mixed", {})
-        items = mixed_info.get("items", [])
+        # WeCom uses "msg_item" (not "items") for mixed message items
+        items = mixed_info.get("msg_item", []) or mixed_info.get("items", [])
         
         logger.info(f"[wecom_bot] WS Received mixed message from sender={sender!r}, {len(items)} items")
         
@@ -1187,7 +1188,8 @@ async def _bot_main_loop():
         text_parts = []
         inline_data = None
         for item in items:
-            item_type = item.get("type", "")
+            # WeCom uses "msgtype" (not "type") for each item's content type
+            item_type = item.get("msgtype", "") or item.get("type", "")
             if item_type == "text":
                 t = item.get("text", {}).get("content", "").strip()
                 if t:
@@ -1202,7 +1204,7 @@ async def _bot_main_loop():
                 aes_key = image_data.get("aeskey", "") or image_data.get("aes_key", "")
                 if img_url and not inline_data:
                     try:
-                        buf, fname = await _client.download_file(img_url, aes_key)
+                        buf, fname = await _client.download_file(img_url, aes_key or None)
                         import base64
                         b64 = base64.b64encode(buf).decode("utf-8")
                         inline_data = {"mimeType": "image/jpeg", "data": b64}
@@ -1250,23 +1252,28 @@ async def _bot_main_loop():
                     except Exception as e:
                         logger.error(f"[wecom_bot] WS fallback: failed to download {key}: {e}")
 
-            # Try to extract from mixed.items
-            mixed_items = body.get("mixed", {}).get("items", []) if isinstance(body.get("mixed"), dict) else []
+            # Try to extract from mixed.msg_item (WeCom actual field name)
+            mixed_obj = body.get("mixed", {})
+            mixed_items = []
+            if isinstance(mixed_obj, dict):
+                mixed_items = mixed_obj.get("msg_item", []) or mixed_obj.get("items", [])
             for item in mixed_items:
                 if not isinstance(item, dict):
                     continue
-                if item.get("type") == "text":
+                # WeCom uses "msgtype" per item (not "type")
+                itype = item.get("msgtype", "") or item.get("type", "")
+                if itype == "text":
                     t = item.get("text", {}).get("content", "").strip() if isinstance(item.get("text"), dict) else ""
                     if t:
                         import re
                         t = re.sub(r'@\S+\s*', '', t).strip()
                         if t:
                             text_parts.append(t)
-                elif item.get("type") == "image" and not inline_data:
+                elif itype == "image" and not inline_data:
                     img = item.get("image", {})
                     if isinstance(img, dict) and img.get("url"):
                         try:
-                            buf, fname = await _client.download_file(img["url"], img.get("aeskey", "") or img.get("aes_key", ""))
+                            buf, fname = await _client.download_file(img["url"], img.get("aeskey", "") or img.get("aes_key", "") or None)
                             inline_data = {"mimeType": "image/jpeg", "data": base64.b64encode(buf).decode("utf-8")}
                             logger.info(f"[wecom_bot] WS fallback mixed: downloaded image {fname}")
                         except Exception as e:
