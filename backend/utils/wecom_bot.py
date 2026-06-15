@@ -1223,6 +1223,17 @@ async def _bot_main_loop():
         logger.info(f"[wecom_bot] WS Mixed: dispatching reply with content={content[:60]!r}, has_image={inline_data is not None}")
         asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
 
+    async def on_any_message(frame):
+        """Catch-all logger for ALL incoming messages — helps debug unknown message types."""
+        body = frame.body if hasattr(frame, 'body') else {}
+        msgtype = body.get("msgtype", "unknown") if isinstance(body, dict) else "non-dict"
+        sender = ""
+        if isinstance(body, dict):
+            sender = body.get("from", {}).get("userid", "") if isinstance(body.get("from"), dict) else ""
+        body_keys = list(body.keys()) if isinstance(body, dict) else []
+        logger.info(f"[wecom_bot] WS ★ ANY message: msgtype={msgtype!r}, sender={sender!r}, body_keys={body_keys}")
+
+    _client.on("message", on_any_message)
     _client.on("message.text", on_text)
     _client.on("message.image", on_image)
     _client.on("message.file", on_file)
