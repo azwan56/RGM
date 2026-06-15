@@ -1175,7 +1175,58 @@ async def _bot_main_loop():
         except Exception as e:
             logger.error(f"[wecom_bot] Failed to download/decrypt WS file: {e}")
 
+    async def on_mixed(frame):
+        """Handle mixed messages (text + image combined, e.g. @Bot + image + text)."""
+        sender = frame.body.get("from", {}).get("userid", "")
+        mixed_info = frame.body.get("mixed", {})
+        items = mixed_info.get("items", [])
+        
+        logger.info(f"[wecom_bot] WS Received mixed message from sender={sender!r}, {len(items)} items")
+        
+        # Extract text and image from items
+        text_parts = []
+        inline_data = None
+        for item in items:
+            item_type = item.get("type", "")
+            if item_type == "text":
+                t = item.get("text", {}).get("content", "").strip()
+                if t:
+                    # Strip @BotName mentions
+                    import re
+                    t = re.sub(r'@\S+\s*', '', t).strip()
+                    if t:
+                        text_parts.append(t)
+            elif item_type == "image":
+                image_data = item.get("image", {})
+                img_url = image_data.get("url", "")
+                aes_key = image_data.get("aeskey", "") or image_data.get("aes_key", "")
+                if img_url and not inline_data:
+                    try:
+                        buf, fname = await _client.download_file(img_url, aes_key)
+                        import base64
+                        b64 = base64.b64encode(buf).decode("utf-8")
+                        inline_data = {"mimeType": "image/jpeg", "data": b64}
+                        logger.info(f"[wecom_bot] WS Mixed: downloaded image {fname}, {len(buf)} bytes")
+                    except Exception as e:
+                        logger.error(f"[wecom_bot] Failed to download mixed image: {e}")
+        
+        content = " ".join(text_parts) if text_parts else "请帮我看看这张图片"
+        
+        if not inline_data and not text_parts:
+            logger.info("[wecom_bot] WS Mixed: no actionable content, skipping")
+            return
+        
+        async def ws_reply(text):
+            stream_id = generate_req_id("stream")
+            await _client.reply_stream(frame, stream_id, text, finish=True)
+        
+        logger.info(f"[wecom_bot] WS Mixed: dispatching reply with content={content[:60]!r}, has_image={inline_data is not None}")
+        asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
+
     _client.on("message.text", on_text)
+    _client.on("message.image", on_image)
+    _client.on("message.file", on_file)
+    _client.on("message.mixed", on_mixed)
 
     # Connect and keep alive with auto-reconnect
     while True:
