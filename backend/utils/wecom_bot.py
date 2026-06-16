@@ -43,9 +43,9 @@ _pending_image_context = {}
 _PENDING_IMAGE_TIMEOUT = 120  # seconds
 
 _IMAGE_INTENT_KEYWORDS = [
-    "看图", "看看图", "图片", "截图", "看看这个", "看看这张", "帮我看", "帮我分析",
-    "分析一下", "发给你", "发你", "给你看", "发图",
-    "识别", "ocr", "看看我的", "看看他的",
+    "看图", "看看图", "图片", "截图", "看看这个", "看看这张", "看这个", "看这张",
+    "帮我看", "帮我分析", "分析一下", "发给你", "发你", "给你看", "发图",
+    "识别", "ocr", "看看我的", "看看他的", "看下", "看一下",
 ]
 
 def _set_pending_image_context(sender_id: str, text: str, reply_func=None, frame=None):
@@ -598,6 +598,13 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             await reply_func(msg)
         else:
             await asyncio.to_thread(send_bonnie_message, chatid, msg)
+
+    # Send typing indicator immediately so user knows Bonnie is processing
+    if reply_func:
+        try:
+            await reply_func("Bonnie正在思考中... 💭")
+        except Exception as e:
+            logger.warning(f"[wecom_bot] Failed to send typing indicator: {e}")
 
     try:
         # Strip @BotName mentions from the beginning (WeCom includes @mention in text)
