@@ -1226,7 +1226,7 @@ async def _bot_main_loop():
         asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
 
     async def on_any_message(frame):
-        """Catch-all for ALL incoming messages. Logs and acts as fallback for non-text."""
+        """Catch-all logger. Only processes unknown message types as fallback."""
         body = frame.body if hasattr(frame, 'body') else {}
         if not isinstance(body, dict):
             return
@@ -1235,79 +1235,35 @@ async def _bot_main_loop():
         body_keys = list(body.keys())
         logger.info(f"[wecom_bot] WS ★ ANY message: msgtype={msgtype!r}, sender={sender!r}, body_keys={body_keys}")
 
-        # For non-text messages, try to extract image inline_data as a fallback
-        if msgtype != "text" and sender:
+        # Known types have dedicated handlers — don't double-process
+        known_types = {"text", "image", "file", "mixed"}
+        if msgtype in known_types:
+            return
+
+        # Unknown message type — try to extract image as fallback
+        if sender:
             import base64, json
             inline_data = None
             text_parts = []
 
-            # Try to extract from top-level image/file fields
-            for key in ["image", "file"]:
-                info = body.get(key, {})
-                if isinstance(info, dict) and info.get("url"):
+            # Scan all dict values for image-like data with "url" field
+            for key, val in body.items():
+                if isinstance(val, dict) and val.get("url") and not inline_data:
                     try:
-                        buf, fname = await _client.download_file(info["url"], info.get("aeskey", "") or info.get("aes_key", ""))
+                        buf, fname = await _client.download_file(val["url"], val.get("aeskey") or val.get("aes_key") or None)
                         inline_data = {"mimeType": "image/jpeg", "data": base64.b64encode(buf).decode("utf-8")}
-                        logger.info(f"[wecom_bot] WS fallback: downloaded {key} from {fname}, {len(buf)} bytes")
+                        logger.info(f"[wecom_bot] WS fallback: downloaded from key={key!r}, {len(buf)} bytes")
                     except Exception as e:
-                        logger.error(f"[wecom_bot] WS fallback: failed to download {key}: {e}")
+                        logger.error(f"[wecom_bot] WS fallback: failed download from key={key!r}: {e}")
 
-            # Try to extract from mixed.msg_item (WeCom actual field name)
-            mixed_obj = body.get("mixed", {})
-            mixed_items = []
-            if isinstance(mixed_obj, dict):
-                mixed_items = mixed_obj.get("msg_item", []) or mixed_obj.get("items", [])
-            for item in mixed_items:
-                if not isinstance(item, dict):
-                    continue
-                # WeCom uses "msgtype" per item (not "type")
-                itype = item.get("msgtype", "") or item.get("type", "")
-                if itype == "text":
-                    t = item.get("text", {}).get("content", "").strip() if isinstance(item.get("text"), dict) else ""
-                    if t:
-                        import re
-                        t = re.sub(r'@\S+\s*', '', t).strip()
-                        if t:
-                            text_parts.append(t)
-                elif itype == "image" and not inline_data:
-                    img = item.get("image", {})
-                    if isinstance(img, dict) and img.get("url"):
-                        try:
-                            buf, fname = await _client.download_file(img["url"], img.get("aeskey", "") or img.get("aes_key", "") or None)
-                            inline_data = {"mimeType": "image/jpeg", "data": base64.b64encode(buf).decode("utf-8")}
-                            logger.info(f"[wecom_bot] WS fallback mixed: downloaded image {fname}")
-                        except Exception as e:
-                            logger.error(f"[wecom_bot] WS fallback mixed: download failed: {e}")
-
-            # Try text from top-level text field too
-            top_text = body.get("text", {}).get("content", "").strip() if isinstance(body.get("text"), dict) else ""
-            if top_text:
-                import re
-                top_text = re.sub(r'@\S+\s*', '', top_text).strip()
-                if top_text:
-                    text_parts.append(top_text)
-
-            content = " ".join(text_parts) if text_parts else "请帮我看看这张图片"
-
+            content = "请帮我看看这张图片"
             if inline_data:
                 async def ws_reply(text):
                     stream_id = generate_req_id("stream")
                     await _client.reply_stream(frame, stream_id, text, finish=True)
-                logger.info(f"[wecom_bot] WS fallback: dispatching with image, content={content[:60]!r}")
                 asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
             else:
-                # No image found — send diagnostic reply so user knows message was received
-                logger.warning(f"[wecom_bot] WS fallback: msgtype={msgtype!r} received but no image extracted. body_keys={body_keys}")
-                try:
-                    # Serialize partial body for debug (exclude large binary fields)
-                    debug_body = {k: (str(v)[:100] if not isinstance(v, (dict, list)) else v) for k, v in body.items() if k not in ['from']}
-                    debug_str = json.dumps(debug_body, ensure_ascii=False, default=str)[:500]
-                    async def ws_reply_debug(text):
-                        stream_id = generate_req_id("stream")
-                        await _client.reply_stream(frame, stream_id, text, finish=True)
-                    await ws_reply_debug(f"[调试] 我收到了一条 {msgtype} 类型的消息，但没能提取图片。消息结构：{debug_str}")
-                except Exception as e:
-                    logger.error(f"[wecom_bot] WS fallback: failed to send debug reply: {e}")
+                logger.warning(f"[wecom_bot] WS fallback: unknown msgtype={msgtype!r}, no image found. body_keys={body_keys}")
 
     _client.on("message", on_any_message)
     _client.on("message.text", on_text)
