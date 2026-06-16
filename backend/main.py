@@ -86,4 +86,4 @@ def read_root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "version": "2026-06-15-image-ocr"}
+    return {"status": "ok", "version": "2026-06-16-typing-intent"}
