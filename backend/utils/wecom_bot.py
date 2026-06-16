@@ -35,6 +35,42 @@ logger = logging.getLogger("wecom_bot")
 _client = None
 _bot_task = None
 
+# Pending image context: when a user @Bonnie asking about an image but hasn't
+# sent it yet (common on mobile), we store the context here so the Callback API
+# can associate a standalone image with the pending request.
+# Structure: {sender_id: {"text": str, "timestamp": float, "reply_func": fn|None, "frame": frame|None}}
+_pending_image_context = {}
+_PENDING_IMAGE_TIMEOUT = 120  # seconds
+
+_IMAGE_INTENT_KEYWORDS = [
+    "看图", "看看图", "图片", "截图", "看看这个", "看看这张", "帮我看", "帮我分析",
+    "分析一下", "发给你", "发你", "给你看", "发图",
+    "识别", "ocr", "看看我的", "看看他的",
+]
+
+def _set_pending_image_context(sender_id: str, text: str, reply_func=None, frame=None):
+    """Store pending image context for a user."""
+    _pending_image_context[sender_id] = {
+        "text": text,
+        "timestamp": time.time(),
+        "reply_func": reply_func,
+        "frame": frame,
+    }
+    logger.info(f"[wecom_bot] Stored pending image context for {sender_id!r}: {text[:50]!r}")
+
+def _consume_pending_image_context(sender_id: str) -> dict | None:
+    """Consume and return pending image context if not expired."""
+    ctx = _pending_image_context.pop(sender_id, None)
+    if ctx and (time.time() - ctx["timestamp"]) < _PENDING_IMAGE_TIMEOUT:
+        logger.info(f"[wecom_bot] Consumed pending image context for {sender_id!r}")
+        return ctx
+    return None
+
+def _has_image_intent(content: str) -> bool:
+    """Check if the user's text implies they want to send/discuss an image."""
+    c = content.lower()
+    return any(kw in c for kw in _IMAGE_INTENT_KEYWORDS)
+
 # ── User identity mapping ────────────────────────────────────────────────────
 
 def _resolve_user_by_wecom_id(wecom_user_id: str):
@@ -1032,7 +1068,15 @@ def handle_wecom_message(msg_data: dict):
     chatid = from_user # Default reply to user
     print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}, has_inline_data={inline_data is not None}")
     
-    if msg_type in ["image", "file"]:
+    # For standalone image/file messages, check pending image context first
+    if msg_type in ["image", "file"] and inline_data:
+        pending_ctx = _consume_pending_image_context(from_user)
+        if pending_ctx:
+            # Merge: use the original question text from the @Bonnie message
+            content = pending_ctx["text"]
+            print(f"[wecom_bot]   ★ Merged with pending context: {content[:60]!r}")
+        should_reply = True
+    elif msg_type in ["image", "file"]:
         should_reply = True
     else:
         # Check if we should reply (sliding window logic)
@@ -1089,11 +1133,16 @@ async def _bot_main_loop():
         # WeCom WS API: sender is in "from" → "userid" (nested object)
         # See: https://developer.work.weixin.qq.com/document/path/105170
         sender = frame.body.get("from", {}).get("userid", "")
-        logger.info(f"[wecom_bot] WS Received text from sender={sender!r}, chattype={frame.body.get('chattype')}")
+        chattype = frame.body.get("chattype", "single")
+        logger.info(f"[wecom_bot] WS Received text from sender={sender!r}, chattype={chattype}")
+        
+        # Strip @mention for intent analysis
+        import re
+        clean_content = re.sub(r'@\S+\s*', '', content).strip()
         
         # Check if we should reply (sliding window logic)
         keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
-        content_lower = content.lower()
+        content_lower = clean_content.lower()
         matched_keywords = [k for k in keywords if k in content_lower]
         should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
         
@@ -1102,6 +1151,15 @@ async def _bot_main_loop():
                 # SDK has no reply_text(); use reply_stream with finish=True for single-shot reply
                 stream_id = generate_req_id("stream")
                 await _client.reply_stream(frame, stream_id, text, finish=True)
+            
+            # Check if user intends to send an image (e.g., "帮我看看这个计划")
+            # In group chats, mobile users can't @Bot + image in one message,
+            # so we store context and prompt them to send the image separately.
+            if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
+                _set_pending_image_context(sender, clean_content, reply_func=ws_reply, frame=frame)
+                await ws_reply(f"好的，请把图片发到群里，我来帮你看看 📸（{_PENDING_IMAGE_TIMEOUT}秒内有效）")
+                logger.info(f"[wecom_bot] Image intent detected, stored pending context for {sender!r}")
+                return
             
             logger.info("[wecom_bot] Dispatching _generate_reply via WS")
             asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
