@@ -1160,10 +1160,9 @@ async def _bot_main_loop():
                 
                 if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
                     await ws_reply(
-                        "📸 想让我看图片？请在**同一条消息**里操作：\n"
-                        "1️⃣ 电脑端：先粘贴/拖入图片到输入框，再输入 @Bonnie + 你的问题，一起发送\n"
-                        "2️⃣ 手机端：点击输入框左边的➕，选择图片，添加 @Bonnie 和文字后发送\n\n"
-                        "这样我就能同时看到图片和你的问题啦～"
+                        "📸 想让我看图片？请在电脑端操作：\n"
+                        "先粘贴/拖入图片到输入框，再输入 @Bonnie + 你的问题，一起发送就行啦～\n\n"
+                        "⚠️ 手机端暂时无法把图片和文字放在同一条消息里，所以需要切换到电脑端发送哦"
                     )
                     logger.info(f"[wecom_bot] Image intent detected, sent guidance for {sender!r}")
                     return
