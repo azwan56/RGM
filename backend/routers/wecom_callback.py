@@ -5,7 +5,7 @@ from fastapi.responses import PlainTextResponse
 
 from utils.wecom_crypto import WXBizMsgCrypt
 
-router = APIRouter()
+router = APIRouter(redirect_slashes=False)
 
 def get_crypto() -> WXBizMsgCrypt:
     token = os.getenv("WECOM_CALLBACK_TOKEN", "")
@@ -18,6 +18,7 @@ def get_crypto() -> WXBizMsgCrypt:
     return WXBizMsgCrypt(token, encoding_aes_key, corp_id)
 
 @router.get("/")
+@router.get("")
 async def verify_url(
     msg_signature: str = Query(...),
     timestamp: str = Query(...),
@@ -35,6 +36,7 @@ async def verify_url(
         raise HTTPException(status_code=400, detail="Verification failed")
 
 @router.post("/")
+@router.post("")
 async def receive_message(
     request: Request,
     background_tasks: BackgroundTasks,
