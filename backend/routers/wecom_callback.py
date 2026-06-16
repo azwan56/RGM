@@ -31,9 +31,13 @@ async def verify_url(
         decrypted_echostr = crypto.verify_url(msg_signature, timestamp, nonce, echostr)
         # Must return the decrypted string directly as plain text
         return PlainTextResponse(content=decrypted_echostr)
+    except ValueError as ve:
+        print(f"[wecom_callback] Config check: TOKEN set={bool(os.getenv('WECOM_CALLBACK_TOKEN'))}, AES set={bool(os.getenv('WECOM_CALLBACK_AES_KEY'))}, CORP_ID set={bool(os.getenv('WECOM_CORP_ID'))}")
+        print(f"[wecom_callback] Verification failed: {ve}")
+        raise HTTPException(status_code=400, detail=f"Verification failed: {ve}")
     except Exception as e:
-        print(f"[wecom_callback] Verification failed: {e}")
-        raise HTTPException(status_code=400, detail="Verification failed")
+        print(f"[wecom_callback] Unexpected error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=400, detail=f"Verification failed: {e}")
 
 @router.post("/")
 @router.post("")
