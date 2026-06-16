@@ -1136,45 +1136,40 @@ async def _bot_main_loop():
     })
 
     async def on_text(frame):
-        content = frame.body.get("text", {}).get("content", "").strip()
-        # WeCom WS API: sender is in "from" → "userid" (nested object)
-        # See: https://developer.work.weixin.qq.com/document/path/105170
-        sender = frame.body.get("from", {}).get("userid", "")
-        chattype = frame.body.get("chattype", "single")
-        logger.info(f"[wecom_bot] WS Received text from sender={sender!r}, chattype={chattype}")
-        
-        # Strip @mention for intent analysis
-        import re
-        clean_content = re.sub(r'@\S+\s*', '', content).strip()
-        
-        # In group chats, the WS Bot ONLY receives @mentioned messages,
-        # so we should ALWAYS reply. For single chats, use keyword matching.
-        if chattype == "group":
-            should_reply = True
-        else:
-            keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
-            content_lower = clean_content.lower()
-            matched_keywords = [k for k in keywords if k in content_lower]
-            should_reply = bool(matched_keywords) or random.random() < 0.1
-        
-        if should_reply:
-            async def ws_reply(text):
-                stream_id = generate_req_id("stream")
-                await _client.reply_stream(frame, stream_id, text, finish=True)
+        try:
+            content = frame.body.get("text", {}).get("content", "").strip()
+            sender = frame.body.get("from", {}).get("userid", "")
+            chattype = frame.body.get("chattype", "single")
+            logger.info(f"[wecom_bot] WS Received text from sender={sender!r}, chattype={chattype}, content={content[:60]!r}")
             
-            # Check if user intends to send an image (e.g., "帮我看看这个截图")
-            # In group chats, mobile users can't @Bot + image in one message,
-            # so we store context and prompt them to send the image separately.
-            if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
-                _set_pending_image_context(sender, clean_content, reply_func=ws_reply, frame=frame)
-                await ws_reply(f"好的，请把图片发到群里，我来帮你看看 📸（{_PENDING_IMAGE_TIMEOUT}秒内有效）")
-                logger.info(f"[wecom_bot] Image intent detected, stored pending context for {sender!r}")
-                return
+            import re
+            clean_content = re.sub(r'@\S+\s*', '', content).strip()
             
-            logger.info("[wecom_bot] Dispatching _generate_reply via WS")
-            asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
-        else:
-            logger.info("[wecom_bot] WS Not replying (no keyword match)")
+            if chattype == "group":
+                should_reply = True
+            else:
+                keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
+                content_lower = clean_content.lower()
+                matched_keywords = [k for k in keywords if k in content_lower]
+                should_reply = bool(matched_keywords) or random.random() < 0.1
+            
+            if should_reply:
+                async def ws_reply(text):
+                    stream_id = generate_req_id("stream")
+                    await _client.reply_stream(frame, stream_id, text, finish=True)
+                
+                if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
+                    _set_pending_image_context(sender, clean_content, reply_func=ws_reply, frame=frame)
+                    await ws_reply(f"好的，请把图片发到群里，我来帮你看看 📸（{_PENDING_IMAGE_TIMEOUT}秒内有效）")
+                    logger.info(f"[wecom_bot] Image intent detected, stored pending context for {sender!r}")
+                    return
+                
+                logger.info("[wecom_bot] Dispatching _generate_reply via WS")
+                asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply))
+            else:
+                logger.info("[wecom_bot] WS Not replying (no keyword match)")
+        except Exception as e:
+            logger.error(f"[wecom_bot] on_text handler error: {e}", exc_info=True)
 
     async def on_image(frame):
         sender = frame.body.get("from", {}).get("userid", "")
@@ -1245,53 +1240,56 @@ async def _bot_main_loop():
 
     async def on_mixed(frame):
         """Handle mixed messages (text + image combined, e.g. @Bot + image + text)."""
-        sender = frame.body.get("from", {}).get("userid", "")
-        mixed_info = frame.body.get("mixed", {})
-        # WeCom uses "msg_item" (not "items") for mixed message items
-        items = mixed_info.get("msg_item", []) or mixed_info.get("items", [])
-        
-        logger.info(f"[wecom_bot] WS Received mixed message from sender={sender!r}, {len(items)} items")
-        
-        # Extract text and image from items
-        text_parts = []
-        inline_data = None
-        for item in items:
-            # WeCom uses "msgtype" (not "type") for each item's content type
-            item_type = item.get("msgtype", "") or item.get("type", "")
-            if item_type == "text":
-                t = item.get("text", {}).get("content", "").strip()
-                if t:
-                    # Strip @BotName mentions
-                    import re
-                    t = re.sub(r'@\S+\s*', '', t).strip()
+        try:
+            sender = frame.body.get("from", {}).get("userid", "")
+            mixed_info = frame.body.get("mixed", {})
+            # WeCom uses "msg_item" (not "items") for mixed message items
+            items = mixed_info.get("msg_item", []) or mixed_info.get("items", [])
+            
+            logger.info(f"[wecom_bot] WS Received mixed message from sender={sender!r}, {len(items)} items, keys={list(frame.body.keys())}")
+            
+            # Extract text and image from items
+            text_parts = []
+            inline_data = None
+            for item in items:
+                # WeCom uses "msgtype" (not "type") for each item's content type
+                item_type = item.get("msgtype", "") or item.get("type", "")
+                if item_type == "text":
+                    t = item.get("text", {}).get("content", "").strip()
                     if t:
-                        text_parts.append(t)
-            elif item_type == "image":
-                image_data = item.get("image", {})
-                img_url = image_data.get("url", "")
-                aes_key = image_data.get("aeskey", "") or image_data.get("aes_key", "")
-                if img_url and not inline_data:
-                    try:
-                        buf, fname = await _client.download_file(img_url, aes_key or None)
-                        import base64
-                        b64 = base64.b64encode(buf).decode("utf-8")
-                        inline_data = {"mimeType": "image/jpeg", "data": b64}
-                        logger.info(f"[wecom_bot] WS Mixed: downloaded image {fname}, {len(buf)} bytes")
-                    except Exception as e:
-                        logger.error(f"[wecom_bot] Failed to download mixed image: {e}")
-        
-        content = " ".join(text_parts) if text_parts else "请帮我看看这张图片"
-        
-        if not inline_data and not text_parts:
-            logger.info("[wecom_bot] WS Mixed: no actionable content, skipping")
-            return
-        
-        async def ws_reply(text):
-            stream_id = generate_req_id("stream")
-            await _client.reply_stream(frame, stream_id, text, finish=True)
-        
-        logger.info(f"[wecom_bot] WS Mixed: dispatching reply with content={content[:60]!r}, has_image={inline_data is not None}")
-        asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
+                        # Strip @BotName mentions
+                        import re
+                        t = re.sub(r'@\S+\s*', '', t).strip()
+                        if t:
+                            text_parts.append(t)
+                elif item_type == "image":
+                    image_data = item.get("image", {})
+                    img_url = image_data.get("url", "")
+                    aes_key = image_data.get("aeskey", "") or image_data.get("aes_key", "")
+                    if img_url and not inline_data:
+                        try:
+                            buf, fname = await _client.download_file(img_url, aes_key or None)
+                            import base64
+                            b64 = base64.b64encode(buf).decode("utf-8")
+                            inline_data = {"mimeType": "image/jpeg", "data": b64}
+                            logger.info(f"[wecom_bot] WS Mixed: downloaded image {fname}, {len(buf)} bytes")
+                        except Exception as e:
+                            logger.error(f"[wecom_bot] Failed to download mixed image: {e}")
+            
+            content = " ".join(text_parts) if text_parts else "请帮我看看这张图片"
+            
+            if not inline_data and not text_parts:
+                logger.info("[wecom_bot] WS Mixed: no actionable content, skipping")
+                return
+            
+            async def ws_reply(text):
+                stream_id = generate_req_id("stream")
+                await _client.reply_stream(frame, stream_id, text, finish=True)
+            
+            logger.info(f"[wecom_bot] WS Mixed: dispatching reply with content={content[:60]!r}, has_image={inline_data is not None}")
+            asyncio.create_task(_generate_reply(content, sender, sender, reply_func=ws_reply, inline_data=inline_data))
+        except Exception as e:
+            logger.error(f"[wecom_bot] on_mixed handler error: {e}", exc_info=True)
 
     async def on_any_message(frame):
         """Catch-all logger. Only processes unknown message types as fallback."""
