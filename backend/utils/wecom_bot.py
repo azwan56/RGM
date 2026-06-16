@@ -58,7 +58,7 @@ def _set_pending_image_context(sender_id: str, text: str, reply_func=None, frame
     }
     logger.info(f"[wecom_bot] Stored pending image context for {sender_id!r}: {text[:50]!r}")
 
-def _consume_pending_image_context(sender_id: str) -> dict | None:
+def _consume_pending_image_context(sender_id: str):
     """Consume and return pending image context if not expired."""
     ctx = _pending_image_context.pop(sender_id, None)
     if ctx and (time.time() - ctx["timestamp"]) < _PENDING_IMAGE_TIMEOUT:
