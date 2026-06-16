@@ -1140,19 +1140,22 @@ async def _bot_main_loop():
         import re
         clean_content = re.sub(r'@\S+\s*', '', content).strip()
         
-        # Check if we should reply (sliding window logic)
-        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
-        content_lower = clean_content.lower()
-        matched_keywords = [k for k in keywords if k in content_lower]
-        should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
+        # In group chats, the WS Bot ONLY receives @mentioned messages,
+        # so we should ALWAYS reply. For single chats, use keyword matching.
+        if chattype == "group":
+            should_reply = True
+        else:
+            keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
+            content_lower = clean_content.lower()
+            matched_keywords = [k for k in keywords if k in content_lower]
+            should_reply = bool(matched_keywords) or random.random() < 0.1
         
         if should_reply:
             async def ws_reply(text):
-                # SDK has no reply_text(); use reply_stream with finish=True for single-shot reply
                 stream_id = generate_req_id("stream")
                 await _client.reply_stream(frame, stream_id, text, finish=True)
             
-            # Check if user intends to send an image (e.g., "帮我看看这个计划")
+            # Check if user intends to send an image (e.g., "帮我看看这个截图")
             # In group chats, mobile users can't @Bot + image in one message,
             # so we store context and prompt them to send the image separately.
             if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
