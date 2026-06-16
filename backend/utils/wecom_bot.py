@@ -1159,9 +1159,13 @@ async def _bot_main_loop():
                     await _client.reply_stream(frame, stream_id, text, finish=True)
                 
                 if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
-                    _set_pending_image_context(sender, clean_content, reply_func=ws_reply, frame=frame)
-                    await ws_reply(f"好的，请把图片发到群里，我来帮你看看 📸（{_PENDING_IMAGE_TIMEOUT}秒内有效）")
-                    logger.info(f"[wecom_bot] Image intent detected, stored pending context for {sender!r}")
+                    await ws_reply(
+                        "📸 想让我看图片？请在**同一条消息**里操作：\n"
+                        "1️⃣ 电脑端：先粘贴/拖入图片到输入框，再输入 @Bonnie + 你的问题，一起发送\n"
+                        "2️⃣ 手机端：点击输入框左边的➕，选择图片，添加 @Bonnie 和文字后发送\n\n"
+                        "这样我就能同时看到图片和你的问题啦～"
+                    )
+                    logger.info(f"[wecom_bot] Image intent detected, sent guidance for {sender!r}")
                     return
                 
                 logger.info("[wecom_bot] Dispatching _generate_reply via WS")
