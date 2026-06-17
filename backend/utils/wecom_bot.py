@@ -745,11 +745,37 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             if acts:
                 context_str += f"- 最近活动: {_build_runs_str(acts)}\n"
 
-            # PB
+            # Additional Profile Data
+            profile_stats = []
+            if user_data.get("height_cm"):
+                profile_stats.append(f"身高: {user_data['height_cm']}cm")
+            if user_data.get("weight_kg"):
+                profile_stats.append(f"体重: {user_data['weight_kg']}kg")
+            if user_data.get("years_running"):
+                profile_stats.append(f"跑龄: {user_data['years_running']}年")
+            if profile_stats:
+                context_str += f"- 身体数据: {', '.join(profile_stats)}\n"
+
+            # PBs
+            pbs = []
             if user_data.get("marathon_pb_sec"):
                 pb = user_data["marathon_pb_sec"]
                 h, r = divmod(pb, 3600); m = r // 60
-                context_str += f"- 全马PB: {h}:{m:02d}\n"
+                pbs.append(f"全马 {h}:{m:02d}")
+            if user_data.get("half_pb_sec"):
+                pb = user_data["half_pb_sec"]
+                h, r = divmod(pb, 3600); m, s = divmod(r, 60)
+                pbs.append(f"半马 {h}:{m:02d}:{s:02d}")
+            if user_data.get("ten_k_pb_sec"):
+                pb = user_data["ten_k_pb_sec"]
+                m, s = divmod(pb, 60)
+                pbs.append(f"10K {m:02d}:{s:02d}")
+            if user_data.get("five_k_pb_sec"):
+                pb = user_data["five_k_pb_sec"]
+                m, s = divmod(pb, 60)
+                pbs.append(f"5K {m:02d}:{s:02d}")
+            if pbs:
+                context_str += f"- 个人PB: {', '.join(pbs)}\n"
 
             # Team leaderboard context (so AI can reference rankings)
             if intent in ("my_stats", "my_activity", "general"):
@@ -830,6 +856,38 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 m_gender_val = m_data.get("gender", "")
                 m_gender_str = "女" if m_gender_val == "female" else ("男" if m_gender_val == "male" else "未知")
                 context_str += f"队员 [{m_name}] (性别: {m_gender_str}):\n"
+
+                # Mentioned User Profile Data
+                m_profile_stats = []
+                if m_data.get("height_cm"):
+                    m_profile_stats.append(f"身高 {m_data['height_cm']}cm")
+                if m_data.get("weight_kg"):
+                    m_profile_stats.append(f"体重 {m_data['weight_kg']}kg")
+                if m_data.get("years_running"):
+                    m_profile_stats.append(f"跑龄 {m_data['years_running']}年")
+                if m_profile_stats:
+                    context_str += f"  - 身体数据: {', '.join(m_profile_stats)}\n"
+                
+                # Mentioned User PBs
+                m_pbs = []
+                if m_data.get("marathon_pb_sec"):
+                    pb = m_data["marathon_pb_sec"]
+                    h, r = divmod(pb, 3600); m = r // 60
+                    m_pbs.append(f"全马 {h}:{m:02d}")
+                if m_data.get("half_pb_sec"):
+                    pb = m_data["half_pb_sec"]
+                    h, r = divmod(pb, 3600); m, s = divmod(r, 60)
+                    m_pbs.append(f"半马 {h}:{m:02d}:{s:02d}")
+                if m_data.get("ten_k_pb_sec"):
+                    pb = m_data["ten_k_pb_sec"]
+                    m, s = divmod(pb, 60)
+                    m_pbs.append(f"10K {m:02d}:{s:02d}")
+                if m_data.get("five_k_pb_sec"):
+                    pb = m_data["five_k_pb_sec"]
+                    m, s = divmod(pb, 60)
+                    m_pbs.append(f"5K {m:02d}:{s:02d}")
+                if m_pbs:
+                    context_str += f"  - PB成绩: {', '.join(m_pbs)}\n"
                 
                 m_lb = await asyncio.to_thread(_fetch_leaderboard, m_uid)
                 if m_lb:
