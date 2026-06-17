@@ -737,6 +737,12 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                     wk_actual = wk.get('total_distance_km', 0) if wk else 0
                     w_pct = round(wk_actual / target_dist * 100) if target_dist else 0
                     context_str += f"- 周目标也有设: 每周 {target_dist}km，本周已跑 {wk_actual}km ({w_pct}%)\n"
+                    
+                # Include next month's target if available
+                next_month = (current_month + 1) % 12
+                next_month_display = datetime.now().month % 12 + 1
+                if len(monthly_targets) > next_month and monthly_targets[next_month] > 0:
+                    context_str += f"- 下个月({next_month_display}月)计划: 目标 {monthly_targets[next_month]}km\n"
             else:
                 context_str += "- 该用户还没有设跑量目标\n"
 
