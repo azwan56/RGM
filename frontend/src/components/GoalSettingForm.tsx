@@ -16,7 +16,6 @@ export default function GoalSettingForm() {
   const [loading, setLoading] = useState(false);
 
   // Goals
-  const [period,   setPeriod]   = useState<"weekly" | "monthly">("monthly");
   const [distance, setDistance] = useState<number | "">(300);
 
 
@@ -43,7 +42,6 @@ export default function GoalSettingForm() {
         const { profile, goal } = res.data;
 
         if (goal) {
-          setPeriod(goal.period || "monthly");
           const overall = goal.target_distance || 300;
           setDistance(overall);
 
@@ -66,7 +64,6 @@ export default function GoalSettingForm() {
           const goalSnap = await getDoc(goalRef);
           if (goalSnap.exists()) {
             const data = goalSnap.data();
-            setPeriod(data.period || "monthly");
             const overall = data.target_distance || 300;
             setDistance(overall);
 
@@ -91,12 +88,8 @@ export default function GoalSettingForm() {
     fetchData();
   }, []);
 
-  // When overall distance changes, sync all months that still equal the old value
   const handleOverallChange = (val: number | "") => {
     setDistance(val);
-    if (val && !showMonthly) {
-      setMonthlyTargets(defaultMonthlyTargets(Number(val)));
-    }
   };
 
   const setMonthTarget = (idx: number, val: string) => {
@@ -121,7 +114,7 @@ export default function GoalSettingForm() {
       const { default: axios } = await import("@/lib/apiClient");
       await axios.post(`${backendUrl}/api/profile/save-settings`, {
         uid,
-        period,
+        period: "weekly", // Always save as weekly since the main input is now weekly
         target_distance:    Number(distance),
         monthly_targets:    monthlyTargets,
 
@@ -148,28 +141,13 @@ export default function GoalSettingForm() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
 
-        {/* ── Tracking Period ─────────────────────────────────────────── */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">统计周期</h3>
-          <div className="flex gap-4">
-            {(["weekly", "monthly"] as const).map(p => (
-              <label key={p} className="flex-1 cursor-pointer">
-                <input type="radio" value={p} checked={period === p} onChange={() => setPeriod(p)} className="sr-only peer" />
-                <div className="text-center py-2 rounded-xl text-sm border border-white/10 text-zinc-400 peer-checked:bg-white/10 peer-checked:text-white peer-checked:border-white/30 transition-all">
-                  {p === "weekly" ? "每周" : "每月"}
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
-
         {/* ── Distance Goal ────────────────────────────────────────────── */}
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-300 border-b border-white/10 pb-2">跑量目标</h3>
 
           <div>
             <label className="block text-zinc-400 text-xs font-medium mb-2">
-              {period === "weekly" ? "周目标 (km)" : "月默认目标 (km)"}
+              周目标 (km)
             </label>
             <input
               type="number" required min="1"
@@ -179,9 +157,8 @@ export default function GoalSettingForm() {
             />
           </div>
 
-          {/* Per-month targets — only show for monthly period */}
-          {period === "monthly" && (
-            <div>
+          {/* Per-month targets */}
+          <div>
               <button
                 type="button"
                 onClick={() => setShowMonthly(!showMonthly)}
@@ -230,7 +207,6 @@ export default function GoalSettingForm() {
                 </div>
               )}
             </div>
-          )}
         </div>
 
         {/* ── Physiology ───────────────────────────────────────────────── */}
