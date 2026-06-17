@@ -599,12 +599,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
         else:
             await asyncio.to_thread(send_bonnie_message, chatid, msg)
 
-    # Send typing indicator immediately so user knows Bonnie is processing
-    if reply_func:
-        try:
-            await reply_func("Bonnie正在思考中... 💭")
-        except Exception as e:
-            logger.warning(f"[wecom_bot] Failed to send typing indicator: {e}")
+
 
     try:
         # Strip @BotName mentions from the beginning (WeCom includes @mention in text)

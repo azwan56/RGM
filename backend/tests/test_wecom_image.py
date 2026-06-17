@@ -58,9 +58,8 @@ async def test_generate_reply_with_image(mock_save, mock_resolve, mock_gemini):
         inline_data=inline_data
     )
     
-    assert len(reply_received) == 2
-    assert reply_received[0] == "Bonnie正在思考中... 💭"
-    assert reply_received[1] == "Bonnie's funny response"
+    assert len(reply_received) == 1
+    assert reply_received[0] == "Bonnie's funny response"
     
     # Verify that gemini was called with content_obj containing inlineData
     called_kwargs = mock_gemini.call_args[1]
