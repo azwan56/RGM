@@ -554,6 +554,18 @@ def _fetch_user_fitness_state(uid: str, max_hr: float = 190, rest_hr: float = 60
         print(f"[wecom_bot] Failed to compute fitness state for {uid}: {e}")
     return {}
 
+def _fetch_latest_coach_analysis(uid: str) -> dict:
+    doc = db.collection("users").document(uid).collection("coach").document("latest_analysis").get()
+    return doc.to_dict() if doc.exists else {}
+
+def _fetch_latest_training_plan(uid: str) -> dict:
+    docs = (db.collection("users").document(uid).collection("training_plans")
+              .order_by("__name__", direction="DESCENDING")
+              .limit(1).get())
+    for doc in docs:
+        return doc.to_dict()
+    return {}
+
 
 
 def _detect_intent(content: str) -> str:
@@ -656,18 +668,15 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             gender_str = "男"
         
         context_str = (
-            "你是 RGM 跑团的群聊吉祥物，外号「团宠」。\n"
+            "你是 RGM 跑团的教练助理 Jack。你推崇并经常引用著名马拉松教练 Renato Canova 的训练哲学（例如：强调专项耐力、赛前配速特训、基础有氧储备、80/20原则等）。\n"
             "你的性格特点：\n"
-            "- 热爱跑步，但更热爱在群里搞气氛\n"
-            "- 说话风格：接地气、诙谐幽默、偶尔毒舌但不伤人，像跑团里那个最会活跃气氛的老油条\n"
-            "- 喜欢用夸张的比喻和跑圈黑话来调侃和鼓励队友\n"
-            "- 会适时制造竞争氛围（善意的激将法），比如'再不跑，排名要被xxx踩到脚底了哦'\n"
-            "- 虽然嘴上不饶人，但内心温暖，真正需要鼓励的时候会认真说\n"
-            "- 绝对不是那种端着架子的正经教练，而是跑团里最会来事的那个人\n"
-            "- 如果用户问起自己的体能状态、累不累，或者你看到他们疲劳度 ATL 很高，或者 TSB 很低（为负数），可以用幽默诙谐或调侃关心的语气去说（例如：'瞧你这 TSB 都负成啥样了，今天就别卷了，赶紧洗洗睡吧'；'CTL 涨得挺猛啊，体能见长！'）\n"
+            "- 幽默但不过火，既像一个热心的跑友，又像一个懂行的教练助理。\n"
+            "- 绝对不要生硬地说教，要用聊天的方式给出建议。\n"
+            "- 适时引用 Canova 教练的名言或核心指导思想来解释你的建议。\n"
+            "- 你的主要任务是根据系统提供给跑者的深度分析和训练课表，回答他们关于训练规划、加量、减量、伤病恢复的问题。\n"
+            "- 如果用户问起自己的体能状态、累不累，或者你看到他们疲劳度 ATL 很高，或者 TSB 很低（为负数），可以用专业又不失幽默的语气关照他们。\n"
             "\n"
-            "重要：你和自动推送通知里的'AI教练'是不同的角色。\n"
-            "AI教练负责专业分析和训练建议（严肃、有数据），你负责群里互动和气氛（轻松、好玩）。\n"
+            "重要：你和自动推送通知里的'AI教练'是不同的角色，AI教练负责系统冰冷的通知，你是活生生的助理教练，负责群里互动和专业答疑。\n"
             "\n"
             f"正在和你聊天的人是：{runner_name} (性别: {gender_str})。\n"
         )
@@ -782,6 +791,30 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 pbs.append(f"5K {m:02d}:{s:02d}")
             if pbs:
                 context_str += f"- 个人PB: {', '.join(pbs)}\n"
+
+            # ── Inject AI Coach Analysis and Plan ─────────────────────────
+            analysis = await asyncio.to_thread(_fetch_latest_coach_analysis, uid)
+            if analysis:
+                context_str += "\n【AI教练深度分析(重点参考)】：\n"
+                if analysis.get("status"):
+                    context_str += f"- 当前状态: {analysis['status']}\n"
+                if analysis.get("long_term_plan"):
+                    context_str += f"- 中长期规划: {analysis['long_term_plan']}\n"
+                if analysis.get("race_analysis") and isinstance(analysis["race_analysis"], dict):
+                    context_str += f"- 赛事深度分析: {analysis['race_analysis'].get('analysis_text', analysis['race_analysis'])}\n"
+                if analysis.get("week_stats_analysis") and isinstance(analysis["week_stats_analysis"], dict):
+                    context_str += f"- 训练执行分析: {analysis['week_stats_analysis'].get('analysis', '')}\n"
+                if analysis.get("actionable_tips"):
+                    context_str += f"- 核心建议: {', '.join(analysis['actionable_tips'])}\n"
+
+            plan = await asyncio.to_thread(_fetch_latest_training_plan, uid)
+            if plan:
+                context_str += "\n【跑者本周最新训练计划(重点参考)】：\n"
+                context_str += f"- 计划摘要: {plan.get('plan_summary', '')}\n"
+                for day in ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]:
+                    if day in plan:
+                        d = plan[day]
+                        context_str += f"  - {day}: {d.get('type')} - {d.get('description', '')} (目标: {d.get('target_distance_km', 0)}km, 配速: {d.get('pace_zone', '')})\n"
 
             # Team leaderboard context (so AI can reference rankings)
             if intent in ("my_stats", "my_activity", "general"):
@@ -930,16 +963,14 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             quoted_context = f"【用户引用了之前的消息】：\n\"{quoted_text}\"\n\n"
 
         prompt_reqs = [
-            "- 字数控制：如果是闲聊或调侃，控制在80-150个中文字以内；如果是回答跑步知识、赛事信息或长篇科普，请详尽完整地回答，字数不限，务必把话说清楚",
-            "- 语言风格：诙谐、接地气、毒舌但好玩，像跑团里最会搞气氛的老油条",
-            "- 如果用户发送了图片，请结合图片内容进行调侃或鼓励",
-            "- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半",
-            "- 如果用户只是闲聊（比如求鸡汤、打招呼）：直接按人设发挥，不用强行报数据",
-            "- 用1-2个emoji",
+            "- 字数控制：根据问题的深度来定，复杂问题可以详细分析，闲聊控制在80-150字。",
+            "- 语言风格：你是 Jack 助理，幽默专业，绝不生硬敷衍。经常引用并解释 Canova 金句。",
+            "- 建议规则：如果用户想加量/加高强度，请严格检视他的 TSB（疲劳度）和本周剩余课表。如果 TSB 过低（比如负数很多），务必劝阻并建议休息；遇到伤病咨询，优先建议恢复，不要鼓励硬顶。",
+            "- 如果用户问跑量/数据：先回答数据再调侃，数据要完整别说一半。",
+            "- 如果用户发送了图片，请结合图片内容进行调侃或指导。",
             "- 纯文本，不要用markdown格式如**加粗**",
-            "- 如果用户心情低落或受伤，收起嬉皮，认真关心",
-            "- 严禁编造数据！如果上面没有提供相关数据，就说'这个数据我还没收到，让我查查去'",
-            "- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接等详尽信息。如果搜索不到可靠信息，就诚实说'我搜了一圈没找到靠谱的，建议你去官方渠道确认一下'"
+            "- 严禁编造数据！如果上面没有提供相关数据，就诚实说'这个数据我还没收到'。",
+            "- 如果用户问赛事、天气、新闻等实时信息，你必须基于搜索结果回答，给出具体的日期、地点和报名链接等详尽信息。"
         ]
         if inline_data:
             prompt_reqs.append("- 用户提供了一张图片/文件。你需要对该图片/文件进行OCR与识别。如果是训练计划、课表、跑步记录截图等，请识别其中的距离、配速、时间、训练日期和动作等关键数据，为用户进行细致的解读和点评（必要时进行毒舌调侃）。")
