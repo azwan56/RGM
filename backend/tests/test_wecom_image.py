@@ -37,10 +37,12 @@ def test_download_wecom_media(mock_get, mock_token):
     assert res is None
 
 @pytest.mark.anyio
+@mock.patch("utils.wecom_bot._fetch_latest_training_plan", return_value={})
+@mock.patch("utils.wecom_bot._fetch_latest_coach_analysis", return_value={})
 @mock.patch("utils.wecom_bot._gemini_generate")
 @mock.patch("utils.wecom_bot._resolve_user_by_wecom_id")
 @mock.patch("utils.wecom_bot._save_chat_message")
-async def test_generate_reply_with_image(mock_save, mock_resolve, mock_gemini):
+async def test_generate_reply_with_image(mock_save, mock_resolve, mock_gemini, mock_analysis, mock_plan):
     mock_resolve.return_value = ("test_uid", {"display_name": "Test User"})
     mock_gemini.return_value = {"text": "Bonnie's funny response"}
     

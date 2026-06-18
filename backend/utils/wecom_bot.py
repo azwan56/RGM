@@ -555,15 +555,24 @@ def _fetch_user_fitness_state(uid: str, max_hr: float = 190, rest_hr: float = 60
     return {}
 
 def _fetch_latest_coach_analysis(uid: str) -> dict:
-    doc = db.collection("users").document(uid).collection("coach").document("latest_analysis").get()
-    return doc.to_dict() if doc.exists else {}
+    """Fetch the latest AI coach analysis for a user."""
+    try:
+        doc = db.collection("users").document(uid).collection("coach").document("latest_analysis").get()
+        return doc.to_dict() if doc.exists else {}
+    except Exception as e:
+        print(f"[wecom_bot] Failed to fetch coach analysis for {uid}: {e}")
+    return {}
 
 def _fetch_latest_training_plan(uid: str) -> dict:
-    docs = (db.collection("users").document(uid).collection("training_plans")
-              .order_by("__name__", direction="DESCENDING")
-              .limit(1).get())
-    for doc in docs:
-        return doc.to_dict()
+    """Fetch the most recent training plan for a user."""
+    try:
+        docs = (db.collection("users").document(uid).collection("training_plans")
+                  .order_by("generated_at", direction="DESCENDING")
+                  .limit(1).get())
+        for doc in docs:
+            return doc.to_dict()
+    except Exception as e:
+        print(f"[wecom_bot] Failed to fetch training plan for {uid}: {e}")
     return {}
 
 
@@ -798,14 +807,34 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 context_str += "\n【AI教练深度分析(重点参考)】：\n"
                 if analysis.get("status"):
                     context_str += f"- 当前状态: {analysis['status']}\n"
+                if analysis.get("summary"):
+                    context_str += f"- 教练总结: {analysis['summary']}\n"
                 if analysis.get("long_term_plan"):
                     context_str += f"- 中长期规划: {analysis['long_term_plan']}\n"
-                if analysis.get("race_analysis") and isinstance(analysis["race_analysis"], dict):
-                    context_str += f"- 赛事深度分析: {analysis['race_analysis'].get('analysis_text', analysis['race_analysis'])}\n"
-                if analysis.get("week_stats_analysis") and isinstance(analysis["week_stats_analysis"], dict):
-                    context_str += f"- 训练执行分析: {analysis['week_stats_analysis'].get('analysis', '')}\n"
+                ra = analysis.get("race_analysis")
+                if ra and isinstance(ra, dict):
+                    parts = []
+                    if ra.get("race_name"):
+                        parts.append(f"赛事: {ra['race_name']}")
+                    if ra.get("fitness_gap"):
+                        parts.append(f"体能差距: {ra['fitness_gap']}")
+                    if ra.get("readiness_score") is not None:
+                        parts.append(f"就绪度: {ra['readiness_score']}/10")
+                    if ra.get("key_demands"):
+                        parts.append(f"核心要求: {ra['key_demands']}")
+                    if parts:
+                        context_str += f"- 赛事深度分析: {'; '.join(parts)}\n"
+                wsa = analysis.get("week_stats_analysis")
+                if wsa and isinstance(wsa, dict) and wsa.get("analysis"):
+                    context_str += f"- 训练执行分析: {wsa['analysis']}\n"
                 if analysis.get("actionable_tips"):
-                    context_str += f"- 核心建议: {', '.join(analysis['actionable_tips'])}\n"
+                    tips = analysis["actionable_tips"]
+                    if isinstance(tips, list):
+                        context_str += f"- 核心建议: {'; '.join(tips)}\n"
+                    else:
+                        context_str += f"- 核心建议: {tips}\n"
+                if analysis.get("encouragement"):
+                    context_str += f"- 鼓励: {analysis['encouragement']}\n"
 
             plan = await asyncio.to_thread(_fetch_latest_training_plan, uid)
             if plan:
@@ -980,7 +1009,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             f"{context_str}\n\n"
             f"{quoted_context}"
             f"用户当前的输入是：{content}\n\n"
-            f"请用你的'团宠'人设回复。要求：\n"
+            f"请用你的 Jack 助理人设回复。要求：\n"
             f"{reqs_str}"
         )
 
@@ -1177,7 +1206,7 @@ def handle_wecom_message(msg_data: dict):
         should_reply = True
     else:
         # Check if we should reply (sliding window logic)
-        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
+        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "jack", "教练", "配速", "课表", "绑定", "我是谁"]
         content_lower = content.lower()
         matched_keywords = [k for k in keywords if k in content_lower]
         should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
@@ -1238,7 +1267,7 @@ async def _bot_main_loop():
             if chattype == "group":
                 should_reply = True
             else:
-                keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "bonnie", "团宠", "配速", "课表", "绑定", "我是谁"]
+                keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "jack", "教练", "配速", "课表", "绑定", "我是谁"]
                 content_lower = clean_content.lower()
                 matched_keywords = [k for k in keywords if k in content_lower]
                 should_reply = bool(matched_keywords) or random.random() < 0.1
@@ -1251,7 +1280,7 @@ async def _bot_main_loop():
                 if chattype == "group" and _has_image_intent(clean_content) and not frame.body.get("image"):
                     await ws_reply(
                         "📸 想让我看图片？请在电脑端操作：\n"
-                        "先粘贴/拖入图片到输入框，再输入 @Bonnie + 你的问题，一起发送就行啦～\n\n"
+                        "先粘贴/拖入图片到输入框，再输入 @Jack + 你的问题，一起发送就行啦～\n\n"
                         "⚠️ 手机端暂时无法把图片和文字放在同一条消息里，所以需要切换到电脑端发送哦"
                     )
                     logger.info(f"[wecom_bot] Image intent detected, sent guidance for {sender!r}")
