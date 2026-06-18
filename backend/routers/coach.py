@@ -190,7 +190,9 @@ from datetime import datetime, timedelta
 
 def group_activities_into_sessions(activities: list) -> list:
     """
-    Groups sorted activities into sessions where the gap between consecutive activities is <= 15 minutes.
+    Groups sorted activities into sessions where:
+    - Activities are of the same type (activity_type field)
+    - The gap between consecutive activities (prev end -> curr start) is <= 30 minutes
     Assumes activities list is already sorted by start_date_local ascending.
     """
     if not activities:
@@ -201,6 +203,13 @@ def group_activities_into_sessions(activities: list) -> list:
         last_session = sessions[-1]
         prev_act = last_session[-1]
         
+        # ── Type check: only same activity_type can be merged ──
+        prev_type = prev_act.get("activity_type", "run")
+        curr_type = act.get("activity_type", "run")
+        if prev_type != curr_type:
+            sessions.append([act])
+            continue
+        
         try:
             prev_start = datetime.fromisoformat(prev_act.get("start_date_local", ""))
             prev_elapsed = timedelta(seconds=prev_act.get("elapsed_time", 0))
@@ -210,11 +219,11 @@ def group_activities_into_sessions(activities: list) -> list:
             gap = (curr_start - prev_end).total_seconds()
         except Exception as e:
             print(f"[grouping] Error parsing dates: {e}")
-            # Fallback: group in same session if parsing fails
-            last_session.append(act)
+            # Fallback: start a new session if date parsing fails
+            sessions.append([act])
             continue
         
-        if gap <= 15 * 60:  # 15 minutes in seconds
+        if gap <= 30 * 60:  # 30 minutes in seconds
             last_session.append(act)
         else:
             sessions.append([act])
@@ -1726,7 +1735,7 @@ async def log_journal_entry(req: JournalLogRequest):
     is_composite = False
     current_sub_ids = []
     if len(current_session_acts) > 1:
-        print(f"[coach] Aggregating {len(current_session_acts)} activities for {date_str} (gap <= 15 mins)")
+        print(f"[coach] Aggregating {len(current_session_acts)} activities for {date_str} (same type, gap <= 30 mins)")
         activity = aggregate_activities(current_session_acts)
         is_composite = True
         current_sub_ids = activity.get("sub_activity_ids", [])
