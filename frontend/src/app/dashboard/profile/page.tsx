@@ -678,20 +678,36 @@ export default function ProfilePage() {
 
             {/* WeCom */}
             <Field
-              label="企业微信机器人 Webhook URL"
-              hint="在企业微信群 → 群机器人 → 添加机器人 里创建，粘贴 URL 到这里"
+              label="【测试阶段】企业微信通知"
+              hint="一键绑定至“闵文跑团”测试群，接收跑步数据通报和 AI 教练点评"
             >
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg select-none">💬</span>
-                <input
-                  className={`${inputCls} pl-9`}
-                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
-                  value={form.wecom_webhook_url}
-                  onChange={set("wecom_webhook_url")}
-                />
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                {form.wecom_webhook_url ? (
+                  <span className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-sm font-semibold text-emerald-400 flex items-center gap-2">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    已绑定{"\u201C"}闵文跑团{"\u201D"}通知
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, wecom_webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=8f9439b4-e72b-4423-af4b-c170a4021b22" }))}
+                    className="px-4 py-2 bg-[#FC4C02]/10 border border-[#FC4C02]/30 hover:bg-[#FC4C02]/20 rounded-xl text-sm font-semibold text-[#FC4C02] transition-all flex items-center gap-2"
+                  >
+                    <span className="text-lg">💬</span> 确认设置{"\u201C"}闵文跑团{"\u201D"}通知
+                  </button>
+                )}
+                {form.wecom_webhook_url && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, wecom_webhook_url: "" }))}
+                    className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1 transition-all"
+                  >
+                    取消绑定
+                  </button>
+                )}
               </div>
               {form.wecom_webhook_url && (
-                <p className="text-[10px] text-emerald-500 mt-1">✓ 已配置 — 保存后生效</p>
+                <p className="text-[10px] text-emerald-500 mt-2">✓ 已设置“闵文跑团”Webhook — 保存后生效</p>
               )}
             </Field>
           </div>
