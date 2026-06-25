@@ -15,6 +15,22 @@ interface FitnessPoint {
   tsb: number;
 }
 
+const getTSBColorClass = (tsb: number) => {
+  if (tsb > 5) return "text-green-400";
+  if (tsb >= -10) return "text-blue-400";
+  if (tsb >= -30) return "text-emerald-400";
+  if (tsb >= -50) return "text-yellow-400";
+  return "text-red-400";
+};
+
+const getTSBBarColor = (tsb: number) => {
+  if (tsb > 5) return "#10b98180";       // Green
+  if (tsb >= -10) return "#3b82f680";     // Blue
+  if (tsb >= -30) return "#34d39980";     // Emerald/Green (Optimal Training)
+  if (tsb >= -50) return "#eab30880";     // Yellow (Fatigue warning)
+  return "#ef444480";                     // Red (Severe fatigue)
+};
+
 export default function FitnessChart({ uid, initialData }: { uid: string; initialData?: FitnessPoint[] }) {
   const [data, setData] = useState<FitnessPoint[]>(initialData || []);
   const [loading, setLoading] = useState(!initialData);
@@ -83,8 +99,8 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
               <p className="text-lg font-black text-white leading-none">{latest.atl}</p>
             </div>
             <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5">
-              <p className="text-[10px] text-yellow-400 uppercase font-bold tracking-wider mb-0.5">TSB 状况</p>
-              <p className={`text-lg font-black leading-none ${latest.tsb >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-0.5">TSB 状况</p>
+              <p className={`text-lg font-black leading-none ${getTSBColorClass(latest.tsb)}`}>
                 {latest.tsb > 0 ? '+' : ''}{latest.tsb}
               </p>
             </div>
@@ -120,8 +136,8 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
 
             {/* TSB - Bar Chart */}
             <Bar dataKey="tsb" yAxisId="right" fill="#eab308" name="状况 (TSB)" radius={[2, 2, 0, 0]}>
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.tsb >= 0 ? "#10b98180" : "#ef444480"} />
+              {data.slice(-30).map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={getTSBBarColor(entry.tsb)} />
               ))}
             </Bar>
 
@@ -163,10 +179,11 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
            <span className="w-3 h-0.5 bg-pink-500" />
            <span>疲劳 (ATL): 7天近期压力</span>
         </div>
-        <div className="flex items-center gap-2">
-           <span className="w-3 h-3 rounded-sm bg-green-500/50" />
-           <span className="w-3 h-3 rounded-sm bg-red-500/50 -ml-1.5" />
-           <span>状况 (TSB): 比赛准备度</span>
+        <div className="flex items-center gap-2 flex-wrap">
+           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-green-500/50" /> &gt;5 巅峰</span>
+           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-500/50" /> -30~5 训练中</span>
+           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-yellow-500/50" /> -50~-30 疲劳</span>
+           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-500/50" /> &lt;-50 严重</span>
         </div>
       </div>
     </div>

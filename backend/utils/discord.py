@@ -168,8 +168,19 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict, is_wecom:
         if monthly_km:
             context_lines.append(f"本月累计跑量：{monthly_km}km")
         if ctl or atl:
-            state = "良好" if tsb > 5 else ("疲劳蓄积" if tsb < -10 else "平衡")
+            if tsb > 5:
+                state = "良好"
+            elif tsb >= -10:
+                state = "平衡"
+            elif tsb >= -30:
+                state = "积极训练中"
+            elif tsb >= -50: # User: -50 below is severe, -30 to -50 is fatigue
+                # Specifically: -30 to -50 is fatigue warning, <-50 is severe fatigue.
+                state = "疲劳蓄积"
+            else:
+                state = "严重疲劳"
             context_lines.append(f"体能状态：CTL体能={ctl}，ATL疲劳={atl}，TSB状态值={tsb}（{state}）")
+
 
         reqs = (
             "要求（重要）：\n"
@@ -304,13 +315,15 @@ def _build_embed(act_doc: dict, user_data: dict, coach_tip: str, context: dict) 
 
     if ctl is not None and atl is not None and tsb is not None:
         if tsb > 5:
-            form_icon, form_label = "🟢", f"状态良好 (+{tsb})"
-        elif tsb < -15:
-            form_icon, form_label = "🔴", f"疲劳蓄积 ({tsb})"
-        elif tsb < -5:
-            form_icon, form_label = "🟡", f"略感疲劳 ({tsb})"
-        else:
+            form_icon, form_label = "🟢", f"状态良好/山峰 (+{tsb})"
+        elif tsb >= -10:
             form_icon, form_label = "🔵", f"状态平衡 ({tsb})"
+        elif tsb >= -30:
+            form_icon, form_label = "🔵", f"积极训练中 ({tsb})"
+        elif tsb >= -50:
+            form_icon, form_label = "🟡", f"疲劳蓄积 ({tsb})"
+        else:
+            form_icon, form_label = "🔴", f"严重疲劳/过度训练 ({tsb})"
 
         fields.append({
             "name":  "💪 体能 / 状态",
