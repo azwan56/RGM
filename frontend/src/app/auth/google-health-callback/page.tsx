@@ -31,7 +31,7 @@ function CallbackContent() {
       if (code) {
         try {
           const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-          const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/auth/google-health-callback`;
+          const redirectUri = `${window.location.origin}/auth/google-health-callback`;
 
           // 1. Exchange Google OAuth code for tokens and persist to Firestore
           setStatus('验证成功，正在保存 Google 授权令牌...');

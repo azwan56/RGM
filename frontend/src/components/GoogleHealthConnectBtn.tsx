@@ -5,7 +5,7 @@ import React from 'react';
 export default function GoogleHealthConnectBtn() {
     const handleConnect = () => {
         const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "598386316625-v59007b4.apps.googleusercontent.com"; // Fallback placeholder
-        const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/auth/google-health-callback`;
+        const redirectUri = `${window.location.origin}/auth/google-health-callback`;
         const scope = "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly https://www.googleapis.com/auth/googlehealth.sleep.readonly email profile openid";
         const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
         window.location.href = url;
