@@ -8,6 +8,7 @@ import axios from "@/lib/apiClient";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
 import RunningStatsPanel from "@/components/RunningStatsPanel";
 import ActivityList from "@/components/ActivityList";
+import RecoveryWidget from "@/components/RecoveryWidget";
 import LeaderboardWidget from "@/components/LeaderboardWidget";
 import dynamic from "next/dynamic";
 import PageNav from "@/components/PageNav";
@@ -166,6 +167,11 @@ export default function Dashboard() {
         {/* Running Stats Panel — pass pre-fetched stats */}
         {isStravaConnected && user && (
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
+        )}
+
+        {/* Recovery & Physiological Metrics Widget */}
+        {user && (
+          <RecoveryWidget uid={user.uid} />
         )}
 
         {/* Leaderboard + Activity List — side by side, fixed height */}

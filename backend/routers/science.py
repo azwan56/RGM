@@ -41,7 +41,7 @@ def get_fitness_trend(req: FitnessTrendRequest):
     activities = [d.to_dict() for d in docs]
     activities.reverse()
 
-    return {"data": compute_fitness_fatigue_timeseries(activities, max_hr, rest_hr, req.days) or []}
+    return {"data": compute_fitness_fatigue_timeseries(activities, max_hr, rest_hr, req.days, req.uid) or []}
 
 
 # ─── Race Predictor ───────────────────────────────────────────────────────────
@@ -275,7 +275,7 @@ def get_analysis_bundle(req: AnalysisBundleRequest):
 
     # ── 1. Fitness Trend (latest 90 activities, chronological order) ──
     fitness_acts = list(reversed(activities[:90]))
-    fitness_data = compute_fitness_fatigue_timeseries(fitness_acts, max_hr, rest_hr, req.days) or []
+    fitness_data = compute_fitness_fatigue_timeseries(fitness_acts, max_hr, rest_hr, req.days, req.uid) or []
 
     # ── 2. Race Predictor (VDOT from latest 80 road activities) ──
     _TRAIL_KEYWORDS = {"trail", "越野", "山", "hill", "mountain", "hiking", "hike"}

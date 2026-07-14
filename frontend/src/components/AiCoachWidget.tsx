@@ -109,13 +109,17 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [raceDaysMap, setRaceDaysMap] = useState<Map<string, number>>(new Map());
+  const [isFitbitConnected, setIsFitbitConnected] = useState(false);
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-  // Fetch race dates from profile for live countdown
+  // Fetch race dates from profile for live countdown and check Fitbit connection
   useEffect(() => {
     const fetchRaceDates = async () => {
       try {
         const res = await axios.get(`${backendUrl}/api/profile/${uid}`);
+        if (res.data?.google_health_connected) {
+          setIsFitbitConnected(true);
+        }
         const races = res.data?.upcoming_races || [];
         const map = new Map<string, number>();
         const now = new Date();
@@ -229,7 +233,19 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
     setLoading(true);
     setErrorStr(null);
     try {
+      // 1. Sync Strava running data
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
+      
+      // 2. Sync Google Health (Fitbit) recovery data if connected
+      if (isFitbitConnected) {
+        try {
+          await axios.post(`${backendUrl}/api/google-health/sync`, { days: 7 });
+        } catch (ghErr) {
+          console.warn("[AiCoach] Google Health sync failed (non-fatal):", ghErr);
+        }
+      }
+
+      // 3. Generate new AI analysis
       const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid, force_refresh: true });
       if (typeof res.data.feedback === "string") {
         setErrorStr(res.data.feedback);
@@ -270,7 +286,15 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </div>
-          <h3 className="text-white font-bold text-lg">AI 智能分析</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-white font-bold text-lg">AI 智能分析</h3>
+            {isFitbitConnected && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full select-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                已启用 Fitbit 生理修正
+              </span>
+            )}
+          </div>
         </div>
         
         {feedback && !loading && (

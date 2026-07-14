@@ -96,7 +96,7 @@ def _get_fitness_state(uid: str, user_data: dict) -> dict:
         activities = [d.to_dict() for d in docs]
         activities.reverse()
 
-        series = compute_fitness_fatigue_timeseries(activities, max_hr, rest_hr, days=3)
+        series = compute_fitness_fatigue_timeseries(activities, max_hr, rest_hr, days=3, uid=uid)
         if series:
             latest = series[-1]
             return {

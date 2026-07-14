@@ -256,6 +256,16 @@ def run_daily_sync() -> dict:
             })
 
             _update_yearly_leaderboard(uid, user_data, display_name)
+            
+            # ── Google Health (Fitbit) Sync ──
+            if user_data.get("google_health_connected", False):
+                try:
+                    from routers.google_health import sync_google_health_data
+                    sync_google_health_data(uid, days=3)
+                    logger.info(f"[scheduler] Synced Google Health data for user={uid}")
+                except Exception as gh_err:
+                    logger.error(f"[scheduler] Failed to sync Google Health for user={uid}: {gh_err}")
+                    
             results["synced"] += 1
             logger.info(f"[scheduler] Synced {uid}: {round(lb_dist, 1)}km/{lb_runs} runs (month), {round(wk_dist, 1)}km/{wk_runs} runs (week)")
 

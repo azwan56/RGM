@@ -13,6 +13,7 @@ interface FitnessPoint {
   ctl: number;
   atl: number;
   tsb: number;
+  fitbit_optimized?: boolean;
 }
 
 const getTSBColorClass = (tsb: number) => {
@@ -79,13 +80,21 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
       {/* Header Stats */}
       <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-            <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            体能与状况指数 (Fitness & Form)
-          </h2>
-          <p className="text-sm text-zinc-400">基于 TRIMP 与 EWMA 算法</p>
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              体能与状况指数 (Fitness & Form)
+            </h2>
+            {data.length > 0 && data[0].fitbit_optimized && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full select-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                已启用 Fitbit 生理修正
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-zinc-400">基于 TRIMP 与 EWMA 算法{data.length > 0 && data[0].fitbit_optimized ? "（融入 HRV 及心率生理指标修正）" : ""}</p>
         </div>
         
         {latest && (

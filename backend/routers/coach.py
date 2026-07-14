@@ -2817,7 +2817,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         )
         fitness_activities = [d.to_dict() for d in fitness_docs]
         fitness_activities.reverse()  # Chronological order for timeseries
-        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3)
+        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3, uid=uid)
         if ts:
             latest = ts[-1]
             fitness_state = {"ctl": round(latest.get("ctl", 0), 1), "atl": round(latest.get("atl", 0), 1), "tsb": round(latest.get("tsb", 0), 1)}
@@ -3123,7 +3123,7 @@ async def generate_auto_monthly_report(uid: str, tz_name: str = "Asia/Singapore"
         )
         fitness_activities = [d.to_dict() for d in fitness_docs]
         fitness_activities.reverse()
-        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3)
+        ts = compute_fitness_fatigue_timeseries(fitness_activities, max_hr, rest_hr, days=3, uid=uid)
         if ts:
             latest = ts[-1]
             fitness_state = {"ctl": round(latest.get("ctl", 0), 1), "atl": round(latest.get("atl", 0), 1), "tsb": round(latest.get("tsb", 0), 1)}

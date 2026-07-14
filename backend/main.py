@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 load_dotenv()
 
-from routers import auth, sync, coach, science, profile
+from routers import auth, sync, coach, science, profile, google_health
 from routers import admin as admin_router
 from middleware.auth import FirebaseAuthMiddleware
 
@@ -50,6 +50,7 @@ app.include_router(sync.router,     prefix="/api/sync",    tags=["sync"])
 app.include_router(coach.router,    prefix="/api/coach",   tags=["coach"])
 app.include_router(science.router,  prefix="/api/science", tags=["science"])
 app.include_router(profile.router,  prefix="/api/profile", tags=["profile"])
+app.include_router(google_health.router, prefix="/api/google-health", tags=["google-health"])
 app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
 
 try:
