@@ -904,7 +904,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
         # ── Include data for mentioned users ──────────────────────────────
         history = await asyncio.to_thread(_fetch_chat_history, wecom_user_id, uid, 10)
         mentioned_users = await asyncio.to_thread(_find_mentioned_users, combined_text)
-        mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid]
+        mentioned_users = [(m_uid, m_data) for m_uid, m_data in mentioned_users if m_uid != uid][:2]
         
         # If no user mentioned in current message, resolve context user from history
         if not mentioned_users:
@@ -914,7 +914,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                     h_mentions = _find_mentioned_users(h_content)
                     h_mentions = [(m_uid, m_data) for m_uid, m_data in h_mentions if m_uid != uid]
                     if h_mentions:
-                        mentioned_users = h_mentions
+                        mentioned_users = h_mentions[:2]
                         print(f"[wecom_bot] Resolved context user from history: {[m[1].get('display_name') for m in mentioned_users]}")
                         break
         
@@ -982,8 +982,8 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                     else:
                         context_str += f"  - 计划: 月目标 {m_this_month}km\n"
 
-                # Recent activities for this member
-                m_acts = await asyncio.to_thread(_fetch_recent_activities, m_uid, 5)
+                # Recent activities for this member (limit to 2 for prompt compacting)
+                m_acts = await asyncio.to_thread(_fetch_recent_activities, m_uid, 2)
                 if m_acts:
                     context_str += f"  - 最近活动: {_build_runs_str(m_acts)}\n"
 
@@ -1067,7 +1067,8 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
             thinking_budget=256,
             contents_obj=gemini_contents,
             system_instruction=context_str,
-            tools=[{"google_search": {}}]
+            tools=[{"google_search": {}}],
+            model_name="gemini-3.1-flash-lite"
         )
         reply_text = result.get("text", "我刚跑了个间歇，喘不上气，等我缓缓再说 🫠").strip()
         # Strip any markdown bold markers

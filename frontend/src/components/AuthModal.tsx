@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import {
   GoogleAuthProvider,
@@ -249,7 +250,25 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
                     </svg>
                   </div>
                   <span className="leading-relaxed group-hover:text-zinc-300 transition-colors">
-                    我已阅读并同意个人数据声明：本平台会收集有限的个人数据用于存储和分析，但绝不会用于转售、训练 AI 模型或任何其他未经授权的用途。
+                    我已阅读并同意 RGM 的{" "}
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[#FC4C02] hover:underline font-semibold"
+                    >
+                      隐私政策
+                    </Link>{" "}
+                    与{" "}
+                    <Link
+                      href="/terms"
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[#FC4C02] hover:underline font-semibold"
+                    >
+                      服务条款
+                    </Link>
+                    。本平台会收集有限的运动数据以供体能分析，我们承诺保护您的数据隐私，绝不将其用于转售或训练外部 AI 模型。
                   </span>
                 </label>
               </div>

@@ -209,7 +209,7 @@ def _generate_coach_tip(act_doc: dict, user_data: dict, context: dict, is_wecom:
             + f"\n\n{reqs}"
         )
 
-        result = _gemini_generate(prompt, temperature=0.7, response_json=False)
+        result = _gemini_generate(prompt, temperature=0.7, response_json=False, model_name="gemini-3.1-flash-lite")
         return result.get("text", "").strip()
 
     except Exception as e:
@@ -441,9 +441,17 @@ def send_activity_wecom_notification(act_doc: dict, user_data: dict, uid: str = 
         fitness = _get_fitness_state(uid, user_data) if uid else {}
         context = {"monthly_km": monthly_km, **fitness}
 
-        # ALWAYS regenerate a WeCom-safe tip — never reuse the journal
-        # coach_tip which can contain CTL/ATL/TSB/HR/PB numbers.
-        wecom_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
+        # First, try to reuse the pre-generated WeCom safe tip from the journal entry (saves LLM call)
+        wecom_tip = ""
+        if journal_entry and isinstance(journal_entry, dict):
+            wecom_tip = (journal_entry.get("wecom_safe_comment") or "").strip()
+
+        if wecom_tip:
+            print(f"[wecom] Reusing wecom_safe_comment from journal entry (saved 1 LLM call!)")
+        else:
+            # Fallback: regenerate a WeCom-safe tip — never reuse the raw journal coach_tip
+            print(f"[wecom] No pre-generated safe comment found — fallback to generating one")
+            wecom_tip = _generate_coach_tip(act_doc, user_data, context, is_wecom=True)
 
         if journal_entry is None:
             journal_entry = {}

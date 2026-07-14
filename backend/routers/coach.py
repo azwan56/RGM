@@ -15,7 +15,7 @@ _gemini_proxy_secret = os.getenv("GEMINI_PROXY_SECRET", "").strip()
 # Model preference order — try these in sequence
 _MODEL_CANDIDATES = [
     "gemini-3.5-flash",          # Latest, confirmed working
-    "gemini-3.5-flash-lite",     # Lightweight variant
+    "gemini-3.1-flash-lite",     # Lightweight variant
     "gemini-2.5-flash",          # Fallback
 ]
 _resolved_model = None  # Will be set on first successful call
@@ -35,11 +35,11 @@ def _extract_text_from_response(data: dict) -> str:
         pass
     return None
 
-def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None, contents_obj: list = None, system_instruction: str = None, tools: list = None) -> dict:
+def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: int = 6000, response_json: bool = True, thinking_budget: int = None, contents_obj: list = None, system_instruction: str = None, tools: list = None, model_name: str = None) -> dict:
     """Call Gemini API — tries Cloud Functions proxy first, falls back to direct REST."""
     global _resolved_model, _use_proxy
 
-    model_name = _resolved_model or _MODEL_CANDIDATES[0]
+    model_name_to_use = model_name or _resolved_model or _MODEL_CANDIDATES[0]
 
     # ── Strategy 1: Cloud Functions proxy (avoids GeoIP blocks) ──
     if _use_proxy is not False and _gemini_proxy_url:
@@ -48,13 +48,13 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
             if contents_obj:
                 body = {
                     "secret": _gemini_proxy_secret,
-                    "model": model_name,
+                    "model": model_name_to_use,
                     "contents": contents_obj,
                 }
             else:
                 body = {
                     "secret": _gemini_proxy_secret,
-                    "model": model_name,
+                    "model": model_name_to_use,
                     "contents": [{"parts": [{"text": prompt}]}],
                 }
             
@@ -74,7 +74,8 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
             resp = http_requests.post(_gemini_proxy_url, json=body, timeout=120)
             if resp.status_code == 200:
                 _use_proxy = True  # Cache: proxy works
-                _resolved_model = model_name
+                if not model_name:
+                    _resolved_model = model_name_to_use
                 data = resp.json()
                 # Robustly extract text — handles thinking models and search grounding
                 text = _extract_text_from_response(data)
@@ -82,15 +83,15 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                     finish_reason = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
                     print(f"[gemini] Proxy returned empty content (finishReason={finish_reason})")
                     raise Exception(f"Gemini returned no text (finishReason={finish_reason})")
-                print(f"[gemini] Proxy OK: {model_name}")
-                return {"text": text, "model": model_name, "api_version": "proxy"}
+                print(f"[gemini] Proxy OK: {model_name_to_use}")
+                return {"text": text, "model": model_name_to_use, "api_version": "proxy"}
             else:
                 print(f"[gemini] Proxy returned {resp.status_code}: {resp.text[:200]}")
         except Exception as e:
             print(f"[gemini] Proxy error: {e}")
 
     # ── Strategy 2: Direct Gemini REST API (fallback) ──
-    models_to_try = [_resolved_model] if _resolved_model else _MODEL_CANDIDATES
+    models_to_try = [model_name_to_use] if model_name else ([_resolved_model] if _resolved_model else _MODEL_CANDIDATES)
 
     last_error = None
     for mn in models_to_try:
@@ -120,7 +121,8 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
             try:
                 resp = http_requests.post(url, json=body, timeout=120)
                 if resp.status_code == 200:
-                    _resolved_model = mn  # Cache working model
+                    if not model_name:
+                        _resolved_model = mn  # Cache working model
                     _use_proxy = False  # Direct works, skip proxy next time
                     data = resp.json()
                     text = _extract_text_from_response(data)
@@ -134,10 +136,10 @@ def _gemini_generate(prompt: str = None, temperature: float = 0.6, max_tokens: i
                     last_error = f"{mn}@{api_ver}: {resp.status_code} {resp.text[:200]}"
                     print(f"[gemini] {last_error}")
                     # If cached model is gone (404), clear cache and retry all candidates
-                    if resp.status_code == 404 and _resolved_model:
+                    if resp.status_code == 404 and _resolved_model and not model_name:
                         print(f"[gemini] Cached model {_resolved_model} is gone, clearing cache")
                         _resolved_model = None
-                        return _gemini_generate(prompt, temperature, max_tokens, response_json, thinking_budget)
+                        return _gemini_generate(prompt, temperature, max_tokens, response_json, thinking_budget, contents_obj, system_instruction, tools, model_name)
             except Exception as e:
                 last_error = f"{mn}@{api_ver}: {e}"
                 print(f"[gemini] {last_error}")
@@ -1521,7 +1523,7 @@ async def generate_coach_feedback(req: CoachRequest):
         print(f"Coach prompt length: {len(prompt)} chars")
         response = await loop.run_in_executor(
             None,
-            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=4000)
+            lambda: _gemini_generate(prompt, temperature=0.6, max_tokens=4000, model_name="gemini-3.5-flash")
         )
         print(f"[coach] Used model: {response['model']}@{response['api_version']}")
         text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
@@ -1812,6 +1814,7 @@ async def log_journal_entry(req: JournalLogRequest):
             '返回JSON格式：\n'
             '{\n'
             '  "ai_comment": "<3-5句教练评语，分析交叉训练的价值和与跑步的协同效应>",\n'
+            '  "wecom_safe_comment": "<脱敏短评，适合群聊，120字以内，不含具体的心率数据等，注重全面恢复与训练价值>",\n'
             '  "fatigue_level": "<low|moderate|high>",\n'
             '  "performance_note": "<交叉训练的核心价值，1-2句话>",\n'
             f'  "tomorrow_suggestion": "<明日训练建议，明确写出\'明天（{tomorrow_date_str}，{tomorrow_weekday}）\'>",\n'
@@ -1821,12 +1824,13 @@ async def log_journal_entry(req: JournalLogRequest):
         )
 
         ai = {"ai_comment": f"完成了一次{ct_label}，交叉训练是跑步训练的重要补充！",
+              "wecom_safe_comment": f"完成了{ct_label}训练，很好的身体恢复与力量补充！",
               "fatigue_level": "low", "performance_note": "", "tomorrow_suggestion": "",
               "training_type": "交叉训练", "encouragement": "全面训练，全面提升！💪"}
 
         if _api_key or _gemini_proxy_url:
             try:
-                resp = await loop.run_in_executor(None, lambda: _gemini_generate(ct_prompt, temperature=0.5, max_tokens=2000))
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(ct_prompt, temperature=0.5, max_tokens=2000, model_name="gemini-3.1-flash-lite"))
                 text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
                 ai = json.loads(text)
                 print(f"[journal] Cross-training AI generated OK, type={ct_label}")
@@ -1847,6 +1851,7 @@ async def log_journal_entry(req: JournalLogRequest):
                 "activity_type": "cross_training",
             },
             "ai_comment": ai.get("ai_comment", ""),
+            "wecom_safe_comment": ai.get("wecom_safe_comment", ""),
             "fatigue_level": ai.get("fatigue_level", "low"),
             "performance_note": ai.get("performance_note", ""),
             "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
@@ -2222,6 +2227,7 @@ async def log_journal_entry(req: JournalLogRequest):
         '返回JSON格式：\n'
         '{\n'
         '  "ai_comment": "<8-12句详细评语，必须引用逐公里配速、心率区间、心率漂移等具体数据，深入分析训练质量>",\n'
+        '  "wecom_safe_comment": "<4-5句话脱敏短评，不含CTL/ATL/TSB和具体心率/配速数值，适合群聊公开展示，120字以内，热情专业>",\n'
         '  "fatigue_level": "<low|moderate|high，基于心率漂移/配速变化/本周累积综合判断>",\n'
         '  "performance_note": "<今日训练的核心亮点或需要注意的问题，2-3句话>",\n'
         '  "tomorrow_suggestion": "<明天的具体训练建议，含距离、配速和强度，要考虑星期、周目标剩余和疲劳度>",\n'
@@ -2230,13 +2236,14 @@ async def log_journal_entry(req: JournalLogRequest):
         '}\n'
     )
 
-    ai = {"ai_comment": "训练完成，继续保持！", "fatigue_level": "moderate",
-          "performance_note": "", "tomorrow_suggestion": "", "training_type": "",
+    ai = {"ai_comment": "训练完成，继续保持！",
+          "wecom_safe_comment": "完成了跑步训练，继续保持节奏！",
+          "fatigue_level": "moderate", "performance_note": "", "tomorrow_suggestion": "", "training_type": "",
           "encouragement": ""}
     # Try generating AI feedback (proxy or direct — _gemini_generate handles both)
     if _api_key or _gemini_proxy_url:
         try:
-            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000, model_name="gemini-3.1-flash-lite"))
             text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             ai = json.loads(text)
             print(f"[journal] AI generated OK via {resp.get('api_version','?')}, comment length={len(ai.get('ai_comment',''))}")
@@ -2252,10 +2259,11 @@ async def log_journal_entry(req: JournalLogRequest):
                     "要求：语言专业但热情，有温度。只输出纯文本评语，不要JSON或markdown格式。"
                 )
                 fallback_resp = await loop.run_in_executor(
-                    None, lambda: _gemini_generate(fallback_prompt, temperature=0.5, max_tokens=1000, response_json=False))
+                    None, lambda: _gemini_generate(fallback_prompt, temperature=0.5, max_tokens=1000, response_json=False, model_name="gemini-3.1-flash-lite"))
                 fallback_text = fallback_resp.get("text", "").strip()
                 if fallback_text and len(fallback_text) > 10:
                     ai["ai_comment"] = fallback_text
+                    ai["wecom_safe_comment"] = fallback_text
                     print(f"[journal] Fallback plain-text AI succeeded, length={len(fallback_text)}")
             except Exception as e2:
                 print(f"[journal] Fallback AI also failed: {e2}")
@@ -2276,6 +2284,7 @@ async def log_journal_entry(req: JournalLogRequest):
             "max_heart_rate": activity.get("max_heart_rate", 0),
         },
         "ai_comment": ai.get("ai_comment", ""),
+        "wecom_safe_comment": ai.get("wecom_safe_comment", ""),
         "fatigue_level": ai.get("fatigue_level", "moderate"),
         "performance_note": ai.get("performance_note", ""),
         "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
@@ -2377,79 +2386,128 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
 
         processed = 0
         errors = 0
+        batch_size = 10
 
-        for activity in activities:
-            act_id = str(activity.get("activity_id", ""))
-            entry_date = activity.get("start_date_local", "")[:10]
-            km = activity.get("distance_km", 0)
-            act_elev = activity.get("total_elevation_gain", 0)
-            is_trail = act_elev > 30 and km > 0 and (act_elev / km) > 15
-
+        # Process in chunks of batch_size
+        for idx in range(0, len(activities), batch_size):
+            chunk = activities[idx:idx+batch_size]
+            
+            # Build batched activities context for prompt
+            items_str_list = []
+            for act in chunk:
+                act_id = str(act.get("activity_id", ""))
+                entry_date = act.get("start_date_local", "")[:10]
+                km = act.get("distance_km", 0)
+                act_elev = act.get("total_elevation_gain", 0)
+                items_str_list.append(
+                    f"ID: {act_id} | 日期: {entry_date} | 名称: {act.get('name','Run')} | "
+                    f"距离: {km}km (8周均量:{avg_dist}km) | 配速: {act.get('avg_pace','—')}/km (8周均速:{avg_pace_8w}/km) | "
+                    f"心率: {act.get('avg_heart_rate',0)}bpm (8周均心率:{avg_hr_8w}) | 爬升: {act_elev}m | 时长: {act.get('duration_str','—')}"
+                )
+            
+            chunk_context = "\n".join(f"{i+1}. {item}" for i, item in enumerate(items_str_list))
+            
             prompt = (
-                "你是专业跑步教练，为跑者写简短训练评语。引用数据，简洁有力。\n"
-                "必须返回纯JSON。\n\n"
-                f"日志：{journal_title}\n{race_ctx}"
-                f"日期：{entry_date} | {activity.get('name','Run')}\n"
-                f"距离：{km}km（均{avg_dist}km） | 配速：{activity.get('avg_pace','—')}/km（均{avg_pace_8w}/km）\n"
-                f"心率：{activity.get('avg_heart_rate',0)}bpm（均{avg_hr_8w}） | 爬升：{act_elev}m | 时长：{activity.get('duration_str','—')}\n\n"
-                '返回：{"ai_comment":"<3-4句评语>","fatigue_level":"<low|moderate|high>",'
-                '"performance_note":"<1句亮点>","tomorrow_suggestion":"<1句建议>",'
-                '"training_type":"<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"}\n'
+                "你是专业跑步教练，为跑者写简短训练评语。引用数据，简洁有力，语言要专业且有温度。\n"
+                "回复必须是纯JSON数组，数组中的每个元素对应一条活动，不要包含 Markdown 标记，也不要有其他包裹文本。\n\n"
+                f"日志：{journal_title}\n{race_ctx}\n"
+                "以下是本次要处理的跑步记录列表：\n"
+                f"{chunk_context}\n\n"
+                "请严格返回如下格式的JSON数组，按输入列表顺序排列，每项包含对应的 activity_id：\n"
+                '[\n'
+                '  {\n'
+                '    "activity_id": "<跑步记录对应的ID，必须精确匹配>",\n'
+                '    "ai_comment": "<针对该次跑步的3-4句教练简评>",\n'
+                '    "fatigue_level": "<low|moderate|high>",\n'
+                '    "performance_note": "<1句亮点>",\n'
+                '    "tomorrow_suggestion": "<1句建议>",\n'
+                '    "training_type": "<轻松跑|节奏跑|间歇训练|长距离|恢复跑|越野训练|山地训练>"\n'
+                '  },\n'
+                '  ...\n'
+                ']'
             )
-
-            ai = {"ai_comment": f"{entry_date}: {activity.get('name','Run')} {km}km 训练完成。",
-                  "fatigue_level": "moderate", "performance_note": "", "tomorrow_suggestion": "",
-                  "training_type": "越野训练" if is_trail else "轻松跑"}
+            
+            # Initialize fallback dictionary for all items in chunk
+            chunk_results = {}
+            for act in chunk:
+                a_id = str(act.get("activity_id", ""))
+                e_date = act.get("start_date_local", "")[:10]
+                a_elev = act.get("total_elevation_gain", 0)
+                a_km = act.get("distance_km", 0)
+                is_t = a_elev > 30 and a_km > 0 and (a_elev / a_km) > 15
+                chunk_results[a_id] = {
+                    "ai_comment": f"{e_date}: {act.get('name','Run')} {a_km}km 训练完成。",
+                    "fatigue_level": "moderate",
+                    "performance_note": "",
+                    "tomorrow_suggestion": "",
+                    "training_type": "越野训练" if is_t else "轻松跑"
+                }
 
             if _api_key:
                 for attempt in range(3):  # Retry up to 3 times
                     try:
-                        resp = _gemini_generate(prompt, temperature=0.5, max_tokens=2500)
+                        resp = _gemini_generate(prompt, temperature=0.5, max_tokens=3000, model_name="gemini-3.1-flash-lite")
                         text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-                        ai = json.loads(text)
-                        print(f"[backfill] {entry_date} AI OK (attempt {attempt+1})")
-                        break
+                        
+                        parsed_list = json.loads(text)
+                        if isinstance(parsed_list, list):
+                            for item in parsed_list:
+                                a_id = str(item.get("activity_id", ""))
+                                if a_id in chunk_results:
+                                    chunk_results[a_id] = item
+                            print(f"[backfill] Batch {idx // batch_size + 1} AI OK (attempt {attempt+1})")
+                            break
+                        else:
+                            raise Exception("Response is not a list")
                     except Exception as e:
                         err_str = str(e)
-                        print(f"[backfill] AI error for {entry_date} (attempt {attempt+1}): {err_str[:200]}")
+                        print(f"[backfill] AI error for batch starting at {idx} (attempt {attempt+1}): {err_str[:200]}")
                         if "429" in err_str or "Resource" in err_str or "quota" in err_str.lower():
                             wait = 10 * (attempt + 1)
                             print(f"[backfill] Rate limited, waiting {wait}s...")
                             time.sleep(wait)
                         else:
-                            errors += 1
-                            # Store last error for debugging
-                            status_ref.set({"last_error": err_str[:300]}, merge=True)
-                            break
+                            if attempt == 2:
+                                errors += len(chunk)
+                                status_ref.set({"last_error": err_str[:300]}, merge=True)
+                            time.sleep(2)
 
-            entry = {
-                "date": entry_date, "entry_type": "daily", "activity_id": act_id,
-                "activity_snapshot": {
-                    "name": activity.get("name", "Run"), "distance_km": km,
-                    "avg_pace": activity.get("avg_pace", "—"),
-                    "avg_heart_rate": activity.get("avg_heart_rate", 0),
-                    "total_elevation_gain": act_elev,
-                    "duration_str": activity.get("duration_str", "—"),
-                    "max_heart_rate": activity.get("max_heart_rate", 0),
-                },
-                "ai_comment": ai.get("ai_comment", ""),
-                "fatigue_level": ai.get("fatigue_level", "moderate"),
-                "performance_note": ai.get("performance_note", ""),
-                "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
-                "training_type": ai.get("training_type", ""),
-                "weekly_progress": {"week_km": 0, "week_runs": 0, "target_km": 0, "completion_pct": 0},
-                "created_at": _dt.now().isoformat(),
-            }
-            entries_ref.document(f"{entry_date}_{act_id}").set(entry)
-            processed += 1
-
-            # Update progress every 3 entries
-            if processed % 3 == 0:
-                status_ref.set({"state": "running", "total": len(activities), "done": processed,
-                                "errors": errors}, merge=True)
-
-            # 4s delay = ~15 RPM to stay within Gemini free tier limit
-            time.sleep(4)
+            # Save batch results to Firestore
+            for act in chunk:
+                act_id = str(act.get("activity_id", ""))
+                entry_date = act.get("start_date_local", "")[:10]
+                km = act.get("distance_km", 0)
+                act_elev = act.get("total_elevation_gain", 0)
+                ai = chunk_results.get(act_id, {})
+                
+                entry = {
+                    "date": entry_date, "entry_type": "daily", "activity_id": act_id,
+                    "activity_snapshot": {
+                        "name": act.get("name", "Run"), "distance_km": km,
+                        "avg_pace": act.get("avg_pace", "—"),
+                        "avg_heart_rate": act.get("avg_heart_rate", 0),
+                        "total_elevation_gain": act_elev,
+                        "duration_str": act.get("duration_str", "—"),
+                        "max_heart_rate": act.get("max_heart_rate", 0),
+                    },
+                    "ai_comment": ai.get("ai_comment", ""),
+                    "wecom_safe_comment": ai.get("ai_comment", ""),
+                    "fatigue_level": ai.get("fatigue_level", "moderate"),
+                    "performance_note": ai.get("performance_note", ""),
+                    "tomorrow_suggestion": ai.get("tomorrow_suggestion", ""),
+                    "training_type": ai.get("training_type", ""),
+                    "weekly_progress": {"week_km": 0, "week_runs": 0, "target_km": 0, "completion_pct": 0},
+                    "created_at": _dt.now().isoformat(),
+                }
+                entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+                processed += 1
+            
+            # Update progress
+            status_ref.set({"state": "running", "total": len(activities), "done": processed,
+                            "errors": errors}, merge=True)
+            
+            # 2s delay between batches to stay safe
+            time.sleep(2)
 
         status_ref.set({"state": "done", "total": len(activities), "done": processed,
                         "errors": errors, "finished_at": _dt.now().isoformat()})
@@ -2573,7 +2631,7 @@ async def generate_weekly_review(req: WeeklyReviewRequest):
                             "key_sessions": [], "adjustments": ""}, "weekly_score": 7}
     if _api_key:
         try:
-            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=1200))
+            resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=1200, model_name="gemini-3.1-flash-lite"))
             text = resp["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             ai = json.loads(text)
         except Exception as e:
@@ -2818,7 +2876,7 @@ async def generate_auto_weekly_report(uid: str, tz_name: str = "Asia/Singapore")
         last_err = None
         for attempt in range(3):
             try:
-                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000))
+                resp = await loop.run_in_executor(None, lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000, model_name="gemini-3.1-flash-lite"))
                 text = resp["text"].strip()
                 # Strip markdown code fences if present
                 if text.startswith("```"):
@@ -3526,7 +3584,7 @@ async def generate_training_plan(req: TrainingPlanRequest):
     try:
         response = await loop.run_in_executor(
             None,
-            lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000)
+            lambda: _gemini_generate(prompt, temperature=0.5, max_tokens=4000, model_name="gemini-3.5-flash")
         )
         print(f"[training-plan] Used model: {response['model']}@{response['api_version']}")
         text = response["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()

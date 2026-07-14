@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
@@ -122,6 +123,15 @@ export default function Home() {
             </svg>
             Powered by Gemini 3.5 Flash
           </p>
+          <div className="hidden sm:block w-1.5 h-1.5 rounded-full bg-white/20" />
+          <div className="flex gap-4 text-xs text-zinc-500">
+            <Link href="/privacy" className="hover:text-white transition-colors underline underline-offset-4 decoration-zinc-700 hover:decoration-[#FC4C02]">
+              隐私政策 (Privacy)
+            </Link>
+            <Link href="/terms" className="hover:text-white transition-colors underline underline-offset-4 decoration-zinc-700 hover:decoration-[#FC4C02]">
+              服务条款 (Terms)
+            </Link>
+          </div>
         </div>
 
       </main>
