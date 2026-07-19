@@ -169,10 +169,7 @@ export default function Dashboard() {
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
 
-        {/* Recovery & Physiological Metrics Widget */}
-        {user && (
-          <RecoveryWidget uid={user.uid} />
-        )}
+
 
         {/* Leaderboard + Activity List — side by side, fixed height */}
         {isStravaConnected && user && (
@@ -218,6 +215,11 @@ export default function Dashboard() {
         {/* Fitness & Form Chart */}
         {isStravaConnected && user && (
           <FitnessChart uid={user.uid} />
+        )}
+
+        {/* Recovery & Physiological Metrics Widget */}
+        {user && (
+          <RecoveryWidget uid={user.uid} />
         )}
 
 
