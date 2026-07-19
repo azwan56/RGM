@@ -91,29 +91,12 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
     now = datetime.now(pytz.utc)
     start_time = now - timedelta(days=days)
     
-    range_payload = {
-        "range": {
-            "start": {
-                "date": {
-                    "year": start_time.year,
-                    "month": start_time.month,
-                    "day": start_time.day
-                }
-            },
-            "end": {
-                "date": {
-                    "year": now.year,
-                    "month": now.month,
-                    "day": now.day
-                }
-            }
-        },
-        "windowSizeDays": 1
-    }
+    start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_date = start_time.strftime("%Y-%m-%d")
     
     # Initialize empty daily data dict for parsing
     daily_data = {}
-    for i in range(days + 1):
+    for i in range(days + 2): # extra day padding to prevent index errors
         dt_str = (now - timedelta(days=i)).strftime("%Y-%m-%d")
         daily_data[dt_str] = {
             "sleep_duration_sec": 0,
@@ -121,49 +104,34 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
             "resting_heart_rate": 0,
             "heart_rate_variability": 0
         }
-        
-    def parse_rollup_date(dp):
-        date_obj = dp.get("date")
-        if isinstance(date_obj, dict):
-            y = date_obj.get("year")
-            m = date_obj.get("month")
-            d = date_obj.get("day")
-            if y and m and d:
-                return f"{y:04d}-{m:02d}-{d:02d}"
-        date_str = dp.get("date")
-        if isinstance(date_str, str):
-            return date_str[:10]
-        return None
 
     # 1. Fetch Sleep Data
     try:
-        sleep_res = requests.post(
-            "https://health.googleapis.com/v4/users/me/dataTypes/sleep/dataPoints:dailyRollUp",
-            headers=headers,
-            json=range_payload,
-            timeout=15
-        )
+        sleep_url = "https://health.googleapis.com/v4/users/me/dataTypes/sleep/dataPoints"
+        sleep_params = {"filter": f'sleep.interval.end_time >= "{start_iso}"'}
+        sleep_res = requests.get(sleep_url, headers=headers, params=sleep_params, timeout=15)
         if sleep_res.ok:
-            points = sleep_res.json().get("rollupDataPoints", [])
+            points = sleep_res.json().get("dataPoints", [])
             for dp in points:
-                date_str = parse_rollup_date(dp)
-                if date_str in daily_data:
-                    val = dp.get("value", {})
-                    duration = 0
-                    score = 0
-                    if isinstance(val, dict):
-                        # Support multiple fields returned by different API revisions
-                        duration = val.get("sleepDurationSeconds") or val.get("durationSeconds") or val.get("duration") or 0
-                        if isinstance(duration, str) and duration.endswith("s"):
-                            duration = int(float(duration[:-1]))
-                        score = val.get("sleepScore") or val.get("score") or 0
-                    else:
-                        duration = val if isinstance(val, (int, float)) else 0
+                sleep_obj = dp.get("sleep", {})
+                interval = sleep_obj.get("interval", {})
+                end_time_str = interval.get("endTime")
+                if end_time_str:
+                    # Parse local waking date using endUtcOffset
+                    dt = datetime.strptime(end_time_str[:19], "%Y-%m-%dT%H:%M:%S")
+                    offset_str = interval.get("endUtcOffset", "0s")
+                    offset_sec = int(offset_str.replace("s", ""))
+                    local_dt = dt + timedelta(seconds=offset_sec)
+                    date_str = local_dt.strftime("%Y-%m-%d")
                     
-                    if duration:
-                        daily_data[date_str]["sleep_duration_sec"] = int(duration)
-                    if score:
-                        daily_data[date_str]["sleep_score"] = int(score)
+                    if date_str in daily_data:
+                        summary = sleep_obj.get("summary", {})
+                        mins_asleep = int(summary.get("minutesAsleep", 0))
+                        daily_data[date_str]["sleep_duration_sec"] += mins_asleep * 60
+                        
+                        # Recalculate sleep score based on total sleep duration of the day
+                        total_mins = daily_data[date_str]["sleep_duration_sec"] / 60.0
+                        daily_data[date_str]["sleep_score"] = int(min(100, max(0, (total_mins / 480.0) * 100)))
         else:
             print(f"[Google Health Sync] Sleep API returned status {sleep_res.status_code}: {sleep_res.text}")
     except Exception as e:
@@ -171,30 +139,19 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
 
     # 2. Fetch Resting Heart Rate
     try:
-        rhr_res = requests.post(
-            "https://health.googleapis.com/v4/users/me/dataTypes/daily-resting-heart-rate/dataPoints:dailyRollUp",
-            headers=headers,
-            json=range_payload,
-            timeout=15
-        )
+        rhr_url = "https://health.googleapis.com/v4/users/me/dataTypes/daily-resting-heart-rate/dataPoints"
+        rhr_params = {"filter": f'daily_resting_heart_rate.date >= "{start_date}"'}
+        rhr_res = requests.get(rhr_url, headers=headers, params=rhr_params, timeout=15)
         if rhr_res.ok:
-            points = rhr_res.json().get("rollupDataPoints", [])
+            points = rhr_res.json().get("dataPoints", [])
             for dp in points:
-                date_str = parse_rollup_date(dp)
-                if date_str in daily_data:
-                    val = dp.get("value", {})
-                    rhr = 0
-                    if isinstance(val, dict):
-                        bpm_min = val.get("beatsPerMinuteMin")
-                        bpm_max = val.get("beatsPerMinuteMax")
-                        if bpm_min and bpm_max:
-                            rhr = int((bpm_min + bpm_max) / 2)
-                        elif bpm_min:
-                            rhr = int(bpm_min)
-                    else:
-                        rhr = val if isinstance(val, (int, float)) else 0
-                    if rhr:
-                        daily_data[date_str]["resting_heart_rate"] = rhr
+                rhr_obj = dp.get("dailyRestingHeartRate", {})
+                date_obj = rhr_obj.get("date", {})
+                if date_obj.get("year") and date_obj.get("month") and date_obj.get("day"):
+                    date_str = f"{date_obj['year']:04d}-{date_obj['month']:02d}-{date_obj['day']:02d}"
+                    if date_str in daily_data:
+                        bpm_val = rhr_obj.get("beatsPerMinute", 0)
+                        daily_data[date_str]["resting_heart_rate"] = int(bpm_val)
         else:
             print(f"[Google Health Sync] RHR API returned status {rhr_res.status_code}: {rhr_res.text}")
     except Exception as e:
@@ -202,30 +159,19 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
 
     # 3. Fetch HRV Data
     try:
-        hrv_res = requests.post(
-            "https://health.googleapis.com/v4/users/me/dataTypes/daily-heart-rate-variability/dataPoints:dailyRollUp",
-            headers=headers,
-            json=range_payload,
-            timeout=15
-        )
+        hrv_url = "https://health.googleapis.com/v4/users/me/dataTypes/daily-heart-rate-variability/dataPoints"
+        hrv_params = {"filter": f'daily_heart_rate_variability.date >= "{start_date}"'}
+        hrv_res = requests.get(hrv_url, headers=headers, params=hrv_params, timeout=15)
         if hrv_res.ok:
-            points = hrv_res.json().get("rollupDataPoints", [])
+            points = hrv_res.json().get("dataPoints", [])
             for dp in points:
-                date_str = parse_rollup_date(dp)
-                if date_str in daily_data:
-                    val = dp.get("value", {})
-                    hrv = 0
-                    if isinstance(val, dict):
-                        hrv_min = val.get("averageHeartRateVariabilityMillisecondsMin")
-                        hrv_max = val.get("averageHeartRateVariabilityMillisecondsMax")
-                        if hrv_min and hrv_max:
-                            hrv = int((hrv_min + hrv_max) / 2)
-                        elif hrv_min:
-                            hrv = int(hrv_min)
-                    else:
-                        hrv = val if isinstance(val, (int, float)) else 0
-                    if hrv:
-                        daily_data[date_str]["heart_rate_variability"] = hrv
+                hrv_obj = dp.get("dailyHeartRateVariability", {})
+                date_obj = hrv_obj.get("date", {})
+                if date_obj.get("year") and date_obj.get("month") and date_obj.get("day"):
+                    date_str = f"{date_obj['year']:04d}-{date_obj['month']:02d}-{date_obj['day']:02d}"
+                    if date_str in daily_data:
+                        hrv_val = hrv_obj.get("averageHeartRateVariabilityMilliseconds", 0.0)
+                        daily_data[date_str]["heart_rate_variability"] = int(hrv_val)
         else:
             print(f"[Google Health Sync] HRV API returned status {hrv_res.status_code}: {hrv_res.text}")
     except Exception as e:

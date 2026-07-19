@@ -80,12 +80,16 @@ def test_sync_google_health_data():
     
     # Mock sleep API response
     sleep_response_data = {
-        "rollupDataPoints": [
+        "dataPoints": [
             {
-                "date": {"year": 2026, "month": 7, "day": 18},
-                "value": {
-                    "sleepDurationSeconds": 28800,
-                    "sleepScore": 85
+                "sleep": {
+                    "interval": {
+                        "endTime": "2026-07-18T12:00:00Z",
+                        "endUtcOffset": "0s"
+                    },
+                    "summary": {
+                        "minutesAsleep": "480"
+                    }
                 }
             }
         ]
@@ -93,12 +97,11 @@ def test_sync_google_health_data():
     
     # Mock RHR API response
     rhr_response_data = {
-        "rollupDataPoints": [
+        "dataPoints": [
             {
-                "date": {"year": 2026, "month": 7, "day": 18},
-                "value": {
-                    "beatsPerMinuteMin": 55,
-                    "beatsPerMinuteMax": 65
+                "dailyRestingHeartRate": {
+                    "date": {"year": 2026, "month": 7, "day": 18},
+                    "beatsPerMinute": "60"
                 }
             }
         ]
@@ -106,18 +109,17 @@ def test_sync_google_health_data():
     
     # Mock HRV API response
     hrv_response_data = {
-        "rollupDataPoints": [
+        "dataPoints": [
             {
-                "date": {"year": 2026, "month": 7, "day": 18},
-                "value": {
-                    "averageHeartRateVariabilityMillisecondsMin": 45,
-                    "averageHeartRateVariabilityMillisecondsMax": 55
+                "dailyHeartRateVariability": {
+                    "date": {"year": 2026, "month": 7, "day": 18},
+                    "averageHeartRateVariabilityMilliseconds": 50
                 }
             }
         ]
     }
     
-    def side_effect_post(url, *args, **kwargs):
+    def side_effect_get(url, *args, **kwargs):
         if "sleep" in url:
             return MockResponse(sleep_response_data)
         elif "resting-heart-rate" in url:
@@ -150,9 +152,10 @@ def test_sync_google_health_data():
     mock_db_collection.document.return_value = mock_user_ref
     mock_db.collection = lambda name: mock_db_collection if name == "users" else None
     
-    # Patch db and requests.post
+    # Patch db and requests.get/post (post is used for OAuth token refresh)
     with patch("routers.google_health.db", mock_db), \
-         patch("requests.post", side_effect=side_effect_post) as mock_post:
+         patch("requests.get", side_effect=side_effect_get) as mock_get, \
+         patch("requests.post", return_value=MockResponse({})) as mock_post:
         
         # Override collection to return custom Ref so subcollection is recorded
         original_collection = mock_db.collection
@@ -185,19 +188,13 @@ def test_sync_google_health_data():
         # Verify the saved Firestore data content
         assert "2026-07-18" in saved_docs
         doc_data = saved_docs["2026-07-18"]
-        assert doc_data["sleep_duration_sec"] == 28800
-        assert doc_data["sleep_score"] == 85
-        assert doc_data["resting_heart_rate"] == 60 # (55+65)/2
-        assert doc_data["heart_rate_variability"] == 50 # (45+55)/2
+        assert doc_data["sleep_duration_sec"] == 28800 # 480 * 60
+        assert doc_data["sleep_score"] == 100 # (480/480)*100
+        assert doc_data["resting_heart_rate"] == 60
+        assert doc_data["heart_rate_variability"] == 50
         
-        # Verify correct CivilTimeInterval range payload structure
-        mock_post.assert_called()
-        for call in mock_post.call_args_list:
+        # Verify correct filter parameters
+        mock_get.assert_called()
+        for call in mock_get.call_args_list:
             called_url, called_kwargs = call[0][0], call[1]
-            if "oauth2" not in called_url:
-                payload = called_kwargs["json"]
-                assert "range" in payload
-                assert "start" in payload["range"]
-                assert "end" in payload["range"]
-                assert "date" in payload["range"]["start"]
-                assert "year" in payload["range"]["start"]["date"]
+            assert "filter" in called_kwargs["params"]
