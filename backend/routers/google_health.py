@@ -68,6 +68,19 @@ def get_google_access_token(uid: str) -> str:
 
 
 def sync_google_health_data(uid: str, days: int = 14):
+    user_ref = db.collection("users").document(uid)
+    try:
+        count = _sync_google_health_data_inner(uid, days)
+        user_ref.update({"google_health_sync_error": None})
+        return count
+    except Exception as e:
+        import traceback
+        err_str = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[Google Health Sync] Error for user {uid}: {err_str}")
+        user_ref.update({"google_health_sync_error": err_str})
+        raise e
+
+def _sync_google_health_data_inner(uid: str, days: int = 14):
     access_token = get_google_access_token(uid)
     headers = {
         "Authorization": f"Bearer {access_token}",

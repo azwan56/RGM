@@ -162,6 +162,8 @@ def test_sync_google_health_data():
                 class MockUserDocRef:
                     def get(self):
                         return MockDocSnapshot(user_data, True, "user_123")
+                    def update(self, data):
+                        pass
                     def collection(self, sub_name):
                         assert sub_name == "daily_recovery"
                         class SubCollectionRef:
