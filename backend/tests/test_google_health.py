@@ -84,6 +84,7 @@ def test_sync_google_health_data():
             {
                 "sleep": {
                     "interval": {
+                        "startTime": "2026-07-18T04:00:00Z",
                         "endTime": "2026-07-18T12:00:00Z",
                         "endUtcOffset": "0s"
                     },

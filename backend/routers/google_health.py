@@ -112,26 +112,68 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
         sleep_res = requests.get(sleep_url, headers=headers, params=sleep_params, timeout=15)
         if sleep_res.ok:
             points = sleep_res.json().get("dataPoints", [])
+            parsed_sessions = []
+            
             for dp in points:
                 sleep_obj = dp.get("sleep", {})
                 interval = sleep_obj.get("interval", {})
                 end_time_str = interval.get("endTime")
-                if end_time_str:
-                    # Parse local waking date using endUtcOffset
-                    dt = datetime.strptime(end_time_str[:19], "%Y-%m-%dT%H:%M:%S")
+                start_time_str = interval.get("startTime")
+                if start_time_str and end_time_str:
+                    s_dt = datetime.strptime(start_time_str[:19], "%Y-%m-%dT%H:%M:%S")
+                    e_dt = datetime.strptime(end_time_str[:19], "%Y-%m-%dT%H:%M:%S")
+                    
                     offset_str = interval.get("endUtcOffset", "0s")
                     offset_sec = int(offset_str.replace("s", ""))
-                    local_dt = dt + timedelta(seconds=offset_sec)
-                    date_str = local_dt.strftime("%Y-%m-%d")
+                    local_e_dt = e_dt + timedelta(seconds=offset_sec)
+                    date_str = local_e_dt.strftime("%Y-%m-%d")
                     
-                    if date_str in daily_data:
-                        summary = sleep_obj.get("summary", {})
-                        mins_asleep = int(summary.get("minutesAsleep", 0))
-                        daily_data[date_str]["sleep_duration_sec"] += mins_asleep * 60
-                        
-                        # Recalculate sleep score based on total sleep duration of the day
-                        total_mins = daily_data[date_str]["sleep_duration_sec"] / 60.0
-                        daily_data[date_str]["sleep_score"] = int(min(100, max(0, (total_mins / 480.0) * 100)))
+                    platform = dp.get("dataSource", {}).get("platform", "UNKNOWN")
+                    summary = sleep_obj.get("summary", {})
+                    mins_asleep = int(summary.get("minutesAsleep", 0))
+                    
+                    parsed_sessions.append({
+                        "start": s_dt,
+                        "end": e_dt,
+                        "date_str": date_str,
+                        "mins_asleep": mins_asleep,
+                        "platform": platform
+                    })
+            
+            # Sort by start time to process sequentially
+            parsed_sessions.sort(key=lambda x: x["start"])
+            
+            # Deduplicate overlapping sessions
+            unique_sessions = []
+            for s in parsed_sessions:
+                overlap_idx = -1
+                for idx, u in enumerate(unique_sessions):
+                    # Overlap condition: start1 < end2 and start2 < end1
+                    if s["start"] < u["end"] and u["start"] < s["end"]:
+                        overlap_idx = idx
+                        break
+                
+                if overlap_idx != -1:
+                    existing = unique_sessions[overlap_idx]
+                    # Prioritize FITBIT over other platforms
+                    if s["platform"] == "FITBIT" and existing["platform"] != "FITBIT":
+                        unique_sessions[overlap_idx] = s
+                    elif existing["platform"] == "FITBIT" and s["platform"] != "FITBIT":
+                        pass
+                    else:
+                        # Keep the longer session
+                        if s["mins_asleep"] > existing["mins_asleep"]:
+                            unique_sessions[overlap_idx] = s
+                else:
+                    unique_sessions.append(s)
+            
+            # Save deduplicated sessions into daily_data
+            for s in unique_sessions:
+                date_str = s["date_str"]
+                if date_str in daily_data:
+                    daily_data[date_str]["sleep_duration_sec"] += s["mins_asleep"] * 60
+                    total_mins = daily_data[date_str]["sleep_duration_sec"] / 60.0
+                    daily_data[date_str]["sleep_score"] = int(min(100, max(0, (total_mins / 480.0) * 100)))
         else:
             print(f"[Google Health Sync] Sleep API returned status {sleep_res.status_code}: {sleep_res.text}")
     except Exception as e:
@@ -150,8 +192,16 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
                 if date_obj.get("year") and date_obj.get("month") and date_obj.get("day"):
                     date_str = f"{date_obj['year']:04d}-{date_obj['month']:02d}-{date_obj['day']:02d}"
                     if date_str in daily_data:
-                        bpm_val = rhr_obj.get("beatsPerMinute", 0)
-                        daily_data[date_str]["resting_heart_rate"] = int(bpm_val)
+                        platform = dp.get("dataSource", {}).get("platform", "UNKNOWN")
+                        bpm_val = int(rhr_obj.get("beatsPerMinute", 0))
+                        
+                        existing_rhr = daily_data[date_str]["resting_heart_rate"]
+                        existing_platform = daily_data[date_str].get("_rhr_platform", "NONE")
+                        
+                        # Prioritize FITBIT over HEALTH_KIT or others
+                        if existing_rhr == 0 or (platform == "FITBIT" and existing_platform != "FITBIT"):
+                            daily_data[date_str]["resting_heart_rate"] = bpm_val
+                            daily_data[date_str]["_rhr_platform"] = platform
         else:
             print(f"[Google Health Sync] RHR API returned status {rhr_res.status_code}: {rhr_res.text}")
     except Exception as e:
@@ -170,8 +220,16 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
                 if date_obj.get("year") and date_obj.get("month") and date_obj.get("day"):
                     date_str = f"{date_obj['year']:04d}-{date_obj['month']:02d}-{date_obj['day']:02d}"
                     if date_str in daily_data:
-                        hrv_val = hrv_obj.get("averageHeartRateVariabilityMilliseconds", 0.0)
-                        daily_data[date_str]["heart_rate_variability"] = int(hrv_val)
+                        platform = dp.get("dataSource", {}).get("platform", "UNKNOWN")
+                        hrv_val = int(hrv_obj.get("averageHeartRateVariabilityMilliseconds", 0.0))
+                        
+                        existing_hrv = daily_data[date_str]["heart_rate_variability"]
+                        existing_platform = daily_data[date_str].get("_hrv_platform", "NONE")
+                        
+                        # Prioritize FITBIT over HEALTH_KIT or others
+                        if existing_hrv == 0 or (platform == "FITBIT" and existing_platform != "FITBIT"):
+                            daily_data[date_str]["heart_rate_variability"] = hrv_val
+                            daily_data[date_str]["_hrv_platform"] = platform
         else:
             print(f"[Google Health Sync] HRV API returned status {hrv_res.status_code}: {hrv_res.text}")
     except Exception as e:
@@ -183,6 +241,9 @@ def _sync_google_health_data_inner(uid: str, days: int = 14):
     synced_count = 0
     
     for date_str, metrics in daily_data.items():
+        # Remove helper keys before saving
+        metrics.pop("_rhr_platform", None)
+        metrics.pop("_hrv_platform", None)
         if metrics["sleep_duration_sec"] > 0 or metrics["resting_heart_rate"] > 0 or metrics["heart_rate_variability"] > 0:
             doc_ref = user_ref.collection("daily_recovery").document(date_str)
             metrics["date"] = date_str

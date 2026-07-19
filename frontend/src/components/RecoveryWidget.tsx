@@ -148,6 +148,229 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
     return `${hrs}小时${mins}分`;
   };
 
+  // Helper to generate last 7 days ending with today's local date
+  const getLast7Days = () => {
+    const result = [];
+    const map = ['日', '一', '二', '三', '四', '五', '六'];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`; // Avoid local timezone shift from toISOString
+      const weekday = map[d.getDay()];
+      
+      const match = history.find(h => h.date === dateStr);
+      result.push({
+        date: dateStr,
+        weekday,
+        sleep_score: match?.sleep_score || 0,
+        sleep_duration_sec: match?.sleep_duration_sec || 0,
+        resting_heart_rate: match?.resting_heart_rate || 0,
+        heart_rate_variability: match?.heart_rate_variability || 0,
+        hasData: !!match
+      });
+    }
+    return result;
+  };
+
+  const weekData = getLast7Days();
+
+  // Sparkline for RHR
+  const renderRhrSparkline = () => {
+    const validPoints = weekData.map((d, i) => ({
+      val: d.resting_heart_rate,
+      x: (i / 6) * 100,
+      hasData: d.resting_heart_rate > 0
+    }));
+    
+    const validVals = validPoints.filter(p => p.hasData).map(p => p.val);
+    if (validVals.length === 0) return <div className="h-8 mt-2 flex items-center justify-center text-[10px] text-zinc-600">暂无数据</div>;
+    const minVal = Math.min(...validVals) - 5;
+    const maxVal = Math.max(...validVals) + 5;
+    const range = maxVal - minVal || 10;
+    
+    const points = validPoints.map(p => ({
+      ...p,
+      y: 28 - ((p.val - minVal) / range) * 24 // scale into 4-28 range
+    }));
+    
+    const paths: React.ReactNode[] = [];
+    let currentPath = "";
+    
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (p.hasData) {
+        if (currentPath === "") {
+          currentPath = `M ${p.x} ${p.y}`;
+        } else {
+          currentPath += ` L ${p.x} ${p.y}`;
+        }
+      } else {
+        if (currentPath !== "") {
+          paths.push(
+            <path
+              key={`path-${i}`}
+              d={currentPath}
+              fill="none"
+              stroke="rgba(244, 63, 94, 0.4)" // rose-500/40
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          );
+          currentPath = "";
+        }
+      }
+    }
+    if (currentPath !== "") {
+      paths.push(
+        <path
+          key="path-final"
+          d={currentPath}
+          fill="none"
+          stroke="rgba(244, 63, 94, 0.5)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      );
+    }
+    
+    return (
+      <div className="relative w-full h-8 mt-2">
+        <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 32" preserveAspectRatio="none">
+          {paths}
+          {points.map((p, i) => p.hasData && (
+            <circle
+              key={`dot-${i}`}
+              cx={p.x}
+              cy={p.y}
+              r="2.5"
+              className="fill-rose-500 stroke-zinc-950 stroke-[0.5]"
+            />
+          ))}
+        </svg>
+      </div>
+    );
+  };
+
+  // Sparkline for HRV
+  const renderHrvSparkline = () => {
+    const validPoints = weekData.map((d, i) => ({
+      val: d.heart_rate_variability,
+      x: (i / 6) * 100,
+      hasData: d.heart_rate_variability > 0
+    }));
+    
+    const validVals = validPoints.filter(p => p.hasData).map(p => p.val);
+    if (validVals.length === 0) return <div className="h-8 mt-2 flex items-center justify-center text-[10px] text-zinc-600">暂无数据</div>;
+    const minVal = Math.min(...validVals) - 5;
+    const maxVal = Math.max(...validVals) + 5;
+    const range = maxVal - minVal || 10;
+    
+    const points = validPoints.map(p => ({
+      ...p,
+      y: 28 - ((p.val - minVal) / range) * 24 // scale into 4-28 range
+    }));
+    
+    const paths: React.ReactNode[] = [];
+    let currentPath = "";
+    
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (p.hasData) {
+        if (currentPath === "") {
+          currentPath = `M ${p.x} ${p.y}`;
+        } else {
+          currentPath += ` L ${p.x} ${p.y}`;
+        }
+      } else {
+        if (currentPath !== "") {
+          paths.push(
+            <path
+              key={`path-${i}`}
+              d={currentPath}
+              fill="none"
+              stroke="rgba(16, 185, 129, 0.4)" // emerald-500/40
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          );
+          currentPath = "";
+        }
+      }
+    }
+    if (currentPath !== "") {
+      paths.push(
+        <path
+          key="path-final"
+          d={currentPath}
+          fill="none"
+          stroke="rgba(16, 185, 129, 0.5)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      );
+    }
+    
+    return (
+      <div className="relative w-full h-8 mt-2">
+        <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 32" preserveAspectRatio="none">
+          {paths}
+          {points.map((p, i) => p.hasData && (
+            <circle
+              key={`dot-${i}`}
+              cx={p.x}
+              cy={p.y}
+              r="2.5"
+              className="fill-emerald-500 stroke-zinc-950 stroke-[0.5]"
+            />
+          ))}
+        </svg>
+      </div>
+    );
+  };
+
+  // Bar chart for Sleep
+  const renderSleepBarChart = () => {
+    const hasAny = weekData.some(d => d.sleep_score > 0);
+    if (!hasAny) return <div className="h-8 mt-2 flex items-center justify-center text-[10px] text-zinc-600">暂无数据</div>;
+    return (
+      <div className="flex items-end justify-between h-8 mt-2 px-1 gap-[3px]">
+        {weekData.map((d, i) => {
+          const heightPct = d.sleep_score > 0 ? `${Math.max(15, d.sleep_score)}%` : '4px';
+          const activeBg = d.sleep_score > 0 ? 'bg-indigo-500/60 group-hover/bar:bg-indigo-400' : 'bg-white/5';
+          return (
+            <div key={i} className="flex flex-col items-center flex-1 h-full justify-end group/bar relative">
+              <div 
+                className={`w-1.5 rounded-full transition-all duration-300 ${activeBg}`} 
+                style={{ height: heightPct }}
+              />
+              {d.sleep_score > 0 && (
+                <div className="absolute bottom-full mb-1 bg-zinc-900 border border-white/10 text-white text-[8px] font-bold px-1 py-0.5 rounded shadow opacity-0 group-hover/bar:opacity-100 transition-opacity z-10 pointer-events-none whitespace-nowrap">
+                  {d.sleep_score}分 ({Math.round(d.sleep_duration_sec / 3600)}h)
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Chinese Weekday labels row
+  const renderWeekdayLabels = () => {
+    return (
+      <div className="flex justify-between mt-2 text-[9px] text-zinc-500 font-bold px-0.5 border-t border-white/5 pt-1.5">
+        {weekData.map((d, i) => (
+          <span key={i} className="flex-1 text-center">
+            {d.weekday}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   // UI styling depending on readiness score
   let readinessLabel = '一般';
   let readinessColor = 'text-yellow-400';
@@ -235,33 +458,57 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
         <div className="md:col-span-8 space-y-4">
           <div className="grid grid-cols-3 gap-2">
             {/* Sleep */}
-            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col">
-              <div className="flex items-center gap-1.5 text-indigo-400 mb-2">
-                <Moon className="w-4 h-4" />
-                <span className="text-zinc-400 text-xs font-semibold">睡眠质量</span>
+            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-1.5 text-indigo-400 mb-1">
+                  <Moon className="w-4 h-4" />
+                  <span className="text-zinc-400 text-xs font-semibold">睡眠质量</span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-white text-lg font-black">{sleepScore > 0 ? `${sleepScore}分` : '—'}</span>
+                  <span className="text-zinc-500 text-[10px] font-medium truncate">{formatSleepDuration(sleepSec)}</span>
+                </div>
               </div>
-              <span className="text-white text-lg font-black">{sleepScore > 0 ? `${sleepScore}分` : '—'}</span>
-              <span className="text-zinc-500 text-[10px] font-medium truncate">{formatSleepDuration(sleepSec)}</span>
+              <div>
+                {renderSleepBarChart()}
+                {renderWeekdayLabels()}
+              </div>
             </div>
 
             {/* HRV */}
-            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col">
-              <div className="flex items-center gap-1.5 text-emerald-400 mb-2">
-                <Activity className="w-4 h-4" />
-                <span className="text-zinc-400 text-xs font-semibold">HRV</span>
+            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col justify-between animate-fade-in">
+              <div>
+                <div className="flex items-center gap-1.5 text-emerald-400 mb-1">
+                  <Activity className="w-4 h-4" />
+                  <span className="text-zinc-400 text-xs font-semibold">HRV</span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-white text-lg font-black">{hrv > 0 ? `${hrv}ms` : '—'}</span>
+                  <span className="text-zinc-500 text-[10px] font-medium">心率变异性</span>
+                </div>
               </div>
-              <span className="text-white text-lg font-black">{hrv > 0 ? `${hrv}ms` : '—'}</span>
-              <span className="text-zinc-500 text-[10px] font-medium">心率变异性</span>
+              <div>
+                {renderHrvSparkline()}
+                {renderWeekdayLabels()}
+              </div>
             </div>
 
             {/* RHR */}
-            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col">
-              <div className="flex items-center gap-1.5 text-rose-400 mb-2">
-                <Heart className="w-4 h-4" />
-                <span className="text-zinc-400 text-xs font-semibold">静息心率</span>
+            <div className="bg-white/5 border border-white/5 rounded-2xl p-3.5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-1.5 text-rose-400 mb-1">
+                  <Heart className="w-4 h-4" />
+                  <span className="text-zinc-400 text-xs font-semibold">静息心率</span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-white text-lg font-black">{rhr > 0 ? `${rhr}bpm` : '—'}</span>
+                  <span className="text-zinc-500 text-[10px] font-medium">RHR</span>
+                </div>
               </div>
-              <span className="text-white text-lg font-black">{rhr > 0 ? `${rhr}bpm` : '—'}</span>
-              <span className="text-zinc-500 text-[10px] font-medium">RHR</span>
+              <div>
+                {renderRhrSparkline()}
+                {renderWeekdayLabels()}
+              </div>
             </div>
           </div>
 
