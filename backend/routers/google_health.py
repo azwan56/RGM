@@ -74,15 +74,26 @@ def sync_google_health_data(uid: str, days: int = 14):
         "Content-Type": "application/json"
     }
     
-    # Calculate range in UTC
+    # Calculate range in UTC (civil dates)
     now = datetime.now(pytz.utc)
-    start_time = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
-    end_time = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    start_time = now - timedelta(days=days)
     
     range_payload = {
         "range": {
-            "startTime": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "endTime": end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            "start": {
+                "date": {
+                    "year": start_time.year,
+                    "month": start_time.month,
+                    "day": start_time.day
+                }
+            },
+            "end": {
+                "date": {
+                    "year": now.year,
+                    "month": now.month,
+                    "day": now.day
+                }
+            }
         },
         "windowSizeDays": 1
     }
@@ -140,6 +151,8 @@ def sync_google_health_data(uid: str, days: int = 14):
                         daily_data[date_str]["sleep_duration_sec"] = int(duration)
                     if score:
                         daily_data[date_str]["sleep_score"] = int(score)
+        else:
+            print(f"[Google Health Sync] Sleep API returned status {sleep_res.status_code}: {sleep_res.text}")
     except Exception as e:
         print(f"[Google Health Sync] Error fetching sleep: {e}")
 
@@ -169,6 +182,8 @@ def sync_google_health_data(uid: str, days: int = 14):
                         rhr = val if isinstance(val, (int, float)) else 0
                     if rhr:
                         daily_data[date_str]["resting_heart_rate"] = rhr
+        else:
+            print(f"[Google Health Sync] RHR API returned status {rhr_res.status_code}: {rhr_res.text}")
     except Exception as e:
         print(f"[Google Health Sync] Error fetching RHR: {e}")
 
@@ -198,6 +213,8 @@ def sync_google_health_data(uid: str, days: int = 14):
                         hrv = val if isinstance(val, (int, float)) else 0
                     if hrv:
                         daily_data[date_str]["heart_rate_variability"] = hrv
+        else:
+            print(f"[Google Health Sync] HRV API returned status {hrv_res.status_code}: {hrv_res.text}")
     except Exception as e:
         print(f"[Google Health Sync] Error fetching HRV: {e}")
 
