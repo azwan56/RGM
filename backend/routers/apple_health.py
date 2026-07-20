@@ -9,6 +9,11 @@ _DEFAULT_TZ = "Asia/Singapore"
 
 router = APIRouter()
 
+class AppleHealthSplit(BaseModel):
+    km: int
+    moving_time: int
+    avg_heart_rate: int
+
 class AppleHealthWorkout(BaseModel):
     uuid: str
     name: str
@@ -17,6 +22,10 @@ class AppleHealthWorkout(BaseModel):
     moving_time: int       # seconds
     avg_heart_rate: int
     total_elevation_gain: float = 0.0
+    active_calories: float = 0.0
+    steps: int = 0
+    max_heart_rate: int = 0
+    splits: list[AppleHealthSplit] = []
 
 class AppleHealthSyncRequest(BaseModel):
     uid: str
@@ -53,7 +62,7 @@ def format_duration(seconds: int) -> str:
 
 
 @router.post("/sync")
-def sync_apple_health_workouts(req: AppleHealthSyncRequest):
+async def sync_apple_health_workouts(req: AppleHealthSyncRequest):
     """
     Receives workout records from the iOS client (via HealthKit), saves them to
     Firestore, and updates the user's weekly and monthly leaderboards.
@@ -75,6 +84,7 @@ def sync_apple_health_workouts(req: AppleHealthSyncRequest):
     })
 
     # 2. Save workouts to activities sub-collection
+    new_workout_uuids = []
     for w in req.workouts:
         act_ref = user_ref.collection("activities").document(w.uuid)
         
@@ -89,7 +99,11 @@ def sync_apple_health_workouts(req: AppleHealthSyncRequest):
                 "duration_str": format_duration(w.moving_time),
                 "avg_pace": pace_str(w.distance_km * 1000, w.moving_time),
                 "avg_heart_rate": w.avg_heart_rate,
+                "max_heart_rate": w.max_heart_rate,
                 "total_elevation_gain": round(w.total_elevation_gain, 1),
+                "active_calories": round(w.active_calories, 1),
+                "steps": w.steps,
+                "splits": [s.dict() for s in w.splits] if w.splits else [],
             })
         else:
             doc = {
@@ -102,12 +116,17 @@ def sync_apple_health_workouts(req: AppleHealthSyncRequest):
                 "duration_str":         format_duration(w.moving_time),
                 "avg_pace":             pace_str(w.distance_km * 1000, w.moving_time),
                 "avg_heart_rate":       w.avg_heart_rate,
+                "max_heart_rate":       w.max_heart_rate,
                 "total_elevation_gain": round(w.total_elevation_gain, 1),
+                "active_calories":      round(w.active_calories, 1),
+                "steps":                w.steps,
+                "splits":               [s.dict() for s in w.splits] if w.splits else [],
                 "activity_type":        "run",
                 "sport_type":           "Run",
                 "source":               "AppleHealth",
             }
             act_ref.set(doc)
+            new_workout_uuids.append(w.uuid)
 
     # 3. Retrieve user goal details
     goal_snap = user_ref.collection("goals").document("current").get()
@@ -224,5 +243,22 @@ def sync_apple_health_workouts(req: AppleHealthSyncRequest):
         "period_start":              get_period_start("weekly").isoformat(),
         "last_sync":                 datetime.now().isoformat(),
     })
+
+    # 2.5 Generate AI Coach Commentary for newly created workouts concurrently
+    if new_workout_uuids:
+        import asyncio
+        from routers.coach import log_journal_entry, JournalLogRequest
+        tasks = []
+        for uuid in new_workout_uuids:
+            journal_req = JournalLogRequest(uid=req.uid, activity_id=uuid, force=True)
+            tasks.append(log_journal_entry(journal_req))
+        if tasks:
+            # Gather tasks concurrently shielding errors so the sync endpoint succeeds regardless
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for uuid, res in zip(new_workout_uuids, results):
+                if isinstance(res, Exception):
+                    print(f"[apple-health] AI Coach generation failed for {uuid}: {res}")
+                else:
+                    print(f"[apple-health] AI Coach generation succeeded for {uuid}")
 
     return {"success": True, "synced_count": len(req.workouts)}

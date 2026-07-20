@@ -13,7 +13,8 @@ os.environ.setdefault("GOOGLE_HEALTH_CLIENT_SECRET", "test_secret")
 
 from tests import MockFirestoreDB, MockDocRef, MockDocSnapshot, MockResponse
 
-def test_sync_apple_health_workouts():
+@pytest.mark.anyio
+async def test_sync_apple_health_workouts():
     from routers.apple_health import sync_apple_health_workouts, AppleHealthSyncRequest, AppleHealthWorkout
     
     # Mock user document
@@ -93,7 +94,11 @@ def test_sync_apple_health_workouts():
         distance_km=5.0,
         moving_time=1800, # 30 mins
         avg_heart_rate=140,
-        total_elevation_gain=20.0
+        total_elevation_gain=20.0,
+        active_calories=350.0,
+        steps=5000,
+        max_heart_rate=165,
+        splits=[{"km": 1, "moving_time": 360, "avg_heart_rate": 135}]
     )
     
     req = AppleHealthSyncRequest(
@@ -101,8 +106,13 @@ def test_sync_apple_health_workouts():
         workouts=[workout]
     )
     
-    with patch("routers.apple_health.db", mock_db):
-        resp = sync_apple_health_workouts(req)
+    # Mock log_journal_entry call to prevent external Gemini API hits
+    async def mock_log_journal_entry(*args, **kwargs):
+        return {"success": True}
+        
+    with patch("routers.apple_health.db", mock_db), \
+         patch("routers.coach.log_journal_entry", mock_log_journal_entry):
+        resp = await sync_apple_health_workouts(req)
         
         # Assertions
         assert resp["success"] is True
@@ -118,6 +128,10 @@ def test_sync_apple_health_workouts():
         assert saved_act["moving_time"] == 1800
         assert saved_act["avg_pace"] == "6:00"
         assert saved_act["source"] == "AppleHealth"
+        assert saved_act["active_calories"] == 350.0
+        assert saved_act["steps"] == 5000
+        assert saved_act["max_heart_rate"] == 165
+        assert len(saved_act["splits"]) == 1
         
         # Verify leaderboard entries were set
         assert "user_123" in leaderboard_docs
