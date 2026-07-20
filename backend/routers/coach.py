@@ -2564,6 +2564,54 @@ def get_journal(uid: str):
     if not journal:
         return {"journal": None, "entries": []}
 
+    # Proactively check the last 5 activities, if any of them is missing a journal entry, trigger generation
+    try:
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=14)).isoformat()
+        recent_acts = list(user_ref.collection("activities")
+                           .where("start_date_local", ">=", cutoff_date)
+                           .order_by("start_date_local", direction="DESCENDING")
+                           .limit(5)
+                           .stream())
+        
+        # Get existing entries to check
+        entries_snap = list(user_ref.collection("training_logs").document(journal_id).collection("entries").stream())
+        existing_act_ids = set()
+        for e in entries_snap:
+            ed = e.to_dict()
+            if ed.get("activity_id"):
+                existing_act_ids.add(str(ed["activity_id"]))
+                
+        # Find activities that need backfill
+        missing_ids = []
+        for act in recent_acts:
+            act_id = str(act.id)
+            if act_id not in existing_act_ids:
+                missing_ids.append(act_id)
+                
+        # Trigger background task for missing entries
+        if missing_ids:
+            import threading
+            def run_backfill():
+                # Import inside to prevent circular dependency
+                import asyncio
+                from routers.coach import log_journal_entry, JournalLogRequest
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                for mid in missing_ids:
+                    try:
+                        print(f"[coach] Proactive backfill generating AI comment for activity {mid}")
+                        req_obj = JournalLogRequest(uid=uid, activity_id=mid, force=True)
+                        loop.run_until_complete(log_journal_entry(req_obj))
+                    except Exception as ex:
+                        print(f"[coach] Backfill error for {mid}: {ex}")
+                loop.close()
+            
+            # Start in background thread so the get_journal call returns immediately without hanging!
+            threading.Thread(target=run_backfill, daemon=True).start()
+    except Exception as e:
+        print(f"[coach] Proactive backfill check failed: {e}")
+
     cutoff = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=90)).isoformat()
     entries = [d.to_dict() for d in
                user_ref.collection("training_logs").document(journal_id)

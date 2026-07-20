@@ -305,7 +305,11 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     if df.empty or 'start_date_local' not in df.columns:
          return []
 
-    df['date'] = pd.to_datetime(df['start_date_local']).dt.floor('D').dt.tz_localize(None)
+    clean_date = df['start_date_local'].astype(str).str.replace(r'Z$', '', regex=True).str.replace(r'[\+\-]\d{2}:\d{2}$', '', regex=True)
+    df['date'] = pd.to_datetime(clean_date, errors='coerce').dt.floor('D')
+    df = df.dropna(subset=['date'])
+    if df.empty:
+        return []
     
     # Ensure moving_time and avg_heart_rate are numeric
     df['moving_time'] = pd.to_numeric(df.get('moving_time', 0), errors='coerce').fillna(0)
