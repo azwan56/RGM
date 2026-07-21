@@ -181,6 +181,9 @@ def run_daily_sync() -> dict:
                 # Only count runs for leaderboard (skip cross-training)
                 if ad.get("activity_type", "run") != "run":
                     continue
+                # Exclude Apple Health workouts as per new requirements
+                if ad.get("source") == "AppleHealth":
+                    continue
                 lb_runs += 1
                 lb_dist += ad.get("distance_km", 0) or 0
                 lb_time += ad.get("moving_time", 0) or 0
@@ -229,6 +232,9 @@ def run_daily_sync() -> dict:
                 ad = adoc.to_dict()
                 if ad.get("activity_type", "run") != "run":
                     continue
+                # Exclude Apple Health workouts as per new requirements
+                if ad.get("source") == "AppleHealth":
+                    continue
                 wk_runs += 1
                 wk_dist += ad.get("distance_km", 0) or 0
                 wk_time += ad.get("moving_time", 0) or 0
@@ -257,14 +263,8 @@ def run_daily_sync() -> dict:
 
             _update_yearly_leaderboard(uid, user_data, display_name)
             
-            # ── Google Health (Fitbit) Sync ──
-            if user_data.get("google_health_connected", False):
-                try:
-                    from routers.google_health import sync_google_health_data
-                    sync_google_health_data(uid, days=14)
-                    logger.info(f"[scheduler] Synced Google Health data for user={uid}")
-                except Exception as gh_err:
-                    logger.error(f"[scheduler] Failed to sync Google Health for user={uid}: {gh_err}")
+            # Google Health (Fitbit) Sync disabled as per user request to use Apple Health for recovery instead
+            pass
                     
             results["synced"] += 1
             logger.info(f"[scheduler] Synced {uid}: {round(lb_dist, 1)}km/{lb_runs} runs (month), {round(wk_dist, 1)}km/{wk_runs} runs (week)")

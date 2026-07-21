@@ -75,12 +75,11 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
             <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">生理数据修正 (Fitbit / Google Health)</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">生理数据修正 (Apple Health)</h2>
           </div>
           
           <p className="text-zinc-400 text-sm leading-relaxed">
-            关联您的 Google Health 或 Fitbit 账号，获取每日睡眠得分、心率变异性 (HRV) 和静息心率。
-            系统将根据您的真实身体恢复状态，**自动动态修正** CTL/ATL 指数，为您量身定制每日训练推荐与准备度评估。
+            请在 RGM iOS 应用中开启并连接 Apple Health。系统将自动获取每日睡眠得分、心率变异性 (HRV) 和静息心率，根据您的真实身体恢复状态，**自动动态修正** CTL/ATL 指数，为您量身定制每日训练推荐与准备度评估。
           </p>
 
           <div className="grid grid-cols-3 gap-3 pt-2">
@@ -101,7 +100,7 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
 
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pt-4">
           <span className="text-xs text-zinc-500">仅用于 RGM 内部体能分析，数据绝不公开</span>
-          <GoogleHealthConnectBtn />
+          <div className="text-zinc-400 text-xs font-semibold px-4 py-2 bg-white/5 border border-white/10 rounded-xl">请在 iOS App 中启用</div>
         </div>
       </div>
     );
@@ -412,7 +411,7 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
         </div>
         <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-full shadow-inner animate-pulse">
           <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>Fitbit Optimized</span>
+          <span>Apple Health Optimized</span>
         </div>
       </div>
 

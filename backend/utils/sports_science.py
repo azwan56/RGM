@@ -285,7 +285,7 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
             user_doc = db.collection("users").document(uid).get()
             if user_doc.exists:
                 user_data = user_doc.to_dict() or {}
-                if user_data.get("google_health_connected", False):
+                if user_data.get("apple_health_connected", False):
                     # Fetch last 90 days of recovery data to ensure we cover the activity period
                     cutoff = (datetime.now().date() - timedelta(days=90)).strftime("%Y-%m-%d")
                     docs = (db.collection("users").document(uid)

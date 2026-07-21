@@ -328,7 +328,7 @@ def get_recovery_status(request: Request, days: int = 30):
         raise HTTPException(status_code=404, detail="User not found")
         
     user_data = user_doc.to_dict() or {}
-    connected = user_data.get("google_health_connected", False)
+    connected = user_data.get("apple_health_connected", False)
     
     if not connected:
         return {"connected": False, "recovery_history": []}

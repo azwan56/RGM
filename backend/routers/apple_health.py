@@ -64,201 +64,69 @@ def format_duration(seconds: int) -> str:
 @router.post("/sync")
 async def sync_apple_health_workouts(req: AppleHealthSyncRequest):
     """
-    Receives workout records from the iOS client (via HealthKit), saves them to
-    Firestore, and updates the user's weekly and monthly leaderboards.
+    Deprecated: Receives workout records from the iOS client.
+    We now use Strava exclusively for workouts, so this is a no-op that returns success.
     """
     user_ref = db.collection("users").document(req.uid)
     user_doc = user_ref.get()
     if not user_doc.exists:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_data = user_doc.to_dict()
-    display_name = (
-        user_data.get("display_name") or user_data.get("strava_name")
-        or (user_data.get("email", "").split("@")[0] if user_data.get("email") else "跑者")
-    )
+    user_ref.update({
+        "apple_health_connected": True
+    })
+    return {"success": True, "synced_count": 0}
 
-    # 1. Update connection status
+
+class AppleHealthRecoveryItem(BaseModel):
+    date: str                  # YYYY-MM-DD
+    sleep_duration_sec: int = 0
+    sleep_score: int = 0
+    resting_heart_rate: int = 0
+    heart_rate_variability: int = 0
+
+
+class AppleHealthRecoverySyncRequest(BaseModel):
+    uid: str
+    recovery_data: list[AppleHealthRecoveryItem]
+
+
+@router.post("/sync-recovery")
+async def sync_apple_health_recovery(req: AppleHealthRecoverySyncRequest):
+    """
+    Receives daily recovery statistics (sleep, resting HR, HRV) from the iOS client
+    (via HealthKit) and saves them to the daily_recovery subcollection.
+    """
+    user_ref = db.collection("users").document(req.uid)
+    user_doc = user_ref.get()
+    if not user_doc.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+
     user_ref.update({
         "apple_health_connected": True
     })
 
-    # 2. Save workouts to activities sub-collection
-    new_workout_uuids = []
-    for w in req.workouts:
-        act_ref = user_ref.collection("activities").document(w.uuid)
+    batch = db.batch()
+    synced_count = 0
+    for item in req.recovery_data:
+        doc_ref = user_ref.collection("daily_recovery").document(item.date)
         
-        # Check if activity already exists. If it does, we don't overwrite custom changes (like names).
-        existing = act_ref.get()
-        if existing.exists:
-            # Only merge new metrics just in case
-            act_ref.update({
-                "distance_km": round(w.distance_km, 2),
-                "moving_time": w.moving_time,
-                "elapsed_time": w.moving_time,
-                "duration_str": format_duration(w.moving_time),
-                "avg_pace": pace_str(w.distance_km * 1000, w.moving_time),
-                "avg_heart_rate": w.avg_heart_rate,
-                "max_heart_rate": w.max_heart_rate,
-                "total_elevation_gain": round(w.total_elevation_gain, 1),
-                "active_calories": round(w.active_calories, 1),
-                "steps": w.steps,
-                "splits": [s.dict() for s in w.splits] if w.splits else [],
-            })
-        else:
-            doc = {
-                "activity_id":          w.uuid,
-                "name":                 w.name or "Apple Health 跑步",
-                "start_date_local":     w.start_date_local,
-                "distance_km":          round(w.distance_km, 2),
-                "moving_time":          w.moving_time,
-                "elapsed_time":         w.moving_time,
-                "duration_str":         format_duration(w.moving_time),
-                "avg_pace":             pace_str(w.distance_km * 1000, w.moving_time),
-                "avg_heart_rate":       w.avg_heart_rate,
-                "max_heart_rate":       w.max_heart_rate,
-                "total_elevation_gain": round(w.total_elevation_gain, 1),
-                "active_calories":      round(w.active_calories, 1),
-                "steps":                w.steps,
-                "splits":               [s.dict() for s in w.splits] if w.splits else [],
-                "activity_type":        "run",
-                "sport_type":           "Run",
-                "source":               "AppleHealth",
-            }
-            act_ref.set(doc)
-            new_workout_uuids.append(w.uuid)
+        # Calculate sleep score if duration is given but score is 0
+        sleep_score = item.sleep_score
+        if sleep_score == 0 and item.sleep_duration_sec > 0:
+            total_mins = item.sleep_duration_sec / 60.0
+            sleep_score = int(min(100, max(0, (total_mins / 480.0) * 100)))
 
-    # 3. Retrieve user goal details
-    goal_snap = user_ref.collection("goals").document("current").get()
-    period = "monthly"
-    target_dist = 0
-    if goal_snap.exists:
-        goal_data = goal_snap.to_dict()
-        period = goal_data.get("period", "monthly")
-        target_dist = goal_data.get("target_distance", 0)
+        metrics = {
+            "date": item.date,
+            "sleep_duration_sec": item.sleep_duration_sec,
+            "sleep_score": sleep_score,
+            "resting_heart_rate": item.resting_heart_rate,
+            "heart_rate_variability": item.heart_rate_variability,
+            "last_sync": datetime.now(ZoneInfo(_DEFAULT_TZ)).isoformat()
+        }
+        batch.set(doc_ref, metrics, merge=True)
+        synced_count += 1
 
-    # 4. Recalculate Monthly Leaderboard Entry
-    month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
-    month_acts = (
-        user_ref.collection("activities")
-        .where("start_date_local", ">=", month_start_str)
-        .stream()
-    )
-    
-    lb_dist = 0.0
-    lb_time = 0
-    lb_hr_sum = 0.0
-    lb_hr_count = 0
-    lb_runs = 0
-    lb_elev = 0.0
-    
-    for a in month_acts:
-        d = a.to_dict()
-        if d.get("activity_type", "run") != "run":
-            continue
-        # Shield non-Apple Health data if Apple Health is connected
-        if d.get("source") != "AppleHealth":
-            continue
-        lb_runs += 1
-        lb_dist += d.get("distance_km", 0) or 0
-        lb_time += d.get("moving_time", 0) or 0
-        lb_elev += d.get("total_elevation_gain", 0) or 0
-        hr = d.get("avg_heart_rate", 0) or 0
-        if hr > 0:
-            lb_hr_sum += hr
-            lb_hr_count += 1
-
-    lb_pace = pace_str(lb_dist * 1000, lb_time)
-    lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
-
-    now = datetime.now(ZoneInfo(_DEFAULT_TZ))
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
-    monthly_target_dist = target_dist
-    if period == "weekly" and target_dist > 0:
-        monthly_target_dist = target_dist * (days_in_month / 7.0)
-
-    lb_goal_percentage = round((lb_dist / monthly_target_dist) * 100) if monthly_target_dist > 0 else 0
-
-    db.collection("leaderboard").document(req.uid).set({
-        "uid":                       req.uid,
-        "display_name":              display_name,
-        "email":                     user_data.get("email", ""),
-        "total_distance_km":         round(lb_dist, 2),
-        "total_elevation_gain":      round(lb_elev, 1),
-        "avg_pace":                  lb_pace,
-        "avg_heart_rate":            lb_avg_hr,
-        "goal_completion_percentage": min(lb_goal_percentage, 100),
-        "run_count":                 lb_runs,
-        "period":                    "monthly",
-        "period_start":              get_period_start("monthly").isoformat(),
-        "last_sync":                 datetime.now().isoformat(),
-    })
-
-    # 5. Recalculate Weekly Leaderboard Entry
-    week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
-    week_acts = (
-        user_ref.collection("activities")
-        .where("start_date_local", ">=", week_start_str)
-        .stream()
-    )
-    
-    wk_dist = 0.0
-    wk_time = 0
-    wk_hr_sum = 0.0
-    wk_hr_count = 0
-    wk_runs = 0
-    wk_elev = 0.0
-    
-    for a in week_acts:
-        d = a.to_dict()
-        if d.get("activity_type", "run") != "run":
-            continue
-        # Shield non-Apple Health data if Apple Health is connected
-        if d.get("source") != "AppleHealth":
-            continue
-        wk_runs += 1
-        wk_dist += d.get("distance_km", 0) or 0
-        wk_time += d.get("moving_time", 0) or 0
-        wk_elev += d.get("total_elevation_gain", 0) or 0
-        hr = d.get("avg_heart_rate", 0) or 0
-        if hr > 0:
-            wk_hr_sum += hr
-            wk_hr_count += 1
-            
-    wk_pace = pace_str(wk_dist * 1000, wk_time)
-    wk_avg_hr = round(wk_hr_sum / wk_hr_count) if wk_hr_count > 0 else 0
-    wk_goal_pct = round((wk_dist / target_dist) * 100) if period == "weekly" and target_dist > 0 else 0
-    
-    db.collection("leaderboard_weekly").document(req.uid).set({
-        "uid":                       req.uid,
-        "display_name":              display_name,
-        "email":                     user_data.get("email", ""),
-        "total_distance_km":         round(wk_dist, 2),
-        "total_elevation_gain":      round(wk_elev, 1),
-        "avg_pace":                  wk_pace,
-        "avg_heart_rate":            wk_avg_hr,
-        "goal_completion_percentage": min(wk_goal_pct, 100),
-        "run_count":                 wk_runs,
-        "period":                    "weekly",
-        "period_start":              get_period_start("weekly").isoformat(),
-        "last_sync":                 datetime.now().isoformat(),
-    })
-
-    # 2.5 Generate AI Coach Commentary for newly created workouts concurrently
-    if new_workout_uuids:
-        import asyncio
-        from routers.coach import log_journal_entry, JournalLogRequest
-        tasks = []
-        for uuid in new_workout_uuids:
-            journal_req = JournalLogRequest(uid=req.uid, activity_id=uuid, force=True)
-            tasks.append(log_journal_entry(journal_req))
-        if tasks:
-            # Gather tasks concurrently shielding errors so the sync endpoint succeeds regardless
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for uuid, res in zip(new_workout_uuids, results):
-                if isinstance(res, Exception):
-                    print(f"[apple-health] AI Coach generation failed for {uuid}: {res}")
-                else:
-                    print(f"[apple-health] AI Coach generation succeeded for {uuid}")
-
-    return {"success": True, "synced_count": len(req.workouts)}
+    batch.commit()
+    return {"success": True, "synced_count": synced_count}

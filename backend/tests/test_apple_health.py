@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("GOOGLE_HEALTH_CLIENT_ID", "test_client")
 os.environ.setdefault("GOOGLE_HEALTH_CLIENT_SECRET", "test_secret")
 
-from tests import MockFirestoreDB, MockDocRef, MockDocSnapshot, MockResponse
+from tests import MockFirestoreDB, MockDocRef, MockDocSnapshot
 
 @pytest.mark.anyio
-async def test_sync_apple_health_workouts():
+async def test_sync_apple_health_workouts_deprecated():
     from routers.apple_health import sync_apple_health_workouts, AppleHealthSyncRequest, AppleHealthWorkout
     
     # Mock user document
@@ -23,115 +23,100 @@ async def test_sync_apple_health_workouts():
         "email": "azwan56@gmail.com"
     }
     
-    # Set up mock DB
     mock_db = MockFirestoreDB()
-    
     user_ref = MockDocRef(data=user_data, exists=True, doc_id="user_123")
     
-    # We will record set/update calls on activities subcollection
-    activities_ref = {}
-    class MockActivitiesCollection:
-        def document(self, doc_id):
-            class ActivityDocRef:
-                def __init__(self, d_id):
-                    self.id = d_id
-                def get(self):
-                    # Mock that it does not exist yet (new workout)
-                    return MockDocSnapshot({}, False, self.id)
-                def set(self, doc_data):
-                    activities_ref[self.id] = doc_data
-                def update(self, doc_data):
-                    activities_ref[self.id].update(doc_data)
-            return ActivityDocRef(doc_id)
-            
-        def where(self, *args, **kwargs):
-            # Return empty stream for leaderboard calculation in test
-            class MockStream:
-                def stream(self):
-                    return []
-            return MockStream()
-            
-    # Mock user_ref.collection
-    def user_collection_side_effect(name):
-        if name == "activities":
-            return MockActivitiesCollection()
-        # For goals or other
-        class EmptyCollection:
-            def document(self, d_id):
-                return MockDocRef(data={}, exists=False, doc_id=d_id)
-        return EmptyCollection()
-        
-    user_ref.collection = user_collection_side_effect
-    
-    # Leaderboard document mock
-    leaderboard_docs = {}
-    class MockLeaderboardCollection:
-        def document(self, doc_id):
-            class LeaderboardDocRef:
-                def __init__(self, d_id):
-                    self.id = d_id
-                def set(self, doc_data):
-                    leaderboard_docs[self.id] = doc_data
-            return LeaderboardDocRef(doc_id)
-            
     def db_collection_side_effect(name):
         if name == "users":
             class UsersCollection:
                 def document(self, doc_id):
                     return user_ref
             return UsersCollection()
-        elif name == "leaderboard" or name == "leaderboard_weekly":
-            return MockLeaderboardCollection()
         return None
         
     mock_db.collection = db_collection_side_effect
     
-    # Request data
-    workout = AppleHealthWorkout(
-        uuid="workout_uuid_123",
-        name="Apple Health 跑步",
-        start_date_local="2026-07-20T10:00:00",
-        distance_km=5.0,
-        moving_time=1800, # 30 mins
-        avg_heart_rate=140,
-        total_elevation_gain=20.0,
-        active_calories=350.0,
-        steps=5000,
-        max_heart_rate=165,
-        splits=[{"km": 1, "moving_time": 360, "avg_heart_rate": 135}]
-    )
-    
     req = AppleHealthSyncRequest(
         uid="user_123",
-        workouts=[workout]
+        workouts=[]
     )
     
-    # Mock log_journal_entry call to prevent external Gemini API hits
-    async def mock_log_journal_entry(*args, **kwargs):
-        return {"success": True}
-        
-    with patch("routers.apple_health.db", mock_db), \
-         patch("routers.coach.log_journal_entry", mock_log_journal_entry):
+    with patch("routers.apple_health.db", mock_db):
         resp = await sync_apple_health_workouts(req)
+        assert resp["success"] is True
+        assert resp["synced_count"] == 0
+        assert user_ref._data["apple_health_connected"] is True
+
+
+@pytest.mark.anyio
+async def test_sync_apple_health_recovery():
+    from routers.apple_health import sync_apple_health_recovery, AppleHealthRecoverySyncRequest, AppleHealthRecoveryItem
+    
+    user_data = {
+        "display_name": "Alex Wan",
+        "email": "azwan56@gmail.com"
+    }
+    
+    mock_db = MockFirestoreDB()
+    user_ref = MockDocRef(data=user_data, exists=True, doc_id="user_123")
+    
+    recovery_docs = {}
+    class RecordingBatch:
+        def set(self, ref, data, merge=False):
+            recovery_docs[ref.id] = data
+        def commit(self):
+            pass
+            
+    mock_db.batch = lambda: RecordingBatch()
+    
+    class MockDocRefWithId:
+        def __init__(self, doc_id):
+            self.id = doc_id
+            
+    class MockRecoveryCollection:
+        def document(self, doc_id):
+            return MockDocRefWithId(doc_id)
+            
+    def user_collection_side_effect(name):
+        if name == "daily_recovery":
+            return MockRecoveryCollection()
+        return None
         
-        # Assertions
+    user_ref.collection = user_collection_side_effect
+    
+    def db_collection_side_effect(name):
+        if name == "users":
+            class UsersCollection:
+                def document(self, doc_id):
+                    return user_ref
+            return UsersCollection()
+        return None
+        
+    mock_db.collection = db_collection_side_effect
+    
+    item1 = AppleHealthRecoveryItem(
+        date="2026-07-20",
+        sleep_duration_sec=28800, # 8 hours
+        sleep_score=85,
+        resting_heart_rate=55,
+        heart_rate_variability=62
+    )
+    
+    req = AppleHealthRecoverySyncRequest(
+        uid="user_123",
+        recovery_data=[item1]
+    )
+    
+    with patch("routers.apple_health.db", mock_db):
+        resp = await sync_apple_health_recovery(req)
         assert resp["success"] is True
         assert resp["synced_count"] == 1
-        
-        # Verify user doc connection status updated
         assert user_ref._data["apple_health_connected"] is True
         
-        # Verify activity saved
-        assert "workout_uuid_123" in activities_ref
-        saved_act = activities_ref["workout_uuid_123"]
-        assert saved_act["distance_km"] == 5.0
-        assert saved_act["moving_time"] == 1800
-        assert saved_act["avg_pace"] == "6:00"
-        assert saved_act["source"] == "AppleHealth"
-        assert saved_act["active_calories"] == 350.0
-        assert saved_act["steps"] == 5000
-        assert saved_act["max_heart_rate"] == 165
-        assert len(saved_act["splits"]) == 1
-        
-        # Verify leaderboard entries were set
-        assert "user_123" in leaderboard_docs
+        assert "2026-07-20" in recovery_docs
+        saved = recovery_docs["2026-07-20"]
+        assert saved["sleep_duration_sec"] == 28800
+        assert saved["sleep_score"] == 85
+        assert saved["resting_heart_rate"] == 55
+        assert saved["heart_rate_variability"] == 62
+        assert "last_sync" in saved

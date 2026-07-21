@@ -117,7 +117,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
     const fetchRaceDates = async () => {
       try {
         const res = await axios.get(`${backendUrl}/api/profile/${uid}`);
-        if (res.data?.google_health_connected) {
+        if (res.data?.apple_health_connected) {
           setIsFitbitConnected(true);
         }
         const races = res.data?.upcoming_races || [];
@@ -236,14 +236,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
       // 1. Sync Strava running data
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid });
       
-      // 2. Sync Google Health (Fitbit) recovery data if connected
-      if (isFitbitConnected) {
-        try {
-          await axios.post(`${backendUrl}/api/google-health/sync`, { days: 7 });
-        } catch (ghErr) {
-          console.warn("[AiCoach] Google Health sync failed (non-fatal):", ghErr);
-        }
-      }
+      // Apple Health is synced directly from the iOS client daily, no web sync call needed.
 
       // 3. Generate new AI analysis
       const res = await axios.post(`${backendUrl}/api/coach/analyze`, { uid, force_refresh: true });
@@ -291,7 +284,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
             {isFitbitConnected && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full select-none">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                已启用 Fitbit 生理修正
+                已启用 Apple Health 生理修正
               </span>
             )}
           </div>

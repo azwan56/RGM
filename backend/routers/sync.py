@@ -277,6 +277,9 @@ def sync_user_data(req: SyncRequest):
         # Only count runs for leaderboard (skip cross-training)
         if d.get("activity_type", "run") != "run":
             continue
+        # Exclude Apple Health workouts as per new requirements
+        if d.get("source") == "AppleHealth":
+            continue
         lb_runs    += 1
         lb_dist    += d.get("distance_km", 0) or 0
         lb_time    += d.get("moving_time", 0) or 0
@@ -331,6 +334,9 @@ def sync_user_data(req: SyncRequest):
         d = a.to_dict()
         # Only count runs for leaderboard (skip cross-training)
         if d.get("activity_type", "run") != "run":
+            continue
+        # Exclude Apple Health workouts as per new requirements
+        if d.get("source") == "AppleHealth":
             continue
         wk_runs += 1
         wk_dist += d.get("distance_km", 0) or 0
@@ -681,6 +687,9 @@ def _update_yearly_leaderboard(uid: str, user_data: dict, display_name: str):
             a = doc.to_dict()
             # Only count runs for leaderboard (skip cross-training)
             if a.get("activity_type", "run") != "run":
+                continue
+            # Exclude Apple Health workouts as per new requirements
+            if a.get("source") == "AppleHealth":
                 continue
             d = a.get("distance_km", 0) * 1000   # back to metres
             t = a.get("moving_time", 0)

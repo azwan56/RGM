@@ -151,9 +151,8 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     leaderboard_entries = results.get("leaderboard") or []
     activities = results.get("activities") or []
     
-    # If Apple Health is connected, shield non-Apple Health data (e.g. Strava)
-    if bool(user_data.get("apple_health_connected")):
-        activities = [a for a in activities if a.get("source") == "AppleHealth"]
+    # Filter out Apple Health workouts (Strava is the source of truth for workouts/activities)
+    activities = [a for a in activities if a.get("source") != "AppleHealth"]
 
     # Strip sensitive tokens from user profile
     safe_profile = {k: v for k, v in user_data.items()
