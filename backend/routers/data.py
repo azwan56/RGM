@@ -176,7 +176,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         "profile": safe_profile,
         "goal": goal,
         "strava_connected": strava_connected,
-        "apple_health_connected": bool(user_data.get("apple_health_connected")),
+        "apple_health_connected": False,
         "display_name": display_name,
         "goal_period": goal_period,
         "stats": stats,
@@ -208,7 +208,7 @@ def get_dashboard_init(uid: str):
         "profile": safe,
         "goal": goal,
         "strava_connected": bool(data.get("strava_connected")),
-        "apple_health_connected": bool(data.get("apple_health_connected")),
+        "apple_health_connected": False,
         "display_name": (
             data.get("display_name") or data.get("strava_name")
             or (data.get("email", "").split("@")[0] if data.get("email") else "")

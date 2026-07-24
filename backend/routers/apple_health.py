@@ -64,18 +64,10 @@ def format_duration(seconds: int) -> str:
 @router.post("/sync")
 async def sync_apple_health_workouts(req: AppleHealthSyncRequest):
     """
-    Deprecated: Receives workout records from the iOS client.
-    We now use Strava exclusively for workouts, so this is a no-op that returns success.
+    Deprecated / Disabled: Apple Health workout sync is disabled.
+    We now use Strava exclusively for workouts.
     """
-    user_ref = db.collection("users").document(req.uid)
-    user_doc = user_ref.get()
-    if not user_doc.exists:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user_ref.update({
-        "apple_health_connected": True
-    })
-    return {"success": True, "synced_count": 0}
+    return {"success": False, "detail": "Apple Health data source disabled"}
 
 
 class AppleHealthRecoveryItem(BaseModel):
@@ -94,39 +86,6 @@ class AppleHealthRecoverySyncRequest(BaseModel):
 @router.post("/sync-recovery")
 async def sync_apple_health_recovery(req: AppleHealthRecoverySyncRequest):
     """
-    Receives daily recovery statistics (sleep, resting HR, HRV) from the iOS client
-    (via HealthKit) and saves them to the daily_recovery subcollection.
+    Deprecated / Disabled: Apple Health recovery sync is disabled.
     """
-    user_ref = db.collection("users").document(req.uid)
-    user_doc = user_ref.get()
-    if not user_doc.exists:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user_ref.update({
-        "apple_health_connected": True
-    })
-
-    batch = db.batch()
-    synced_count = 0
-    for item in req.recovery_data:
-        doc_ref = user_ref.collection("daily_recovery").document(item.date)
-        
-        # Calculate sleep score if duration is given but score is 0
-        sleep_score = item.sleep_score
-        if sleep_score == 0 and item.sleep_duration_sec > 0:
-            total_mins = item.sleep_duration_sec / 60.0
-            sleep_score = int(min(100, max(0, (total_mins / 480.0) * 100)))
-
-        metrics = {
-            "date": item.date,
-            "sleep_duration_sec": item.sleep_duration_sec,
-            "sleep_score": sleep_score,
-            "resting_heart_rate": item.resting_heart_rate,
-            "heart_rate_variability": item.heart_rate_variability,
-            "last_sync": datetime.now(ZoneInfo(_DEFAULT_TZ)).isoformat()
-        }
-        batch.set(doc_ref, metrics, merge=True)
-        synced_count += 1
-
-    batch.commit()
-    return {"success": True, "synced_count": synced_count}
+    return {"success": False, "detail": "Apple Health data source disabled"}

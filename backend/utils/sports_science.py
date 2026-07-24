@@ -269,37 +269,14 @@ def calculate_daily_readiness(tsb: float, hrv: float, hrv_baseline: float, sleep
 def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, rest_hr: float = 60, days: int = 45, uid: str = None):
     """
     Given an unordered list of activities, computes CTL, ATL, and TSB sequences.
+    Uses pure Banister TRIMP & EWMA algorithms (alpha_ctl = 1/43, alpha_atl = 1/8).
     `activities`: List of dictionaries with 'start_date_local' (ISO), 'moving_time' (seconds), 'avg_heart_rate'
     `days`: Number of past days to generate the sequence for.
-    `uid`: Optional. If passed and Google Health is connected, applies dynamic Fitbit/physiological overrides.
     """
     if not activities:
         return []
 
-    # 1. Fetch Google Health / Fitbit recovery records if connected
-    recovery_map = {}
-    is_fitbit_optimized = False
-    if uid:
-        try:
-            from firebase_config import db
-            user_doc = db.collection("users").document(uid).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict() or {}
-                if user_data.get("apple_health_connected", False):
-                    # Fetch last 90 days of recovery data to ensure we cover the activity period
-                    cutoff = (datetime.now().date() - timedelta(days=90)).strftime("%Y-%m-%d")
-                    docs = (db.collection("users").document(uid)
-                            .collection("daily_recovery")
-                            .where("date", ">=", cutoff)
-                            .stream())
-                    for doc in docs:
-                        d = doc.to_dict()
-                        recovery_map[d["date"]] = d
-                    is_fitbit_optimized = len(recovery_map) > 0
-        except Exception as e:
-            print(f"[Sports Science] Error loading recovery data for {uid}: {e}")
-
-    # 2. Prepare base DataFrame
+    # 1. Prepare base DataFrame
     df = pd.DataFrame(activities)
     
     if df.empty or 'start_date_local' not in df.columns:
@@ -318,28 +295,21 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     # Add a fallback for missing HR: if HR=0 but moving_time > 0, estimate rough TRIMP using zone 2
     df.loc[(df['avg_heart_rate'] == 0) & (df['moving_time'] > 0), 'avg_heart_rate'] = rest_hr + (max_hr - rest_hr) * 0.5 
 
-    # Calculate TRIMP per activity with conditional resting heart rate
+    # Calculate TRIMP per activity with standard Banister HR reserve formula
     def get_row_trimp(row):
-        day_rest_hr = rest_hr
-        if is_fitbit_optimized:
-            date_str = row['date'].strftime('%Y-%m-%d')
-            if date_str in recovery_map:
-                rhr = recovery_map[date_str].get("resting_heart_rate", 0)
-                if rhr > 0:
-                    day_rest_hr = rhr
         return calculate_trimp(
             duration_min=row['moving_time'] / 60.0,
             avg_hr=row['avg_heart_rate'],
             max_hr=max_hr,
-            rest_hr=day_rest_hr
+            rest_hr=rest_hr
         )
 
     df['trimp'] = df.apply(get_row_trimp, axis=1)
 
-    # 3. Group by Day sum (if user runs twice a day, sum their TRIMP)
+    # 2. Group by Day sum (if user runs twice a day, sum their TRIMP)
     daily_trimp = df.groupby('date')['trimp'].sum().reset_index()
 
-    # 4. Create continuous daily date range from (oldest_activity - 42 days) to Today
+    # 3. Create continuous daily date range from (oldest_activity - 42 days) to Today
     today = pd.to_datetime(datetime.now().date())
     oldest_date = daily_trimp['date'].min()
     start_date = min(oldest_date, today - timedelta(days=days))
@@ -350,48 +320,19 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     # Merge and fill missing days with 0 TRIMP
     ts_df = pd.merge(ts_df, daily_trimp, on='date', how='left').fillna(0)
     
-    # 5. Compute daily ctl and atl
+    # 4. Compute daily ctl and atl via standard EWMA
+    # CTL: 42-day time constant => alpha_ctl = 1/43
+    # ATL: 7-day time constant => alpha_atl = 1/8
+    alpha_ctl = 1.0 / 43.0
+    alpha_atl = 1.0 / 8.0
+    
     ctl_values = []
     atl_values = []
     current_ctl = 0.0
     current_atl = 0.0
-    
-    # Extract chronological HRV values for baseline
-    hrv_values = []
-    for date_obj in ts_df['date']:
-        date_str = date_obj.strftime('%Y-%m-%d')
-        hrv = 0
-        if date_str in recovery_map:
-            hrv = recovery_map[date_str].get("heart_rate_variability", 0)
-        hrv_values.append(hrv)
 
     for idx, row in ts_df.iterrows():
         trimp = row['trimp']
-        date_str = row['date'].strftime('%Y-%m-%d')
-        
-        # CTL: 42-day time constant => alpha_ctl = 1/43
-        # ATL: 7-day time constant => alpha_atl = 1/8
-        alpha_ctl = 1.0 / 43.0
-        alpha_atl = 1.0 / 8.0
-        
-        if is_fitbit_optimized and date_str in recovery_map:
-            hrv = recovery_map[date_str].get("heart_rate_variability", 0)
-            if hrv > 0:
-                # Rolling 7-day baseline of prior days
-                recent_hrvs = [h for h in hrv_values[max(0, idx-7):idx] if h > 0]
-                if recent_hrvs:
-                    hrv_baseline = np.mean(recent_hrvs)
-                    ratio = hrv / hrv_baseline
-                    
-                    if ratio < 0.95:
-                        # HRV is low -> fatigue decays slower
-                        scale_factor = 1.0 + min(0.5, (0.95 - ratio) * 1.5)
-                        alpha_atl = 1.0 / (7.0 * scale_factor + 1.0)
-                    elif ratio > 1.05:
-                        # HRV is high -> fatigue decays faster
-                        scale_factor = max(0.7, 1.0 - (ratio - 1.05) * 0.8)
-                        alpha_atl = 1.0 / (7.0 * scale_factor + 1.0)
-                        
         current_ctl = current_ctl * (1.0 - alpha_ctl) + trimp * alpha_ctl
         current_atl = current_atl * (1.0 - alpha_atl) + trimp * alpha_atl
         
@@ -401,36 +342,25 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     ts_df['CTL'] = ctl_values
     ts_df['ATL'] = atl_values
     
-    # 6. Compute TSB
+    # 5. Compute TSB
     ts_df['CTL_yest'] = ts_df['CTL'].shift(1).fillna(0)
     ts_df['ATL_yest'] = ts_df['ATL'].shift(1).fillna(0)
     ts_df['TSB'] = ts_df['CTL_yest'] - ts_df['ATL_yest']
 
-    # 7. Extract only the recent window requested by the user
+    # 6. Extract only the recent window requested by the user
     output_df = ts_df[ts_df['date'] >= (today - timedelta(days=days))].copy()
     output_df['date_str'] = output_df['date'].dt.strftime('%Y-%m-%d')
     output = []
     
     for idx, row in output_df.iterrows():
-        date_str = row['date_str']
-        readiness = None
-        
-        if is_fitbit_optimized and date_str in recovery_map:
-            hrv = recovery_map[date_str].get("heart_rate_variability", 0)
-            sleep_score = recovery_map[date_str].get("sleep_score", 0)
-            # Fetch baseline
-            recent_hrvs = [h for h in hrv_values[max(0, idx-7):idx] if h > 0]
-            hrv_baseline = np.mean(recent_hrvs) if recent_hrvs else hrv
-            readiness = calculate_daily_readiness(row['TSB'], hrv, hrv_baseline, sleep_score)
-            
         output.append({
-            "date": date_str,
+            "date": row['date_str'],
             "trimp_today": round(row['trimp'], 1),
             "ctl": round(row['CTL'], 1),    # Fitness
             "atl": round(row['ATL'], 1),    # Fatigue
-            "tsb": round(row['TSB'], 1),    # Form (Readiness)
-            "fitbit_optimized": is_fitbit_optimized,
-            "readiness": readiness
+            "tsb": round(row['TSB'], 1),    # Form
+            "fitbit_optimized": False,
+            "readiness": None
         })
         
     return output
