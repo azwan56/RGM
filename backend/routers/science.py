@@ -273,7 +273,9 @@ def get_analysis_bundle(req: AnalysisBundleRequest):
                      .limit(30)
                      .stream()]
         )
-        activities = act_future.result()
+        raw_acts = act_future.result()
+        from utils.activity_utils import deduplicate_activities
+        activities = deduplicate_activities(raw_acts)
         profile = prof_future.result()
         goal = goal_future.result()
         health_docs = health_future.result()

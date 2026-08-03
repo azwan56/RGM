@@ -345,14 +345,18 @@ def sync_user_data(req: SyncRequest):
           .where("start_date_local", ">=", month_start_str)
           .stream()
     )
+    from utils.activity_utils import deduplicate_activities
+
+    month_acts_raw = [a.to_dict() for a in month_acts]
+    month_acts_clean = deduplicate_activities(month_acts_raw)
+
     lb_dist    = 0.0
     lb_time    = 0
     lb_hr_sum  = 0.0
     lb_hr_count = 0
     lb_runs    = 0
     lb_elev    = 0.0
-    for a in month_acts:
-        d = a.to_dict()
+    for d in month_acts_clean:
         # Only count runs for leaderboard (skip cross-training)
         if d.get("activity_type", "run") != "run":
             continue
@@ -403,14 +407,16 @@ def sync_user_data(req: SyncRequest):
           .where("start_date_local", ">=", week_start_str)
           .stream()
     )
+    week_acts_raw = [a.to_dict() for a in week_acts]
+    week_acts_clean = deduplicate_activities(week_acts_raw)
+
     wk_dist = 0.0
     wk_time = 0
     wk_hr_sum = 0.0
     wk_hr_count = 0
     wk_runs = 0
     wk_elev = 0.0
-    for a in week_acts:
-        d = a.to_dict()
+    for d in week_acts_clean:
         # Only count runs for leaderboard (skip cross-training)
         if d.get("activity_type", "run") != "run":
             continue

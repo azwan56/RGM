@@ -87,6 +87,7 @@ def _read_leaderboard_list(period: str, limit_n: int = 20):
     return result
 
 def _read_activities(uid: str, start: str, end: str):
+    from utils.activity_utils import deduplicate_activities
     q = db.collection("users").document(uid).collection("activities")
     if start and end:
         q = (q.where("start_date_local", ">=", start)
@@ -94,7 +95,8 @@ def _read_activities(uid: str, start: str, end: str):
               .order_by("start_date_local", direction="DESCENDING"))
     else:
         q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
-    return [d.to_dict() for d in q.stream()]
+    raw = [d.to_dict() for d in q.stream()]
+    return deduplicate_activities(raw)
 
 def _read_latest_health(uid: str):
     docs = (
