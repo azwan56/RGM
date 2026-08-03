@@ -159,11 +159,12 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
 
     user_data = results.get("user") or {}
     goal = goal_data
-    stats = results.get("stats") or {}
     leaderboard_entries = results.get("leaderboard") or []
-    activities = results.get("activities") or []
     
-    # Filter out Apple Health workouts (Strava is the source of truth for workouts/activities)
+    # Deduplicate activities
+    from utils.activity_utils import deduplicate_activities
+    raw_acts = results.get("activities") or []
+    activities = deduplicate_activities(raw_acts)
     activities = [a for a in activities if a.get("source") != "AppleHealth"]
 
     # Strip sensitive tokens from user profile
@@ -184,6 +185,54 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         if p in ("weekly", "monthly"):
             goal_period = p
 
+    # Dynamically compute deduplicated stats for the current period
+    run_acts = [a for a in activities if a.get("activity_type", "run") == "run"]
+    calc_dist = round(sum(float(a.get("distance_km", 0) or 0) for a in run_acts), 2)
+    calc_elev = round(sum(float(a.get("total_elevation_gain", 0) or 0) for a in run_acts), 1)
+    calc_time = sum(int(a.get("moving_time", 0) or 0) for a in run_acts)
+    calc_hrs = [float(a.get("avg_heart_rate", 0)) for a in run_acts if float(a.get("avg_heart_rate", 0)) > 0]
+    calc_avg_hr = round(sum(calc_hrs) / len(calc_hrs)) if calc_hrs else 0
+
+    from utils.sports_science import pace_str
+    calc_pace = pace_str(calc_dist * 1000, calc_time)
+
+    target_dist = float(goal.get("target_distance_km", 0)) if goal else 0.0
+    calc_goal_pct = round((calc_dist / target_dist) * 100) if target_dist > 0 else 0
+
+    stats = {
+        "uid": uid,
+        "display_name": display_name,
+        "total_distance_km": calc_dist,
+        "total_elevation_gain": calc_elev,
+        "avg_pace": calc_pace,
+        "avg_heart_rate": calc_avg_hr,
+        "goal_completion_percentage": min(calc_goal_pct, 100),
+        "run_count": len(run_acts),
+        "period": goal_period,
+    }
+
+    # Update current user's row in leaderboard_entries
+    updated_leaderboard = []
+    found_user = False
+    for entry in leaderboard_entries:
+        if entry.get("uid") == uid:
+            found_user = True
+            e = dict(entry)
+            e["total_distance_km"] = calc_dist
+            e["total_elevation_gain"] = calc_elev
+            e["avg_pace"] = calc_pace
+            e["avg_heart_rate"] = calc_avg_hr
+            e["run_count"] = len(run_acts)
+            updated_leaderboard.append(e)
+        else:
+            updated_leaderboard.append(entry)
+
+    if not found_user and calc_dist > 0:
+        updated_leaderboard.append(stats)
+
+    # Re-sort leaderboard entries by distance descending
+    updated_leaderboard = sorted(updated_leaderboard, key=lambda x: x.get("total_distance_km", 0), reverse=True)
+
     latest_health = results.get("health")
 
     return {
@@ -195,7 +244,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         "display_name": display_name,
         "goal_period": goal_period,
         "stats": stats,
-        "leaderboard": {"entries": leaderboard_entries},
+        "leaderboard": {"entries": updated_leaderboard},
         "activities": {"activities": activities},
         "latest_health": latest_health,
     }
