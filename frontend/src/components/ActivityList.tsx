@@ -176,7 +176,9 @@ export default function ActivityList({ uid, month, initialActivities }: Props) {
               
               {!isCT && (
                 <div className="hidden md:block text-right">
-                  <p className="text-white font-bold text-sm">{act.total_elevation_gain}m</p>
+                  <p className="text-white font-bold text-sm">
+                    {Number(Number(act.total_elevation_gain || 0).toFixed(1))}m
+                  </p>
                   <p className="text-zinc-500 text-xs">爬升</p>
                 </div>
               )}

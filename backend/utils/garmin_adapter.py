@@ -174,7 +174,7 @@ class GarminAdapter:
             max_hr = act.get("maxHR")
 
             # Elevation
-            elevation_gain = float(act.get("elevationGain", 0.0))
+            elevation_gain = round(float(act.get("elevationGain", 0.0)), 1)
 
             return {
                 "id": f"garmin_{act_id}",
