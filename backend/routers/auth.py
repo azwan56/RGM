@@ -201,3 +201,19 @@ def unbind_garmin(request: GarminUnbindRequest):
     return {"message": "Garmin disconnected successfully"}
 
 
+class StravaUnbindRequest(BaseModel):
+    uid: str
+
+@router.post("/strava/unbind")
+def unbind_strava(request: StravaUnbindRequest):
+    """Unbinds Strava integration for a user."""
+    user_ref = db.collection("users").document(request.uid)
+    user_ref.set({
+        "strava_access_token": "",
+        "strava_refresh_token": "",
+        "strava_expires_at": 0,
+        "strava_id": "",
+    }, merge=True)
+    return {"message": "Strava disconnected successfully"}
+
+

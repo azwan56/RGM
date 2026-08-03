@@ -110,18 +110,40 @@ export default function Dashboard() {
         password: garminPassword,
         domain: garminDomain,
       });
-      setGarminMsg("✓ 绑定成功！已开始自动同步佳明跑步数据...");
+      setGarminMsg("✓ 绑定成功！已开始自动同步佳明数据...");
       setTimeout(async () => {
         setShowGarminModal(false);
         setGarminMsg("");
         setGarminPassword("");
         await fetchDashboard(user.uid, activityMonth);
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       setGarminMsg(detail || "绑定失败，请检查账号、密码及选择的佳明区域（中国版 vs 国际版）。");
     } finally {
       setGarminLoading(false);
+    }
+  };
+
+  // Handle Garmin Unbinding
+  const handleGarminUnbind = async () => {
+    if (!user || !confirm("确定解绑 Garmin 佳明账号吗？")) return;
+    try {
+      await axios.post(`${backendUrl}/api/auth/garmin/unbind`, { uid: user.uid });
+      await fetchDashboard(user.uid, activityMonth);
+    } catch (err) {
+      alert("解绑失败，请重试");
+    }
+  };
+
+  // Handle Strava Unbinding
+  const handleStravaUnbind = async () => {
+    if (!user || !confirm("确定解除 Strava 账号授权吗？")) return;
+    try {
+      await axios.post(`${backendUrl}/api/auth/strava/unbind`, { uid: user.uid });
+      await fetchDashboard(user.uid, activityMonth);
+    } catch (err) {
+      alert("解绑失败，请重试");
     }
   };
 
@@ -145,7 +167,7 @@ export default function Dashboard() {
     if (isGarmin && isStrava) return "Garmin & Strava 双源直连 ✓";
     if (isGarmin) return "Garmin 佳明直连已启用 ✓";
     if (isStrava) return "Strava 数据已连接 ✓";
-    return "点击选择连接 Garmin 或 Strava 记录";
+    return "点击底部绑定 Garmin 或 Strava 记录";
   };
 
   const syncBtnLabel = () => {
@@ -205,31 +227,6 @@ export default function Dashboard() {
           </div>
           <PageNav />
         </header>
-
-        {/* Data source connect banner */}
-        {(!dashboardData?.strava_connected || !dashboardData?.garmin_connected) && (
-          <div className="bg-gradient-to-r from-blue-900/20 via-zinc-900/40 to-orange-950/20 border border-white/10 p-4 md:p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 backdrop-blur-md">
-            <div>
-              <h3 className="text-lg md:text-xl font-bold mb-1 text-white">连接数据源 (Garmin 佳明 / Strava)</h3>
-              <p className="text-zinc-400 text-sm">
-                支持绑定 Garmin 佳明账号 (中国版/国际版) 或 Strava，自动同步跑步记录与生理恢复指标。
-              </p>
-            </div>
-            <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
-              {!dashboardData?.garmin_connected && (
-                <button
-                  onClick={() => setShowGarminModal(true)}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
-                >
-                  <span>⌚</span> 绑定 Garmin 佳明
-                </button>
-              )}
-              {!dashboardData?.strava_connected && (
-                <StravaConnectBtn />
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Sync control & Running Stats Panel */}
         {user && (
@@ -308,8 +305,111 @@ export default function Dashboard() {
           />
         )}
 
+        {/* ── Data Source Connection Section (Placed at the VERY BOTTOM as requested) ── */}
+        <div className="bg-white/3 border border-white/10 rounded-3xl p-5 md:p-6 space-y-4 backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>🔗</span> 数据源连接设置 (Data Sources)
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                实时连接 Garmin 佳明账号或 Strava，自动同步全量跑步与身体恢复数据。
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 1. Garmin Connection Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between h-36">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">⌚</span>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Garmin 佳明直连</h4>
+                    <p className="text-[11px] text-zinc-400">支持中国版 (garmin.cn) / 国际版 (garmin.com)</p>
+                  </div>
+                </div>
+                {dashboardData?.garmin_connected ? (
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    ✓ 已连接
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-zinc-400">
+                    未连接
+                  </span>
+                )}
+              </div>
+
+              <div>
+                {dashboardData?.garmin_connected ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-zinc-400 truncate">
+                      {dashboardData?.profile?.garmin_email || "已绑定 Garmin 账号"}
+                    </span>
+                    <button
+                      onClick={handleGarminUnbind}
+                      className="h-11 px-5 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600/30 border border-rose-500/30 rounded-xl transition flex items-center justify-center"
+                    >
+                      断开链接
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowGarminModal(true)}
+                    className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                  >
+                    <span>⌚</span> 绑定 Garmin 佳明账号
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Strava Connection Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between h-36">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl"></span>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Strava 账号授权</h4>
+                    <p className="text-[11px] text-zinc-400">通过 Strava OAuth 自动同步跑步记录</p>
+                  </div>
+                </div>
+                {dashboardData?.strava_connected ? (
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    ✓ 已连接
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-zinc-400">
+                    未连接
+                  </span>
+                )}
+              </div>
+
+              <div>
+                {dashboardData?.strava_connected ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-zinc-400 truncate">
+                      {dashboardData?.profile?.strava_name || "已授权 Strava 账号"}
+                    </span>
+                    <button
+                      onClick={handleStravaUnbind}
+                      className="h-11 px-5 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600/30 border border-rose-500/30 rounded-xl transition flex items-center justify-center"
+                    >
+                      断开链接
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-full h-11">
+                    <StravaConnectBtn />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Footer */}
-        <div className="mt-12 mb-4 text-center">
+        <div className="mt-8 mb-4 text-center">
           <p className="text-zinc-500 text-sm font-medium">RGM Running Intelligence Platform</p>
         </div>
 

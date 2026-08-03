@@ -60,7 +60,7 @@ class GarminAdapter:
                     normalized.append(norm)
             return normalized
         except Exception as e:
-            logger.error(f"[garmin] Failed to fetch activities for {self.email}: {e}")
+            logger.error(f"[garmin] Error fetching activities: {e}")
             return []
 
     def fetch_daily_health_metrics(self, target_date: Optional[str] = None) -> Dict[str, Any]:
@@ -80,41 +80,44 @@ class GarminAdapter:
         try:
             summary = self.client.get_user_summary(date_str)
             if isinstance(summary, dict):
-                if summary.get("restingHeartRate"):
-                    metrics["resting_heart_rate"] = summary.get("restingHeartRate")
-                if summary.get("vo2Max"):
-                    metrics["vo2_max"] = summary.get("vo2Max")
-                if summary.get("sleepDuration"):
-                    metrics["sleep_duration_seconds"] = summary.get("sleepDuration")
-                if summary.get("bodyBatteryHighestValue"):
-                    metrics["body_battery_max"] = summary.get("bodyBatteryHighestValue")
+                rhr = summary.get("restingHeartRate") or summary.get("userDailySummary", {}).get("restingHeartRate")
+                if rhr and rhr > 0:
+                    metrics["resting_heart_rate"] = rhr
+                vo2 = summary.get("vo2MaxPrecise") or summary.get("vo2Max") or summary.get("userDailySummary", {}).get("vo2Max")
+                if vo2 and vo2 > 0:
+                    metrics["vo2_max"] = round(float(vo2), 1)
+                dur = summary.get("sleepDuration") or summary.get("userDailySummary", {}).get("sleepDuration")
+                if dur and dur > 0:
+                    metrics["sleep_duration_seconds"] = dur
+                bb = summary.get("bodyBatteryHighestValue") or summary.get("userDailySummary", {}).get("bodyBatteryHighestValue")
+                if bb and bb > 0:
+                    metrics["body_battery_max"] = bb
         except Exception as e:
             logger.debug(f"[garmin] Could not fetch user summary: {e}")
 
-        # 1. Resting Heart Rate (override/supplement)
-        try:
-            rhr_data = self.client.get_rhr_day(date_str)
-            if isinstance(rhr_data, dict) and "allMetrics" in rhr_data:
-                val = rhr_data["allMetrics"].get("metricsMap", {}).get("WELLNESS_RESTING_HEART_RATE", [{}])[0].get("value")
-                if val:
-                    metrics["resting_heart_rate"] = val
-            elif isinstance(rhr_data, dict) and "restingHeartRate" in rhr_data:
-                val = rhr_data.get("restingHeartRate")
-                if val:
-                    metrics["resting_heart_rate"] = val
-        except Exception as e:
-            logger.debug(f"[garmin] Could not fetch RHR: {e}")
+        # 1. Resting Heart Rate
+        if "resting_heart_rate" not in metrics:
+            try:
+                rhr_data = self.client.get_rhr_day(date_str)
+                if isinstance(rhr_data, list) and len(rhr_data) > 0:
+                    rhr_data = rhr_data[0]
+                if isinstance(rhr_data, dict):
+                    val = rhr_data.get("restingHeartRate") or rhr_data.get("value")
+                    if val and val > 0:
+                        metrics["resting_heart_rate"] = val
+            except Exception as e:
+                logger.debug(f"[garmin] Could not fetch RHR: {e}")
 
         # 2. Sleep Data
         try:
             sleep_data = self.client.get_sleep_data(date_str)
             if isinstance(sleep_data, dict):
-                daily_sleep = sleep_data.get("dailySleepDTO", {})
-                score = daily_sleep.get("sleepScores", {}).get("overall", {}).get("value")
-                if score:
+                daily_sleep = sleep_data.get("dailySleepDTO", {}) or sleep_data
+                score = daily_sleep.get("sleepScores", {}).get("overall", {}).get("value") or daily_sleep.get("sleepScore")
+                if score and score > 0:
                     metrics["sleep_score"] = score
-                dur = daily_sleep.get("sleepTimeSeconds")
-                if dur:
+                dur = daily_sleep.get("sleepTimeSeconds") or daily_sleep.get("sleepDuration")
+                if dur and dur > 0:
                     metrics["sleep_duration_seconds"] = dur
         except Exception as e:
             logger.debug(f"[garmin] Could not fetch sleep data: {e}")
@@ -122,81 +125,79 @@ class GarminAdapter:
         # 3. HRV Data
         try:
             hrv_data = self.client.get_hrv_data(date_str)
-            if isinstance(hrv_data, dict) and "hrvSummary" in hrv_data:
-                summary = hrv_data["hrvSummary"]
-                metrics["hrv_status"] = summary.get("status")
-                metrics["hrv_weekly_avg"] = summary.get("weeklyAvg")
-                metrics["hrv_last_night"] = summary.get("lastNightAvg")
+            if isinstance(hrv_data, dict):
+                summary = hrv_data.get("hrvSummary", {}) or hrv_data
+                if summary.get("status"):
+                    metrics["hrv_status"] = summary.get("status")
+                if summary.get("weeklyAvg"):
+                    metrics["hrv_weekly_avg"] = summary.get("weeklyAvg")
+                if summary.get("lastNightAvg"):
+                    metrics["hrv_last_night"] = summary.get("lastNightAvg")
         except Exception as e:
-            logger.debug(f"[garmin] Could not fetch HRV data: {e}")
+            logger.debug(f"[garmin] Could not fetch HRV: {e}")
 
-        # 4. Body Battery
-        try:
-            bb_data = self.client.get_body_battery(date_str)
-            if isinstance(bb_data, list) and len(bb_data) > 0:
-                values = [item.get("charged", 0) for item in bb_data if "charged" in item]
-                if values:
-                    metrics["body_battery_max"] = max(values)
-        except Exception as e:
-            logger.debug(f"[garmin] Could not fetch Body Battery data: {e}")
+        # 4. Body Battery Data
+        if "body_battery_max" not in metrics:
+            try:
+                bb_data = self.client.get_body_battery(date_str)
+                if isinstance(bb_data, list) and len(bb_data) > 0:
+                    vals = [x.get("charged", 0) or x.get("chargedValue", 0) for x in bb_data if isinstance(x, dict)]
+                    if vals and max(vals) > 0:
+                        metrics["body_battery_max"] = max(vals)
+            except Exception as e:
+                logger.debug(f"[garmin] Could not fetch Body Battery: {e}")
 
         return metrics
 
-    def _normalize_activity(self, act: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Transforms a Garmin activity dict into RGM's standardized Activity format."""
-        try:
-            act_id = str(act.get("activityId", ""))
-            if not act_id:
-                return None
-
-            # Type mapping
-            raw_type = act.get("activityType", {}).get("typeKey", "running").capitalize()
-            activity_type = "Run" if raw_type in ["Running", "Run", "Track_running", "Treadmill_running"] else raw_type
-
-            # Start time formatting
-            start_time_local = act.get("startTimeLocal", "")
-            if start_time_local and "T" not in start_time_local:
-                start_time_local = start_time_local.replace(" ", "T") + "Z"
-
-            # Speed & Pace
-            avg_speed = float(act.get("averageSpeed", 0.0))  # m/s
-            max_speed = float(act.get("maxSpeed", 0.0))
-            distance_m = float(act.get("distance", 0.0))
-            moving_time_s = int(act.get("duration", 0))
-            elapsed_time_s = int(act.get("elapsedDuration", moving_time_s))
-
-            # Cadence (Garmin returns SPM or RPM; if RPM, multiply by 2 for running steps/min)
-            raw_cadence = act.get("averageRunningCadenceInStepsPerMinute") or act.get("averageCadence") or 0
-            cadence = int(raw_cadence)
-
-            # Heart Rate
-            avg_hr = act.get("averageHR")
-            max_hr = act.get("maxHR")
-
-            # Elevation
-            elevation_gain = round(float(act.get("elevationGain", 0.0)), 1)
-
-            return {
-                "id": f"garmin_{act_id}",
-                "source": "garmin",
-                "garmin_domain": self.domain,
-                "garmin_activity_id": act_id,
-                "name": act.get("activityName", "Garmin Workout"),
-                "type": activity_type,
-                "distance": distance_m,
-                "moving_time": moving_time_s,
-                "elapsed_time": elapsed_time_s,
-                "start_date_local": start_time_local,
-                "start_date": start_time_local,
-                "average_speed": avg_speed,
-                "max_speed": max_speed,
-                "average_heartrate": avg_hr,
-                "max_heartrate": max_hr,
-                "has_heartrate": avg_hr is not None,
-                "average_cadence": cadence,
-                "total_elevation_gain": elevation_gain,
-                "summary_polyline": act.get("summaryPolyline") or "",
-            }
-        except Exception as e:
-            logger.error(f"[garmin] Failed to normalize activity: {e}")
+    def _normalize_activity(self, raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Normalizes raw Garmin activity dict to RGM Activity schema."""
+        act_id = str(raw.get("activityId") or raw.get("id") or "")
+        if not act_id:
             return None
+
+        # Distance in km
+        dist_m = raw.get("distance", 0) or 0
+        dist_km = round(dist_m / 1000.0, 2)
+
+        # Duration in seconds
+        moving_sec = int(raw.get("duration") or raw.get("movingDuration") or 0)
+        elapsed_sec = int(raw.get("elapsedDuration") or moving_sec)
+
+        # Dates
+        start_date_local = raw.get("startTimeLocal") or raw.get("startDateLocal") or ""
+        if not start_date_local:
+            return None
+
+        # Format duration string
+        mins = moving_sec // 60
+        secs = moving_sec % 60
+        duration_str = f"{mins}:{secs:02d}"
+
+        # Pace string
+        pace_str = "—"
+        if dist_km > 0 and moving_sec > 0:
+            sec_per_km = int(moving_sec / dist_km)
+            p_min = sec_per_km // 60
+            p_sec = sec_per_km % 60
+            pace_str = f"{p_min}:{p_sec:02d}"
+
+        avg_hr = round(raw.get("averageHR", 0) or 0)
+        max_hr = round(raw.get("maxHR", 0) or 0)
+        elevation = round(float(raw.get("elevationGain") or raw.get("totalElevationGain") or 0), 1)
+
+        return {
+            "activity_id": f"garmin_{act_id}",
+            "name": raw.get("activityName") or "Garmin Running",
+            "start_date_local": start_date_local,
+            "distance_km": dist_km,
+            "moving_time": moving_sec,
+            "elapsed_time": elapsed_sec,
+            "duration_str": duration_str,
+            "avg_pace": pace_str,
+            "avg_heart_rate": avg_hr,
+            "max_heart_rate": max_hr,
+            "total_elevation_gain": elevation,
+            "activity_type": "run",
+            "source": f"garmin_{'cn' if self.is_cn else 'global'}",
+            "garmin_raw_id": act_id,
+        }
