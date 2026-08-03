@@ -281,12 +281,6 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-white font-bold text-lg">AI 智能分析</h3>
-            {isFitbitConnected && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full select-none">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                已启用 Apple Health 生理修正
-              </span>
-            )}
           </div>
         </div>
         

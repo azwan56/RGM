@@ -75,11 +75,11 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
             <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">生理数据修正 (Apple Health)</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">生理与恢复数据</h2>
           </div>
           
           <p className="text-zinc-400 text-sm leading-relaxed">
-            请在 RGM iOS 应用中开启并连接 Apple Health。系统将自动获取每日睡眠得分、心率变异性 (HRV) 和静息心率，根据您的真实身体恢复状态，**自动动态修正** CTL/ATL 指数，为您量身定制每日训练推荐与准备度评估。
+            系统自动获取每日睡眠得分、心率变异性 (HRV) 和静息心率，根据您的真实身体恢复状态，为您量身定制每日训练推荐与准备度评估。
           </p>
 
           <div className="grid grid-cols-3 gap-3 pt-2">
