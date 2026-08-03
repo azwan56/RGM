@@ -109,9 +109,9 @@ export default function AnalysisPage() {
         )}
 
         {/* Garmin Health & Recovery Trend (30 days) */}
-        {user && bundleData?.health_history?.data && bundleData.health_history.data.length > 0 && (
+        {user && (
           <section>
-            <GarminHealthTrendChart data={bundleData.health_history.data} />
+            <GarminHealthTrendChart data={bundleData?.health_history?.data || []} />
           </section>
         )}
 

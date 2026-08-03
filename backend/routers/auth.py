@@ -179,6 +179,14 @@ def bind_garmin(request: GarminAuthRequest):
     }
 
     user_ref.set(garmin_fields, merge=True)
+
+    # Immediately trigger initial sync for activities & health metrics
+    try:
+        from routers.sync import sync_garmin_user_data
+        sync_garmin_user_data(garmin_fields, user_ref)
+    except Exception as e:
+        print(f"[auth] Initial Garmin sync error: {e}")
+
     return {"message": f"Garmin ({domain}) connected successfully", "email": request.email, "domain": domain}
 
 

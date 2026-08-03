@@ -149,10 +149,19 @@ export default function Dashboard() {
         )}
 
         {/* Garmin Health Card */}
-        {dashboardData?.latest_health && (
+        {(dashboardData?.latest_health || dashboardData?.garmin_connected) && (
           <GarminHealthCard
-            health={dashboardData.latest_health}
-            vo2Max={dashboardData.profile?.vo2_max}
+            health={dashboardData?.latest_health}
+            vo2Max={dashboardData?.profile?.vo2_max}
+            isGarminConnected={dashboardData?.garmin_connected}
+            onSync={async () => {
+              if (user) {
+                try {
+                  await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
+                  await fetchDashboard(user.uid, activityMonth);
+                } catch (e) {}
+              }
+            }}
           />
         )}
 

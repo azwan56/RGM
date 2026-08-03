@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
 interface GarminHealthCardProps {
   health?: {
@@ -15,10 +15,12 @@ interface GarminHealthCardProps {
     source?: string;
   };
   vo2Max?: number;
+  isGarminConnected?: boolean;
+  onSync?: () => void;
 }
 
-export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardProps) {
-  if (!health && !vo2Max) return null;
+export default function GarminHealthCard({ health, vo2Max, isGarminConnected, onSync }: GarminHealthCardProps) {
+  if (!health && !vo2Max && !isGarminConnected) return null;
 
   const rhr = health?.resting_heart_rate;
   const sleepScore = health?.sleep_score;
@@ -35,14 +37,20 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
 
   // HRV status badge styling
   const hrvBadge = () => {
-    if (!hrvStatus) return null;
+    if (!hrvStatus) {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          Garmin 佳明直连
+        </span>
+      );
+    }
     const statusUpper = hrvStatus.toUpperCase();
     if (statusUpper.includes("BALANCED")) {
-      return <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">✓ 平衡 (Balanced)</span>;
+      return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">✓ HRV 平衡 (Balanced)</span>;
     } else if (statusUpper.includes("UNBALANCED") || statusUpper.includes("LOW")) {
-      return <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">⚠️ 偏低/波动</span>;
+      return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">⚠️ HRV 偏低/波动</span>;
     }
-    return <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-white/10 text-zinc-300">{hrvStatus}</span>;
+    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 text-zinc-300">{hrvStatus}</span>;
   };
 
   return (
@@ -56,11 +64,22 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
           <div>
             <h3 className="text-base font-bold text-white leading-tight">Garmin 生理与恢复卡片</h3>
             <p className="text-xs text-zinc-500">
-              {health?.date ? `最近更新: ${health.date}` : "来自 Garmin 佳明同步"}
+              {health?.date ? `最近更新: ${health.date}` : "尚未同步到当天休息数据，点击刷新可手动拉取"}
             </p>
           </div>
         </div>
-        {hrvBadge()}
+        <div className="flex items-center gap-2">
+          {hrvBadge()}
+          {onSync && (
+            <button
+              onClick={onSync}
+              className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition border border-white/10"
+              title="即时从 Garmin 刷新健康数据"
+            >
+              🔄 刷新
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 4 Grid Cards */}
@@ -72,10 +91,10 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
           </span>
           <div className="mt-2">
             <div className="text-xl md:text-2xl font-black text-white">
-              {sleepScore ? `${sleepScore} 分` : sleepStr}
+              {sleepScore ? `${sleepScore} 分` : (sleepSec ? sleepStr : "未同步")}
             </div>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              {sleepScore ? `时长 ${sleepStr}` : "质量评级"}
+              {sleepScore ? `时长 ${sleepStr}` : "睡眠评分与时长"}
             </p>
           </div>
         </div>
@@ -87,7 +106,7 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
           </span>
           <div className="mt-2">
             <div className="text-xl md:text-2xl font-black text-rose-400">
-              {rhr ? `${rhr} bpm` : "—"}
+              {rhr ? `${rhr} bpm` : "未同步"}
             </div>
             <p className="text-[11px] text-zinc-500 mt-0.5">清息生理基线</p>
           </div>
@@ -100,15 +119,17 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
           </span>
           <div className="mt-2 space-y-1.5">
             <div className="text-xl md:text-2xl font-black text-amber-400">
-              {bodyBattery ? `${bodyBattery}%` : "—"}
+              {bodyBattery ? `${bodyBattery}%` : "未同步"}
             </div>
-            {bodyBattery && (
+            {bodyBattery ? (
               <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 rounded-full"
                   style={{ width: `${Math.min(100, bodyBattery)}%` }}
                 />
               </div>
+            ) : (
+              <p className="text-[11px] text-zinc-500">电量充能状态</p>
             )}
           </div>
         </div>
@@ -120,10 +141,10 @@ export default function GarminHealthCard({ health, vo2Max }: GarminHealthCardPro
           </span>
           <div className="mt-2">
             <div className="text-xl md:text-2xl font-black text-cyan-400">
-              {hrvNight ? `${hrvNight} ms` : (vo2Max ? `${vo2Max}` : "—")}
+              {hrvNight ? `${hrvNight} ms` : (vo2Max ? `${vo2Max}` : "未同步")}
             </div>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              {hrvWeekly ? `周均: ${hrvWeekly} ms` : (vo2Max ? "VO2 Max (ml/kg/min)" : "神经恢复数位")}
+              {hrvWeekly ? `周均: ${hrvWeekly} ms` : (vo2Max ? "VO2 Max (ml/kg/min)" : "心率变异性数位")}
             </p>
           </div>
         </div>
