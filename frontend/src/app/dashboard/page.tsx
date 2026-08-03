@@ -245,7 +245,7 @@ export default function Dashboard() {
     if (isGarmin && isStrava) return "Garmin & Strava 双源直连 ✓";
     if (isGarmin) return "Garmin 佳明直连已启用 ✓";
     if (isStrava) return "Strava 数据已连接 ✓";
-    return "点击底部“数据源连接设置”进行绑定";
+    return "点击底部“数据源连接设置”进行绑定与同步";
   };
 
   if (loading) {
@@ -366,7 +366,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ── Data Source Connection & Specific Sync Section (Placed at the VERY BOTTOM) ── */}
+        {/* ── Data Source Connection & Dedicated Sync Section ── */}
         <div className="bg-white/3 border border-white/10 rounded-3xl p-5 md:p-6 space-y-5 backdrop-blur-md">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div>
@@ -374,14 +374,14 @@ export default function Dashboard() {
                 <span>🔗</span> 数据源连接与独立同步设置 (Data Sources & Sync)
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                独立管理 Garmin 佳明直连与 Strava 授权，各数据源包含专属的数据同步与历史导入按键。
+                独立管理 Garmin 佳明直连与 Strava 授权，各自配备专属的“Sync 数据同步”按键。
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 1. Garmin Connection & Sync Card */}
-            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[160px] space-y-4">
+            {/* 1. Garmin Connection & Dedicated Sync Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[170px] space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">⌚</span>
@@ -401,19 +401,18 @@ export default function Dashboard() {
                 )}
               </div>
 
-              <div>
+              <div className="space-y-2.5">
                 {dashboardData?.garmin_connected ? (
-                  <div className="space-y-2.5">
+                  <>
                     <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
                       <span className="truncate">{dashboardData?.profile?.garmin_email || "已绑定 Garmin 账号"}</span>
                       <button
                         onClick={handleGarminUnbind}
-                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium shrink-0"
                       >
                         断开链接
                       </button>
                     </div>
-                    {/* Garmin Dedicated Sync Button */}
                     <button
                       onClick={handleGarminSync}
                       disabled={garminSyncing}
@@ -422,23 +421,36 @@ export default function Dashboard() {
                       {garminSyncing ? (
                         <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步 Garmin...</>
                       ) : (
-                        "⌚ 立即同步 Garmin 数据"
+                        "⌚ Sync Garmin 数据"
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setShowGarminModal(true)}
+                      className="h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1 shadow-lg shadow-blue-600/20"
+                    >
+                      <span>⌚</span> 绑定 Garmin
+                    </button>
+                    <button
+                      onClick={handleGarminSync}
+                      disabled={garminSyncing}
+                      className="h-11 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-400 hover:text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+                    >
+                      {garminSyncing ? (
+                        <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        "🔄 Sync Garmin"
                       )}
                     </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setShowGarminModal(true)}
-                    className="w-full h-11 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
-                  >
-                    <span>⌚</span> 绑定 Garmin 佳明账号
-                  </button>
                 )}
               </div>
             </div>
 
-            {/* 2. Strava Connection & Sync Card */}
-            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[160px] space-y-4">
+            {/* 2. Strava Connection & Dedicated Sync Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[170px] space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl"></span>
@@ -458,19 +470,18 @@ export default function Dashboard() {
                 )}
               </div>
 
-              <div>
+              <div className="space-y-2.5">
                 {dashboardData?.strava_connected ? (
-                  <div className="space-y-2.5">
+                  <>
                     <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
                       <span className="truncate">{dashboardData?.profile?.strava_name || "已授权 Strava 账号"}</span>
                       <button
                         onClick={handleStravaUnbind}
-                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium shrink-0"
                       >
                         断开链接
                       </button>
                     </div>
-                    {/* Strava Dedicated Sync + History Dropdown */}
                     <div className="grid grid-cols-5 gap-2">
                       <button
                         onClick={handleStravaSync}
@@ -517,10 +528,23 @@ export default function Dashboard() {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </>
                 ) : (
-                  <div className="w-full h-11">
-                    <StravaConnectBtn />
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <StravaConnectBtn />
+                      <button
+                        onClick={handleStravaSync}
+                        disabled={stravaSyncing}
+                        className="h-11 bg-[#FC4C02]/20 hover:bg-[#FC4C02]/30 border border-[#FC4C02]/40 text-[#FC4C02] hover:text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+                      >
+                        {stravaSyncing ? (
+                          <div className="w-3.5 h-3.5 border-2 border-[#FC4C02] border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          "⚡ Sync Strava"
+                        )}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
