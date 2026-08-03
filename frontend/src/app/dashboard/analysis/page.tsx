@@ -38,6 +38,11 @@ const GoalHistoryPanel = dynamic(() => import("@/components/GoalHistoryPanel"), 
   ssr: false,
 });
 
+const GarminHealthTrendChart = dynamic(() => import("@/components/GarminHealthTrendChart"), {
+  loading: () => <div className="h-64 bg-white/5 border border-white/10 rounded-3xl animate-pulse" />,
+  ssr: false,
+});
+
 export default function AnalysisPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -55,7 +60,6 @@ export default function AnalysisPage() {
       setBundleData(res.data);
     } catch (err) {
       console.error("Analysis bundle error:", err);
-      // Fallback: components will fetch individually
     }
   }, [backendUrl]);
 
@@ -92,7 +96,7 @@ export default function AnalysisPage() {
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-black">深度分析</h1>
-            <p className="text-zinc-500 text-sm">体能趋势 · 跑力诊断 · 月度统计 · 目标回顾</p>
+            <p className="text-zinc-500 text-sm">体能趋势 · 恢复诊断 · 跑力预测 · 目标回顾</p>
           </div>
           <PageNav />
         </header>
@@ -101,6 +105,13 @@ export default function AnalysisPage() {
         {user && (
           <section>
             <FitnessChart uid={user.uid} initialData={bundleData?.fitness_trend?.data} />
+          </section>
+        )}
+
+        {/* Garmin Health & Recovery Trend (30 days) */}
+        {user && bundleData?.health_history?.data && bundleData.health_history.data.length > 0 && (
+          <section>
+            <GarminHealthTrendChart data={bundleData.health_history.data} />
           </section>
         )}
 

@@ -253,8 +253,8 @@ def get_analysis_bundle(req: AnalysisBundleRequest):
     year_start = f"{year}-01-01"
     user_ref = db.collection("users").document(req.uid)
 
-    # ── 2 parallel Firestore reads: activities (365) + profile ──
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    # ── 3 parallel Firestore reads: activities (365) + profile + health ──
+    with ThreadPoolExecutor(max_workers=4) as ex:
         act_future = ex.submit(
             lambda: [d.to_dict() for d in
                      user_ref.collection("activities")
@@ -266,9 +266,20 @@ def get_analysis_bundle(req: AnalysisBundleRequest):
         goal_future = ex.submit(
             lambda: (user_ref.collection("goals").document("current").get().to_dict() or {})
         )
+        health_future = ex.submit(
+            lambda: [d.to_dict() for d in
+                     user_ref.collection("health_metrics")
+                     .order_by("date", direction="DESCENDING")
+                     .limit(30)
+                     .stream()]
+        )
         activities = act_future.result()
         profile = prof_future.result()
         goal = goal_future.result()
+        health_docs = health_future.result()
+
+    health_history = list(reversed(health_docs))
+
 
     max_hr = profile.get("max_heart_rate", 190)
     rest_hr = profile.get("resting_heart_rate", 60)
@@ -461,4 +472,5 @@ def get_analysis_bundle(req: AnalysisBundleRequest):
         "race_predictor": race_data,
         "monthly_trend": {"data": trend_result},
         "stats_summary": stats_summary,
+        "health_history": {"data": health_history},
     }

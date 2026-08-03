@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import axios from "@/lib/apiClient";
 import StravaConnectBtn from "@/components/StravaConnectBtn";
+import GarminHealthCard from "@/components/GarminHealthCard";
 import RunningStatsPanel from "@/components/RunningStatsPanel";
 import ActivityList from "@/components/ActivityList";
 import LeaderboardWidget from "@/components/LeaderboardWidget";
@@ -39,7 +40,7 @@ export default function Dashboard() {
       });
       const d = res.data;
       setDashboardData(d);
-      if (d.strava_connected) setIsStravaConnected(true);
+      if (d.strava_connected || d.garmin_connected) setIsStravaConnected(true);
       setDisplayName(d.display_name || "");
       if (d.goal_period === "weekly" || d.goal_period === "monthly") {
         setPeriod(d.goal_period);
@@ -98,33 +99,19 @@ export default function Dashboard() {
               src="/icons/icon-512x512.png" 
               alt="RGM Logo" 
               className="w-24 h-24 md:w-32 md:h-32 rounded-3xl shadow-2xl drop-shadow-[0_0_20px_rgba(252,76,2,0.3)] animate-bounce" 
-              style={{ animationDuration: '3s' }} 
             />
-            <div className="absolute -inset-4 border-2 border-[#FC4C02]/20 rounded-[2.5rem] animate-ping" style={{ animationDuration: '2s' }} />
           </div>
-          
-          <div className="space-y-3">
-            <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">
-              {user ? `欢迎回来，${userName}` : "正在启动 RGM"}
-            </h1>
-            <p className="text-zinc-400 text-sm md:text-base max-w-sm mx-auto">
-              {user ? "正在同步您的最新跑步数据和体能指标，请稍候..." : "正在验证身份并连接数据源..."}
+          <div className="space-y-2">
+            <h2 className="text-xl md:text-2xl font-bold text-white tracking-wide">
+              正在同步数据...
+            </h2>
+            <p className="text-zinc-500 text-sm">
+              欢迎回来，{userName}
             </p>
           </div>
-          
-          <div className="flex items-center gap-3 mt-4">
-            <div className="w-5 h-5 border-2 border-[#FC4C02] border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm tracking-widest text-[#FC4C02] font-semibold uppercase">Processing</span>
+          <div className="w-48 h-1 bg-white/10 rounded-full overflow-hidden">
+            <div className="w-full h-full bg-gradient-to-r from-[#FC4C02] via-orange-400 to-[#FC4C02] animate-pulse" />
           </div>
-        </div>
-
-        <div className="absolute bottom-8 left-0 right-0 text-center animate-in fade-in duration-1000 delay-500">
-          <p className="text-xs text-zinc-500 font-medium tracking-wider flex items-center justify-center gap-2">
-            <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C12.3 7.4 16.6 11.7 22 12C16.6 12.3 12.3 16.6 12 22C11.7 16.6 7.4 12.3 2 12C7.4 11.7 11.7 7.4 12 2Z" />
-            </svg>
-            Powered by Gemini 3.5 Flash
-          </p>
         </div>
       </div>
     );
@@ -132,19 +119,17 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pt-20 md:pt-24 px-4 md:px-6 pb-16 md:pb-20 relative">
-      <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-[#FC4C02]/10 blur-[160px] pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-orange-600/10 blur-[160px] pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[30%] h-[30%] rounded-full bg-blue-600/5 blur-[120px] pointer-events-none" />
 
-      <main className="max-w-5xl mx-auto space-y-10 relative z-10">
+      <main className="max-w-5xl mx-auto space-y-6 md:space-y-8 relative z-10">
 
         {/* Header */}
-        <header className="flex items-start justify-between gap-4">
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-4xl md:text-5xl font-black mb-1">
-              {displayName ? `你好，${displayName}` : "Welcome Back"}<span className="text-[#FC4C02]">.</span>
-            </h1>
-            <p className="text-zinc-400 text-sm md:text-base">
-              {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "Strava 已连接 ✓" : "连接 Strava 开始记录"}
+            <h1 className="text-2xl md:text-3xl font-black text-white mb-1">Dashboard</h1>
+            <p className="text-zinc-500 text-sm">
+              {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "设备与数据已连接 ✓" : "连接数据源开始记录"}
             </p>
           </div>
           <PageNav />
@@ -156,19 +141,25 @@ export default function Dashboard() {
             <div>
               <h3 className="text-xl font-bold mb-1">连接数据源</h3>
               <p className="text-zinc-400 text-sm">
-                连接你的 Strava 账号，自动同步跑步记录并追踪进度。
+                连接你的 Strava 或 Garmin 账号，自动同步跑步记录与健康恢复指标。
               </p>
             </div>
             <StravaConnectBtn />
           </div>
         )}
 
+        {/* Garmin Health Card */}
+        {dashboardData?.latest_health && (
+          <GarminHealthCard
+            health={dashboardData.latest_health}
+            vo2Max={dashboardData.profile?.vo2_max}
+          />
+        )}
+
         {/* Running Stats Panel — pass pre-fetched stats */}
         {isStravaConnected && user && (
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
-
-
 
         {/* Leaderboard + Activity List — side by side, fixed height */}
         {isStravaConnected && user && (

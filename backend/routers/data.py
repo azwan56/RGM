@@ -96,6 +96,16 @@ def _read_activities(uid: str, start: str, end: str):
         q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
     return [d.to_dict() for d in q.stream()]
 
+def _read_latest_health(uid: str):
+    docs = (
+        db.collection("users").document(uid).collection("health_metrics")
+          .order_by("date", direction="DESCENDING")
+          .limit(1)
+          .stream()
+    )
+    res = [d.to_dict() for d in docs]
+    return res[0] if res else None
+
 
 # ── Combined Dashboard endpoint (replaces 4 serial requests) ─────────────────
 
@@ -120,8 +130,6 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     act_end = f"{end_year}-{pad(end_mon + 1)}-01T00:00:00"
 
     # Fire all Firestore reads in parallel
-    # We need the goal doc first to determine the correct stats collection,
-    # but we can still fire user/activities in parallel and read goal inline.
     goal_data = _read_goal_doc(uid)
     goal_period = "monthly"
     if goal_data:
@@ -134,7 +142,9 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         _executor.submit(_read_leaderboard_doc, uid, goal_period): "stats",
         _executor.submit(_read_leaderboard_list, period): "leaderboard",
         _executor.submit(_read_activities, uid, act_start, act_end): "activities",
+        _executor.submit(_read_latest_health, uid): "health",
     }
+
 
     results = {}
     for future in as_completed(futures):
@@ -172,16 +182,20 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         if p in ("weekly", "monthly"):
             goal_period = p
 
+    latest_health = results.get("health")
+
     return {
         "profile": safe_profile,
         "goal": goal,
         "strava_connected": strava_connected,
+        "garmin_connected": bool(user_data.get("garmin_connected")),
         "apple_health_connected": False,
         "display_name": display_name,
         "goal_period": goal_period,
         "stats": stats,
         "leaderboard": {"entries": leaderboard_entries},
         "activities": {"activities": activities},
+        "latest_health": latest_health,
     }
 
 
