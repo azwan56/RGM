@@ -241,17 +241,34 @@ def sync_user_data(req: SyncRequest):
 
     user_data = user_doc.to_dict()
 
-    # If user has Garmin connected, perform Garmin sync
+    # If user has Garmin connected or has Garmin credentials, perform Garmin sync
     garmin_result = None
-    if user_data.get("garmin_connected"):
-        garmin_result = sync_garmin_user_data(user_data, user_ref)
+    if user_data.get("garmin_connected") or user_data.get("garmin_encrypted_password"):
+        try:
+            garmin_result = sync_garmin_user_data(user_data, user_ref)
+        except Exception as e:
+            logger.error(f"[sync] Garmin sync error: {e}")
+            garmin_result = {"success": False, "error": str(e)}
 
     refresh_token = user_data.get("strava_refresh_token")
-    if not refresh_token and not user_data.get("garmin_connected"):
-        raise HTTPException(status_code=400, detail="Neither Strava nor Garmin connected")
+    
+    # If Strava is not connected, handle Garmin result and return
+    if not refresh_token:
+        from routers.data import invalidate_profile_cache
+        invalidate_profile_cache(req.uid)
 
+        if garmin_result and garmin_result.get("success"):
+            return {
+                "message": "Garmin 恢复与运动数据同步成功！",
+                "garmin": garmin_result,
+            }
+        elif garmin_result and not garmin_result.get("success"):
+            err_msg = garmin_result.get("error") or "Garmin 同步失败，请检查佳明账号、密码或选区 (garmin.cn vs garmin.com)。"
+            raise HTTPException(status_code=400, detail=err_msg)
+        else:
+            raise HTTPException(status_code=400, detail="未检测到 Garmin 绑定账号。请先点击【绑定 Garmin 佳明账号】进行绑定。")
 
-    # 1. Refresh token
+    # 1. Refresh token for Strava
     client_id     = os.getenv("STRAVA_CLIENT_ID")
     client_secret = os.getenv("STRAVA_CLIENT_SECRET")
     if not client_id or not client_secret:
@@ -264,7 +281,9 @@ def sync_user_data(req: SyncRequest):
         "refresh_token": refresh_token,
     }, skip_throttle=True)
     if not token_resp.ok:
-        raise HTTPException(status_code=400, detail=f"Failed to refresh token: {token_resp.text}")
+        if garmin_result and garmin_result.get("success"):
+            return {"message": "Garmin 同步成功（Strava Token 刷新跳过）", "garmin": garmin_result}
+        raise HTTPException(status_code=400, detail=f"Failed to refresh Strava token: {token_resp.text}")
 
     new_token_data = token_resp.json()
     access_token   = new_token_data["access_token"]

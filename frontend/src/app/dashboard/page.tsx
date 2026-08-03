@@ -177,13 +177,18 @@ export default function Dashboard() {
     try {
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
       await fetchDashboard(user.uid, activityMonth);
-      setSyncMsg({ text: "✓ Garmin 数据同步成功！", type: "success" });
-    } catch (e) {
+      setSyncMsg({ text: "✓ Garmin 生理与跑步数据同步成功！", type: "success" });
+    } catch (e: any) {
       console.error("Garmin sync error:", e);
-      setSyncMsg({ text: "Garmin 同步失败，请稍后重试", type: "error" });
+      const detail = e.response?.data?.detail || "Garmin 同步失败，请稍后重试";
+      if (detail.includes("绑定") || detail.includes("账号")) {
+        setShowGarminModal(true);
+      } else {
+        setSyncMsg({ text: detail, type: "error" });
+      }
     } finally {
       setGarminSyncing(false);
-      setTimeout(() => setSyncMsg(null), 4000);
+      setTimeout(() => setSyncMsg(null), 5000);
     }
   };
 
