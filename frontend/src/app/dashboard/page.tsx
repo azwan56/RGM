@@ -299,7 +299,7 @@ export default function Dashboard() {
         )}
 
         {/* Garmin Health Card */}
-        {(dashboardData?.latest_health || dashboardData?.garmin_connected) && (
+        {user && (
           <GarminHealthCard
             health={dashboardData?.latest_health}
             vo2Max={dashboardData?.profile?.vo2_max}

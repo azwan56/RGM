@@ -35,10 +35,12 @@ def get_fitness_trend(req: FitnessTrendRequest):
     docs = (
         user_ref.collection("activities")
         .order_by("start_date_local", direction="DESCENDING")
-        .limit(90)
+        .limit(120)
         .stream()
     )
-    activities = [d.to_dict() for d in docs]
+    raw_acts = [d.to_dict() for d in docs]
+    from utils.activity_utils import deduplicate_activities
+    activities = deduplicate_activities(raw_acts)
     activities.reverse()
 
     return {"data": compute_fitness_fatigue_timeseries(activities, max_hr, rest_hr, req.days, req.uid) or []}

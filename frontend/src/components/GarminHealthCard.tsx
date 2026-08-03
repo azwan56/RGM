@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 
 interface GarminHealthCardProps {
   health?: {
@@ -20,8 +20,6 @@ interface GarminHealthCardProps {
 }
 
 export default function GarminHealthCard({ health, vo2Max, isGarminConnected, onSync }: GarminHealthCardProps) {
-  if (!health && !vo2Max && !isGarminConnected) return null;
-
   const rhr = health?.resting_heart_rate;
   const sleepScore = health?.sleep_score;
   const sleepSec = health?.sleep_duration_seconds;
@@ -40,7 +38,7 @@ export default function GarminHealthCard({ health, vo2Max, isGarminConnected, on
     if (!hrvStatus) {
       return (
         <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-          Garmin 佳明直连
+          {isGarminConnected ? "Garmin 佳明已连接" : "Garmin 佳明直连"}
         </span>
       );
     }
@@ -64,7 +62,7 @@ export default function GarminHealthCard({ health, vo2Max, isGarminConnected, on
           <div>
             <h3 className="text-base font-bold text-white leading-tight">Garmin 生理与恢复卡片</h3>
             <p className="text-xs text-zinc-500">
-              {health?.date ? `最近更新: ${health.date}` : "尚未同步到当天休息数据，点击刷新可手动拉取"}
+              {health?.date ? `最近更新: ${health.date}` : "展示静息心率、睡眠质量、夜间 HRV 与身体电量"}
             </p>
           </div>
         </div>
