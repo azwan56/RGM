@@ -66,18 +66,6 @@ export default function GarminHealthCard({ health, vo2Max, isGarminConnected, on
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {hrvBadge()}
-          {onSync && (
-            <button
-              onClick={onSync}
-              className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition border border-white/10"
-              title="即时从 Garmin 刷新健康数据"
-            >
-              🔄 刷新
-            </button>
-          )}
-        </div>
       </div>
 
       {/* 4 Grid Cards */}
