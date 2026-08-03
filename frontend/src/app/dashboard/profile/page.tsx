@@ -231,7 +231,9 @@ export default function ProfilePage() {
     setImportingPBs(false);
   }, [uid, backendUrl]);
 
-  // ── Garmin connection status ────────────────────────────────────────────────
+  // ── Connection status ──────────────────────────────────────────────────────
+  const [stravaConnected, setStravaConnected] = useState(false);
+  const [stravaName, setStravaName]           = useState("");
   const [garminConnected, setGarminConnected] = useState(false);
   const [garminEmail, setGarminEmail]         = useState("");
   const [garminDomain, setGarminDomain]       = useState("garmin.cn");
@@ -241,6 +243,7 @@ export default function ProfilePage() {
   const [garminFormDomain, setGarminFormDomain]     = useState("garmin.cn");
   const [garminLoading, setGarminLoading]           = useState(false);
   const [garminMsg, setGarminMsg]                   = useState("");
+
 
   useEffect(() => {
     if (!uid) return;
@@ -799,7 +802,9 @@ export default function ProfilePage() {
             {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中...</> : "💾 保存所有修改"}
           </button>
         </div>
+        </div>
       </main>
+
 
       {/* ── Garmin Bind Modal ──────────────────────────────────────────────── */}
       {showGarminModal && (
