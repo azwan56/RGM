@@ -172,6 +172,11 @@ export default function Dashboard() {
   // Handle Garmin Sync
   const handleGarminSync = async () => {
     if (!user || garminSyncing) return;
+    // If Garmin is not connected yet, open bind modal directly without failing
+    if (!dashboardData?.garmin_connected) {
+      setShowGarminModal(true);
+      return;
+    }
     setGarminSyncing(true);
     setSyncMsg(null);
     try {
@@ -180,12 +185,8 @@ export default function Dashboard() {
       setSyncMsg({ text: "✓ Garmin 生理与跑步数据同步成功！", type: "success" });
     } catch (e: any) {
       console.error("Garmin sync error:", e);
-      const detail = e.response?.data?.detail || "Garmin 同步失败，请稍后重试";
-      if (detail.includes("绑定") || detail.includes("账号")) {
-        setShowGarminModal(true);
-      } else {
-        setSyncMsg({ text: detail, type: "error" });
-      }
+      const detail = e.response?.data?.detail || "Garmin 同步失败，请检查佳明账号、密码或选区 (garmin.cn vs garmin.com)。";
+      setSyncMsg({ text: detail, type: "error" });
     } finally {
       setGarminSyncing(false);
       setTimeout(() => setSyncMsg(null), 5000);
