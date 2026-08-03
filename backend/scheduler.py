@@ -60,17 +60,42 @@ def run_daily_sync() -> dict:
         logger.error("[scheduler] Strava credentials missing, skipping sync")
         return {"error": "Strava credentials missing"}
 
-    # Find all Strava-connected users
-    users = db.collection("users").where("strava_connected", "==", True).stream()
-    user_list = [(doc.id, doc.to_dict()) for doc in users]
+    # Find all Strava-connected or Garmin-connected users
+    garmin_users = db.collection("users").where("garmin_connected", "==", True).stream()
+    strava_users = db.collection("users").where("strava_connected", "==", True).stream()
 
+    user_map = {}
+    for doc in garmin_users:
+        user_map[doc.id] = doc.to_dict()
+    for doc in strava_users:
+        user_map[doc.id] = doc.to_dict()
+
+    user_list = list(user_map.items())
     results = {"synced": 0, "failed": 0, "skipped": 0, "errors": [], "started_at": datetime.now().isoformat()}
 
     for uid, user_data in user_list:
+        user_ref = db.collection("users").document(uid)
+
+        # 1. Sync Garmin if connected
+        if user_data.get("garmin_connected"):
+            try:
+                from routers.sync import sync_garmin_user_data
+                gar_res = sync_garmin_user_data(user_data, user_ref)
+                if gar_res.get("success"):
+                    results["synced"] += 1
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(f"{uid} (garmin): {gar_res.get('error')}")
+            except Exception as ge:
+                logger.error(f"[scheduler] Garmin sync failed for {uid}: {ge}")
+
+        # 2. Sync Strava if connected
         refresh_token = user_data.get("strava_refresh_token")
         if not refresh_token:
-            results["skipped"] += 1
+            if not user_data.get("garmin_connected"):
+                results["skipped"] += 1
             continue
+
 
         try:
             # Refresh token (skip throttle for auth requests)

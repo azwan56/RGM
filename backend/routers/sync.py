@@ -142,11 +142,75 @@ def _build_act_doc(act: dict, period: str, period_start, gear_info: dict = None)
     return doc
 
 
+def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
+    """Syncs Garmin activities & daily health metrics for a user."""
+    from utils.garmin_adapter import GarminAdapter
+    from utils.encryption import decrypt_string
+
+    email = user_data.get("garmin_email")
+    enc_pwd = user_data.get("garmin_encrypted_password")
+    domain = user_data.get("garmin_domain", "garmin.cn")
+
+    if not email or not enc_pwd:
+        return {"success": False, "error": "Garmin credentials missing"}
+
+    password = decrypt_string(enc_pwd)
+    if not password:
+        return {"success": False, "error": "Failed to decrypt password"}
+
+    adapter = GarminAdapter(email=email, password=password, domain=domain)
+    activities = adapter.fetch_recent_activities(limit=50)
+
+    batch = db.batch()
+    synced_count = 0
+
+    for act in activities:
+        act_id = act.get("garmin_activity_id") or act["id"]
+        act_ref = user_ref.collection("activities").document(f"garmin_{act_id}")
+        dist = act.get("distance", 0)
+        t = act.get("moving_time", 0)
+        is_run = (act.get("type", "Run") in ["Run", "Running", "TrailRun"])
+
+        doc = {
+            "activity_id": f"garmin_{act_id}",
+            "source": "garmin",
+            "garmin_domain": domain,
+            "name": act.get("name", "Garmin Run"),
+            "start_date_local": act.get("start_date_local", ""),
+            "distance_km": round(dist / 1000, 2),
+            "moving_time": t,
+            "elapsed_time": act.get("elapsed_time", t),
+            "duration_str": format_duration(t),
+            "avg_pace": pace_str(dist, t) if is_run else "—",
+            "avg_speed_kmh": round(act.get("average_speed", 0) * 3.6, 1),
+            "max_speed_kmh": round(act.get("max_speed", 0) * 3.6, 1),
+            "avg_heart_rate": round(act.get("average_heartrate", 0)) if act.get("average_heartrate") else 0,
+            "max_heart_rate": round(act.get("max_heartrate", 0)) if act.get("max_heartrate") else 0,
+            "has_heartrate": act.get("has_heartrate", False),
+            "total_elevation_gain": act.get("total_elevation_gain", 0),
+            "avg_cadence": act.get("average_cadence", 0),
+            "summary_polyline": act.get("summary_polyline", ""),
+            "activity_type": "run" if is_run else "cross_training",
+        }
+        batch.set(act_ref, doc, merge=True)
+        synced_count += 1
+
+    batch.commit()
+
+    # Sync daily health metrics
+    health = adapter.fetch_daily_health_metrics()
+    if health and health.get("date"):
+        health_ref = user_ref.collection("health_metrics").document(health["date"])
+        health_ref.set(health, merge=True)
+
+    return {"success": True, "count": synced_count, "health": health}
+
+
 # ── Trigger sync (current period) ────────────────────────────────────────────
 @router.post("/trigger")
 def sync_user_data(req: SyncRequest):
     """
-    Syncs running data from Strava for the current natural week or month,
+    Syncs running data from Garmin or Strava for the current natural week or month,
     depending on the user's goal period setting.
     """
     user_ref  = db.collection("users").document(req.uid)
@@ -154,10 +218,17 @@ def sync_user_data(req: SyncRequest):
     if not user_doc.exists:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_data     = user_doc.to_dict()
+    user_data = user_doc.to_dict()
+
+    # If user has Garmin connected, perform Garmin sync
+    garmin_result = None
+    if user_data.get("garmin_connected"):
+        garmin_result = sync_garmin_user_data(user_data, user_ref)
+
     refresh_token = user_data.get("strava_refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=400, detail="Strava not connected")
+    if not refresh_token and not user_data.get("garmin_connected"):
+        raise HTTPException(status_code=400, detail="Neither Strava nor Garmin connected")
+
 
     # 1. Refresh token
     client_id     = os.getenv("STRAVA_CLIENT_ID")

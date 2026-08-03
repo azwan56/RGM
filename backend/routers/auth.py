@@ -131,3 +131,65 @@ def send_welcome(request: WelcomeEmailRequest, background_tasks: BackgroundTasks
     )
     return {"message": "Welcome email queued", "skipped": False}
 
+
+# ── Garmin Auth & Bind ────────────────────────────────────────────────────────
+
+class GarminAuthRequest(BaseModel):
+    uid: str
+    email: str
+    password: str
+    domain: str = "garmin.cn"  # "garmin.cn" or "garmin.com"
+
+
+class GarminUnbindRequest(BaseModel):
+    uid: str
+
+
+@router.post("/garmin/bind")
+def bind_garmin(request: GarminAuthRequest):
+    """
+    Validates Garmin credentials and securely stores encrypted credentials
+    in the user's Firestore document. Supports garmin.cn and garmin.com.
+    """
+    from utils.garmin_adapter import GarminAdapter
+    from utils.encryption import encrypt_string
+
+    domain = request.domain.lower().strip()
+    if domain not in ["garmin.cn", "garmin.com"]:
+        raise HTTPException(status_code=400, detail="Invalid domain. Choose garmin.cn or garmin.com")
+
+    # Attempt test login
+    adapter = GarminAdapter(email=request.email, password=request.password, domain=domain)
+    # If garminconnect is installed, validate credentials
+    from utils.garmin_adapter import HAS_GARMINCONNECT
+    if HAS_GARMINCONNECT:
+        ok = adapter.login()
+        if not ok:
+            raise HTTPException(status_code=400, detail="Garmin authentication failed. Please check email, password, and region.")
+
+    encrypted_pwd = encrypt_string(request.password)
+    user_ref = db.collection("users").document(request.uid)
+
+    garmin_fields = {
+        "garmin_connected": True,
+        "garmin_email": request.email,
+        "garmin_encrypted_password": encrypted_pwd,
+        "garmin_domain": domain,
+        "primary_data_source": "garmin",
+    }
+
+    user_ref.set(garmin_fields, merge=True)
+    return {"message": f"Garmin ({domain}) connected successfully", "email": request.email, "domain": domain}
+
+
+@router.post("/garmin/unbind")
+def unbind_garmin(request: GarminUnbindRequest):
+    """Unbinds Garmin integration for a user."""
+    user_ref = db.collection("users").document(request.uid)
+    user_ref.set({
+        "garmin_connected": False,
+        "garmin_encrypted_password": "",
+    }, merge=True)
+    return {"message": "Garmin disconnected successfully"}
+
+

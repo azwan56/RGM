@@ -231,9 +231,16 @@ export default function ProfilePage() {
     setImportingPBs(false);
   }, [uid, backendUrl]);
 
-  // ── Strava connection status ────────────────────────────────────────────────
-  const [stravaConnected, setStravaConnected] = useState(false);
-  const [stravaName, setStravaName]           = useState("");
+  // ── Garmin connection status ────────────────────────────────────────────────
+  const [garminConnected, setGarminConnected] = useState(false);
+  const [garminEmail, setGarminEmail]         = useState("");
+  const [garminDomain, setGarminDomain]       = useState("garmin.cn");
+  const [showGarminModal, setShowGarminModal] = useState(false);
+  const [garminFormEmail, setGarminFormEmail]       = useState("");
+  const [garminFormPassword, setGarminFormPassword] = useState("");
+  const [garminFormDomain, setGarminFormDomain]     = useState("garmin.cn");
+  const [garminLoading, setGarminLoading]           = useState(false);
+  const [garminMsg, setGarminMsg]                   = useState("");
 
   useEffect(() => {
     if (!uid) return;
@@ -241,8 +248,47 @@ export default function ProfilePage() {
       .then(r => {
         setStravaConnected(!!r.data.strava_expires_at);
         setStravaName(r.data.strava_name || "");
+        setGarminConnected(!!r.data.garmin_connected);
+        setGarminEmail(r.data.garmin_email || "");
+        setGarminDomain(r.data.garmin_domain || "garmin.cn");
       }).catch(() => {});
   }, [uid, backendUrl]);
+
+  const handleGarminBind = async () => {
+    if (!garminFormEmail || !garminFormPassword) {
+      setGarminMsg("请输入 Garmin 账号邮箱与密码");
+      return;
+    }
+    setGarminLoading(true);
+    setGarminMsg("");
+    try {
+      await axios.post(`${backendUrl}/api/auth/garmin/bind`, {
+        uid,
+        email: garminFormEmail,
+        password: garminFormPassword,
+        domain: garminFormDomain,
+      });
+      setGarminConnected(true);
+      setGarminEmail(garminFormEmail);
+      setGarminDomain(garminFormDomain);
+      setShowGarminModal(false);
+      setGarminMsg("");
+    } catch (err: any) {
+      setGarminMsg(err.response?.data?.detail || "绑定失败，请检查账号密码及选择的服务器区域。");
+    } finally {
+      setGarminLoading(false);
+    }
+  };
+
+  const handleGarminUnbind = async () => {
+    if (!confirm("确定解除 Garmin 账号绑定吗？")) return;
+    try {
+      await axios.post(`${backendUrl}/api/auth/garmin/unbind`, { uid });
+      setGarminConnected(false);
+      setGarminEmail("");
+    } catch (err) {}
+  };
+
 
   if (loading) {
     return (
@@ -377,8 +423,37 @@ export default function ProfilePage() {
                 <span className="text-sm">{stravaConnected ? stravaName || "已连接" : "未连接"}</span>
               </div>
             </Field>
+
+            <Field label="Garmin 佳明设备">
+              <div className="flex items-center gap-2">
+                <div className={`${inputCls} flex-1 flex items-center gap-2 cursor-default`} style={{ opacity: garminConnected ? 1 : 0.5 }}>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-mono">
+                    {garminDomain === "garmin.cn" ? "🇨🇳 中国版" : "🌐 国际版"}
+                  </span>
+                  <span className="text-sm truncate">{garminConnected ? garminEmail || "已连接" : "未连接"}</span>
+                </div>
+                {garminConnected ? (
+                  <button
+                    type="button"
+                    onClick={handleGarminUnbind}
+                    className="px-3 py-2 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition"
+                  >
+                    解绑
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setShowGarminModal(true); setGarminMsg(""); }}
+                    className="px-3 py-2 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-medium transition"
+                  >
+                    绑定 Garmin
+                  </button>
+                )}
+              </div>
+            </Field>
           </div>
         </div>
+
 
         {/* ── Runner Profile ────────────────────────────────────────────────── */}
         <div className="bg-white/3 border border-white/8 rounded-3xl p-5 space-y-4">
@@ -724,8 +799,112 @@ export default function ProfilePage() {
             {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中...</> : "💾 保存所有修改"}
           </button>
         </div>
-        </div>
       </main>
+
+      {/* ── Garmin Bind Modal ──────────────────────────────────────────────── */}
+      {showGarminModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-[#121215] border border-white/10 rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <span>⌚</span> 绑定 Garmin 佳明账号
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowGarminModal(false)}
+                className="text-zinc-400 hover:text-white text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">选择服务器区域</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGarminFormDomain("garmin.cn")}
+                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
+                      garminFormDomain === "garmin.cn"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                        : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    🇨🇳 中国版 (garmin.cn)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGarminFormDomain("garmin.com")}
+                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition ${
+                      garminFormDomain === "garmin.com"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                        : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    🌐 国际版 (garmin.com)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Garmin 登录邮箱</label>
+                <input
+                  type="email"
+                  placeholder="your-email@example.com"
+                  className={inputCls}
+                  value={garminFormEmail}
+                  onChange={(e) => setGarminFormEmail(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Garmin 登录密码</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className={inputCls}
+                  value={garminFormPassword}
+                  onChange={(e) => setGarminFormPassword(e.target.value)}
+                />
+                <p className="text-[10px] text-zinc-500 mt-1">🔒 密码将在服务端通过 AES 加密安全保存，仅用于向 Garmin 请求数据。</p>
+              </div>
+
+              {garminMsg && (
+                <div className={`p-3 rounded-xl text-xs ${garminMsg.includes("成功") ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"}`}>
+                  {garminMsg}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setShowGarminModal(false)}
+                className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleGarminBind}
+                disabled={garminLoading}
+                className="px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl transition flex items-center gap-2"
+              >
+                {garminLoading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    验证中...
+                  </>
+                ) : (
+                  "立即连接"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
