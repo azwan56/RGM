@@ -203,6 +203,14 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
         health_ref = user_ref.collection("health_metrics").document(health["date"])
         health_ref.set(health, merge=True)
 
+        prof_updates = {}
+        if health.get("resting_heart_rate"):
+            prof_updates["resting_heart_rate"] = health["resting_heart_rate"]
+        if health.get("vo2_max"):
+            prof_updates["vo2_max"] = health["vo2_max"]
+        if prof_updates:
+            user_ref.set(prof_updates, merge=True)
+
     return {"success": True, "count": synced_count, "health": health}
 
 

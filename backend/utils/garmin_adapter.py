@@ -76,13 +76,32 @@ class GarminAdapter:
             "updated_at": datetime.utcnow().isoformat() + "Z"
         }
 
-        # 1. Resting Heart Rate
+        # 0. User Summary Baseline (RHR, VO2 Max, Sleep, Body Battery)
+        try:
+            summary = self.client.get_user_summary(date_str)
+            if isinstance(summary, dict):
+                if summary.get("restingHeartRate"):
+                    metrics["resting_heart_rate"] = summary.get("restingHeartRate")
+                if summary.get("vo2Max"):
+                    metrics["vo2_max"] = summary.get("vo2Max")
+                if summary.get("sleepDuration"):
+                    metrics["sleep_duration_seconds"] = summary.get("sleepDuration")
+                if summary.get("bodyBatteryHighestValue"):
+                    metrics["body_battery_max"] = summary.get("bodyBatteryHighestValue")
+        except Exception as e:
+            logger.debug(f"[garmin] Could not fetch user summary: {e}")
+
+        # 1. Resting Heart Rate (override/supplement)
         try:
             rhr_data = self.client.get_rhr_day(date_str)
             if isinstance(rhr_data, dict) and "allMetrics" in rhr_data:
-                metrics["resting_heart_rate"] = rhr_data["allMetrics"].get("metricsMap", {}).get("WELLNESS_RESTING_HEART_RATE", [{}])[0].get("value")
+                val = rhr_data["allMetrics"].get("metricsMap", {}).get("WELLNESS_RESTING_HEART_RATE", [{}])[0].get("value")
+                if val:
+                    metrics["resting_heart_rate"] = val
             elif isinstance(rhr_data, dict) and "restingHeartRate" in rhr_data:
-                metrics["resting_heart_rate"] = rhr_data.get("restingHeartRate")
+                val = rhr_data.get("restingHeartRate")
+                if val:
+                    metrics["resting_heart_rate"] = val
         except Exception as e:
             logger.debug(f"[garmin] Could not fetch RHR: {e}")
 
@@ -91,8 +110,12 @@ class GarminAdapter:
             sleep_data = self.client.get_sleep_data(date_str)
             if isinstance(sleep_data, dict):
                 daily_sleep = sleep_data.get("dailySleepDTO", {})
-                metrics["sleep_score"] = daily_sleep.get("sleepScores", {}).get("overall", {}).get("value")
-                metrics["sleep_duration_seconds"] = daily_sleep.get("sleepTimeSeconds")
+                score = daily_sleep.get("sleepScores", {}).get("overall", {}).get("value")
+                if score:
+                    metrics["sleep_score"] = score
+                dur = daily_sleep.get("sleepTimeSeconds")
+                if dur:
+                    metrics["sleep_duration_seconds"] = dur
         except Exception as e:
             logger.debug(f"[garmin] Could not fetch sleep data: {e}")
 
