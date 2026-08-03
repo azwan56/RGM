@@ -39,8 +39,8 @@ class _TTLCache:
 
 # Leaderboard list: rarely changes, 5 min cache
 _lb_cache = _TTLCache(300)
-# User profiles: 2 min cache (same-session)
-_profile_cache = _TTLCache(120)
+# User profiles: 0 min cache (bypass to avoid distributed stale reads after bind/sync)
+_profile_cache = _TTLCache(0)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

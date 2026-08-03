@@ -52,7 +52,7 @@ export default function Dashboard() {
   const fetchDashboard = useCallback(async (uid: string, month: number) => {
     try {
       const res = await axios.get(`${backendUrl}/api/data/dashboard/${uid}`, {
-        params: { period: "monthly", month },
+        params: { period: "monthly", month, _t: Date.now() },
       });
       const d = res.data;
       setDashboardData(d);
@@ -357,7 +357,7 @@ export default function Dashboard() {
         {/* Garmin Health Card */}
         {user && (
           <GarminHealthCard
-            health={dashboardData?.latest_health}
+            health={dashboardData?.health}
             vo2Max={dashboardData?.profile?.vo2_max}
             isGarminConnected={dashboardData?.garmin_connected}
             onSync={handleGarminSync}
