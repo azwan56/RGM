@@ -165,34 +165,11 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
     synced_count = 0
 
     for act in activities:
-        act_id = act.get("garmin_activity_id") or act["id"]
+        act_id = str(act.get("garmin_raw_id") or act.get("activity_id", "").replace("garmin_", ""))
+        if not act_id:
+            continue
         act_ref = user_ref.collection("activities").document(f"garmin_{act_id}")
-        dist = act.get("distance", 0)
-        t = act.get("moving_time", 0)
-        is_run = (act.get("type", "Run") in ["Run", "Running", "TrailRun"])
-
-        doc = {
-            "activity_id": f"garmin_{act_id}",
-            "source": "garmin",
-            "garmin_domain": domain,
-            "name": act.get("name", "Garmin Run"),
-            "start_date_local": act.get("start_date_local", ""),
-            "distance_km": round(dist / 1000, 2),
-            "moving_time": t,
-            "elapsed_time": act.get("elapsed_time", t),
-            "duration_str": format_duration(t),
-            "avg_pace": pace_str(dist, t) if is_run else "—",
-            "avg_speed_kmh": round(act.get("average_speed", 0) * 3.6, 1),
-            "max_speed_kmh": round(act.get("max_speed", 0) * 3.6, 1),
-            "avg_heart_rate": round(act.get("average_heartrate", 0)) if act.get("average_heartrate") else 0,
-            "max_heart_rate": round(act.get("max_heartrate", 0)) if act.get("max_heartrate") else 0,
-            "has_heartrate": act.get("has_heartrate", False),
-            "total_elevation_gain": round(float(act.get("total_elevation_gain", 0)), 1),
-            "avg_cadence": act.get("average_cadence", 0),
-            "summary_polyline": act.get("summary_polyline", ""),
-            "activity_type": "run" if is_run else "cross_training",
-        }
-        batch.set(act_ref, doc, merge=True)
+        batch.set(act_ref, act, merge=True)
         synced_count += 1
 
     batch.commit()
