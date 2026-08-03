@@ -197,21 +197,34 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
 
     batch.commit()
 
-    # Sync daily health metrics
-    health = adapter.fetch_daily_health_metrics()
-    if health and health.get("date"):
-        health_ref = user_ref.collection("health_metrics").document(health["date"])
-        health_ref.set(health, merge=True)
+    # Sync daily health metrics for past 7 days
+    from datetime import date, timedelta
+    today = date.today()
+    latest_valid_health = None
 
+    for i in range(7):
+        day_str = (today - timedelta(days=i)).isoformat()
+        try:
+            h = adapter.fetch_daily_health_metrics(day_str)
+            if h and h.get("date"):
+                health_ref = user_ref.collection("health_metrics").document(h["date"])
+                health_ref.set(h, merge=True)
+                has_data = any(h.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "hrv_last_night", "body_battery_max"])
+                if has_data and not latest_valid_health:
+                    latest_valid_health = h
+        except Exception as e:
+            logger.debug(f"[sync] Health metric sync for {day_str} failed: {e}")
+
+    if latest_valid_health:
         prof_updates = {}
-        if health.get("resting_heart_rate"):
-            prof_updates["resting_heart_rate"] = health["resting_heart_rate"]
-        if health.get("vo2_max"):
-            prof_updates["vo2_max"] = health["vo2_max"]
+        if latest_valid_health.get("resting_heart_rate"):
+            prof_updates["resting_heart_rate"] = latest_valid_health["resting_heart_rate"]
+        if latest_valid_health.get("vo2_max"):
+            prof_updates["vo2_max"] = latest_valid_health["vo2_max"]
         if prof_updates:
             user_ref.set(prof_updates, merge=True)
 
-    return {"success": True, "count": synced_count, "health": health}
+    return {"success": True, "count": synced_count, "health": latest_valid_health}
 
 
 # ── Trigger sync (current period) ────────────────────────────────────────────

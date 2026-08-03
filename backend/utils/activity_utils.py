@@ -36,21 +36,40 @@ def get_activity_date_str(act: Dict[str, Any]) -> str:
     st_str = str(st).strip()
     return st_str[:10]  # First 10 chars: YYYY-MM-DD
 
+def get_act_distance(act: Dict[str, Any]) -> float:
+    """Safely extracts distance in kilometers as float."""
+    d = act.get("distance_km")
+    if d is not None:
+        try:
+            return float(d)
+        except Exception:
+            pass
+    d = act.get("distance")
+    if d is not None:
+        try:
+            return float(d) / 1000.0
+        except Exception:
+            pass
+    return 0.0
+
 def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Deduplicates activities from multiple sources (Garmin, Strava, Apple Health).
     Two activities represent the exact same workout if:
-    1. They occur within 5 minutes (300 seconds) OR on the same day (YYYY-MM-DD), AND
-    2. Distance difference is <= 0.3 km (or <= 3%).
+    1. They occur on the same date (YYYY-MM-DD) OR within 10 minutes (600s), AND
+    2. Distance difference <= 0.5 km (or <= 5%).
     Garmin activities take precedence over Strava.
     """
     if not activities:
         return []
 
-    # Helper to sort: Garmin priority = 0, Strava = 1, AppleHealth = 2, others = 3
+    # Sort key: Garmin priority = 0, Strava = 1, AppleHealth = 2, others = 3
     def sort_key(act):
         source = str(act.get("source", "")).lower()
-        prio = 0 if source == "garmin" else (1 if source == "strava" else (2 if source == "applehealth" else 3))
+        act_id = str(act.get("activity_id", "") or act.get("id", "")).lower()
+        is_garmin = (source == "garmin" or act_id.startswith("garmin"))
+        is_strava = (source == "strava" or not is_garmin)
+        prio = 0 if is_garmin else (1 if is_strava else 2)
         return (parse_activity_time(act), -prio)
 
     sorted_acts = sorted(activities, key=sort_key, reverse=True)
@@ -59,22 +78,22 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
     for act in sorted_acts:
         t_act = parse_activity_time(act)
         d_str_act = get_activity_date_str(act)
-        d_act = float(act.get("distance_km", 0) or (act.get("distance", 0) / 1000.0) or 0)
+        d_act = get_act_distance(act)
 
         is_dup = False
         for k in kept:
             t_k = parse_activity_time(k)
             d_str_k = get_activity_date_str(k)
-            d_k = float(k.get("distance_km", 0) or (k.get("distance", 0) / 1000.0) or 0)
+            d_k = get_act_distance(k)
 
-            # Check distance difference (within 0.3 km or 3%)
+            # Check distance difference (within 0.5 km or 5%)
             dist_diff = abs(d_act - d_k)
-            dist_matches = dist_diff <= 0.3 or (d_k > 0 and (dist_diff / d_k) <= 0.03)
+            dist_matches = dist_diff <= 0.5 or (d_k > 0 and (dist_diff / d_k) <= 0.05)
 
             if dist_matches:
-                # Check time difference (within 5 mins / 300s) OR same date string
+                # Check time difference (within 10 mins / 600s) OR same date string
                 time_diff = abs(t_act - t_k)
-                time_matches = (t_act > 0 and t_k > 0 and time_diff <= 300) or (d_str_act and d_str_act == d_str_k)
+                time_matches = (t_act > 0 and t_k > 0 and time_diff <= 600) or (d_str_act and d_str_act == d_str_k)
                 if time_matches:
                     is_dup = True
                     break

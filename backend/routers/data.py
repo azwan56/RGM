@@ -102,11 +102,14 @@ def _read_latest_health(uid: str):
     docs = (
         db.collection("users").document(uid).collection("health_metrics")
           .order_by("date", direction="DESCENDING")
-          .limit(1)
+          .limit(10)
           .stream()
     )
-    res = [d.to_dict() for d in docs]
-    return res[0] if res else None
+    for d in docs:
+        h = d.to_dict()
+        if any(h.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "hrv_last_night", "hrv_weekly_avg", "body_battery_max"]):
+            return h
+    return None
 
 
 # ── Combined Dashboard endpoint (replaces 4 serial requests) ─────────────────

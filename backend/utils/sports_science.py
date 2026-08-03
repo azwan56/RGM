@@ -276,6 +276,10 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     if not activities:
         return []
 
+    # Unconditionally deduplicate input activities to prevent TRIMP doubling
+    from utils.activity_utils import deduplicate_activities
+    activities = deduplicate_activities(activities)
+
     # 1. Prepare base DataFrame
     df = pd.DataFrame(activities)
     
