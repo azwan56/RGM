@@ -135,8 +135,8 @@ export default function Dashboard() {
           <PageNav />
         </header>
 
-        {/* Strava connect banner */}
-        {!isStravaConnected && (
+        {/* Data source connect banner (shows if neither Strava nor Garmin is connected) */}
+        {!dashboardData?.strava_connected && !dashboardData?.garmin_connected && (
           <div className="bg-gradient-to-r from-[#FC4C02]/20 to-orange-500/10 border border-[#FC4C02]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 backdrop-blur-sm">
             <div>
               <h3 className="text-xl font-bold mb-1">连接数据源</h3>
@@ -149,12 +149,12 @@ export default function Dashboard() {
         )}
 
         {/* Running Stats Panel — pass pre-fetched stats */}
-        {isStravaConnected && user && (
+        {user && (
           <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
 
         {/* Leaderboard + Activity List — side by side, fixed height */}
-        {isStravaConnected && user && (
+        {user && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Leaderboard — first */}
             <div className="flex flex-col" style={{ height: "520px" }}>
@@ -195,7 +195,7 @@ export default function Dashboard() {
         )}
 
         {/* Fitness & Form Chart */}
-        {isStravaConnected && user && (
+        {user && (
           <FitnessChart uid={user.uid} />
         )}
 
