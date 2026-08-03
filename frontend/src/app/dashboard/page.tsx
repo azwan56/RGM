@@ -110,13 +110,13 @@ export default function Dashboard() {
         password: garminPassword,
         domain: garminDomain,
       });
-      setGarminMsg("✓ 绑定成功！已开始自动同步佳明数据...");
+      setGarminMsg("✓ 验证并绑定成功！已拉取 Garmin 生理与健康数据...");
       setTimeout(async () => {
         setShowGarminModal(false);
         setGarminMsg("");
         setGarminPassword("");
         await fetchDashboard(user.uid, activityMonth);
-      }, 1200);
+      }, 1000);
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       setGarminMsg(detail || "绑定失败，请检查账号、密码及选择的佳明区域（中国版 vs 国际版）。");
@@ -167,16 +167,16 @@ export default function Dashboard() {
     if (isGarmin && isStrava) return "Garmin & Strava 双源直连 ✓";
     if (isGarmin) return "Garmin 佳明直连已启用 ✓";
     if (isStrava) return "Strava 数据已连接 ✓";
-    return "点击底部绑定 Garmin 或 Strava 记录";
+    return "点击底部“数据源连接设置”进行绑定";
   };
 
   const syncBtnLabel = () => {
     const isGarmin = dashboardData?.garmin_connected;
     const isStrava = dashboardData?.strava_connected;
-    if (isGarmin && isStrava) return "🔄 同步全量数据";
-    if (isGarmin) return "⌚ 同步 Garmin 数据";
-    if (isStrava) return " Connect Strava";
-    return "🔄 同步数据";
+    if (isGarmin && isStrava) return "🔄 同步 Garmin & Strava 数据";
+    if (isGarmin) return "⌚ 立即同步 Garmin 生理与运动数据";
+    if (isStrava) return " 立即同步 Strava 数据";
+    return "🔄 同步设备数据";
   };
 
   if (loading) {
@@ -228,25 +228,9 @@ export default function Dashboard() {
           <PageNav />
         </header>
 
-        {/* Sync control & Running Stats Panel */}
+        {/* Running Stats Panel */}
         {user && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-500 font-medium">数据控制面板</span>
-              <button
-                onClick={handleSyncAll}
-                disabled={syncing}
-                className="px-4 py-2 bg-gradient-to-r from-[#FC4C02] to-orange-500 hover:from-orange-500 hover:to-[#FC4C02] disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-2"
-              >
-                {syncing ? (
-                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步...</>
-                ) : (
-                  syncBtnLabel()
-                )}
-              </button>
-            </div>
-            <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
-          </div>
+          <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
         )}
 
         {/* Leaderboard + Activity List — side by side */}
@@ -305,17 +289,30 @@ export default function Dashboard() {
           />
         )}
 
-        {/* ── Data Source Connection Section (Placed at the VERY BOTTOM as requested) ── */}
-        <div className="bg-white/3 border border-white/10 rounded-3xl p-5 md:p-6 space-y-4 backdrop-blur-md">
-          <div className="flex items-center justify-between">
+        {/* ── Data Source Connection Section (Placed at the VERY BOTTOM with Sync Data Button) ── */}
+        <div className="bg-white/3 border border-white/10 rounded-3xl p-5 md:p-6 space-y-5 backdrop-blur-md">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span>🔗</span> 数据源连接设置 (Data Sources)
+                <span>🔗</span> 数据源连接与同步设置 (Data Sources & Sync)
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                实时连接 Garmin 佳明账号或 Strava，自动同步全量跑步与身体恢复数据。
+                支持绑定 Garmin 佳明账号 (中国版/国际版) 或 Strava，手动或自动同步全量跑步与生理恢复指标。
               </p>
             </div>
+
+            {/* Sync button moved directly here into settings! */}
+            <button
+              onClick={handleSyncAll}
+              disabled={syncing}
+              className="px-5 py-2.5 bg-gradient-to-r from-[#FC4C02] to-orange-500 hover:from-orange-500 hover:to-[#FC4C02] disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-lg flex items-center gap-2 shrink-0"
+            >
+              {syncing ? (
+                <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步...</>
+              ) : (
+                syncBtnLabel()
+              )}
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

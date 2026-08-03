@@ -180,6 +180,13 @@ def bind_garmin(request: GarminAuthRequest):
 
     user_ref.set(garmin_fields, merge=True)
 
+    # Invalidate profile cache so backend returns garmin_connected=True immediately
+    try:
+        from routers.data import invalidate_profile_cache
+        invalidate_profile_cache(request.uid)
+    except Exception:
+        pass
+
     # Immediately trigger initial sync for activities & health metrics
     try:
         from routers.sync import sync_garmin_user_data
@@ -198,6 +205,11 @@ def unbind_garmin(request: GarminUnbindRequest):
         "garmin_connected": False,
         "garmin_encrypted_password": "",
     }, merge=True)
+    try:
+        from routers.data import invalidate_profile_cache
+        invalidate_profile_cache(request.uid)
+    except Exception:
+        pass
     return {"message": "Garmin disconnected successfully"}
 
 
@@ -213,7 +225,13 @@ def unbind_strava(request: StravaUnbindRequest):
         "strava_refresh_token": "",
         "strava_expires_at": 0,
         "strava_id": "",
+        "strava_connected": False,
     }, merge=True)
+    try:
+        from routers.data import invalidate_profile_cache
+        invalidate_profile_cache(request.uid)
+    except Exception:
+        pass
     return {"message": "Strava disconnected successfully"}
 
 

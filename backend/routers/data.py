@@ -55,6 +55,11 @@ def _read_user_doc(uid: str):
         _profile_cache.set(uid, result)
     return result
 
+def invalidate_profile_cache(uid: str):
+    """Purges the user's cached profile so fresh auth/bind states are returned instantly."""
+    _profile_cache._data.pop(uid, None)
+    _profile_cache._ts.pop(uid, None)
+
 def _read_goal_doc(uid: str):
     doc = db.collection("users").document(uid).collection("goals").document("current").get()
     return doc.to_dict() if doc.exists else None
