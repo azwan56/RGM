@@ -21,18 +21,28 @@ const FitnessChart = dynamic(() => import("@/components/FitnessChart"), {
 export default function Dashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [isStravaConnected, setIsStravaConnected] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [period, setPeriod] = useState<"weekly" | "monthly">("monthly");
   const [displayName, setDisplayName] = useState("");
   const [activityMonth, setActivityMonth] = useState(new Date().getMonth());
+
+  // Garmin bind modal state
+  const [showGarminModal, setShowGarminModal] = useState(false);
+  const [garminEmail, setGarminEmail] = useState("");
+  const [garminPassword, setGarminPassword] = useState("");
+  const [garminDomain, setGarminDomain] = useState<"garmin.cn" | "garmin.com">("garmin.cn");
+  const [garminLoading, setGarminLoading] = useState(false);
+  const [garminMsg, setGarminMsg] = useState("");
+
+  // Sync loading state
+  const [syncing, setSyncing] = useState(false);
 
   // Pre-fetched data from combined endpoint
   const [dashboardData, setDashboardData] = useState<any>(null);
 
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-  // Fetch all dashboard data in ONE request (replaces 4 serial requests)
+  // Fetch all dashboard data in ONE request
   const fetchDashboard = useCallback(async (uid: string, month: number) => {
     try {
       const res = await axios.get(`${backendUrl}/api/data/dashboard/${uid}`, {
@@ -40,7 +50,6 @@ export default function Dashboard() {
       });
       const d = res.data;
       setDashboardData(d);
-      if (d.strava_connected || d.garmin_connected) setIsStravaConnected(true);
       setDisplayName(d.display_name || "");
       if (d.goal_period === "weekly" || d.goal_period === "monthly") {
         setPeriod(d.goal_period);
@@ -85,11 +94,73 @@ export default function Dashboard() {
     }
   }, [user, backendUrl]);
 
+  // Handle Garmin Binding
+  const handleGarminBind = async () => {
+    if (!user) return;
+    if (!garminEmail || !garminPassword) {
+      setGarminMsg("请输入 Garmin 账号邮箱与密码");
+      return;
+    }
+    setGarminLoading(true);
+    setGarminMsg("");
+    try {
+      await axios.post(`${backendUrl}/api/auth/garmin/bind`, {
+        uid: user.uid,
+        email: garminEmail,
+        password: garminPassword,
+        domain: garminDomain,
+      });
+      setGarminMsg("✓ 绑定成功！已开始自动同步佳明跑步数据...");
+      setTimeout(async () => {
+        setShowGarminModal(false);
+        setGarminMsg("");
+        setGarminPassword("");
+        await fetchDashboard(user.uid, activityMonth);
+      }, 1500);
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      setGarminMsg(detail || "绑定失败，请检查账号、密码及选择的佳明区域（中国版 vs 国际版）。");
+    } finally {
+      setGarminLoading(false);
+    }
+  };
+
+  // Handle manual sync trigger
+  const handleSyncAll = async () => {
+    if (!user || syncing) return;
+    setSyncing(true);
+    try {
+      await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
+      await fetchDashboard(user.uid, activityMonth);
+    } catch (e) {
+      console.error("Sync error:", e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const statusSubtitle = () => {
+    const isGarmin = dashboardData?.garmin_connected;
+    const isStrava = dashboardData?.strava_connected;
+    if (isGarmin && isStrava) return "Garmin & Strava 双源直连 ✓";
+    if (isGarmin) return "Garmin 佳明直连已启用 ✓";
+    if (isStrava) return "Strava 数据已连接 ✓";
+    return "点击选择连接 Garmin 或 Strava 记录";
+  };
+
+  const syncBtnLabel = () => {
+    const isGarmin = dashboardData?.garmin_connected;
+    const isStrava = dashboardData?.strava_connected;
+    if (isGarmin && isStrava) return "🔄 同步全量数据";
+    if (isGarmin) return "⌚ 同步 Garmin 数据";
+    if (isStrava) return " Connect Strava";
+    return "🔄 同步数据";
+  };
+
   if (loading) {
     const userName = user?.displayName || user?.email?.split('@')[0] || "跑者";
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Decorative background blurs */}
         <div className="absolute top-0 right-0 w-[40%] h-[40%] rounded-full bg-[#FC4C02]/15 blur-[160px] pointer-events-none animate-pulse" />
         <div className="absolute bottom-0 left-0 w-[30%] h-[30%] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none animate-pulse" style={{ animationDelay: "1s" }} />
         
@@ -129,41 +200,69 @@ export default function Dashboard() {
           <div>
             <h1 className="text-2xl md:text-3xl font-black text-white mb-1">Dashboard</h1>
             <p className="text-zinc-500 text-sm">
-              {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {isStravaConnected ? "设备与数据已连接 ✓" : "连接数据源开始记录"}
+              {user?.email || user?.phoneNumber || user?.displayName || "已登录"} &mdash; {statusSubtitle()}
             </p>
           </div>
           <PageNav />
         </header>
 
-        {/* Data source connect banner (shows if neither Strava nor Garmin is connected) */}
-        {!dashboardData?.strava_connected && !dashboardData?.garmin_connected && (
-          <div className="bg-gradient-to-r from-[#FC4C02]/20 to-orange-500/10 border border-[#FC4C02]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 backdrop-blur-sm">
+        {/* Data source connect banner */}
+        {(!dashboardData?.strava_connected || !dashboardData?.garmin_connected) && (
+          <div className="bg-gradient-to-r from-blue-900/20 via-zinc-900/40 to-orange-950/20 border border-white/10 p-4 md:p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 backdrop-blur-md">
             <div>
-              <h3 className="text-xl font-bold mb-1">连接数据源</h3>
+              <h3 className="text-lg md:text-xl font-bold mb-1 text-white">连接数据源 (Garmin 佳明 / Strava)</h3>
               <p className="text-zinc-400 text-sm">
-                连接你的 Strava 或 Garmin 账号，自动同步跑步记录与健康恢复指标。
+                支持绑定 Garmin 佳明账号 (中国版/国际版) 或 Strava，自动同步跑步记录与生理恢复指标。
               </p>
             </div>
-            <StravaConnectBtn />
+            <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
+              {!dashboardData?.garmin_connected && (
+                <button
+                  onClick={() => setShowGarminModal(true)}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
+                >
+                  <span>⌚</span> 绑定 Garmin 佳明
+                </button>
+              )}
+              {!dashboardData?.strava_connected && (
+                <StravaConnectBtn />
+              )}
+            </div>
           </div>
         )}
 
-        {/* Running Stats Panel — pass pre-fetched stats */}
+        {/* Sync control & Running Stats Panel */}
         {user && (
-          <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500 font-medium">数据控制面板</span>
+              <button
+                onClick={handleSyncAll}
+                disabled={syncing}
+                className="px-4 py-2 bg-gradient-to-r from-[#FC4C02] to-orange-500 hover:from-orange-500 hover:to-[#FC4C02] disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-2"
+              >
+                {syncing ? (
+                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步...</>
+                ) : (
+                  syncBtnLabel()
+                )}
+              </button>
+            </div>
+            <RunningStatsPanel uid={user.uid} initialStats={dashboardData?.stats} />
+          </div>
         )}
 
-        {/* Leaderboard + Activity List — side by side, fixed height */}
+        {/* Leaderboard + Activity List — side by side */}
         {user && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Leaderboard — first */}
+            {/* Leaderboard */}
             <div className="flex flex-col" style={{ height: "520px" }}>
               <div className="flex-1 overflow-hidden">
                 <LeaderboardWidget currentUid={user.uid} fixedHeight="520px" initialEntries={dashboardData?.leaderboard?.entries} />
               </div>
             </div>
 
-            {/* Activity List — with month selector */}
+            {/* Activity List */}
             <div className="flex flex-col bg-white/5 border border-white/10 rounded-3xl overflow-hidden" style={{ height: "520px" }}>
               <div className="px-5 pt-5 pb-3 flex-shrink-0 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-white">跑步记录</h2>
@@ -199,31 +298,124 @@ export default function Dashboard() {
           <FitnessChart uid={user.uid} />
         )}
 
-        {/* Garmin Health Card (placed below FitnessChart) */}
+        {/* Garmin Health Card */}
         {(dashboardData?.latest_health || dashboardData?.garmin_connected) && (
           <GarminHealthCard
             health={dashboardData?.latest_health}
             vo2Max={dashboardData?.profile?.vo2_max}
             isGarminConnected={dashboardData?.garmin_connected}
-            onSync={async () => {
-              if (user) {
-                try {
-                  await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
-                  await fetchDashboard(user.uid, activityMonth);
-                } catch (e) {}
-              }
-            }}
+            onSync={handleSyncAll}
           />
         )}
 
-
-        
         {/* Footer */}
         <div className="mt-12 mb-4 text-center">
-          <p className="text-zinc-500 text-sm font-medium">Powered by Strava</p>
+          <p className="text-zinc-500 text-sm font-medium">RGM Running Intelligence Platform</p>
         </div>
 
       </main>
+
+      {/* Garmin Bind Modal */}
+      {showGarminModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-[#121215] border border-white/15 rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <span>⌚</span> 绑定 Garmin 佳明账号
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowGarminModal(false)}
+                className="text-zinc-400 hover:text-white text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">选择佳明服务器区域</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGarminDomain("garmin.cn")}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition ${
+                      garminDomain === "garmin.cn"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400 shadow-md"
+                        : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    🇨🇳 中国版 (garmin.cn)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGarminDomain("garmin.com")}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition ${
+                      garminDomain === "garmin.com"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400 shadow-md"
+                        : "bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    🌐 国际版 (garmin.com)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Garmin 登录邮箱</label>
+                <input
+                  type="email"
+                  placeholder="your-garmin-email@example.com"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  value={garminEmail}
+                  onChange={(e) => setGarminEmail(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Garmin 登录密码</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  value={garminPassword}
+                  onChange={(e) => setGarminPassword(e.target.value)}
+                />
+                <p className="text-[10px] text-zinc-500 mt-1">🔒 密码经 AES 高强度加密后安全存储，仅用于与 Garmin 服务器连接同步。</p>
+              </div>
+
+              {garminMsg && (
+                <div className={`p-3 rounded-xl text-xs ${garminMsg.includes("✓") ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}>
+                  {garminMsg}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setShowGarminModal(false)}
+                className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleGarminBind}
+                disabled={garminLoading}
+                className="px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl transition flex items-center gap-2"
+              >
+                {garminLoading ? (
+                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 验证并绑定中...</>
+                ) : (
+                  "验证并绑定 Garmin"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
