@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { auth } from "@/lib/firebase";
@@ -34,8 +34,14 @@ export default function Dashboard() {
   const [garminLoading, setGarminLoading] = useState(false);
   const [garminMsg, setGarminMsg] = useState("");
 
-  // Sync loading state
-  const [syncing, setSyncing] = useState(false);
+  // Sync states
+  const [garminSyncing, setGarminSyncing] = useState(false);
+  const [stravaSyncing, setStravaSyncing] = useState(false);
+  const [fullSyncing, setFullSyncing] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Pre-fetched data from combined endpoint
   const [dashboardData, setDashboardData] = useState<any>(null);
@@ -71,6 +77,22 @@ export default function Dashboard() {
     });
     return () => unsubscribe();
   }, [router, fetchDashboard, activityMonth, backendUrl]);
+
+  // Click outside to close history dropdown
+  useEffect(() => {
+    if (!historyOpen) return;
+    function handleClickOutside(e: MouseEvent | TouchEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, [historyOpen]);
 
   // Refetch only activities when month changes
   const handleMonthChange = useCallback(async (newMonth: number) => {
@@ -147,17 +169,73 @@ export default function Dashboard() {
     }
   };
 
-  // Handle manual sync trigger
-  const handleSyncAll = async () => {
-    if (!user || syncing) return;
-    setSyncing(true);
+  // Handle Garmin Sync
+  const handleGarminSync = async () => {
+    if (!user || garminSyncing) return;
+    setGarminSyncing(true);
+    setSyncMsg(null);
     try {
       await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
       await fetchDashboard(user.uid, activityMonth);
+      setSyncMsg({ text: "✓ Garmin 数据同步成功！", type: "success" });
     } catch (e) {
-      console.error("Sync error:", e);
+      console.error("Garmin sync error:", e);
+      setSyncMsg({ text: "Garmin 同步失败，请稍后重试", type: "error" });
     } finally {
-      setSyncing(false);
+      setGarminSyncing(false);
+      setTimeout(() => setSyncMsg(null), 4000);
+    }
+  };
+
+  // Handle Strava Current Period Sync
+  const handleStravaSync = async () => {
+    if (!user || stravaSyncing) return;
+    setStravaSyncing(true);
+    setSyncMsg(null);
+    try {
+      await axios.post(`${backendUrl}/api/sync/trigger`, { uid: user.uid });
+      await fetchDashboard(user.uid, activityMonth);
+      setSyncMsg({ text: "✓ Strava 数据同步成功！", type: "success" });
+    } catch (e) {
+      console.error("Strava sync error:", e);
+      setSyncMsg({ text: "Strava 同步失败，请稍后重试", type: "error" });
+    } finally {
+      setStravaSyncing(false);
+      setTimeout(() => setSyncMsg(null), 4000);
+    }
+  };
+
+  // Handle Strava Full History Sync
+  const handleFullSync = async (sinceDate = "2025-01-01") => {
+    if (!user || fullSyncing) return;
+    setFullSyncing(true);
+    setSyncMsg(null);
+    try {
+      await axios.post(`${backendUrl}/api/sync/full`, { uid: user.uid, since_date: sinceDate }, { timeout: 15000 });
+      setSyncMsg({ text: "历史同步已启动，正在后台拉取 Strava 历史数据...", type: "success" });
+
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await axios.get(`${backendUrl}/api/sync/full-status?uid=${user.uid}`, { timeout: 8000 });
+          const s = statusRes.data;
+          if (s.state === "done") {
+            clearInterval(poll);
+            setFullSyncing(false);
+            setSyncMsg({ text: `✓ 历史同步完成！共导入 ${s.saved} 次 Strava 跑步记录`, type: "success" });
+            fetchDashboard(user.uid, activityMonth);
+            setTimeout(() => setSyncMsg(null), 8000);
+          } else if (s.state === "error") {
+            clearInterval(poll);
+            setFullSyncing(false);
+            setSyncMsg({ text: `同步出错：${s.error || "未知错误"}`, type: "error" });
+            setTimeout(() => setSyncMsg(null), 6000);
+          }
+        } catch { /* noop */ }
+      }, 3000);
+    } catch (err) {
+      setSyncMsg({ text: "历史同步启动失败，请检查网络连接。", type: "error" });
+      setFullSyncing(false);
+      setTimeout(() => setSyncMsg(null), 6000);
     }
   };
 
@@ -168,15 +246,6 @@ export default function Dashboard() {
     if (isGarmin) return "Garmin 佳明直连已启用 ✓";
     if (isStrava) return "Strava 数据已连接 ✓";
     return "点击底部“数据源连接设置”进行绑定";
-  };
-
-  const syncBtnLabel = () => {
-    const isGarmin = dashboardData?.garmin_connected;
-    const isStrava = dashboardData?.strava_connected;
-    if (isGarmin && isStrava) return "🔄 同步 Garmin & Strava 数据";
-    if (isGarmin) return "⌚ 立即同步 Garmin 生理与运动数据";
-    if (isStrava) return " 立即同步 Strava 数据";
-    return "🔄 同步设备数据";
   };
 
   if (loading) {
@@ -285,39 +354,34 @@ export default function Dashboard() {
             health={dashboardData?.latest_health}
             vo2Max={dashboardData?.profile?.vo2_max}
             isGarminConnected={dashboardData?.garmin_connected}
-            onSync={handleSyncAll}
+            onSync={handleGarminSync}
           />
         )}
 
-        {/* ── Data Source Connection Section (Placed at the VERY BOTTOM with Sync Data Button) ── */}
+        {/* Feedback Alert Toast */}
+        {syncMsg && (
+          <div className={`p-4 rounded-2xl text-xs font-semibold flex items-center justify-between shadow-xl backdrop-blur-md animate-in fade-in ${syncMsg.type === "success" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border border-rose-500/30"}`}>
+            <span>{syncMsg.text}</span>
+            <button onClick={() => setSyncMsg(null)} className="opacity-70 hover:opacity-100">✕</button>
+          </div>
+        )}
+
+        {/* ── Data Source Connection & Specific Sync Section (Placed at the VERY BOTTOM) ── */}
         <div className="bg-white/3 border border-white/10 rounded-3xl p-5 md:p-6 space-y-5 backdrop-blur-md">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span>🔗</span> 数据源连接与同步设置 (Data Sources & Sync)
+                <span>🔗</span> 数据源连接与独立同步设置 (Data Sources & Sync)
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                支持绑定 Garmin 佳明账号 (中国版/国际版) 或 Strava，手动或自动同步全量跑步与生理恢复指标。
+                独立管理 Garmin 佳明直连与 Strava 授权，各数据源包含专属的数据同步与历史导入按键。
               </p>
             </div>
-
-            {/* Sync button moved directly here into settings! */}
-            <button
-              onClick={handleSyncAll}
-              disabled={syncing}
-              className="px-5 py-2.5 bg-gradient-to-r from-[#FC4C02] to-orange-500 hover:from-orange-500 hover:to-[#FC4C02] disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-lg flex items-center gap-2 shrink-0"
-            >
-              {syncing ? (
-                <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步...</>
-              ) : (
-                syncBtnLabel()
-              )}
-            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 1. Garmin Connection Card */}
-            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between h-36">
+            {/* 1. Garmin Connection & Sync Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[160px] space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">⌚</span>
@@ -339,15 +403,27 @@ export default function Dashboard() {
 
               <div>
                 {dashboardData?.garmin_connected ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-zinc-400 truncate">
-                      {dashboardData?.profile?.garmin_email || "已绑定 Garmin 账号"}
-                    </span>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+                      <span className="truncate">{dashboardData?.profile?.garmin_email || "已绑定 Garmin 账号"}</span>
+                      <button
+                        onClick={handleGarminUnbind}
+                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+                      >
+                        断开链接
+                      </button>
+                    </div>
+                    {/* Garmin Dedicated Sync Button */}
                     <button
-                      onClick={handleGarminUnbind}
-                      className="h-11 px-5 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600/30 border border-rose-500/30 rounded-xl transition flex items-center justify-center"
+                      onClick={handleGarminSync}
+                      disabled={garminSyncing}
+                      className="w-full h-11 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
                     >
-                      断开链接
+                      {garminSyncing ? (
+                        <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 正在同步 Garmin...</>
+                      ) : (
+                        "⌚ 立即同步 Garmin 数据"
+                      )}
                     </button>
                   </div>
                 ) : (
@@ -361,8 +437,8 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 2. Strava Connection Card */}
-            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between h-36">
+            {/* 2. Strava Connection & Sync Card */}
+            <div className="bg-white/4 border border-white/8 rounded-2xl p-4.5 flex flex-col justify-between min-h-[160px] space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl"></span>
@@ -384,16 +460,63 @@ export default function Dashboard() {
 
               <div>
                 {dashboardData?.strava_connected ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-zinc-400 truncate">
-                      {dashboardData?.profile?.strava_name || "已授权 Strava 账号"}
-                    </span>
-                    <button
-                      onClick={handleStravaUnbind}
-                      className="h-11 px-5 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600/30 border border-rose-500/30 rounded-xl transition flex items-center justify-center"
-                    >
-                      断开链接
-                    </button>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+                      <span className="truncate">{dashboardData?.profile?.strava_name || "已授权 Strava 账号"}</span>
+                      <button
+                        onClick={handleStravaUnbind}
+                        className="text-xs text-rose-400 hover:text-rose-300 underline font-medium"
+                      >
+                        断开链接
+                      </button>
+                    </div>
+                    {/* Strava Dedicated Sync + History Dropdown */}
+                    <div className="grid grid-cols-5 gap-2">
+                      <button
+                        onClick={handleStravaSync}
+                        disabled={stravaSyncing || fullSyncing}
+                        className="col-span-3 h-11 bg-[#FC4C02] hover:bg-[#e04400] disabled:opacity-50 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg shadow-[#FC4C02]/20"
+                      >
+                        <svg className={`w-3.5 h-3.5 ${stravaSyncing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        {stravaSyncing ? "同步中..." : "Sync Strava"}
+                      </button>
+
+                      {/* Full history dropdown */}
+                      <div className="col-span-2 relative" ref={dropdownRef}>
+                        <button
+                          onClick={() => setHistoryOpen((o) => !o)}
+                          disabled={stravaSyncing || fullSyncing}
+                          className="w-full h-11 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-zinc-300 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1"
+                        >
+                          <svg className={`w-3.5 h-3.5 ${fullSyncing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          {fullSyncing ? "同步中" : "历史数据"}
+                          <svg className={`w-3 h-3 transition-transform ${historyOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        {historyOpen && (
+                          <div className="absolute right-0 bottom-full mb-1 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl z-50 min-w-[150px]">
+                            {[
+                              { label: "2025年至今",  date: "2025-01-01" },
+                              { label: "2024年至今",  date: "2024-01-01" },
+                              { label: "所有历史数据", date: "2020-01-01" },
+                            ].map(({ label, date }) => (
+                              <button
+                                key={date}
+                                onClick={() => { setHistoryOpen(false); handleFullSync(date); }}
+                                className="w-full text-left px-3.5 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/5 transition-colors first:rounded-t-xl last:rounded-b-xl"
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="w-full h-11">

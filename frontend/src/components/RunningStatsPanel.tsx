@@ -169,56 +169,6 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
             {stats.last_sync ? `Last synced: ${formatSyncTime(stats.last_sync)}` : "No data yet — sync to get started"}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleSync}
-            disabled={syncing || fullSyncing}
-            className="flex items-center gap-2 px-4 py-2 bg-[#FC4C02] hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-[#FC4C02]/20"
-          >
-            <svg
-              className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`}
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            {syncing ? "Syncing..." : "Sync Strava"}
-          </button>
-
-          {/* Full history sync dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setHistoryOpen((o) => !o)}
-              disabled={syncing || fullSyncing}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-zinc-400 hover:text-white text-sm font-semibold rounded-xl transition-all"
-            >
-              <svg className={`w-4 h-4 ${fullSyncing ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {fullSyncing ? "同步中..." : "历史数据"}
-              <svg className={`w-3 h-3 transition-transform ${historyOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {/* Dropdown */}
-            {historyOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl z-50 min-w-[160px]">
-                {[
-                  { label: "2025年至今",  date: "2025-01-01" },
-                  { label: "2024年至今",  date: "2024-01-01" },
-                  { label: "所有历史数据", date: "2020-01-01" },
-                ].map(({ label, date }) => (
-                  <button
-                    key={date}
-                    onClick={() => { setHistoryOpen(false); handleFullSync(date); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:text-white hover:bg-white/5 active:bg-white/10 transition-colors first:rounded-t-xl last:rounded-b-xl"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Feedback message */}
