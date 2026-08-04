@@ -43,3 +43,27 @@ def test_deduplicate_garmin_and_strava_same_day():
     assert sources == ["garmin", "garmin"]
     distances = [a["distance_km"] for a in deduped]
     assert distances == [16.01, 12.49]
+
+
+def test_same_day_two_runs_not_deduplicated():
+    activities = [
+        {
+            "id": "garmin_001",
+            "source": "garmin",
+            "name": "Morning Run",
+            "start_date_local": "2026-08-04 07:00:00",
+            "distance_km": 5.0,
+            "moving_time": 1800,
+        },
+        {
+            "id": "garmin_002",
+            "source": "garmin",
+            "name": "Evening Run",
+            "start_date_local": "2026-08-04 19:00:00",
+            "distance_km": 5.0,
+            "moving_time": 1800,
+        },
+    ]
+    deduped = deduplicate_activities(activities)
+    assert len(deduped) == 2
+

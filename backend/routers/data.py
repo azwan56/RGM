@@ -269,7 +269,7 @@ def get_dashboard_init(uid: str):
 
     data = user_future.result()
     if not data:
-        return {"profile": None, "goal": None, "strava_connected": False}
+        return {"profile": None, "goal": None, "strava_connected": False, "garmin_connected": False}
 
     # Strip sensitive tokens
     safe = {k: v for k, v in data.items()
@@ -281,6 +281,7 @@ def get_dashboard_init(uid: str):
         "profile": safe,
         "goal": goal,
         "strava_connected": bool(data.get("strava_connected")),
+        "garmin_connected": bool(data.get("garmin_connected")),
         "apple_health_connected": False,
         "display_name": (
             data.get("display_name") or data.get("strava_name")

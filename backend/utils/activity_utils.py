@@ -56,8 +56,9 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
     """
     Deduplicates activities from multiple sources (Garmin, Strava, Apple Health).
     Two activities represent the exact same workout if:
-    1. They occur on the same date (YYYY-MM-DD) OR within 10 minutes (600s), AND
-    2. Distance difference <= 0.5 km (or <= 5%).
+    1. Distance difference <= 0.5 km (or <= 5%), AND
+    2. Start time difference <= 15 minutes (900 seconds) if timestamps are valid,
+       OR same date string if timestamp parsing failed.
     Garmin activities take precedence over Strava.
     """
     if not activities:
@@ -67,8 +68,8 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
     def sort_key(act):
         source = str(act.get("source", "")).lower()
         act_id = str(act.get("activity_id", "") or act.get("id", "")).lower()
-        is_garmin = (source == "garmin" or act_id.startswith("garmin"))
-        is_strava = (source == "strava" or not is_garmin)
+        is_garmin = (source.startswith("garmin") or act_id.startswith("garmin"))
+        is_strava = (source.startswith("strava") or (not is_garmin and source != "applehealth"))
         prio = 0 if is_garmin else (1 if is_strava else 2)
         return (parse_activity_time(act), -prio)
 
@@ -91,9 +92,14 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
             dist_matches = dist_diff <= 0.5 or (d_k > 0 and (dist_diff / d_k) <= 0.05)
 
             if dist_matches:
-                # Check time difference (within 10 mins / 600s) OR same date string
-                time_diff = abs(t_act - t_k)
-                time_matches = (t_act > 0 and t_k > 0 and time_diff <= 600) or (d_str_act and d_str_act == d_str_k)
+                # If both have valid timestamps (t > 0), they must be within 15 minutes (900 seconds)
+                # If either timestamp failed to parse (t == 0), fallback to checking same date string
+                if t_act > 0 and t_k > 0:
+                    time_diff = abs(t_act - t_k)
+                    time_matches = (time_diff <= 900)
+                else:
+                    time_matches = bool(d_str_act and d_str_act == d_str_k)
+
                 if time_matches:
                     is_dup = True
                     break

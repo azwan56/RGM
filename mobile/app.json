@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "RGM",
+    "slug": "rgm-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "rgm",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.azwan56.rgm.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "我们需要使用您的蓝牙以连接 Polar H10 等心率带设备，实时同步您在跑步过程中的心电图与心率数据。",
+        "NSHealthShareUsageDescription": "我们需要读取您的 Apple Health 数据，以将您的 Apple Watch 跑步记录同步至 RGM 排行榜中。",
+        "NSHealthUpdateUsageDescription": "我们需要写入运动数据至您的 Apple Health 中以同步您的训练完成情况。"
+      }
+    },
+    "android": {
+      "package": "com.azwan56.rgm.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#121212",
+        "foregroundImage": "./assets/icon.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
