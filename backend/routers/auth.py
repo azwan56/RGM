@@ -74,6 +74,13 @@ def auth_strava(request: StravaAuthRequest):
 
     user_ref.set(strava_fields, merge=True)
 
+    # Invalidate profile cache so dashboard returns strava_connected=True immediately
+    try:
+        from routers.data import invalidate_profile_cache
+        invalidate_profile_cache(request.uid)
+    except Exception:
+        pass
+
     # Also keep leaderboard name in sync
     try:
         lb_data = db.collection("leaderboard").document(request.uid).get()

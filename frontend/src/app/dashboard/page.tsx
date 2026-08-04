@@ -357,7 +357,7 @@ export default function Dashboard() {
         {/* Garmin Health Card */}
         {user && (
           <GarminHealthCard
-            health={dashboardData?.health}
+            health={dashboardData?.latest_health ?? dashboardData?.health}
             vo2Max={dashboardData?.profile?.vo2_max}
             isGarminConnected={dashboardData?.garmin_connected}
             onSync={handleGarminSync}
