@@ -198,13 +198,13 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     calc_dist = round(sum(float(a.get("distance_km", 0) or 0) for a in run_acts), 2)
     calc_elev = round(sum(float(a.get("total_elevation_gain", 0) or 0) for a in run_acts), 1)
     calc_time = sum(int(a.get("moving_time", 0) or 0) for a in run_acts)
-    calc_hrs = [float(a.get("avg_heart_rate", 0)) for a in run_acts if float(a.get("avg_heart_rate", 0)) > 0]
+    calc_hrs = [float(a.get("avg_heart_rate", 0) or 0) for a in run_acts if float(a.get("avg_heart_rate", 0) or 0) > 0]
     calc_avg_hr = round(sum(calc_hrs) / len(calc_hrs)) if calc_hrs else 0
 
     from utils.sports_science import pace_str
     calc_pace = pace_str(calc_dist * 1000, calc_time)
 
-    target_dist = float(goal.get("target_distance_km", 0)) if goal else 0.0
+    target_dist = float(goal.get("target_distance_km", 0) or 0.0) if goal else 0.0
     calc_goal_pct = round((calc_dist / target_dist) * 100) if target_dist > 0 else 0
 
     stats = {
