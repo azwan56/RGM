@@ -121,7 +121,7 @@ def _build_act_doc(act: dict, period: str, period_start, gear_info: dict = None)
         "avg_heart_rate":       round(avg_hr) if avg_hr else 0,
         "max_heart_rate":       act.get("max_heartrate") or 0,
         "has_heartrate":        act.get("has_heartrate", False),
-        "total_elevation_gain": round(float(act.get("total_elevation_gain", 0)), 1),
+        "total_elevation_gain": round(float(act.get("total_elevation_gain", 0) or 0), 1),
         "avg_cadence":          round(act.get("average_cadence", 0) * 2) if act.get("average_cadence") else 0,
         "achievement_count":    act.get("achievement_count", 0),
         "kudos_count":          act.get("kudos_count", 0),
