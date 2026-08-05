@@ -61,14 +61,17 @@ def run_daily_sync() -> dict:
         return {"error": "Strava credentials missing"}
 
     # Find all Strava-connected or Garmin-connected users
-    garmin_users = db.collection("users").where("garmin_connected", "==", True).stream()
-    strava_users = db.collection("users").where("strava_connected", "==", True).stream()
-
     user_map = {}
-    for doc in garmin_users:
-        user_map[doc.id] = doc.to_dict()
-    for doc in strava_users:
-        user_map[doc.id] = doc.to_dict()
+    try:
+        garmin_users = db.collection("users").where("garmin_connected", "==", True).stream(timeout=5.0)
+        for doc in garmin_users:
+            user_map[doc.id] = doc.to_dict()
+        strava_users = db.collection("users").where("strava_connected", "==", True).stream(timeout=5.0)
+        for doc in strava_users:
+            user_map[doc.id] = doc.to_dict()
+    except Exception as e:
+        logger.error(f"[scheduler] Failed to query users for sync: {e}")
+        return {"error": str(e)}
 
     user_list = list(user_map.items())
     results = {"synced": 0, "failed": 0, "skipped": 0, "errors": [], "started_at": datetime.now().isoformat()}
@@ -198,7 +201,7 @@ def run_daily_sync() -> dict:
             month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
             month_acts = (user_ref.collection("activities")
                           .where("start_date_local", ">=", month_start_str)
-                          .stream())
+                          .stream(timeout=5.0))
 
             lb_dist, lb_time, lb_hr_sum, lb_hr_cnt, lb_runs, lb_elev = 0.0, 0, 0.0, 0, 0, 0.0
             for adoc in month_acts:
@@ -250,7 +253,7 @@ def run_daily_sync() -> dict:
             week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
             week_acts = (user_ref.collection("activities")
                          .where("start_date_local", ">=", week_start_str)
-                         .stream())
+                         .stream(timeout=5.0))
 
             wk_dist, wk_time, wk_hr_sum, wk_hr_cnt, wk_runs = 0.0, 0, 0.0, 0, 0
             for adoc in week_acts:
@@ -329,8 +332,12 @@ def run_rest_day_reminders() -> dict:
     from firebase_config import db
     from utils.discord import send_rest_day_discord_notification, send_rest_day_wecom_notification
 
-    users = db.collection("users").where("strava_connected", "==", True).stream()
-    user_list = [(doc.id, doc.to_dict()) for doc in users]
+    try:
+        users = db.collection("users").where("strava_connected", "==", True).stream(timeout=5.0)
+        user_list = [(doc.id, doc.to_dict()) for doc in users]
+    except Exception as e:
+        logger.error(f"[scheduler] Failed to query users for rest day reminders: {e}")
+        return {"reminded": 0, "skipped": 0, "errors": [str(e)]}
 
     results = {"reminded": 0, "skipped": 0, "errors": []}
 
