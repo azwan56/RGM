@@ -402,8 +402,12 @@ def run_weekly_reports(force: bool = False) -> dict:
     from utils.discord import send_weekly_report_discord_notification, send_weekly_report_wecom_notification
     from utils.email import send_report_email
 
-    users = db.collection("users").where("strava_connected", "==", True).stream()
-    user_list = [(doc.id, doc.to_dict()) for doc in users]
+    try:
+        users = db.collection("users").where("strava_connected", "==", True).stream(timeout=5.0)
+        user_list = [(doc.id, doc.to_dict()) for doc in users]
+    except Exception as e:
+        logger.error(f"[scheduler] Failed to query users for weekly reports: {e}")
+        return {"generated": 0, "failed": 0, "skipped": 0, "errors": [str(e)], "force": force}
 
     results = {"generated": 0, "failed": 0, "skipped": 0, "errors": [], "force": force}
 
@@ -496,8 +500,12 @@ def run_monthly_reports(force: bool = False) -> dict:
     from routers.coach import generate_auto_monthly_report
     from utils.email import send_report_email
 
-    users = db.collection("users").where("strava_connected", "==", True).stream()
-    user_list = [(doc.id, doc.to_dict()) for doc in users]
+    try:
+        users = db.collection("users").where("strava_connected", "==", True).stream(timeout=5.0)
+        user_list = [(doc.id, doc.to_dict()) for doc in users]
+    except Exception as e:
+        logger.error(f"[scheduler] Failed to query users for monthly reports: {e}")
+        return {"generated": 0, "failed": 0, "skipped": 0, "errors": [str(e)], "force": force}
 
     results = {"generated": 0, "failed": 0, "skipped": 0, "errors": [], "force": force}
 
