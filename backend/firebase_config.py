@@ -1,5 +1,8 @@
 import os
-os.environ["GOOGLE_CLOUD_DISABLE_GRPC"] = "true"
+for k in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "grpc_proxy"]:
+    os.environ.pop(k, None)
+os.environ["NO_PROXY"] = "*"
+os.environ["no_proxy"] = "*"
 import firebase_admin
 from firebase_admin import credentials, firestore
 import json

@@ -1,6 +1,10 @@
+import os
+for k in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "grpc_proxy"]:
+    os.environ.pop(k, None)
+os.environ["NO_PROXY"] = "*"
+os.environ["no_proxy"] = "*"
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
