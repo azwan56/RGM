@@ -1,6 +1,7 @@
+import os
+os.environ["GOOGLE_CLOUD_DISABLE_GRPC"] = "true"
 import firebase_admin
 from firebase_admin import credentials, firestore
-import os
 import json
 
 
