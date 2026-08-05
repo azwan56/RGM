@@ -25,6 +25,7 @@ _PUBLIC_PREFIXES = (
     "/api/webhook/",
     "/api/admin/",
     "/api/wecom/",
+    "/api/auth/",
 )
 
 # ── Token verification cache (saves 20-100ms per request) ────────────────────
