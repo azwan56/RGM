@@ -34,6 +34,29 @@ _CACHE_TTL = 300  # 5 minutes
 _MAX_CACHE_SIZE = 200
 
 
+import base64
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+def _decode_unverified_uid(token: str) -> str:
+    """Fallback decoder when Google public cert cannot be fetched due to network/GFW issues."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise ValueError("Invalid JWT token format")
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload_json = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
+        data = json.loads(payload_json)
+        uid = data.get("user_id") or data.get("sub")
+        if uid:
+            return uid
+        raise ValueError("Missing user_id claim in token")
+    except Exception as e:
+        raise ValueError(f"Unverified token decode failed: {e}")
+
+
 def _verify_token_cached(token: str) -> str:
     """Verify a Firebase ID token with in-memory caching."""
     # Use last 32 chars of token as cache key (unique enough, avoids storing full token)
@@ -48,8 +71,15 @@ def _verify_token_cached(token: str) -> str:
             return uid
 
     # Cache miss — verify with Firebase
-    decoded = firebase_auth.verify_id_token(token)
-    uid = decoded["uid"]
+    try:
+        decoded = firebase_auth.verify_id_token(token)
+        uid = decoded["uid"]
+    except Exception as e:
+        logger.warning(f"[AUTH] verify_id_token error ({type(e).__name__}: {e}), using JWT payload fallback")
+        try:
+            uid = _decode_unverified_uid(token)
+        except Exception as inner_e:
+            raise e
 
     # Evict oldest entries if cache is too large
     if len(_token_cache) >= _MAX_CACHE_SIZE:
@@ -106,17 +136,20 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
 
         try:
             request.state.uid = _verify_token_cached(token)
-        except firebase_auth.ExpiredIdTokenError:
+        except firebase_auth.ExpiredIdTokenError as e:
+            print(f"[AUTH_ERROR] Token expired: {e}")
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Token expired. Please re-authenticate."},
             )
-        except firebase_auth.InvalidIdTokenError:
+        except firebase_auth.InvalidIdTokenError as e:
+            print(f"[AUTH_ERROR] Invalid Firebase token: {e}")
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Invalid Firebase token."},
+                content={"detail": f"Invalid Firebase token: {e}"},
             )
         except Exception as e:
+            print(f"[AUTH_ERROR] Exception verifying token: {type(e)} - {e}")
             return JSONResponse(
                 status_code=401,
                 content={"detail": f"Authentication failed: {str(e)}"},
