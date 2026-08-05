@@ -50,7 +50,7 @@ def _read_user_doc(uid: str):
     if cached is not None:
         return cached
     try:
-        doc = db.collection("users").document(uid).get()
+        doc = db.collection("users").document(uid).get(timeout=4.0)
         result = doc.to_dict() if doc.exists else None
         if result:
             _profile_cache.set(uid, result)
@@ -66,7 +66,7 @@ def invalidate_profile_cache(uid: str):
 
 def _read_goal_doc(uid: str):
     try:
-        doc = db.collection("users").document(uid).collection("goals").document("current").get()
+        doc = db.collection("users").document(uid).collection("goals").document("current").get(timeout=4.0)
         return doc.to_dict() if doc.exists else None
     except Exception as e:
         print(f"[data] Error reading goal doc for {uid}: {e}")
@@ -75,7 +75,7 @@ def _read_goal_doc(uid: str):
 def _read_leaderboard_doc(uid: str, period: str = "monthly"):
     try:
         collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
-        doc = db.collection(collection).document(uid).get()
+        doc = db.collection(collection).document(uid).get(timeout=4.0)
         return doc.to_dict() if doc.exists else None
     except Exception as e:
         print(f"[data] Error reading leaderboard doc for {uid}: {e}")
@@ -91,13 +91,13 @@ def _read_leaderboard_list(period: str, limit_n: int = 20):
             docs = (db.collection("leaderboard")
                       .order_by("total_distance_km", direction="DESCENDING")
                       .limit(limit_n)
-                      .stream())
+                      .stream(timeout=4.0))
         else:
             docs = (db.collection("leaderboard")
                       .where("period", "==", period)
                       .order_by("total_distance_km", direction="DESCENDING")
                       .limit(limit_n)
-                      .stream())
+                      .stream(timeout=4.0))
         result = [d.to_dict() for d in docs]
         _lb_cache.set(cache_key, result)
         return result
@@ -115,7 +115,7 @@ def _read_activities(uid: str, start: str, end: str):
                   .order_by("start_date_local", direction="DESCENDING"))
         else:
             q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
-        raw = [d.to_dict() for d in q.stream()]
+        raw = [d.to_dict() for d in q.stream(timeout=4.0)]
         return deduplicate_activities(raw)
     except Exception as e:
         print(f"[data] Error reading activities for {uid}: {e}")
@@ -127,7 +127,7 @@ def _read_latest_health(uid: str):
             db.collection("users").document(uid).collection("health_metrics")
               .order_by("date", direction="DESCENDING")
               .limit(10)
-              .stream()
+              .stream(timeout=4.0)
         )
         for d in docs:
             h = d.to_dict()
@@ -235,7 +235,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     from routers.sync import pace_str
     calc_pace = pace_str(calc_dist * 1000, calc_time)
 
-    target_dist = float(goal.get("target_distance_km", 0) or 0.0) if goal else 0.0
+    target_dist = float(goal.get("target_distance") or goal.get("target_distance_km", 0) or 0.0) if goal else 0.0
     calc_goal_pct = round((calc_dist / target_dist) * 100) if target_dist > 0 else 0
 
     stats = {
