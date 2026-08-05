@@ -69,6 +69,8 @@ def _read_goal_doc(uid: str):
         doc = db.collection("users").document(uid).collection("goals").document("current").get()
         return doc.to_dict() if doc.exists else None
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"[data] Error reading goal doc for {uid}: {e}")
         return None
 
