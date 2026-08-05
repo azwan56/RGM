@@ -49,11 +49,15 @@ def _read_user_doc(uid: str):
     cached = _profile_cache.get(uid)
     if cached is not None:
         return cached
-    doc = db.collection("users").document(uid).get()
-    result = doc.to_dict() if doc.exists else None
-    if result:
-        _profile_cache.set(uid, result)
-    return result
+    try:
+        doc = db.collection("users").document(uid).get()
+        result = doc.to_dict() if doc.exists else None
+        if result:
+            _profile_cache.set(uid, result)
+        return result
+    except Exception as e:
+        print(f"[data] Error reading user doc for {uid}: {e}")
+        return None
 
 def invalidate_profile_cache(uid: str):
     """Purges the user's cached profile so fresh auth/bind states are returned instantly."""
@@ -61,60 +65,78 @@ def invalidate_profile_cache(uid: str):
     _profile_cache._ts.pop(uid, None)
 
 def _read_goal_doc(uid: str):
-    doc = db.collection("users").document(uid).collection("goals").document("current").get()
-    return doc.to_dict() if doc.exists else None
+    try:
+        doc = db.collection("users").document(uid).collection("goals").document("current").get()
+        return doc.to_dict() if doc.exists else None
+    except Exception as e:
+        print(f"[data] Error reading goal doc for {uid}: {e}")
+        return None
 
 def _read_leaderboard_doc(uid: str, period: str = "monthly"):
-    collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
-    doc = db.collection(collection).document(uid).get()
-    return doc.to_dict() if doc.exists else None
+    try:
+        collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
+        doc = db.collection(collection).document(uid).get()
+        return doc.to_dict() if doc.exists else None
+    except Exception as e:
+        print(f"[data] Error reading leaderboard doc for {uid}: {e}")
+        return None
 
 def _read_leaderboard_list(period: str, limit_n: int = 20):
     cache_key = f"{period}_{limit_n}"
     cached = _lb_cache.get(cache_key)
     if cached is not None:
         return cached
-    # Leaderboard always stores monthly data now, but legacy docs may have
-    # period="weekly". For the monthly tab, fetch ALL docs sorted by distance.
-    if period == "monthly":
-        docs = (db.collection("leaderboard")
-                  .order_by("total_distance_km", direction="DESCENDING")
-                  .limit(limit_n)
-                  .stream())
-    else:
-        docs = (db.collection("leaderboard")
-                  .where("period", "==", period)
-                  .order_by("total_distance_km", direction="DESCENDING")
-                  .limit(limit_n)
-                  .stream())
-    result = [d.to_dict() for d in docs]
-    _lb_cache.set(cache_key, result)
-    return result
+    try:
+        if period == "monthly":
+            docs = (db.collection("leaderboard")
+                      .order_by("total_distance_km", direction="DESCENDING")
+                      .limit(limit_n)
+                      .stream())
+        else:
+            docs = (db.collection("leaderboard")
+                      .where("period", "==", period)
+                      .order_by("total_distance_km", direction="DESCENDING")
+                      .limit(limit_n)
+                      .stream())
+        result = [d.to_dict() for d in docs]
+        _lb_cache.set(cache_key, result)
+        return result
+    except Exception as e:
+        print(f"[data] Error reading leaderboard list: {e}")
+        return []
 
 def _read_activities(uid: str, start: str, end: str):
     from utils.activity_utils import deduplicate_activities
-    q = db.collection("users").document(uid).collection("activities")
-    if start and end:
-        q = (q.where("start_date_local", ">=", start)
-              .where("start_date_local", "<", end)
-              .order_by("start_date_local", direction="DESCENDING"))
-    else:
-        q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
-    raw = [d.to_dict() for d in q.stream()]
-    return deduplicate_activities(raw)
+    try:
+        q = db.collection("users").document(uid).collection("activities")
+        if start and end:
+            q = (q.where("start_date_local", ">=", start)
+                  .where("start_date_local", "<", end)
+                  .order_by("start_date_local", direction="DESCENDING"))
+        else:
+            q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
+        raw = [d.to_dict() for d in q.stream()]
+        return deduplicate_activities(raw)
+    except Exception as e:
+        print(f"[data] Error reading activities for {uid}: {e}")
+        return []
 
 def _read_latest_health(uid: str):
-    docs = (
-        db.collection("users").document(uid).collection("health_metrics")
-          .order_by("date", direction="DESCENDING")
-          .limit(10)
-          .stream()
-    )
-    for d in docs:
-        h = d.to_dict()
-        if any(h.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "hrv_last_night", "hrv_weekly_avg", "body_battery_max"]):
-            return h
-    return None
+    try:
+        docs = (
+            db.collection("users").document(uid).collection("health_metrics")
+              .order_by("date", direction="DESCENDING")
+              .limit(10)
+              .stream()
+        )
+        for d in docs:
+            h = d.to_dict()
+            if any(h.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "hrv_last_night", "hrv_weekly_avg", "body_battery_max"]):
+                return h
+        return None
+    except Exception as e:
+        print(f"[data] Error reading latest health for {uid}: {e}")
+        return None
 
 
 # ── Combined Dashboard endpoint (replaces 4 serial requests) ─────────────────
