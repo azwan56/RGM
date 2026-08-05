@@ -140,10 +140,25 @@ class GarminAdapter:
         if "body_battery_max" not in metrics:
             try:
                 bb_data = self.client.get_body_battery(date_str)
-                if isinstance(bb_data, list) and len(bb_data) > 0:
-                    vals = [x.get("charged", 0) or x.get("chargedValue", 0) for x in bb_data if isinstance(x, dict)]
-                    if vals and max(vals) > 0:
-                        metrics["body_battery_max"] = max(vals)
+                vals = []
+                if isinstance(bb_data, list):
+                    for x in bb_data:
+                        if isinstance(x, dict):
+                            v = x.get("charged") or x.get("chargedValue") or x.get("bodyBatteryLevel") or x.get("value")
+                            if isinstance(v, (int, float)) and v > 0:
+                                vals.append(int(v))
+                            # Check nested bodyBatteryValuesArray if present
+                            arr = x.get("bodyBatteryValuesArray") or []
+                            if isinstance(arr, list):
+                                for item in arr:
+                                    if isinstance(item, (list, tuple)) and len(item) > 1 and isinstance(item[1], (int, float)):
+                                        vals.append(int(item[1]))
+                elif isinstance(bb_data, dict):
+                    highest = bb_data.get("bodyBatteryHighestValue") or bb_data.get("charged")
+                    if highest and highest > 0:
+                        vals.append(int(highest))
+                if vals:
+                    metrics["body_battery_max"] = max(vals)
             except Exception as e:
                 logger.debug(f"[garmin] Could not fetch Body Battery: {e}")
 

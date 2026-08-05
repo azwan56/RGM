@@ -175,16 +175,25 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     activities = deduplicate_activities(raw_acts)
     activities = [a for a in activities if a.get("source") != "AppleHealth"]
 
+    strava_connected = bool(
+        user_data.get("strava_connected")
+        or user_data.get("strava_access_token")
+        or user_data.get("strava_refresh_token")
+        or user_data.get("strava_athlete_id")
+    )
+    garmin_connected = bool(
+        user_data.get("garmin_connected")
+        or (user_data.get("garmin_email") and user_data.get("garmin_encrypted_password"))
+    )
+
     # Strip sensitive tokens from user profile
     safe_profile = {k: v for k, v in user_data.items()
-                    if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
+                    if not k.startswith("strava_access") and not k.startswith("strava_refresh") and k != "garmin_encrypted_password"}
 
     display_name = (
         user_data.get("display_name") or user_data.get("strava_name")
         or (user_data.get("email", "").split("@")[0] if user_data.get("email") else "")
     )
-
-    strava_connected = bool(user_data.get("strava_connected"))
 
     # Determine period from goal
     goal_period = "monthly"
@@ -201,7 +210,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     calc_hrs = [float(a.get("avg_heart_rate", 0) or 0) for a in run_acts if float(a.get("avg_heart_rate", 0) or 0) > 0]
     calc_avg_hr = round(sum(calc_hrs) / len(calc_hrs)) if calc_hrs else 0
 
-    from utils.sports_science import pace_str
+    from routers.sync import pace_str
     calc_pace = pace_str(calc_dist * 1000, calc_time)
 
     target_dist = float(goal.get("target_distance_km", 0) or 0.0) if goal else 0.0
@@ -247,7 +256,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         "profile": safe_profile,
         "goal": goal,
         "strava_connected": strava_connected,
-        "garmin_connected": bool(user_data.get("garmin_connected")),
+        "garmin_connected": garmin_connected,
         "apple_health_connected": False,
         "display_name": display_name,
         "goal_period": goal_period,
@@ -273,15 +282,26 @@ def get_dashboard_init(uid: str):
 
     # Strip sensitive tokens
     safe = {k: v for k, v in data.items()
-            if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
+            if not k.startswith("strava_access") and not k.startswith("strava_refresh") and k != "garmin_encrypted_password"}
 
     goal = goal_future.result()
+
+    strava_connected = bool(
+        data.get("strava_connected")
+        or data.get("strava_access_token")
+        or data.get("strava_refresh_token")
+        or data.get("strava_athlete_id")
+    )
+    garmin_connected = bool(
+        data.get("garmin_connected")
+        or (data.get("garmin_email") and data.get("garmin_encrypted_password"))
+    )
 
     return {
         "profile": safe,
         "goal": goal,
-        "strava_connected": bool(data.get("strava_connected")),
-        "garmin_connected": bool(data.get("garmin_connected")),
+        "strava_connected": strava_connected,
+        "garmin_connected": garmin_connected,
         "apple_health_connected": False,
         "display_name": (
             data.get("display_name") or data.get("strava_name")

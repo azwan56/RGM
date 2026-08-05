@@ -249,7 +249,7 @@ export default function ProfilePage() {
     if (!uid) return;
     axios.get(`${backendUrl}/api/profile/${uid}`)
       .then(r => {
-        setStravaConnected(!!r.data.strava_expires_at);
+        setStravaConnected(!!r.data.strava_connected);
         setStravaName(r.data.strava_name || "");
         setGarminConnected(!!r.data.garmin_connected);
         setGarminEmail(r.data.garmin_email || "");

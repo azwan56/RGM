@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import List, Dict, Any
 
 def parse_activity_time(act: Dict[str, Any]) -> float:
-    """Parses start_date_local, start_date, or startTimeLocal into UNIX epoch seconds."""
-    st = act.get("start_date_local") or act.get("start_date") or act.get("startTimeLocal") or ""
+    """Parses start_date_local, startTimeLocal, or start_date into UNIX epoch seconds."""
+    st = act.get("start_date_local") or act.get("startTimeLocal") or act.get("start_date") or ""
     if not st:
         return 0.0
     st_str = str(st).strip().replace(" ", "T")
@@ -30,7 +30,7 @@ def parse_activity_time(act: Dict[str, Any]) -> float:
 
 def get_activity_date_str(act: Dict[str, Any]) -> str:
     """Returns YYYY-MM-DD string for an activity."""
-    st = act.get("start_date_local") or act.get("start_date") or act.get("startTimeLocal") or ""
+    st = act.get("start_date_local") or act.get("startTimeLocal") or act.get("start_date") or ""
     if not st:
         return ""
     st_str = str(st).strip()
@@ -58,7 +58,7 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
     Two activities represent the exact same workout if:
     1. Distance difference <= 0.5 km (or <= 5%), AND
     2. Start time difference <= 15 minutes (900 seconds) if timestamps are valid,
-       OR same date string if timestamp parsing failed.
+       OR same date string (YYYY-MM-DD).
     Garmin activities take precedence over Strava.
     """
     if not activities:
@@ -92,13 +92,16 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
             dist_matches = dist_diff <= 0.5 or (d_k > 0 and (dist_diff / d_k) <= 0.05)
 
             if dist_matches:
-                # If both have valid timestamps (t > 0), they must be within 15 minutes (900 seconds)
-                # If either timestamp failed to parse (t == 0), fallback to checking same date string
+                # If both have valid timestamps (t > 0), check time diff <= 900
                 if t_act > 0 and t_k > 0:
                     time_diff = abs(t_act - t_k)
                     time_matches = (time_diff <= 900)
                 else:
-                    time_matches = bool(d_str_act and d_str_act == d_str_k)
+                    time_matches = False
+
+                # Fallback: if distance matches and date string (YYYY-MM-DD) matches
+                if not time_matches and d_str_act and d_str_k and d_str_act == d_str_k:
+                    time_matches = True
 
                 if time_matches:
                     is_dup = True
@@ -109,3 +112,4 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
 
     # Return activities sorted by start_date_local descending
     return sorted(kept, key=parse_activity_time, reverse=True)
+

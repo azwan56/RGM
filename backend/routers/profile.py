@@ -57,7 +57,18 @@ def get_profile(uid: str):
 
     # Strip sensitive / internal fields before returning
     safe = {k: v for k, v in data.items()
-            if not k.startswith("strava_access") and not k.startswith("strava_refresh")}
+            if not k.startswith("strava_access") and not k.startswith("strava_refresh") and k != "garmin_encrypted_password"}
+
+    safe["strava_connected"] = bool(
+        data.get("strava_connected")
+        or data.get("strava_access_token")
+        or data.get("strava_refresh_token")
+        or data.get("strava_athlete_id")
+    )
+    safe["garmin_connected"] = bool(
+        data.get("garmin_connected")
+        or (data.get("garmin_email") and data.get("garmin_encrypted_password"))
+    )
 
     # Compute age from date_of_birth if present
     dob = data.get("date_of_birth")

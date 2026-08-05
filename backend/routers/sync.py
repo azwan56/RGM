@@ -192,14 +192,13 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
         except Exception as e:
             logger.debug(f"[sync] Health metric sync for {day_str} failed: {e}")
 
+    prof_updates = {"garmin_connected": True}
     if latest_valid_health:
-        prof_updates = {}
         if latest_valid_health.get("resting_heart_rate"):
             prof_updates["resting_heart_rate"] = latest_valid_health["resting_heart_rate"]
         if latest_valid_health.get("vo2_max"):
             prof_updates["vo2_max"] = latest_valid_health["vo2_max"]
-        if prof_updates:
-            user_ref.set(prof_updates, merge=True)
+    user_ref.set(prof_updates, merge=True)
 
     return {"success": True, "count": synced_count, "health": latest_valid_health}
 
