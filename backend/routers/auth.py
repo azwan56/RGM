@@ -172,7 +172,8 @@ def bind_garmin(request: GarminAuthRequest):
     if HAS_GARMINCONNECT:
         ok = adapter.login()
         if not ok:
-            raise HTTPException(status_code=400, detail="Garmin authentication failed. Please check email, password, and region.")
+            err_msg = adapter.last_error or "请检查邮箱、密码及地区选择"
+            raise HTTPException(status_code=400, detail=f"Garmin 验证失败: {err_msg}")
 
     encrypted_pwd = encrypt_string(request.password)
     user_ref = db.collection("users").document(request.uid)

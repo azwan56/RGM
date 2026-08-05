@@ -27,12 +27,13 @@ class GarminAdapter:
         self.password = password
         self.domain = domain.lower().strip()
         self.is_cn = ("garmin.cn" in self.domain or self.domain == "cn")
-        self.client: Optional[Any] = None
+        self.last_error: Optional[str] = None
 
     def login(self) -> bool:
         """Log in to Garmin Connect (Global or China)."""
         if not HAS_GARMINCONNECT:
             logger.warning("[garmin] garminconnect package not installed.")
+            self.last_error = "garminconnect package not installed on server"
             return False
 
         try:
@@ -40,9 +41,12 @@ class GarminAdapter:
             self.client = Garmin(self.email, self.password, is_cn=self.is_cn)
             self.client.login()
             logger.info(f"[garmin] Login successful for {self.email}")
+            self.last_error = None
             return True
         except Exception as e:
-            logger.error(f"[garmin] Login failed for {self.email}: {e}")
+            err_str = str(e)
+            logger.error(f"[garmin] Login failed for {self.email}: {err_str}")
+            self.last_error = err_str
             return False
 
     def fetch_recent_activities(self, limit: int = 30) -> List[Dict[str, Any]]:
