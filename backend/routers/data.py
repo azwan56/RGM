@@ -50,7 +50,7 @@ def _read_user_doc(uid: str):
     if cached is not None:
         return cached
     try:
-        doc = db.collection("users").document(uid).get(timeout=4.0)
+        doc = db.collection("users").document(uid).get()
         result = doc.to_dict() if doc.exists else None
         if result:
             _profile_cache.set(uid, result)
@@ -66,7 +66,7 @@ def invalidate_profile_cache(uid: str):
 
 def _read_goal_doc(uid: str):
     try:
-        doc = db.collection("users").document(uid).collection("goals").document("current").get(timeout=4.0)
+        doc = db.collection("users").document(uid).collection("goals").document("current").get()
         return doc.to_dict() if doc.exists else None
     except Exception as e:
         print(f"[data] Error reading goal doc for {uid}: {e}")
@@ -75,7 +75,7 @@ def _read_goal_doc(uid: str):
 def _read_leaderboard_doc(uid: str, period: str = "monthly"):
     try:
         collection = "leaderboard_weekly" if period == "weekly" else "leaderboard"
-        doc = db.collection(collection).document(uid).get(timeout=4.0)
+        doc = db.collection(collection).document(uid).get()
         return doc.to_dict() if doc.exists else None
     except Exception as e:
         print(f"[data] Error reading leaderboard doc for {uid}: {e}")
@@ -91,13 +91,13 @@ def _read_leaderboard_list(period: str, limit_n: int = 20):
             docs = (db.collection("leaderboard")
                       .order_by("total_distance_km", direction="DESCENDING")
                       .limit(limit_n)
-                      .stream(timeout=4.0))
+                      .stream())
         else:
             docs = (db.collection("leaderboard")
                       .where("period", "==", period)
                       .order_by("total_distance_km", direction="DESCENDING")
                       .limit(limit_n)
-                      .stream(timeout=4.0))
+                      .stream())
         result = [d.to_dict() for d in docs]
         _lb_cache.set(cache_key, result)
         return result
@@ -115,7 +115,7 @@ def _read_activities(uid: str, start: str, end: str):
                   .order_by("start_date_local", direction="DESCENDING"))
         else:
             q = q.order_by("start_date_local", direction="DESCENDING").limit(50)
-        raw = [d.to_dict() for d in q.stream(timeout=4.0)]
+        raw = [d.to_dict() for d in q.stream()]
         return deduplicate_activities(raw)
     except Exception as e:
         print(f"[data] Error reading activities for {uid}: {e}")
@@ -127,7 +127,7 @@ def _read_latest_health(uid: str):
             db.collection("users").document(uid).collection("health_metrics")
               .order_by("date", direction="DESCENDING")
               .limit(10)
-              .stream(timeout=4.0)
+              .stream()
         )
         for d in docs:
             h = d.to_dict()
@@ -162,21 +162,14 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     act_end = f"{end_year}-{pad(end_mon + 1)}-01T00:00:00"
 
     # Fire all Firestore reads in parallel
-    goal_data = _read_goal_doc(uid)
-    goal_period = "monthly"
-    if goal_data:
-        p = goal_data.get("period")
-        if p in ("weekly", "monthly"):
-            goal_period = p
-
     futures = {
         _executor.submit(_read_user_doc, uid): "user",
-        _executor.submit(_read_leaderboard_doc, uid, goal_period): "stats",
+        _executor.submit(_read_goal_doc, uid): "goal",
+        _executor.submit(_read_leaderboard_doc, uid, period): "stats",
         _executor.submit(_read_leaderboard_list, period): "leaderboard",
         _executor.submit(_read_activities, uid, act_start, act_end): "activities",
         _executor.submit(_read_latest_health, uid): "health",
     }
-
 
     results = {}
     for future in as_completed(futures):
@@ -188,7 +181,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
             results[key] = None
 
     user_data = results.get("user") or {}
-    goal = goal_data
+    goal = results.get("goal")
     leaderboard_entries = results.get("leaderboard") or []
     
     # Deduplicate activities
