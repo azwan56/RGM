@@ -154,10 +154,15 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     if month < 0:
         month = date.today().month - 1  # 0-indexed
 
-    # Calculate month range for activities
+    # Calculate month range for activities (including current week start if earlier)
     year = date.today().year
     pad = lambda n: str(n).zfill(2)
-    act_start = f"{year}-{pad(month + 1)}-01T00:00:00"
+    month_start_str = f"{year}-{pad(month + 1)}-01T00:00:00"
+    from routers.sync import get_period_start
+    week_start_dt = get_period_start("weekly")
+    week_start_str = week_start_dt.strftime("%Y-%m-%dT00:00:00")
+    act_start = min(month_start_str, week_start_str)
+    
     next_month = month + 1
     end_year = year + 1 if next_month > 11 else year
     end_mon = 0 if next_month > 11 else next_month
@@ -212,26 +217,41 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         or (user_data.get("email", "").split("@")[0] if user_data.get("email") else "")
     )
 
-    # Determine period from goal
-    goal_period = "monthly"
+    # Determine period from goal (default to weekly)
+    goal_period = "weekly"
     if goal:
         p = goal.get("period")
         if p in ("weekly", "monthly"):
             goal_period = p
 
-    # Dynamically compute deduplicated stats for the current period
-    run_acts = [a for a in activities if a.get("activity_type", "run") == "run"]
-    calc_dist = round(sum(float(a.get("distance_km", 0) or 0) for a in run_acts), 2)
-    calc_elev = round(sum(float(a.get("total_elevation_gain", 0) or 0) for a in run_acts), 1)
-    calc_time = sum(int(a.get("moving_time", 0) or 0) for a in run_acts)
-    calc_hrs = [float(a.get("avg_heart_rate", 0) or 0) for a in run_acts if float(a.get("avg_heart_rate", 0) or 0) > 0]
+    # Compute deduplicated stats for the goal period
+    from routers.sync import get_period_start, pace_str
+    from utils.activity_utils import parse_activity_time
+
+    all_run_acts = [a for a in activities if a.get("activity_type", "run") == "run"]
+
+    if goal_period == "weekly":
+        week_start_ts = get_period_start("weekly").timestamp()
+        period_run_acts = [a for a in all_run_acts if parse_activity_time(a) >= week_start_ts]
+        period_start_iso = get_period_start("weekly").isoformat()
+    else:
+        period_run_acts = all_run_acts
+        period_start_iso = get_period_start("monthly").isoformat()
+
+    calc_dist = round(sum(float(a.get("distance_km", 0) or 0) for a in period_run_acts), 2)
+    calc_elev = round(sum(float(a.get("total_elevation_gain", 0) or 0) for a in period_run_acts), 1)
+    calc_time = sum(int(a.get("moving_time", 0) or 0) for a in period_run_acts)
+    calc_hrs = [float(a.get("avg_heart_rate", 0) or 0) for a in period_run_acts if float(a.get("avg_heart_rate", 0) or 0) > 0]
     calc_avg_hr = round(sum(calc_hrs) / len(calc_hrs)) if calc_hrs else 0
 
-    from routers.sync import pace_str
     calc_pace = pace_str(calc_dist * 1000, calc_time)
 
     target_dist = float(goal.get("target_distance") or goal.get("target_distance_km", 0) or 0.0) if goal else 0.0
     calc_goal_pct = round((calc_dist / target_dist) * 100) if target_dist > 0 else 0
+
+    db_stats = results.get("stats") or {}
+    from datetime import datetime
+    last_sync = db_stats.get("last_sync") or user_data.get("last_sync") or datetime.now().isoformat()
 
     stats = {
         "uid": uid,
@@ -241,9 +261,19 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         "avg_pace": calc_pace,
         "avg_heart_rate": calc_avg_hr,
         "goal_completion_percentage": min(calc_goal_pct, 100),
-        "run_count": len(run_acts),
+        "run_count": len(period_run_acts),
         "period": goal_period,
+        "period_start": period_start_iso,
+        "last_sync": last_sync,
     }
+
+    # Calculate monthly stats for the monthly leaderboard list
+    monthly_dist = round(sum(float(a.get("distance_km", 0) or 0) for a in all_run_acts), 2)
+    monthly_elev = round(sum(float(a.get("total_elevation_gain", 0) or 0) for a in all_run_acts), 1)
+    monthly_time = sum(int(a.get("moving_time", 0) or 0) for a in all_run_acts)
+    monthly_hrs = [float(a.get("avg_heart_rate", 0) or 0) for a in all_run_acts if float(a.get("avg_heart_rate", 0) or 0) > 0]
+    monthly_avg_hr = round(sum(monthly_hrs) / len(monthly_hrs)) if monthly_hrs else 0
+    monthly_pace = pace_str(monthly_dist * 1000, monthly_time)
 
     # Update current user's row in leaderboard_entries
     updated_leaderboard = []
@@ -252,17 +282,26 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         if entry.get("uid") == uid:
             found_user = True
             e = dict(entry)
-            e["total_distance_km"] = calc_dist
-            e["total_elevation_gain"] = calc_elev
-            e["avg_pace"] = calc_pace
-            e["avg_heart_rate"] = calc_avg_hr
-            e["run_count"] = len(run_acts)
+            e["total_distance_km"] = monthly_dist
+            e["total_elevation_gain"] = monthly_elev
+            e["avg_pace"] = monthly_pace
+            e["avg_heart_rate"] = monthly_avg_hr
+            e["run_count"] = len(all_run_acts)
             updated_leaderboard.append(e)
         else:
             updated_leaderboard.append(entry)
 
-    if not found_user and calc_dist > 0:
-        updated_leaderboard.append(stats)
+    if not found_user and monthly_dist > 0:
+        updated_leaderboard.append({
+            "uid": uid,
+            "display_name": display_name,
+            "total_distance_km": monthly_dist,
+            "total_elevation_gain": monthly_elev,
+            "avg_pace": monthly_pace,
+            "avg_heart_rate": monthly_avg_hr,
+            "run_count": len(all_run_acts),
+            "period": "monthly",
+        })
 
     # Re-sort leaderboard entries by distance descending
     updated_leaderboard = sorted(updated_leaderboard, key=lambda x: x.get("total_distance_km", 0), reverse=True)

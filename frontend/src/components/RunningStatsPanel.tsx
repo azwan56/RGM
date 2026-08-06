@@ -66,8 +66,11 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
   }, [uid, backendUrl]);
 
   useEffect(() => {
-    // Skip fetch if initial data was provided (from combined dashboard endpoint)
-    if (!initialStats) fetchStats();
+    if (initialStats && Object.keys(initialStats).length > 0) {
+      setStats({ ...EMPTY_STATS, ...initialStats });
+    } else {
+      fetchStats();
+    }
   }, [fetchStats, initialStats]);
 
   const handleSync = useCallback(async () => {

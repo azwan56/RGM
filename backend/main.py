@@ -17,19 +17,25 @@ from middleware.auth import FirebaseAuthMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    try:
-        from scheduler import start_scheduler
-        start_scheduler()
-        print("[startup] Background scheduler started")
-    except Exception as e:
-        print(f"[startup] Scheduler failed to start: {e}")
+    if os.getenv("DISABLE_IN_MEMORY_SCHEDULER", "false").lower() not in ("true", "1"):
+        try:
+            from scheduler import start_scheduler
+            start_scheduler()
+            print("[startup] Background scheduler started")
+        except Exception as e:
+            print(f"[startup] Scheduler failed to start: {e}")
+    else:
+        print("[startup] In-memory scheduler disabled by env (DISABLE_IN_MEMORY_SCHEDULER)")
 
-    try:
-        from utils.wecom_bot import start_wecom_bot
-        start_wecom_bot()
-        print("[startup] WeCom WS interactive bot initialized")
-    except Exception as e:
-        print(f"[startup] WeCom WS bot failed to start: {e}")
+    if os.getenv("DISABLE_WECOM_BOT", "false").lower() not in ("true", "1"):
+        try:
+            from utils.wecom_bot import start_wecom_bot
+            start_wecom_bot()
+            print("[startup] WeCom WS interactive bot initialized")
+        except Exception as e:
+            print(f"[startup] WeCom WS bot failed to start: {e}")
+    else:
+        print("[startup] WeCom WS bot disabled by env (DISABLE_WECOM_BOT)")
     yield
     # Shutdown (nothing needed)
 
@@ -56,6 +62,13 @@ app.include_router(profile.router,  prefix="/api/profile", tags=["profile"])
 app.include_router(apple_health.router, prefix="/api/sync/apple-health", tags=["apple-health"])
 app.include_router(google_health.router, prefix="/api/google-health", tags=["google-health"])
 app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
+
+try:
+    from routers import cron
+    app.include_router(cron.router, prefix="/api/cron", tags=["cron"])
+except ImportError:
+    pass
+
 
 try:
     from routers import wecom_callback

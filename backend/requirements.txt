@@ -14,5 +14,6 @@ httpx
 Pillow
 pycryptodome
 wecom-aibot-sdk-python
+pytz
 garminconnect
 

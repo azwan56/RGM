@@ -26,6 +26,7 @@ _PUBLIC_PREFIXES = (
     "/api/admin/",
     "/api/wecom/",
     "/api/auth/",
+    "/api/cron/",
 )
 
 # ── Token verification cache (saves 20-100ms per request) ────────────────────
