@@ -62,7 +62,7 @@ const selectCls = "w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const router = useRouter();
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   const [now] = useState(() => Date.now());
   const [uid, setUid]             = useState<string | null>(null);

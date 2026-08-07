@@ -17,7 +17,7 @@ export default function TeamDetailPage() {
   const router = useRouter();
   const params = useParams();
   const teamId = params.teamId as string;
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   const [uid, setUid] = useState<string | null>(null);
   const [teamName, setTeamName] = useState("");

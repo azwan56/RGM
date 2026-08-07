@@ -49,7 +49,7 @@ export default function AnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [bundleData, setBundleData] = useState<any>(null);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   // Fetch all analysis data in ONE request (replaces 4 serial requests)
   const fetchBundle = useCallback(async (uid: string) => {

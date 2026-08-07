@@ -36,7 +36,7 @@ export default function GoalSettingForm() {
       if (!user) return;
 
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+        const backendUrl = "";
         const { default: axios } = await import("@/lib/apiClient");
         const res = await axios.get(`${backendUrl}/api/data/init/${user.uid}`);
         const { profile, goal } = res.data;
@@ -108,7 +108,7 @@ export default function GoalSettingForm() {
 
     try {
       const uid = auth.currentUser.uid;
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+      const backendUrl = "";
 
       // Save via backend API (reliable from China — no direct Firestore needed)
       const { default: axios } = await import("@/lib/apiClient");

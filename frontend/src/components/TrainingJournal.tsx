@@ -89,7 +89,7 @@ export default function TrainingJournal({ uid }: { uid: string }) {
   const [reviewing, setReviewing] = useState(false);
   const [backfilling, setBackfilling] = useState<string>("");
   const [liveRaceDays, setLiveRaceDays] = useState<number | null>(null);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   const fetchJournal = useCallback(async () => {
     try {

@@ -33,7 +33,7 @@ export default function LeaderboardWidget({ currentUid, fixedHeight, initialEntr
   const [entries, setEntries]       = useState<LeaderboardEntry[]>(initialEntries || []);
   const [yearly,  setYearly]        = useState<YearlyEntry[]>([]);
   const [loading, setLoading]       = useState(!initialEntries);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   // ── Monthly / Weekly — backend API (not direct Firestore) ─────────────────
   useEffect(() => {

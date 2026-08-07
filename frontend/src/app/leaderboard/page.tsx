@@ -17,7 +17,7 @@ export default function Leaderboard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortMethod, setSortMethod] = useState<"distance" | "completion">("completion");
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
+  const backendUrl = "";
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
