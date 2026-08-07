@@ -110,7 +110,7 @@ export default function AiCoachWidget({ uid }: { uid: string }) {
   const [loading, setLoading] = useState(true);
   const [raceDaysMap, setRaceDaysMap] = useState<Map<string, number>>(new Map());
   const [isFitbitConnected, setIsFitbitConnected] = useState(false);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
 
   // Fetch race dates from profile for live countdown and check Fitbit connection
   useEffect(() => {

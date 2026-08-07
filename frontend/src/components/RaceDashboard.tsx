@@ -12,7 +12,7 @@ export default function RaceDashboard({ uid, initialData }: { uid: string; initi
 
   useEffect(() => {
     if (initialData) return;
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
     axios
       .post(`${backendUrl}/api/science/race-predictor`, { uid })
       .then((r) => {

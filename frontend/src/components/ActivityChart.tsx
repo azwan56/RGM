@@ -89,7 +89,7 @@ export default function ActivityChart({ activityId, uid, avgPace, avgHeartRate, 
 
   useEffect(() => {
     if (hasInitialPoints) return; // already seeded with real data
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
     import("@/lib/apiClient").then(({ default: api }) => {
       api.get(`${backendUrl}/api/sync/activity/${activityId}/streams?uid=${uid}`)
         .then((r) => { setPoints(r.data.points || []); setLoading(false); })

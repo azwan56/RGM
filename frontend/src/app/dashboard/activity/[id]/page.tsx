@@ -67,7 +67,7 @@ export default function ActivityDetailPage() {
       if (!firebaseUser) { router.push("/"); return; }
       setUser(firebaseUser);
       const uid = firebaseUser.uid;
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
 
       try {
         // Load from backend API (not direct Firestore — faster in China)

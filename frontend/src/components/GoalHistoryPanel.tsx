@@ -47,7 +47,7 @@ const MONTHS_SHORT = ["1月","2月","3月","4月","5月","6月",
                       "7月","8月","9月","10月","11月","12月"];
 
 export default function GoalHistoryPanel({ uid, initialData }: { uid: string; initialData?: { history: HistoryData; annual: AnnualData } }) {
-  const backendUrl  = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const backendUrl  = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
   const [history,  setHistory]  = useState<HistoryData | null>(initialData?.history || null);
   const [annual,   setAnnual]   = useState<AnnualData  | null>(initialData?.annual || null);
   const [loading,  setLoading]  = useState(!initialData);

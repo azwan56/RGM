@@ -41,7 +41,7 @@ export default function FitnessChart({ uid, initialData }: { uid: string; initia
     if (initialData) return; // Skip fetch if data was provided
     const fetchData = async () => {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
         const res = await axios.post(`${backendUrl}/api/science/fitness-trend`, { uid, days: 30 });
         setData(res.data.data || []);
       } catch (err: any) {

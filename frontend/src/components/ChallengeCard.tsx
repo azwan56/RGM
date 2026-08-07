@@ -37,7 +37,7 @@ export default function ChallengeCard({ challenge, uid }: { challenge: Challenge
   const [syncing, setSyncing] = useState(false);
   const [myValue, setMyValue] = useState<number | null>(null);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
   const meta = TYPE_META[challenge.type] || TYPE_META.total_km;
 
   // Calculate days remaining

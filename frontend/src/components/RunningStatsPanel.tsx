@@ -51,7 +51,7 @@ export default function RunningStatsPanel({ uid, initialStats }: { uid: string; 
   const [syncing, setSyncing] = useState(false);
   const [fullSyncing, setFullSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
 
   // Fetch stats from backend API (not direct Firestore — faster in China)
   const fetchStats = useCallback(async () => {

@@ -58,7 +58,7 @@ export default function ActivityList({ uid, month, initialActivities }: Props) {
   const [loading, setLoading] = useState(!initialActivities);
   const [initialMonth] = useState(month); // Track the initial month to know when to skip fetch
   const router = useRouter();
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
 
   useEffect(() => {
     if (!uid) return;

@@ -77,7 +77,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
       const creationTime = cred.user.metadata.creationTime;
       const isNewUser = creationTime && (Date.now() - new Date(creationTime).getTime() < 30000);
       if (isNewUser && cred.user.email) {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
         fetch(`${backendUrl}/api/auth/welcome-email`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -109,7 +109,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
       if (isRegister) {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         // Fire-and-forget: send welcome email for new registrations
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
         fetch(`${backendUrl}/api/auth/welcome-email`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

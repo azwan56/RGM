@@ -23,7 +23,7 @@ export default function TrendChart({ uid, initialData }: { uid: string; initialD
     if (initialData) return;
     const fetch = async () => {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "https://rgm-backend-3v6u4behxa-de.a.run.app";
         const res = await axios.post(`${backendUrl}/api/science/monthly-trend`, { uid, months: 6 });
         setData(res.data.data || []);
       } catch { /* noop */ }

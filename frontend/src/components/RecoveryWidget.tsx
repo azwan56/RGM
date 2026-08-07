@@ -23,7 +23,7 @@ export default function RecoveryWidget({ uid }: RecoveryWidgetProps) {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [history, setHistory] = useState<RecoveryDataPoint[]>([]);
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://rgm-backend-3v6u4behxa-de.a.run.app';
 
   useEffect(() => {
     async function fetchRecovery() {
