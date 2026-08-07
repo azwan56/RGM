@@ -156,7 +156,7 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
 
     password = decrypt_string(enc_pwd)
     if not password:
-        return {"success": False, "error": "Failed to decrypt password"}
+        return {"success": False, "error": "Garmin 密码秘钥已失效，请重新点击【绑定 Garmin】输入密码连接。"}
 
     adapter = GarminAdapter(email=email, password=password, domain=domain)
     activities = adapter.fetch_recent_activities(limit=50)

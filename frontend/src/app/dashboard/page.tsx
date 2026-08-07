@@ -181,8 +181,9 @@ export default function Dashboard() {
     } catch (e: any) {
       console.error("Garmin sync error:", e);
       const detail = e.response?.data?.detail;
-      if (detail && detail.includes("未检测到 Garmin 绑定账号")) {
+      if (detail && (detail.includes("未检测到 Garmin 绑定账号") || detail.includes("秘钥已失效") || detail.includes("密码"))) {
         setShowGarminModal(true);
+        setSyncMsg({ text: detail, type: "error" });
       } else {
         setSyncMsg({ text: detail || "Garmin 同步失败，请检查佳明账号、密码或选区 (garmin.cn vs garmin.com)。", type: "error" });
       }
