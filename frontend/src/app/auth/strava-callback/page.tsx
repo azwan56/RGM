@@ -32,20 +32,11 @@ function CallbackContent() {
 
       if (code) {
         try {
-          // 1. Exchange Strava OAuth code for tokens and persist to Firestore
-          // Use relative API path (proxied by Next.js rewrites to prevent CORS/GFW issues)
-          try {
-            await axios.post('/api/auth/strava', {
-              code: code,
-              uid: user.uid,
-            });
-          } catch (firstErr) {
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://rgm-backend-598386316625.asia-east1.run.app';
-            await axios.post(`${backendUrl}/api/auth/strava`, {
-              code: code,
-              uid: user.uid,
-            });
-          }
+          // 1. Exchange Strava OAuth code for tokens via Next.js proxy rewrite (/api/auth/strava)
+          await axios.post('/api/auth/strava', {
+            code: code,
+            uid: user.uid,
+          });
 
           // 2. Auto-trigger an initial Strava sync so the dashboard is not empty
           setStatus('Connected! Syncing your Strava data...');
