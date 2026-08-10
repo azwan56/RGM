@@ -58,9 +58,10 @@ function CallbackContent() {
 
           setStatus('All done! Redirecting to Dashboard...');
           setTimeout(() => router.push('/dashboard'), 1500);
-        } catch (err) {
+        } catch (err: any) {
           console.error(err);
-          setStatus('Failed to connect Strava. Please try again.');
+          const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
+          setStatus(`Failed to connect Strava: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
         }
       }
     });
