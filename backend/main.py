@@ -44,12 +44,10 @@ app = FastAPI(title="Running Community Manager API", lifespan=lifespan)
 # Firebase auth middleware — validates Bearer tokens on protected routes
 app.add_middleware(FirebaseAuthMiddleware)
 
-# Configure CORS — read allowed origins from env, default to localhost for dev
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in cors_origins],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

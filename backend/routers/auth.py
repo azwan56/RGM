@@ -173,8 +173,12 @@ def bind_garmin(request: GarminAuthRequest):
     if HAS_GARMINCONNECT:
         ok = adapter.login()
         if not ok:
-            err_msg = adapter.last_error or "请检查邮箱、密码及地区选择"
-            raise HTTPException(status_code=400, detail=f"Garmin 验证失败: {err_msg}")
+            err_msg = adapter.last_error or ""
+            if "429" in err_msg or "rate limit" in err_msg.lower():
+                detail_str = "佳明官方服务器临时限流 (429 Too Many Requests)，请等待 2~3 分钟后重新尝试绑定。"
+            else:
+                detail_str = f"绑定失败，请检查账号、密码及选择的佳明区域（中国版 vs 国际版）。{f' ({err_msg})' if err_msg else ''}"
+            raise HTTPException(status_code=400, detail=detail_str)
 
     encrypted_pwd = encrypt_string(request.password)
     user_ref = db.collection("users").document(request.uid)
