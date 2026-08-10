@@ -14,8 +14,6 @@ const nextConfig: NextConfig = {
     let backendUrl = 'https://rgm-backend-598386316625.asia-east1.run.app';
     if (isDev) {
       backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-    } else if (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('3v6u4behxa')) {
-      backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
     }
     backendUrl = backendUrl.replace(/\/$/, '');
       
