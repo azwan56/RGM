@@ -505,8 +505,8 @@ _RACE_KNOWLEDGE = {
         "climate_notes": "需夜间越野经验，山区气候多变，携带完整强制装备",
     },
     "trail_100m": {
-        "race_type": "越野跑 100英里（UTMB级别）", "difficulty_level": "极限",
-        "total_distance": "约170公里", "elevation_gain": "8000-10000m+（UTMB约10000m+）",
+        "race_type": "越野跑 100英里", "difficulty_level": "极限",
+        "total_distance": "约170公里", "elevation_gain": "8000-10000m+",
         "key_demands": [
             "超极限耐力（30-46小时持续运动）", "巨量累计爬升（10000m+）与Power Hiking",
             "多次夜跑与睡眠管理", "极端天气应对（暴风雨、低温、大风）",
@@ -1625,29 +1625,59 @@ class JournalLogRequest(BaseModel):
     uid: str
     activity_id: str = ""
     force: bool = False
+    send_notification: bool = True
 
 class WeeklyReviewRequest(BaseModel):
     uid: str
 
 
 def _get_nearest_race_info(uid: str) -> dict:
-    """Get nearest future race from goals."""
-    import re
+    """Get nearest future race from user profile (upcoming_races) or goals/races."""
     from datetime import date as _dt
     user_ref = db.collection("users").document(uid)
+    user_doc = user_ref.get()
+    user_data = user_doc.to_dict() if user_doc.exists else {}
+
+    races = []
+    # 1. Profile races (upcoming_races)
+    profile_races = user_data.get("upcoming_races", [])
+    if isinstance(profile_races, list):
+        races.extend(profile_races)
+
+    # 2. Goals/races subcollection
     races_doc = user_ref.collection("goals").document("races").get()
-    if not races_doc.exists:
-        return {}
-    races = races_doc.to_dict().get("upcoming", [])
-    future = sorted([r for r in races if r.get("date", "") >= _dt.today().isoformat()],
-                    key=lambda r: r.get("date", "9999"))
+    if races_doc.exists:
+        goal_races = races_doc.to_dict().get("upcoming", [])
+        if isinstance(goal_races, list):
+            races.extend(goal_races)
+
+    today_str = _dt.today().isoformat()
+    future = []
+    seen = set()
+    for r in races:
+        if not isinstance(r, dict):
+            continue
+        r_date = r.get("date", "")
+        r_name = r.get("name", "")
+        if r_date and r_date >= today_str and r_name:
+            key = f"{r_name}_{r_date}"
+            if key not in seen:
+                seen.add(key)
+                future.append(r)
+
+    future.sort(key=lambda r: r.get("date", "9999"))
     if not future:
         return {}
+
     race = future[0]
     days_to = (_dt.fromisoformat(race["date"]) - _dt.today()).days if race.get("date") else 999
-    return {"name": race.get("name", ""), "type": race.get("type", ""),
-            "date": race.get("date", ""), "target_time": race.get("target_time", ""),
-            "days_to": days_to}
+    return {
+        "name": race.get("name", ""),
+        "type": race.get("type", ""),
+        "date": race.get("date", ""),
+        "target_time": race.get("target_time", ""),
+        "days_to": days_to
+    }
 
 
 def _get_or_create_journal(uid: str) -> dict:
@@ -1664,6 +1694,11 @@ def _get_or_create_journal(uid: str) -> dict:
             if race["name"] not in j.get("title", ""):
                 user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
                 break  # fall through to create new
+        else:
+            # If no race exists but journal title references an old race → archive & recreate
+            if "备赛日志" in j.get("title", "") and "通用" not in j.get("title", ""):
+                user_ref.collection("training_logs").document(doc.id).update({"status": "archived"})
+                break
         j["_race"] = race  # attach race info for prompt use
         return j
 
@@ -1868,6 +1903,22 @@ async def log_journal_entry(req: JournalLogRequest):
             entry["sub_activity_ids"] = current_sub_ids
             
         entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+
+        # Dispatch Discord & WeCom push notifications (only for recent activities)
+        if getattr(req, "send_notification", True):
+            from datetime import date as _dt, timedelta
+            act_date_str = activity.get("start_date_local", "")[:10]
+            if act_date_str and act_date_str >= (_dt.today() - timedelta(days=2)).isoformat():
+                try:
+                    from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
+                    coach_tip = entry.get("ai_comment") or ""
+                    print(f"[coach] Dispatching Discord & WeCom notifications for CT entry {entry_date}_{act_id}")
+                    send_activity_discord_notification(activity, user_data, uid=uid, coach_tip=coach_tip)
+                    send_activity_wecom_notification(activity, user_data, uid=uid, coach_tip=coach_tip, journal_entry=entry)
+                except Exception as _ne:
+                    print(f"[coach] Notification dispatch error for CT: {_ne}")
+            else:
+                print(f"[coach] Skipping CT push notification for historical activity {act_id} (date: {act_date_str})")
         
         # Clean up duplicate entries in composite session
         if is_composite:
@@ -2301,6 +2352,22 @@ async def log_journal_entry(req: JournalLogRequest):
         entry["sub_activity_ids"] = current_sub_ids
         
     entries_ref.document(f"{entry_date}_{act_id}").set(entry)
+
+    # Dispatch Discord & WeCom push notifications (only for recent activities)
+    if getattr(req, "send_notification", True):
+        from datetime import date as _dt, timedelta
+        act_date_str = activity.get("start_date_local", "")[:10]
+        if act_date_str and act_date_str >= (_dt.today() - timedelta(days=2)).isoformat():
+            try:
+                from utils.discord import send_activity_discord_notification, send_activity_wecom_notification
+                coach_tip = entry.get("ai_comment") or ""
+                print(f"[coach] Dispatching Discord & WeCom notifications for run entry {entry_date}_{act_id}")
+                send_activity_discord_notification(activity, user_data, uid=uid, coach_tip=coach_tip)
+                send_activity_wecom_notification(activity, user_data, uid=uid, coach_tip=coach_tip, journal_entry=entry)
+            except Exception as _ne:
+                print(f"[coach] Notification dispatch error for run: {_ne}")
+        else:
+            print(f"[coach] Skipping run push notification for historical activity {act_id} (date: {act_date_str})")
     
     # Clean up duplicate entries in composite session
     if is_composite:
@@ -2351,8 +2418,10 @@ def _run_backfill_task(uid: str, since_date: str, journal_title: str):
 
         print(f"[backfill] Found {len(activities)} activities")
 
-        # Create journal with custom title
-        journal_title = journal_title or "UTMB 备赛日志"
+        # Create journal with custom title or dynamic race name
+        if not journal_title:
+            race = _get_nearest_race_info(uid)
+            journal_title = f"{race['name']} 备赛日志" if race and race.get("name") else "备赛日志"
         race = _get_nearest_race_info(uid)
 
         # Archive any existing active journals
@@ -2601,7 +2670,7 @@ def get_journal(uid: str):
                 for mid in missing_ids:
                     try:
                         print(f"[coach] Proactive backfill generating AI comment for activity {mid}")
-                        req_obj = JournalLogRequest(uid=uid, activity_id=mid, force=True)
+                        req_obj = JournalLogRequest(uid=uid, activity_id=mid, force=True, send_notification=False)
                         loop.run_until_complete(log_journal_entry(req_obj))
                     except Exception as ex:
                         print(f"[coach] Backfill error for {mid}: {ex}")

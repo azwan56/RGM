@@ -465,7 +465,11 @@ export default function Dashboard() {
                     <p className="text-[11px] text-zinc-400">通过 Strava OAuth 自动同步跑步记录</p>
                   </div>
                 </div>
-                {dashboardData?.strava_connected ? (
+                {dashboardData?.strava_token_invalid ? (
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                    ! 授权已失效
+                  </span>
+                ) : dashboardData?.strava_connected ? (
                   <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                     ✓ 已连接
                   </span>
@@ -536,7 +540,12 @@ export default function Dashboard() {
                     </div>
                   </>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
+                    {dashboardData?.strava_token_invalid && (
+                      <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl font-medium">
+                        ⚠️ Strava 授权已失效，请点击下方按钮重新建立授权以恢复同步。
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <StravaConnectBtn />
                       <button

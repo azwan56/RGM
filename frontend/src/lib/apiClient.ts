@@ -11,20 +11,19 @@ const _authReadyPromise = auth.authStateReady().then(() => { _authReady = true; 
 // Request interceptor to attach Firebase ID Token
 apiClient.interceptors.request.use(
   async (config) => {
-    // Only wait for auth init once (first request); subsequent calls skip instantly
-    if (!_authReady) {
-      await _authReadyPromise;
-    }
-
-    const user = auth.currentUser;
-    if (user) {
-      try {
-        // getIdToken() returns cached token if not expired (~instant)
-        const token = await user.getIdToken();
-        config.headers.Authorization = `Bearer ${token}`;
-      } catch (error) {
-        console.error("Failed to get Firebase token:", error);
+    try {
+      if (typeof window !== "undefined") {
+        await auth.authStateReady();
+        const user = auth.currentUser;
+        if (user) {
+          const token = await user.getIdToken();
+          if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+          }
+        }
       }
+    } catch (error) {
+      console.error("Failed to get Firebase token:", error);
     }
     return config;
   },

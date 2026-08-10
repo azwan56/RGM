@@ -197,12 +197,8 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
     activities = deduplicate_activities(raw_acts)
     activities = [a for a in activities if a.get("source") != "AppleHealth"]
 
-    strava_connected = bool(
-        user_data.get("strava_connected")
-        or user_data.get("strava_access_token")
-        or user_data.get("strava_refresh_token")
-        or user_data.get("strava_athlete_id")
-    )
+    strava_token_invalid = bool(user_data.get("strava_token_invalid", False))
+    strava_connected = bool(user_data.get("strava_connected", False)) and not strava_token_invalid
     garmin_connected = bool(
         user_data.get("garmin_connected")
         or (user_data.get("garmin_email") and user_data.get("garmin_encrypted_password"))
@@ -312,6 +308,7 @@ def get_dashboard_all(uid: str, period: str = "monthly", month: int = -1):
         "profile": safe_profile,
         "goal": goal,
         "strava_connected": strava_connected,
+        "strava_token_invalid": strava_token_invalid,
         "garmin_connected": garmin_connected,
         "apple_health_connected": False,
         "display_name": display_name,
@@ -391,18 +388,34 @@ def get_user_stats(uid: str):
 @router.get("/leaderboard")
 def get_leaderboard(period: str = "monthly", limit_n: int = 20):
     """Returns sorted leaderboard entries for the given period (monthly or weekly)."""
-    # Monthly tab fetches all docs (leaderboard now always stores monthly data)
     if period == "monthly":
         docs = (db.collection("leaderboard")
                   .order_by("total_distance_km", direction="DESCENDING")
                   .limit(limit_n)
                   .stream())
+        return {"entries": [d.to_dict() for d in docs]}
     else:
-        docs = (db.collection("leaderboard_weekly")
-                  .order_by("total_distance_km", direction="DESCENDING")
-                  .limit(limit_n)
-                  .stream())
-    return {"entries": [d.to_dict() for d in docs]}
+        try:
+            from routers.sync import get_period_start
+            current_week_start = get_period_start("weekly").isoformat()
+            docs = db.collection("leaderboard_weekly").stream()
+            entries = []
+            for d in docs:
+                data = d.to_dict()
+                if data.get("period_start", "") < current_week_start:
+                    data["total_distance_km"] = 0.0
+                    data["run_count"] = 0
+                    data["avg_pace"] = "—"
+                    data["goal_completion_percentage"] = 0
+                entries.append(data)
+            entries.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+            return {"entries": entries[:limit_n]}
+        except Exception:
+            docs = (db.collection("leaderboard_weekly")
+                      .order_by("total_distance_km", direction="DESCENDING")
+                      .limit(limit_n)
+                      .stream())
+            return {"entries": [d.to_dict() for d in docs]}
 
 
 # ── Activities list for a month ───────────────────────────────────────────────

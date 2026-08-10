@@ -54,26 +54,32 @@ def clean_err(e: Exception) -> str:
 # ── Helpers: pull extra context from Firestore ────────────────────────────────
 
 def _get_monthly_km(uid: str, current_date_str: str) -> float:
-    """Sum distance for the current calendar month."""
+    """Sum deduplicated run distance for the current calendar month."""
     try:
         from firebase_config import db
-        month_prefix = current_date_str[:7]  # "YYYY-MM"
+        from utils.activity_utils import deduplicate_activities
+
+        month_prefix = current_date_str[:7] if current_date_str else datetime.now().strftime("%Y-%m")
+        month_start_str = f"{month_prefix}-01T00:00:00"
+
         docs = (
             db.collection("users").document(uid)
             .collection("activities")
-            .order_by("start_date_local", direction="DESCENDING")
-            .limit(200)
+            .where("start_date_local", ">=", month_start_str)
             .stream()
         )
+        raw_acts = [d.to_dict() for d in docs]
+        clean_acts = deduplicate_activities(raw_acts)
+
         total = 0.0
-        for d in docs:
-            act = d.to_dict()
+        for act in clean_acts:
             if act.get("start_date_local", "")[:7] == month_prefix:
-                total += act.get("distance_km", 0)
-            elif act.get("start_date_local", "")[:7] < month_prefix:
-                break  # sorted descending, safe to stop
+                if act.get("activity_type", "run") == "run" and act.get("source") != "AppleHealth":
+                    total += act.get("distance_km", 0) or 0.0
+
         return round(total, 1)
-    except Exception:
+    except Exception as e:
+        print(f"[discord] _get_monthly_km error: {e}")
         return 0.0
 
 

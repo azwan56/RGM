@@ -112,6 +112,12 @@ def run_daily_sync() -> dict:
             }, timeout=15, skip_throttle=True)
 
             if not token_resp.ok:
+                if token_resp.status_code == 400 or "invalid" in token_resp.text.lower():
+                    user_ref.update({
+                        "strava_connected": False,
+                        "strava_token_invalid": True,
+                    })
+                    logger.warning(f"[scheduler] Marked Strava token invalid for {uid}")
                 results["failed"] += 1
                 results["errors"].append(f"{uid}: token refresh failed ({token_resp.status_code})")
                 continue

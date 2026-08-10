@@ -492,11 +492,24 @@ def _fetch_monthly_leaderboard(limit_n: int = 20) -> list:
 
 def _fetch_weekly_leaderboard(limit_n: int = 20) -> list:
     """Fetch the weekly leaderboard (all users, sorted by distance)."""
-    docs = (db.collection("leaderboard_weekly")
-              .order_by("total_distance_km", direction="DESCENDING")
-              .limit(limit_n)
-              .stream())
-    return [d.to_dict() for d in docs]
+    try:
+        from routers.sync import get_period_start
+        current_week_start = get_period_start("weekly").isoformat()
+        docs = db.collection("leaderboard_weekly").stream()
+        entries = []
+        for d in docs:
+            data = d.to_dict()
+            if data.get("period_start", "") < current_week_start:
+                data["total_distance_km"] = 0.0
+                data["run_count"] = 0
+                data["avg_pace"] = "—"
+                data["goal_completion_percentage"] = 0
+            entries.append(data)
+        entries.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+        return entries[:limit_n]
+    except Exception as e:
+        print(f"[wecom_bot] Error fetching weekly leaderboard: {e}")
+        return []
 
 
 def _format_leaderboard_markdown(entries: list, title: str) -> str:
@@ -520,7 +533,20 @@ def _format_leaderboard_markdown(entries: list, title: str) -> str:
 def _fetch_user_weekly_stats(uid: str) -> dict:
     """Fetch a user's weekly leaderboard stats."""
     doc = db.collection("leaderboard_weekly").document(uid).get()
-    return doc.to_dict() if doc.exists else {}
+    if not doc.exists:
+        return {}
+    data = doc.to_dict()
+    try:
+        from routers.sync import get_period_start
+        current_week_start = get_period_start("weekly").isoformat()
+        if data.get("period_start", "") < current_week_start:
+            data["total_distance_km"] = 0.0
+            data["run_count"] = 0
+            data["avg_pace"] = "—"
+            data["goal_completion_percentage"] = 0
+    except Exception:
+        pass
+    return data
 
 
 def _fetch_user_goal(uid: str) -> dict:
@@ -1134,7 +1160,7 @@ def _get_wecom_access_token():
     return None
 
 def send_bonnie_message(chatid: str, content: str) -> bool:
-    """Send a message via WeCom Application Message API.
+    """Send a message via WeCom Application Message API or AppChat API.
     Used as fallback when the WS SDK reply_func is not available (Callback API path).
     Requires WECOM_CORP_ID + WECOM_CALLBACK_SECRET for access token.
     """
@@ -1142,20 +1168,37 @@ def send_bonnie_message(chatid: str, content: str) -> bool:
     if not token:
         print("[wecom_bot] Cannot send message: no access token (WECOM_CORP_ID/WECOM_CALLBACK_SECRET not set)")
         return False
-        
-    url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
-    payload = {
-        "touser": chatid,
-        "msgtype": "markdown",
-        "agentid": int(os.getenv("WECOM_AGENT_ID", "1000002")),
-        "markdown": {
-            "content": content
-        }
-    }
-    resp = requests.post(url, json=payload)
-    return resp.ok and resp.json().get("errcode") == 0
 
-def handle_wecom_message(msg_data: dict):
+    is_group_chat = chatid.startswith("wr") or chatid.startswith("Chat")
+    if is_group_chat:
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/appchat/send?access_token={token}"
+        payload = {
+            "chatid": chatid,
+            "msgtype": "markdown",
+            "markdown": {
+                "content": content
+            }
+        }
+    else:
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+        payload = {
+            "touser": chatid,
+            "msgtype": "markdown",
+            "agentid": int(os.getenv("WECOM_AGENT_ID", "1000002")),
+            "markdown": {
+                "content": content
+            }
+        }
+
+    resp = requests.post(url, json=payload)
+    data = resp.json() if resp.ok else {}
+    if not resp.ok or data.get("errcode") != 0:
+        print(f"[wecom_bot] ✗ send_bonnie_message failed for {chatid}: status={resp.status_code}, body={resp.text}")
+        return False
+    print(f"[wecom_bot] ✓ send_bonnie_message succeeded for {chatid}")
+    return True
+
+def handle_wecom_message(msg_data: dict, loop=None):
     """Entry point for incoming messages from WeCom Callback API."""
     print(f"[wecom_bot] ▶ handle_wecom_message called with keys: {list(msg_data.keys())}")
     msg_type = msg_data.get("MsgType", "")
@@ -1193,7 +1236,7 @@ def handle_wecom_message(msg_data: dict):
             return
 
     from_user = msg_data.get("FromUserName", "")
-    chatid = from_user # Default reply to user
+    chatid = msg_data.get("ChatId") or from_user  # Prefer ChatId if message is from a group chat
     print(f"[wecom_bot]   Content={content[:80]!r}, FromUser={from_user}, has_inline_data={inline_data is not None}")
     
     # For standalone image/file messages, check pending image context first
@@ -1208,29 +1251,55 @@ def handle_wecom_message(msg_data: dict):
         should_reply = True
     else:
         # Check if we should reply (sliding window logic)
-        keywords = ["受伤", "PB", "偷懒", "装备", "鞋", "跑", "jack", "教练", "配速", "课表", "绑定", "我是谁"]
+        keywords = [
+            "hi", "hello", "你好", "在吗", "哈喽", "嗨", "jack", "bonnie",
+            "受伤", "pb", "偷懒", "装备", "鞋", "跑", "教练", "配速", "课表",
+            "绑定", "我是谁", "帮助", "？", "?", "分析", "早", "晚安"
+        ]
         content_lower = content.lower()
         matched_keywords = [k for k in keywords if k in content_lower]
-        should_reply = bool(matched_keywords) or random.random() < 0.1 # 10% chance
+        should_reply = True  # Always reply to incoming messages in Callback mode
         print(f"[wecom_bot]   matched_keywords={matched_keywords}, should_reply={should_reply}")
     
+    response_url = msg_data.get("response_url")
+    reply_func = None
+    if response_url:
+        async def reply_via_response_url(text: str):
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "content": text
+                }
+            }
+            try:
+                resp = requests.post(response_url, json=payload, timeout=10)
+                print(f"[wecom_bot] ✓ reply_via_response_url status={resp.status_code}, body={resp.text[:100]!r}")
+            except Exception as e:
+                print(f"[wecom_bot] ✗ reply_via_response_url error: {e}")
+        reply_func = reply_via_response_url
+        print(f"[wecom_bot]   Configured reply_via_response_url: {response_url[:60]!r}")
+
     if should_reply:
-        # Use asyncio to run the async generate_reply in background
-        loop = None
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        
-        print(f"[wecom_bot]   loop={'running' if loop and loop.is_running() else 'none'}")
-        try:
-            if loop and loop.is_running():
-                loop.create_task(_generate_reply(content, from_user, chatid, inline_data=inline_data))
-            else:
-                asyncio.run(_generate_reply(content, from_user, chatid, inline_data=inline_data))
-            print(f"[wecom_bot]   ✓ _generate_reply dispatched")
-        except Exception as e:
-            print(f"[wecom_bot]   ✗ Failed to dispatch _generate_reply: {e}")
+        # FastAPI background tasks run handle_wecom_message in a thread pool.
+        # Use run_coroutine_threadsafe to schedule _generate_reply on the
+        # uvicorn event loop — this keeps the loop active (Cloud Run won't
+        # suspend the container) and avoids the asyncio.run() nested-loop issue.
+        if loop and loop.is_running():
+            fut = asyncio.run_coroutine_threadsafe(
+                _generate_reply(content, from_user, chatid, reply_func=reply_func, inline_data=inline_data),
+                loop
+            )
+            print(f"[wecom_bot]   ✓ _generate_reply scheduled via run_coroutine_threadsafe")
+        else:
+            # Fallback: no loop passed or loop not running — spawn own event loop in thread
+            import threading
+            def _run_in_thread():
+                try:
+                    asyncio.run(_generate_reply(content, from_user, chatid, reply_func=reply_func, inline_data=inline_data))
+                except Exception as ex:
+                    print(f"[wecom_bot]   ✗ _generate_reply thread error: {ex}")
+            threading.Thread(target=_run_in_thread, daemon=True).start()
+            print(f"[wecom_bot]   ✓ _generate_reply dispatched in fallback thread")
     else:
         print(f"[wecom_bot]   ✗ Not replying (no keyword match, random miss)")
 

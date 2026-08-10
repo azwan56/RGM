@@ -57,6 +57,7 @@ def auth_strava(request: StravaAuthRequest):
         "strava_expires_at":    data["expires_at"],
         "strava_athlete_id":    athlete.get("id"),
         "strava_connected":     True,
+        "strava_token_invalid": False,
         "strava_name":          strava_name,
         "strava_profile_url":   athlete.get("profile"),  # avatar URL
     }

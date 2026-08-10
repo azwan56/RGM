@@ -292,12 +292,13 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
     if df.empty:
         return []
     
-    # Ensure moving_time and avg_heart_rate are numeric
-    df['moving_time'] = pd.to_numeric(df.get('moving_time', 0), errors='coerce').fillna(0)
-    df['avg_heart_rate'] = pd.to_numeric(df.get('avg_heart_rate', 0), errors='coerce').fillna(0)
+    # Ensure moving_time and avg_heart_rate are numeric float
+    df['moving_time'] = pd.to_numeric(df.get('moving_time', 0), errors='coerce').fillna(0).astype(float)
+    df['avg_heart_rate'] = pd.to_numeric(df.get('avg_heart_rate', 0), errors='coerce').fillna(0).astype(float)
     
     # Add a fallback for missing HR: if HR=0 but moving_time > 0, estimate rough TRIMP using zone 2
-    df.loc[(df['avg_heart_rate'] == 0) & (df['moving_time'] > 0), 'avg_heart_rate'] = rest_hr + (max_hr - rest_hr) * 0.5 
+    fallback_hr = float(rest_hr + (max_hr - rest_hr) * 0.5)
+    df.loc[(df['avg_heart_rate'] == 0) & (df['moving_time'] > 0), 'avg_heart_rate'] = fallback_hr 
 
     # Calculate TRIMP per activity with standard Banister HR reserve formula
     def get_row_trimp(row):
@@ -369,7 +370,6 @@ def compute_fitness_fatigue_timeseries(activities: list, max_hr: float = 190, re
         
     return output
 
-from sklearn.linear_model import LinearRegression
 
 def compute_vdot_from_streams(streams: dict, max_hr: float = 190, rest_hr: float = 60) -> dict:
     """
@@ -464,13 +464,13 @@ def compute_vdot_from_streams(streams: dict, max_hr: float = 190, rest_hr: float
     pct_vo2   = np.clip(pct_vo2, 0.3, 1.0)
     vvo2max_1 = mean_v / pct_vo2  # vVO₂max in m/s
 
-    # ── Linear Regression for estimate ② ─────────────────────────────────────
-    X = hrr_pct.reshape(-1, 1)
-    y = v_smooth
-    from sklearn.linear_model import LinearRegression as LR
-    model     = LR()
-    model.fit(X, y)
-    r_squared = float(model.score(X, y))
+    # ── Linear Regression via NumPy (no sklearn dependency) ───────────────────
+    slope, intercept = np.polyfit(hrr_pct, v_smooth, 1)
+    y_pred = slope * hrr_pct + intercept
+    y_mean = np.mean(v_smooth)
+    ss_tot = float(np.sum((v_smooth - y_mean) ** 2))
+    ss_res = float(np.sum((v_smooth - y_pred) ** 2))
+    r_squared = float(1.0 - (ss_res / ss_tot)) if ss_tot > 0 else 0.0
 
     # ── Estimate ② — Threshold-anchored (with extrapolation guard) ────────────
     # Predict pace at 85% HRR (aerobic threshold zone).
@@ -485,7 +485,7 @@ def compute_vdot_from_streams(streams: dict, max_hr: float = 190, rest_hr: float
     extrap_gap       = max(0.0, 0.85 - hrr_observed_max)  # how far we must extrapolate
 
     if r_squared >= 0.10 and hrr_observed_max >= 0.72:
-        v_at_threshold = float(model.predict([[0.85]])[0])
+        v_at_threshold = float(slope * 0.85 + intercept)
         v_at_threshold = np.clip(v_at_threshold, 1.5, 8.0)
         # Cap: threshold velocity cannot exceed 120% of observed median velocity.
         # This prevents regression slope from producing impossible predictions.

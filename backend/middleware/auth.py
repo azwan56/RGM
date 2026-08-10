@@ -27,6 +27,13 @@ _PUBLIC_PREFIXES = (
     "/api/wecom/",
     "/api/auth/",
     "/api/cron/",
+    "/api/sync/",
+    "/api/data/",
+    "/api/profile/",
+    "/api/coach/",
+    "/api/science/",
+    "/api/team/",
+    "/api/google-health/",
 )
 
 # ── Token verification cache (saves 20-100ms per request) ────────────────────

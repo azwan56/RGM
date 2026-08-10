@@ -29,15 +29,23 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${SERVICE_ACCOUNT}" \
   --role="roles/datastore.user" || true
 
-# 4. 部署 FastAPI 后端到 Cloud Run (无常驻 WS Bot，按需缩容至 0 实例)
-echo "🚀 正在编译 Docker 镜像并部署至 Cloud Run..."
+# Generate env.yaml for Cloud Run deployment
+cat <<EOF > .env.yaml
+DISABLE_IN_MEMORY_SCHEDULER: "true"
+DISABLE_WECOM_BOT: "true"
+CRON_SECRET: "${CRON_SECRET}"
+CORS_ORIGINS: "http://localhost:3000,http://localhost:8000,https://rgm.vanpower.live"
+EOF
+# Append backend/.env contents to .env.yaml
+awk -F '=' '/^[a-zA-Z_]+=/ { printf "%s: \"%s\"\n", $1, $2 }' backend/.env >> .env.yaml
+
 gcloud run deploy "${SERVICE_NAME}" \
   --source ./backend \
   --region "${REGION}" \
   --allow-unauthenticated \
   --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars "DISABLE_IN_MEMORY_SCHEDULER=true,DISABLE_WECOM_BOT=true,CRON_SECRET=${CRON_SECRET}"
+  --env-vars-file .env.yaml
 
 # 获取部署后的 Cloud Run 服务域名
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format="value(status.url)")
@@ -58,7 +66,7 @@ if gcloud scheduler jobs describe "${SCHEDULER_JOB_NAME}" --location "${REGION}"
   echo "更新已存在的 Cloud Scheduler 任务..."
   gcloud scheduler jobs update http "${SCHEDULER_JOB_NAME}" \
     --location "${REGION}" \
-    --schedule "0 4 * * *" \
+    --schedule "0 * * * *" \
     --uri "${SERVICE_URL}/api/cron/daily-sync" \
     --http-method POST \
     --update-headers "X-Cron-Secret=${CRON_SECRET}" \
@@ -68,7 +76,7 @@ else
   echo "新建 Cloud Scheduler 任务..."
   gcloud scheduler jobs create http "${SCHEDULER_JOB_NAME}" \
     --location "${REGION}" \
-    --schedule "0 4 * * *" \
+    --schedule "0 * * * *" \
     --uri "${SERVICE_URL}/api/cron/daily-sync" \
     --http-method POST \
     --headers "X-Cron-Secret=${CRON_SECRET}" \

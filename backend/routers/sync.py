@@ -2,12 +2,15 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from firebase_config import db
 import requests
+import logging
 from utils.strava_rate_limiter import strava_request
 from utils.strava_config import STRAVA_OAUTH_TOKEN_URL, STRAVA_API_BASE
 import os
 import calendar
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 # Default user timezone — all current users are in UTC+8
 _DEFAULT_TZ = "Asia/Singapore"
@@ -142,6 +145,121 @@ def _build_act_doc(act: dict, period: str, period_start, gear_info: dict = None)
     return doc
 
 
+def update_user_leaderboards(uid: str, user_data: dict):
+    """Aggregates monthly, weekly, and yearly leaderboard stats for a user and writes to Firestore."""
+    user_ref = db.collection("users").document(uid)
+    display_name = (
+        user_data.get("display_name")
+        or user_data.get("strava_name")
+        or (user_data.get("email", "").split("@")[0] if user_data.get("email") else None)
+        or f"Runner #{uid[:6]}"
+    )
+
+    goal_snap = user_ref.collection("goals").document("current").get()
+    period = "monthly"
+    target_dist = 0
+    if goal_snap.exists:
+        goal_data = goal_snap.to_dict()
+        period = goal_data.get("period", "monthly")
+        target_dist = goal_data.get("target_distance", 0)
+
+    from utils.activity_utils import deduplicate_activities
+
+    # 1. Monthly Leaderboard
+    month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
+    month_acts = (
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", month_start_str)
+        .stream()
+    )
+    month_acts_raw = [a.to_dict() for a in month_acts]
+    month_acts_clean = deduplicate_activities(month_acts_raw)
+
+    lb_dist, lb_time, lb_hr_sum, lb_hr_count, lb_runs, lb_elev = 0.0, 0, 0.0, 0, 0, 0.0
+    for d in month_acts_clean:
+        if d.get("activity_type", "run") != "run" or d.get("source") == "AppleHealth":
+            continue
+        lb_runs += 1
+        lb_dist += d.get("distance_km", 0) or 0
+        lb_time += d.get("moving_time", 0) or 0
+        lb_elev += d.get("total_elevation_gain", 0) or 0
+        hr = d.get("avg_heart_rate", 0) or 0
+        if hr > 0:
+            lb_hr_sum += hr
+            lb_hr_count += 1
+
+    lb_pace = pace_str(lb_dist * 1000, lb_time)
+    lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
+
+    now = datetime.now(ZoneInfo(_DEFAULT_TZ))
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    monthly_target_dist = target_dist
+    if period == "weekly" and target_dist > 0:
+        monthly_target_dist = target_dist * (days_in_month / 7.0)
+
+    lb_goal_percentage = round((lb_dist / monthly_target_dist) * 100) if monthly_target_dist > 0 else 0
+
+    db.collection("leaderboard").document(uid).set({
+        "uid": uid,
+        "display_name": display_name,
+        "email": user_data.get("email", ""),
+        "total_distance_km": round(lb_dist, 2),
+        "total_elevation_gain": round(lb_elev, 1),
+        "avg_pace": lb_pace,
+        "avg_heart_rate": lb_avg_hr,
+        "goal_completion_percentage": min(lb_goal_percentage, 100),
+        "run_count": lb_runs,
+        "period": "monthly",
+        "period_start": get_period_start("monthly").isoformat(),
+        "last_sync": datetime.now().isoformat(),
+    })
+
+    # 2. Weekly Leaderboard
+    week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
+    week_acts = (
+        user_ref.collection("activities")
+        .where("start_date_local", ">=", week_start_str)
+        .stream()
+    )
+    week_acts_raw = [a.to_dict() for a in week_acts]
+    week_acts_clean = deduplicate_activities(week_acts_raw)
+
+    wk_dist, wk_time, wk_hr_sum, wk_hr_count, wk_runs, wk_elev = 0.0, 0, 0.0, 0, 0, 0.0
+    for d in week_acts_clean:
+        if d.get("activity_type", "run") != "run" or d.get("source") == "AppleHealth":
+            continue
+        wk_runs += 1
+        wk_dist += d.get("distance_km", 0) or 0
+        wk_time += d.get("moving_time", 0) or 0
+        wk_elev += d.get("total_elevation_gain", 0) or 0
+        hr = d.get("avg_heart_rate", 0) or 0
+        if hr > 0:
+            wk_hr_sum += hr
+            wk_hr_count += 1
+
+    wk_pace = pace_str(wk_dist * 1000, wk_time)
+    wk_avg_hr = round(wk_hr_sum / wk_hr_count) if wk_hr_count > 0 else 0
+    wk_goal_pct = round((wk_dist / target_dist) * 100) if period == "weekly" and target_dist > 0 else 0
+
+    db.collection("leaderboard_weekly").document(uid).set({
+        "uid": uid,
+        "display_name": display_name,
+        "email": user_data.get("email", ""),
+        "total_distance_km": round(wk_dist, 2),
+        "total_elevation_gain": round(wk_elev, 1),
+        "avg_pace": wk_pace,
+        "avg_heart_rate": wk_avg_hr,
+        "goal_completion_percentage": min(wk_goal_pct, 100),
+        "run_count": wk_runs,
+        "period": "weekly",
+        "period_start": get_period_start("weekly").isoformat(),
+        "last_sync": datetime.now().isoformat(),
+    })
+
+    # 3. Yearly Leaderboard
+    _update_yearly_leaderboard(uid, user_data, display_name)
+
+
 def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
     """Syncs Garmin activities & daily health metrics for a user."""
     from utils.garmin_adapter import GarminAdapter
@@ -200,6 +318,12 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
             prof_updates["vo2_max"] = latest_valid_health["vo2_max"]
     user_ref.set(prof_updates, merge=True)
 
+    # Recompute leaderboards after Garmin sync
+    try:
+        update_user_leaderboards(user_ref.id, user_data)
+    except Exception as le:
+        logger.error(f"[sync] Leaderboard update error after Garmin sync: {le}")
+
     return {"success": True, "count": synced_count, "health": latest_valid_health}
 
 
@@ -234,6 +358,7 @@ def sync_user_data(req: SyncRequest):
         invalidate_profile_cache(req.uid)
 
         if garmin_result and garmin_result.get("success"):
+            update_user_leaderboards(req.uid, user_data)
             return {
                 "message": "Garmin 恢复与运动数据同步成功！",
                 "garmin": garmin_result,
@@ -257,6 +382,17 @@ def sync_user_data(req: SyncRequest):
         "refresh_token": refresh_token,
     }, skip_throttle=True)
     if not token_resp.ok:
+        if token_resp.status_code == 400 or "invalid" in token_resp.text.lower():
+            user_ref.update({
+                "strava_connected": False,
+                "strava_token_invalid": True,
+            })
+            if garmin_result and garmin_result.get("success"):
+                return {"message": "Garmin 同步成功（Strava 授权已失效，请重新授权 Strava）", "garmin": garmin_result}
+            raise HTTPException(
+                status_code=400,
+                detail="Strava 授权已失效或被撤销，请点击【重新授权 Strava】重新建立链接。"
+            )
         if garmin_result and garmin_result.get("success"):
             return {"message": "Garmin 同步成功（Strava Token 刷新跳过）", "garmin": garmin_result}
         raise HTTPException(status_code=400, detail=f"Failed to refresh Strava token: {token_resp.text}")
@@ -336,131 +472,8 @@ def sync_user_data(req: SyncRequest):
     avg_heart_rate   = round(heart_rate_sum / hr_count) if hr_count > 0 else 0
     goal_percentage  = round((km_distance / target_dist) * 100) if target_dist > 0 else 0
 
-    # Determine best display name (priority: profile name > strava > email prefix > uid)
-    display_name = (
-        user_data.get("display_name")
-        or user_data.get("strava_name")
-        or (user_data.get("email", "").split("@")[0] if user_data.get("email") else None)
-        or f"Runner #{req.uid[:6]}"
-    )
-
-    # ── Leaderboard: always use MONTHLY stats for fair ranking ──
-    # Aggregate from Firestore activities (already synced) for the current month.
-    month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
-    month_acts = (
-        db.collection("users").document(req.uid)
-          .collection("activities")
-          .where("start_date_local", ">=", month_start_str)
-          .stream()
-    )
-    from utils.activity_utils import deduplicate_activities
-
-    month_acts_raw = [a.to_dict() for a in month_acts]
-    month_acts_clean = deduplicate_activities(month_acts_raw)
-
-    lb_dist    = 0.0
-    lb_time    = 0
-    lb_hr_sum  = 0.0
-    lb_hr_count = 0
-    lb_runs    = 0
-    lb_elev    = 0.0
-    for d in month_acts_clean:
-        # Only count runs for leaderboard (skip cross-training)
-        if d.get("activity_type", "run") != "run":
-            continue
-        # Exclude Apple Health workouts as per new requirements
-        if d.get("source") == "AppleHealth":
-            continue
-        lb_runs    += 1
-        lb_dist    += d.get("distance_km", 0) or 0
-        lb_time    += d.get("moving_time", 0) or 0
-        lb_elev    += d.get("total_elevation_gain", 0) or 0
-        hr = d.get("avg_heart_rate", 0) or 0
-        if hr > 0:
-            lb_hr_sum  += hr
-            lb_hr_count += 1
-
-    lb_pace   = pace_str(lb_dist * 1000, lb_time)
-    lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
-
-    # Automatically estimate monthly goal if the user uses a weekly plan
-    now = datetime.now(ZoneInfo(_DEFAULT_TZ))
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
-    monthly_target_dist = target_dist
-    if period == "weekly" and target_dist > 0:
-        monthly_target_dist = target_dist * (days_in_month / 7.0)
-
-    lb_goal_percentage = round((lb_dist / monthly_target_dist) * 100) if monthly_target_dist > 0 else 0
-
-    db.collection("leaderboard").document(req.uid).set({
-        "uid":                       req.uid,
-        "display_name":              display_name,
-        "email":                     user_data.get("email", ""),
-        "total_distance_km":         round(lb_dist, 2),
-        "total_elevation_gain":      round(lb_elev, 1),
-        "avg_pace":                  lb_pace,
-        "avg_heart_rate":            lb_avg_hr,
-        "goal_completion_percentage": min(lb_goal_percentage, 100),
-        "run_count":                 lb_runs,
-        "period":                    "monthly",
-        "period_start":              get_period_start("monthly").isoformat(),
-        "last_sync":                 datetime.now().isoformat(),
-    })  # Full set (not merge) — prevents stale data from persisting
-
-    # ── Weekly Leaderboard Aggregate ──
-    week_start_str = get_period_start("weekly").strftime("%Y-%m-%dT%H:%M:%S")
-    week_acts = (
-        db.collection("users").document(req.uid)
-          .collection("activities")
-          .where("start_date_local", ">=", week_start_str)
-          .stream()
-    )
-    week_acts_raw = [a.to_dict() for a in week_acts]
-    week_acts_clean = deduplicate_activities(week_acts_raw)
-
-    wk_dist = 0.0
-    wk_time = 0
-    wk_hr_sum = 0.0
-    wk_hr_count = 0
-    wk_runs = 0
-    wk_elev = 0.0
-    for d in week_acts_clean:
-        # Only count runs for leaderboard (skip cross-training)
-        if d.get("activity_type", "run") != "run":
-            continue
-        # Exclude Apple Health workouts as per new requirements
-        if d.get("source") == "AppleHealth":
-            continue
-        wk_runs += 1
-        wk_dist += d.get("distance_km", 0) or 0
-        wk_time += d.get("moving_time", 0) or 0
-        wk_elev += d.get("total_elevation_gain", 0) or 0
-        hr = d.get("avg_heart_rate", 0) or 0
-        if hr > 0:
-            wk_hr_sum += hr
-            wk_hr_count += 1
-            
-    wk_pace = pace_str(wk_dist * 1000, wk_time)
-    wk_avg_hr = round(wk_hr_sum / wk_hr_count) if wk_hr_count > 0 else 0
-    wk_goal_pct = round((wk_dist / target_dist) * 100) if period == "weekly" and target_dist > 0 else 0
-    
-    db.collection("leaderboard_weekly").document(req.uid).set({
-        "uid": req.uid,
-        "display_name": display_name,
-        "email": user_data.get("email", ""),
-        "total_distance_km": round(wk_dist, 2),
-        "total_elevation_gain": round(wk_elev, 1),
-        "avg_pace": wk_pace,
-        "avg_heart_rate": wk_avg_hr,
-        "goal_completion_percentage": min(wk_goal_pct, 100),
-        "run_count": wk_runs,
-        "period": "weekly",
-        "period_start": get_period_start("weekly").isoformat(),
-        "last_sync": datetime.now().isoformat(),
-    })
-
-    # ── Also update yearly leaderboard aggregate ───────────────────────────────
-    _update_yearly_leaderboard(req.uid, user_data, display_name)
+    # ── Leaderboard Aggregation ──
+    update_user_leaderboards(req.uid, user_data)
 
     return {
         "message": "Sync successful",

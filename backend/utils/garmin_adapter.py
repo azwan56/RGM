@@ -28,6 +28,7 @@ class GarminAdapter:
         self.domain = domain.lower().strip()
         self.is_cn = ("garmin.cn" in self.domain or self.domain == "cn")
         self.last_error: Optional[str] = None
+        self.client = None  # Initialized lazily on first login
 
     def login(self) -> bool:
         """Log in to Garmin Connect (Global or China)."""
@@ -186,6 +187,7 @@ class GarminAdapter:
         start_date_local = raw.get("startTimeLocal") or raw.get("startDateLocal") or ""
         if not start_date_local:
             return None
+        start_date_local = start_date_local.replace(" ", "T")
 
         # Format duration string
         mins = moving_sec // 60
