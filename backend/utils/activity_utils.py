@@ -57,8 +57,9 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
     Deduplicates activities from multiple sources (Garmin, Strava, Apple Health).
     Two activities represent the exact same workout if:
     1. Distance difference <= 0.5 km (or <= 5%), AND
-    2. Start time difference <= 15 minutes (900 seconds) if timestamps are valid,
-       OR same date string (YYYY-MM-DD).
+    2. Start time difference <= 15 minutes (900 seconds) when both have valid timestamps.
+       If either activity lacks a full timestamp, fall back to matching date string (YYYY-MM-DD)
+       ONLY when sources differ (e.g. Garmin vs Strava).
     Garmin activities take precedence over Strava.
     """
     if not activities:
@@ -80,12 +81,14 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
         t_act = parse_activity_time(act)
         d_str_act = get_activity_date_str(act)
         d_act = get_act_distance(act)
+        s_act = str(act.get("source", "")).lower()
 
         is_dup = False
         for k in kept:
             t_k = parse_activity_time(k)
             d_str_k = get_activity_date_str(k)
             d_k = get_act_distance(k)
+            s_k = str(k.get("source", "")).lower()
 
             # Check distance difference (within 0.5 km or 5%)
             dist_diff = abs(d_act - d_k)
@@ -97,11 +100,8 @@ def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, A
                     time_diff = abs(t_act - t_k)
                     time_matches = (time_diff <= 900)
                 else:
-                    time_matches = False
-
-                # Fallback: if distance matches and date string (YYYY-MM-DD) matches
-                if not time_matches and d_str_act and d_str_k and d_str_act == d_str_k:
-                    time_matches = True
+                    # Fallback only when timestamp parsing failed on one/both AND sources are different
+                    time_matches = bool(d_str_act and d_str_k and d_str_act == d_str_k and s_act != s_k)
 
                 if time_matches:
                     is_dup = True

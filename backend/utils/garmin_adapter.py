@@ -205,20 +205,38 @@ class GarminAdapter:
         avg_hr = round(raw.get("averageHR", 0) or 0)
         max_hr = round(raw.get("maxHR", 0) or 0)
         elevation = round(float(raw.get("elevationGain") or raw.get("totalElevationGain") or 0), 1)
+        cadence = round(raw.get("averageRunningCadenceInStepsPerMinute") or raw.get("averageCadence") or 0)
+        avg_speed = round(float(raw.get("averageSpeed", 0) or 0) * 3.6, 1)
+        max_speed = round(float(raw.get("maxSpeed", 0) or 0) * 3.6, 1)
 
         return {
+            "id": f"garmin_{act_id}",
             "activity_id": f"garmin_{act_id}",
             "name": raw.get("activityName") or "Garmin Running",
             "start_date_local": start_date_local,
+            "start_date": raw.get("startTimeGMT") or start_date_local,
             "distance_km": dist_km,
+            "distance": dist_m,
             "moving_time": moving_sec,
             "elapsed_time": elapsed_sec,
             "duration_str": duration_str,
             "avg_pace": pace_str,
+            "avg_speed_kmh": avg_speed,
+            "max_speed_kmh": max_speed,
             "avg_heart_rate": avg_hr,
+            "average_heartrate": avg_hr,
             "max_heart_rate": max_hr,
+            "max_heartrate": max_hr,
+            "has_heartrate": bool(avg_hr > 0),
+            "avg_cadence": cadence,
+            "average_cadence": cadence,
             "total_elevation_gain": elevation,
             "activity_type": "run",
-            "source": f"garmin_{'cn' if self.is_cn else 'global'}",
+            "type": "Run",
+            "sport_type": "Run",
+            "strava_type": "Run",
+            "source": "garmin",
+            "garmin_domain": "garmin.cn" if self.is_cn else "garmin.com",
             "garmin_raw_id": act_id,
+            "summary_polyline": raw.get("summaryPolyline") or "",
         }

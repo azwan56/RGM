@@ -440,9 +440,13 @@ def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
     Compute a leaderboard for a specific historical month by summing activities.
     Returns a list of dicts sorted by total_distance_km descending.
     """
-    from datetime import datetime
-    month_prefix = f"{year}-{month:02d}"
-    
+    import calendar
+    from utils.activity_utils import deduplicate_activities
+
+    start_str = f"{year}-{month:02d}-01T00:00:00"
+    last_day = calendar.monthrange(year, month)[1]
+    end_str = f"{year}-{month:02d}-{last_day:02d}T23:59:59"
+
     results = []
     users = db.collection("users").stream()
     for udoc in users:
@@ -450,22 +454,24 @@ def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
         udata = udoc.to_dict()
         name = udata.get("display_name") or udata.get("strava_name") or uid[:8]
         gender = udata.get("gender", "")
-        
+
         acts = (db.collection("users").document(uid)
                   .collection("activities")
-                  .order_by("start_date_local", direction="DESCENDING")
-                  .limit(100)
+                  .where("start_date_local", ">=", start_str)
+                  .where("start_date_local", "<=", end_str)
                   .stream())
-        
+
+        raw_acts = [a.to_dict() for a in acts]
+        clean_acts = deduplicate_activities(raw_acts)
+
         total_km = 0.0
         run_count = 0
-        for a in acts:
-            ad = a.to_dict()
-            date_str = ad.get("start_date_local", "")[:7]  # "YYYY-MM"
-            if date_str == month_prefix:
-                total_km += ad.get("distance_km", 0)
-                run_count += 1
-        
+        for ad in clean_acts:
+            if ad.get("activity_type", "run") != "run" or ad.get("source") == "AppleHealth":
+                continue
+            total_km += ad.get("distance_km", 0) or 0
+            run_count += 1
+
         if total_km > 0:
             results.append({
                 "display_name": name,
@@ -474,7 +480,7 @@ def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
                 "uid": uid,
                 "gender": gender,
             })
-    
+
     results.sort(key=lambda x: x["total_distance_km"], reverse=True)
     return results
 
@@ -483,11 +489,25 @@ def _fetch_historical_month_leaderboard(year: int, month: int) -> list:
 
 def _fetch_monthly_leaderboard(limit_n: int = 20) -> list:
     """Fetch the monthly leaderboard (all users, sorted by distance)."""
-    docs = (db.collection("leaderboard")
-              .order_by("total_distance_km", direction="DESCENDING")
-              .limit(limit_n)
-              .stream())
-    return [d.to_dict() for d in docs]
+    try:
+        from routers.sync import get_period_start
+        current_month_start = get_period_start("monthly").isoformat()
+        docs = db.collection("leaderboard").stream()
+        entries = []
+        for d in docs:
+            data = d.to_dict()
+            if data.get("period_start", "") < current_month_start:
+                data["total_distance_km"] = 0.0
+                data["run_count"] = 0
+                data["avg_pace"] = "—"
+                data["goal_completion_percentage"] = 0
+            if data.get("total_distance_km", 0) > 0:
+                entries.append(data)
+        entries.sort(key=lambda x: x.get("total_distance_km", 0), reverse=True)
+        return entries[:limit_n]
+    except Exception as e:
+        print(f"[wecom_bot] Error fetching monthly leaderboard: {e}")
+        return []
 
 
 def _fetch_weekly_leaderboard(limit_n: int = 20) -> list:
@@ -528,6 +548,65 @@ def _format_leaderboard_markdown(entries: list, title: str) -> str:
         lines.append(f"{icon} **{name}**  {km}km · {runs}次 · {pace}/km")
 
     return "\n".join(lines)
+
+
+def _fetch_user_monthly_stats(uid: str) -> dict:
+    """
+    Fetch a user's current month running stats.
+    Validates period_start against current month; if stale or missing,
+    dynamically computes from activities for 100% accuracy.
+    """
+    try:
+        from routers.sync import get_period_start, pace_str
+        from utils.activity_utils import deduplicate_activities
+
+        current_month_start = get_period_start("monthly").isoformat()
+        doc = db.collection("leaderboard").document(uid).get()
+        if doc.exists:
+            data = doc.to_dict()
+            if data.get("period_start", "") >= current_month_start:
+                return data
+
+        # If missing or outdated period_start, compute directly from Firestore activities
+        user_ref = db.collection("users").document(uid)
+        month_start_str = get_period_start("monthly").strftime("%Y-%m-%dT%H:%M:%S")
+        month_acts = (
+            user_ref.collection("activities")
+            .where("start_date_local", ">=", month_start_str)
+            .stream()
+        )
+        raw_acts = [a.to_dict() for a in month_acts]
+        clean_acts = deduplicate_activities(raw_acts)
+
+        lb_dist, lb_time, lb_hr_sum, lb_hr_count, lb_runs, lb_elev = 0.0, 0, 0.0, 0, 0, 0.0
+        for d in clean_acts:
+            if d.get("activity_type", "run") != "run" or d.get("source") == "AppleHealth":
+                continue
+            lb_runs += 1
+            lb_dist += d.get("distance_km", 0) or 0
+            lb_time += d.get("moving_time", 0) or 0
+            lb_elev += d.get("total_elevation_gain", 0) or 0
+            hr = d.get("avg_heart_rate", 0) or 0
+            if hr > 0:
+                lb_hr_sum += hr
+                lb_hr_count += 1
+
+        lb_pace = pace_str(lb_dist * 1000, lb_time)
+        lb_avg_hr = round(lb_hr_sum / lb_hr_count) if lb_hr_count > 0 else 0
+
+        return {
+            "uid": uid,
+            "total_distance_km": round(lb_dist, 2),
+            "total_elevation_gain": round(lb_elev, 1),
+            "avg_pace": lb_pace,
+            "avg_heart_rate": lb_avg_hr,
+            "run_count": lb_runs,
+            "period": "monthly",
+            "period_start": current_month_start,
+        }
+    except Exception as e:
+        print(f"[wecom_bot] Error fetching monthly stats for {uid}: {e}")
+        return {}
 
 
 def _fetch_user_weekly_stats(uid: str) -> dict:
@@ -731,7 +810,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 )
 
             # Personal monthly stats
-            lb = await asyncio.to_thread(_fetch_leaderboard, uid)
+            lb = await asyncio.to_thread(_fetch_user_monthly_stats, uid)
             if lb:
                 context_str += (
                     f"- 本月累计: {lb.get('total_distance_km', 0)}km, "
@@ -753,9 +832,15 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 from datetime import datetime
                 current_month = datetime.now().month - 1  # 0-based index
                 goal_period = goal.get("period", "monthly")
-                target_dist = goal.get("target_distance", 0)
+                target_dist = float(goal.get("target_distance") or 0)
                 monthly_targets = goal.get("monthly_targets", [])
-                this_month_target = monthly_targets[current_month] if len(monthly_targets) > current_month else 0
+                
+                # If specific monthly target is set and > 0, use it; otherwise fallback to target_dist
+                this_month_target = 0.0
+                if isinstance(monthly_targets, list) and len(monthly_targets) > current_month and monthly_targets[current_month]:
+                    this_month_target = float(monthly_targets[current_month])
+                elif target_dist > 0:
+                    this_month_target = target_dist
 
                 # Show primary plan
                 if goal_period == "weekly":
@@ -984,7 +1069,7 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                 if m_pbs:
                     context_str += f"  - PB成绩: {', '.join(m_pbs)}\n"
                 
-                m_lb = await asyncio.to_thread(_fetch_leaderboard, m_uid)
+                m_lb = await asyncio.to_thread(_fetch_user_monthly_stats, m_uid)
                 if m_lb:
                     context_str += f"  - 本月已跑: {m_lb.get('total_distance_km', 0)}km, 跑步{m_lb.get('run_count', 0)}次, 平均配速: {m_lb.get('avg_pace', '—')}/km\n"
 
@@ -997,16 +1082,22 @@ async def _generate_reply(content: str, wecom_user_id: str, chatid: str, reply_f
                     from datetime import datetime
                     current_month = datetime.now().month - 1
                     m_goal_period = m_goal.get("period", "monthly")
-                    m_target_dist = m_goal.get("target_distance", 0)
+                    m_target_dist = float(m_goal.get("target_distance") or 0)
                     m_monthly_targets = m_goal.get("monthly_targets", [])
-                    m_this_month = m_monthly_targets[current_month] if len(m_monthly_targets) > current_month else 0
+                    m_this_month = 0.0
+                    if isinstance(m_monthly_targets, list) and len(m_monthly_targets) > current_month and m_monthly_targets[current_month]:
+                        m_this_month = float(m_monthly_targets[current_month])
+                    elif m_target_dist > 0:
+                        m_this_month = m_target_dist
                     
                     if m_goal_period == "weekly":
                         m_wk_actual = m_wk.get('total_distance_km', 0) if m_wk else 0
                         m_w_pct = round(m_wk_actual / m_target_dist * 100) if m_target_dist else 0
                         context_str += f"  - 计划: 周目标 {m_target_dist}km, 本周完成 {m_w_pct}%\n"
                     else:
-                        context_str += f"  - 计划: 月目标 {m_this_month}km\n"
+                        m_lb_actual = m_lb.get('total_distance_km', 0) if m_lb else 0
+                        m_m_pct = round(m_lb_actual / m_this_month * 100) if m_this_month else 0
+                        context_str += f"  - 计划: 月目标 {m_this_month}km, 本月完成 {m_m_pct}%\n"
 
                 # Recent activities for this member (limit to 2 for prompt compacting)
                 m_acts = await asyncio.to_thread(_fetch_recent_activities, m_uid, 2)

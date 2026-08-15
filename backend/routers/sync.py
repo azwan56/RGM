@@ -324,7 +324,42 @@ def sync_garmin_user_data(user_data: dict, user_ref) -> dict:
     except Exception as le:
         logger.error(f"[sync] Leaderboard update error after Garmin sync: {le}")
 
+    # Trigger AI coach commentary & push notifications (Discord & WeCom) for recent activities
+    recent_cutoff = (today - timedelta(days=2)).isoformat()
+    recent_acts = [
+        a for a in activities
+        if (a.get("start_date_local", "")[:10] >= recent_cutoff)
+    ]
+    recent_acts.sort(key=lambda a: a.get("start_date_local", ""))
+
+    for ract in recent_acts:
+        r_act_id = str(ract.get("activity_id") or f"garmin_{ract.get('garmin_raw_id')}")
+        _trigger_garmin_journal_and_notification(user_ref.id, r_act_id)
+
     return {"success": True, "count": synced_count, "health": latest_valid_health}
+
+
+def _trigger_garmin_journal_and_notification(uid: str, act_id: str):
+    """Generates AI Coach commentary and sends Discord & WeCom notifications for a Garmin activity."""
+    try:
+        from routers.coach import log_journal_entry, JournalLogRequest
+        import asyncio
+        journal_req = JournalLogRequest(uid=uid, activity_id=str(act_id), send_notification=True)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            asyncio.create_task(log_journal_entry(journal_req))
+        else:
+            new_loop = asyncio.new_event_loop()
+            try:
+                new_loop.run_until_complete(log_journal_entry(journal_req))
+            finally:
+                new_loop.close()
+    except Exception as err:
+        logger.error(f"[sync] Error generating Garmin journal/notification for {act_id}: {err}")
 
 
 # ── Trigger sync (current period) ────────────────────────────────────────────
