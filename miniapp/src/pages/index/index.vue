@@ -199,94 +199,6 @@
         </view>
       </view>
     </view>
-
-    <!-- ── CARD 2: 月度跑量趋势 (近 6 个月) ── -->
-    <view class="section-container">
-      <view class="section-header-row">
-        <text class="section-title">月度跑量趋势 (近 6 个月)</text>
-        <text class="badge-growth">↑ 较上月 +{{ dashboardData?.monthly_trend?.pct_change ?? 9.2 }}%</text>
-      </view>
-
-      <view class="monthly-trend-card">
-        <view class="trend-bars-box">
-          <view
-            v-for="(item, idx) in (dashboardData?.monthly_trend?.trend || [])"
-            :key="idx"
-            class="bar-column"
-          >
-            <view class="bar-top-val">{{ item.distance_km }}k</view>
-            <view class="bar-track">
-              <view
-                class="bar-fill"
-                :class="{ active: item.is_current }"
-                :style="{ height: Math.max(15, Math.min(100, (item.distance_km / 250) * 100)) + '%' }"
-              />
-            </view>
-            <text class="bar-label">{{ item.month_label?.split('/')[1] || item.month_label }}</text>
-          </view>
-        </view>
-
-        <!-- Recent 3 Months Breakdown -->
-        <view class="recent-3-grid">
-          <view
-            v-for="(m, idx) in (dashboardData?.monthly_trend?.recent_3_months || [])"
-            :key="idx"
-            class="r3-item"
-          >
-            <text class="r3-name">{{ m.month_label }}</text>
-            <text class="r3-km">{{ m.distance_km }} <text class="unit">km</text></text>
-            <text class="r3-cnt">{{ m.count }} 次跑步</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
-
-    <!-- Renato Canova AI Coach Tip -->
-    <view class="ai-coach-card">
-      <view class="ai-header">
-        <text class="ai-tag">AI 教练 · Canova 哲学</text>
-      </view>
-      <text class="ai-quote">{{ dashboardData?.ai_coach_tip || "保持耐心，专注有氧节奏构建，专项能力水到渠成。" }}</text>
-    </view>
-
-    <!-- Recent Activities Preview -->
-    <view class="section-container">
-      <view class="section-header-row">
-        <text class="section-title">近期跑步记录</text>
-        <text class="see-more" @click="goToActivities">查看全部 ></text>
-      </view>
-
-      <view v-if="dashboardData?.recent_activities?.length" class="activity-list">
-        <view v-for="act in dashboardData.recent_activities" :key="act.id" class="activity-card">
-          <view class="act-top">
-            <text class="act-name">{{ act.name }}</text>
-            <text class="act-time">{{ formatTime(act.start_time) }}</text>
-          </view>
-          <view class="act-data-row">
-            <view class="act-col">
-              <text class="act-main-val">{{ act.distance_km }} <text class="unit">km</text></text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val">{{ act.avg_pace_str }}</text>
-              <text class="act-sub-label">平均配速</text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val">{{ act.average_heartrate || '—' }} <text class="unit">bpm</text></text>
-              <text class="act-sub-label">平均心率</text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val">{{ act.trimp || '—' }}</text>
-              <text class="act-sub-label">TRIMP负荷</text>
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <view v-else class="empty-box">
-        <text class="empty-text">暂无运动记录，请绑定佳明账号并点击同步。</text>
-      </view>
-    </view>
   </view>
 </template>
 
@@ -651,7 +563,7 @@ onPullDownRefresh(async () => {
 .dashboard-page {
   min-height: 100vh;
   background-color: #0b0b0d;
-  padding: 30rpx 30rpx 60rpx 30rpx;
+  padding: 36rpx 28rpx 90rpx 28rpx;
   box-sizing: border-box;
 }
 
@@ -659,7 +571,7 @@ onPullDownRefresh(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 30rpx;
+  margin-bottom: 38rpx;
 }
 
 .user-info {
@@ -669,10 +581,10 @@ onPullDownRefresh(async () => {
 }
 
 .avatar {
-  width: 90rpx;
-  height: 90rpx;
-  border-radius: 45rpx;
-  border: 2rpx solid rgba(255, 255, 255, 0.1);
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 48rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.12);
 }
 
 .text-group {
@@ -686,7 +598,7 @@ onPullDownRefresh(async () => {
 }
 
 .user-name {
-  font-size: 32rpx;
+  font-size: 34rpx;
   font-weight: bold;
   color: #ffffff;
 }
@@ -695,10 +607,10 @@ onPullDownRefresh(async () => {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  padding: 10rpx 20rpx;
+  padding: 10rpx 22rpx;
   border-radius: 30rpx;
   background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
 }
 
 .pulse-dot {
@@ -725,8 +637,8 @@ onPullDownRefresh(async () => {
   background: linear-gradient(135deg, #1c1c1e 0%, #141416 100%);
   border: 1rpx solid rgba(255, 255, 255, 0.08);
   border-radius: 32rpx;
-  padding: 36rpx;
-  margin-bottom: 30rpx;
+  padding: 40rpx 36rpx;
+  margin-bottom: 46rpx;
   box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.5);
 }
 
@@ -734,17 +646,17 @@ onPullDownRefresh(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20rpx;
+  margin-bottom: 24rpx;
 }
 
 .card-title {
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: bold;
   color: #ffffff;
 }
 
 .progress-pct {
-  font-size: 36rpx;
+  font-size: 38rpx;
   font-weight: 900;
   color: #fc4c02;
 }
@@ -755,7 +667,7 @@ onPullDownRefresh(async () => {
   background-color: #2c2c2e;
   border-radius: 8rpx;
   overflow: hidden;
-  margin-bottom: 30rpx;
+  margin-bottom: 32rpx;
 }
 
 .progress-bar-fill {
@@ -770,8 +682,8 @@ onPullDownRefresh(async () => {
   justify-content: space-between;
   background-color: #121214;
   border-radius: 24rpx;
-  padding: 24rpx 10rpx;
-  margin-bottom: 24rpx;
+  padding: 26rpx 12rpx;
+  margin-bottom: 26rpx;
 }
 
 .stat-item {
@@ -806,7 +718,7 @@ onPullDownRefresh(async () => {
 }
 
 .sync-action-box {
-  margin-top: 10rpx;
+  margin-top: 12rpx;
 }
 
 .sync-btn {
@@ -819,7 +731,7 @@ onPullDownRefresh(async () => {
   align-items: center;
   justify-content: center;
   gap: 12rpx;
-  height: 84rpx;
+  height: 88rpx;
   border: none;
 }
 
@@ -827,16 +739,16 @@ onPullDownRefresh(async () => {
   font-size: 30rpx;
 }
 
-/* 4-Grid Health */
+/* Sections & Spacings */
 .section-container {
-  margin-bottom: 30rpx;
+  margin-bottom: 48rpx;
 }
 
 .section-header-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16rpx;
+  margin-bottom: 24rpx;
 }
 
 .section-title {
@@ -850,40 +762,28 @@ onPullDownRefresh(async () => {
   color: #636366;
 }
 
-.badge-growth {
-  font-size: 22rpx;
-  font-weight: bold;
-  color: #34c759;
-}
-
-.progress-tag {
-  font-size: 24rpx;
-  font-weight: bold;
-  color: #ff3b30;
-}
-
 .health-grid-4 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16rpx;
+  gap: 22rpx;
 }
 
 .health-tile {
   background-color: #151518;
   border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 24rpx;
-  padding: 24rpx;
+  border-radius: 28rpx;
+  padding: 28rpx 24rpx;
 }
 
 .tile-top {
   display: flex;
   align-items: center;
   gap: 10rpx;
-  margin-bottom: 12rpx;
+  margin-bottom: 14rpx;
 }
 
 .tile-icon {
-  font-size: 24rpx;
+  font-size: 26rpx;
 }
 
 .tile-name {
@@ -898,7 +798,7 @@ onPullDownRefresh(async () => {
 }
 
 .tile-main-val {
-  font-size: 36rpx;
+  font-size: 38rpx;
   font-weight: bold;
   color: #ffffff;
 }
@@ -923,7 +823,7 @@ onPullDownRefresh(async () => {
 .tile-sub {
   font-size: 20rpx;
   color: #636366;
-  margin-top: 8rpx;
+  margin-top: 10rpx;
 }
 
 .mini-progress-bg {
@@ -931,287 +831,13 @@ onPullDownRefresh(async () => {
   height: 8rpx;
   background-color: #2c2c2e;
   border-radius: 4rpx;
-  margin-top: 14rpx;
+  margin-top: 16rpx;
   overflow: hidden;
 }
 
 .mini-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #ffd60a 0%, #30d158 100%);
-}
-
-/* Monthly Trend */
-.monthly-trend-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 28rpx;
-  padding: 28rpx;
-}
-
-.trend-bars-box {
-  display: flex;
-  justify-content: space-around;
-  align-items: flex-end;
-  height: 220rpx;
-  padding-bottom: 16rpx;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.05);
-}
-
-.bar-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 60rpx;
-  height: 100%;
-  justify-content: flex-end;
-}
-
-.bar-top-val {
-  font-size: 18rpx;
-  color: #8e8e93;
-  margin-bottom: 6rpx;
-}
-
-.bar-track {
-  width: 32rpx;
-  height: 130rpx;
-  background-color: #1c1c1e;
-  border-radius: 12rpx;
-  display: flex;
-  align-items: flex-end;
-  overflow: hidden;
-}
-
-.bar-fill {
-  width: 100%;
-  background-color: #1b4332;
-  border-radius: 12rpx;
-}
-
-.bar-fill.active {
-  background-color: #34c759;
-}
-
-.bar-label {
-  font-size: 20rpx;
-  color: #8e8e93;
-  margin-top: 8rpx;
-}
-
-.recent-3-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12rpx;
-  margin-top: 20rpx;
-  text-align: center;
-}
-
-.r3-item {
-  background-color: #1a1a1e;
-  border-radius: 18rpx;
-  padding: 16rpx 8rpx;
-}
-
-.r3-name {
-  font-size: 20rpx;
-  color: #8e8e93;
-}
-
-.r3-km {
-  font-size: 26rpx;
-  font-weight: bold;
-  color: #ffffff;
-  margin: 4rpx 0;
-}
-
-.r3-cnt {
-  font-size: 18rpx;
-  color: #636366;
-}
-
-/* Yearly Card */
-.yearly-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 28rpx;
-  padding: 28rpx;
-}
-
-.yearly-top-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24rpx;
-}
-
-.yearly-big-stat {
-  display: flex;
-  flex-direction: column;
-}
-
-.big-val {
-  font-size: 48rpx;
-  font-weight: 900;
-  color: #ffffff;
-}
-
-.big-label {
-  font-size: 20rpx;
-  color: #8e8e93;
-  margin-top: 4rpx;
-}
-
-.yearly-sub-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.sub-stat-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 20rpx;
-}
-
-.sub-stat-label {
-  font-size: 22rpx;
-  color: #8e8e93;
-}
-
-.sub-stat-val {
-  font-size: 22rpx;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-.text-green {
-  color: #34c759;
-}
-
-.yearly-progress-track {
-  width: 100%;
-  height: 12rpx;
-  background-color: #2c2c2e;
-  border-radius: 6rpx;
-  overflow: hidden;
-  margin-bottom: 16rpx;
-}
-
-.yearly-progress-fill {
-  height: 100%;
-  background-color: #ff3b30;
-}
-
-.yearly-best-month {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  font-size: 22rpx;
-  color: #ffd60a;
-}
-
-.best-text {
-  color: #8e8e93;
-}
-
-/* AI Coach Card */
-.ai-coach-card {
-  background: linear-gradient(135deg, #1d1b22 0%, #131217 100%);
-  border: 1rpx solid rgba(252, 76, 2, 0.2);
-  border-radius: 28rpx;
-  padding: 28rpx;
-  margin-bottom: 30rpx;
-}
-
-.ai-header {
-  margin-bottom: 10rpx;
-}
-
-.ai-tag {
-  font-size: 20rpx;
-  font-weight: bold;
-  color: #fc4c02;
-  background-color: rgba(252, 76, 2, 0.1);
-  padding: 4rpx 14rpx;
-  border-radius: 10rpx;
-}
-
-.ai-quote {
-  font-size: 26rpx;
-  color: #e5e5ea;
-  line-height: 1.5;
-}
-
-/* Activities */
-.see-more {
-  font-size: 24rpx;
-  color: #fc4c02;
-}
-
-.activity-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 24rpx;
-  padding: 24rpx;
-  margin-bottom: 16rpx;
-}
-
-.act-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16rpx;
-}
-
-.act-name {
-  font-size: 28rpx;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-.act-time {
-  font-size: 22rpx;
-  color: #8e8e93;
-}
-
-.act-data-row {
-  display: flex;
-  justify-content: space-between;
-}
-
-.act-col {
-  display: flex;
-  flex-direction: column;
-}
-
-.act-main-val {
-  font-size: 36rpx;
-  font-weight: 900;
-  color: #fc4c02;
-}
-
-.act-sub-val {
-  font-size: 26rpx;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-.act-sub-label {
-  font-size: 20rpx;
-  color: #636366;
-  margin-top: 4rpx;
-}
-
-.empty-box {
-  background-color: #151518;
-  border-radius: 24rpx;
-  padding: 40rpx;
-  text-align: center;
-}
-
-.empty-text {
-  font-size: 24rpx;
-  color: #636366;
 }
 
 /* Fitness & Form Card Styles */
