@@ -71,7 +71,7 @@
       </view>
     </view>
 
-    <!-- ── CARD 2: 个人最佳成绩 (PB) - 从 Garmin 导入 ── -->
+    <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -105,6 +105,95 @@
           <text class="pb-label">5公里</text>
           <text class="pb-val">{{ formatSecs(profile?.five_k_pb) }}</text>
         </view>
+      </view>
+    </view>
+
+    <!-- ── CARD 3: 生理参数与身体指标 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">💓</text>
+          <text class="card-title">生理参数与身体指标</text>
+        </view>
+      </view>
+
+      <view class="form-grid-2">
+        <view class="form-item">
+          <text class="form-label">最大心率 (bpm)</text>
+          <input class="form-input" type="number" v-model="profile.max_heart_rate" placeholder="例如: 190" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">静息心率 (bpm)</text>
+          <input class="form-input" type="number" v-model="profile.resting_heart_rate" placeholder="例如: 56" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">跑龄 (年)</text>
+          <input class="form-input" type="number" v-model="profile.years_running" placeholder="例如: 3" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">身高 (cm)</text>
+          <input class="form-input" type="digit" v-model="profile.height_cm" placeholder="例如: 175" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">体重 (kg)</text>
+          <input class="form-input" type="digit" v-model="profile.weight_kg" placeholder="例如: 65" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">性别</text>
+          <picker
+            :range="['男', '女']"
+            :value="profile.gender === 'female' ? 1 : 0"
+            @change="(e) => profile.gender = e.detail.value === 1 ? 'female' : 'male'"
+          >
+            <view class="form-input">{{ profile.gender === 'female' ? '女' : '男' }}</view>
+          </picker>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── CARD 4: 训练目标与跑量设置 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🎯</text>
+          <text class="card-title">训练目标与跑量设置</text>
+        </view>
+        <text class="target-badge">{{ targetDistance }} km / 月</text>
+      </view>
+
+      <slider
+        :value="targetDistance"
+        :min="50"
+        :max="600"
+        :step="10"
+        activeColor="#FC4C02"
+        backgroundColor="rgba(255,255,255,0.1)"
+        block-color="#ffffff"
+        block-size="20"
+        @change="(e) => onTargetSliderChange(e.detail.value)"
+      />
+
+      <view class="breakdown-toggle" @click="showMonthlyBreakdown = !showMonthlyBreakdown">
+        <text class="toggle-text">{{ showMonthlyBreakdown ? "收起 12 个月独立设定 ▲" : "展开 12 个月独立设定 (夏训/冬训调整) ▼" }}</text>
+      </view>
+
+      <view v-if="showMonthlyBreakdown" class="months-grid">
+        <view v-for="(val, idx) in monthlyTargets" :key="idx" class="month-cell">
+          <text class="month-label">{{ idx + 1 }}月</text>
+          <input
+            class="month-input"
+            type="number"
+            :value="val"
+            @input="(e) => monthlyTargets[idx] = parseInt(e.detail.value, 10) || 0"
+          />
+        </view>
+      </view>
+
+      <!-- Save Profile & Goals Action Button -->
+      <view class="save-box">
+        <button class="save-btn" :loading="saving" @click="handleSaveProfileAndGoal">
+          保存档案与训练目标
+        </button>
       </view>
     </view>
 
@@ -272,6 +361,16 @@ const binding = ref(false);
 const unbinding = ref(false);
 const importingGarmin = ref(false);
 
+const targetDistance = ref(200);
+const monthlyTargets = ref<number[]>(Array(12).fill(200));
+const showMonthlyBreakdown = ref(false);
+const saving = ref(false);
+
+function onTargetSliderChange(val: number) {
+  targetDistance.value = val;
+  monthlyTargets.value = Array(12).fill(val);
+}
+
 async function loadProfileData() {
   user.value = getStoredUser();
   if (!user.value || !user.value.id) {
@@ -292,11 +391,56 @@ async function loadProfileData() {
     } else {
       garminConnected.value = false;
     }
+    if (res?.goal) {
+      targetDistance.value = res.goal.target_distance || 200;
+      if (res.goal.monthly_targets && Array.isArray(res.goal.monthly_targets)) {
+        monthlyTargets.value = res.goal.monthly_targets;
+      } else {
+        monthlyTargets.value = Array(12).fill(targetDistance.value);
+      }
+    }
     if (res?.races) {
       races.value = res.races;
     }
   } catch (e) {
     console.error("Fetch profile failed:", e);
+  }
+}
+
+async function handleSaveProfileAndGoal() {
+  if (!user.value || !user.value.id) {
+    uni.showToast({ title: "请先登录账号", icon: "none" });
+    showAuthModal.value = true;
+    return;
+  }
+
+  saving.value = true;
+  uni.showLoading({ title: "保存中..." });
+  try {
+    // 1. Update Profile
+    await request(`/api/profile/${user.value.id}`, "PUT", {
+      gender: profile.value.gender || "male",
+      height_cm: parseFloat(profile.value.height_cm) || null,
+      weight_kg: parseFloat(profile.value.weight_kg) || null,
+      years_running: parseInt(profile.value.years_running, 10) || null,
+      max_heart_rate: parseInt(profile.value.max_heart_rate, 10) || null,
+      resting_heart_rate: parseInt(profile.value.resting_heart_rate, 10) || null,
+    });
+
+    // 2. Update Goal
+    await request(`/api/profile/${user.value.id}/goal`, "PUT", {
+      target_distance: targetDistance.value,
+      monthly_targets: monthlyTargets.value,
+    });
+
+    uni.hideLoading();
+    uni.showToast({ title: "档案与目标已保存", icon: "success" });
+    await loadProfileData();
+  } catch (e: any) {
+    uni.hideLoading();
+    uni.showToast({ title: e?.message || "保存失败", icon: "none" });
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -837,5 +981,103 @@ onShow(() => {
   color: #ffffff;
   font-weight: bold;
   border-color: #007aff;
+}
+
+/* Form & Goals */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
+}
+
+.form-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 22rpx;
+  color: #8e8e93;
+  margin-bottom: 8rpx;
+}
+
+.form-input {
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+  color: #ffffff;
+}
+
+.target-badge {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background-color: rgba(252, 76, 2, 0.1);
+  padding: 4rpx 14rpx;
+  border-radius: 12rpx;
+}
+
+.breakdown-toggle {
+  text-align: center;
+  padding: 16rpx 0;
+  margin-top: 10rpx;
+}
+
+.toggle-text {
+  font-size: 22rpx;
+  color: #71717a;
+}
+
+.months-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.month-cell {
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border-radius: 14rpx;
+  padding: 10rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.month-label {
+  font-size: 20rpx;
+  color: #8e8e93;
+  margin-bottom: 4rpx;
+}
+
+.month-input {
+  width: 100%;
+  text-align: center;
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.save-box {
+  margin-top: 30rpx;
+}
+
+.save-btn {
+  width: 100%;
+  height: 84rpx;
+  background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: bold;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
 }
 </style>

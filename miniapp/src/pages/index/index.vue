@@ -54,6 +54,62 @@
       </view>
     </view>
 
+    <!-- ── CARD 0: 体能与状况指数 (Fitness & Form) ── -->
+    <view class="section-container">
+      <view class="section-header-row">
+        <view class="title-with-desc">
+          <text class="section-title">体能与状况指数 (Fitness & Form)</text>
+          <text class="sub-formula">基于 Banister TRIMP 与 EWMA 模型算法</text>
+        </view>
+        <view
+          class="status-pill"
+          :style="{
+            backgroundColor: (dashboardData?.fitness_form?.status_color || '#0ea5e9') + '22',
+            borderColor: (dashboardData?.fitness_form?.status_color || '#0ea5e9') + '55'
+          }"
+        >
+          <text class="status-pill-text" :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }">
+            {{ dashboardData?.fitness_form?.status_label || "训练中" }}
+          </text>
+        </view>
+      </view>
+
+      <view class="fitness-card">
+        <view class="fitness-grid-3">
+          <!-- CTL 体能 -->
+          <view class="fit-col">
+            <text class="fit-val text-cyan">{{ dashboardData?.fitness_form?.ctl ?? 0 }}</text>
+            <text class="fit-name">CTL 体能</text>
+            <text class="fit-sub">42天长期压力</text>
+          </view>
+
+          <!-- ATL 疲劳 -->
+          <view class="fit-col divider">
+            <text class="fit-val text-pink">{{ dashboardData?.fitness_form?.atl ?? 0 }}</text>
+            <text class="fit-name">ATL 疲劳</text>
+            <text class="fit-sub">7天近期压力</text>
+          </view>
+
+          <!-- TSB 状况 -->
+          <view class="fit-col divider">
+            <text class="fit-val" :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }">
+              {{ (dashboardData?.fitness_form?.tsb ?? 0) > 0 ? '+' : '' }}{{ dashboardData?.fitness_form?.tsb ?? 0 }}
+            </text>
+            <text class="fit-name">TSB 状况</text>
+            <text class="fit-sub">{{ dashboardData?.fitness_form?.status_label || "训练中" }}</text>
+          </view>
+        </view>
+
+        <!-- TSB Status Classification Bar -->
+        <view class="tsb-zones-bar">
+          <view class="zone-seg green"><text class="zone-txt">>5 巅峰</text></view>
+          <view class="zone-seg blue"><text class="zone-txt">-30~5 训练中</text></view>
+          <view class="zone-seg yellow"><text class="zone-txt">-50~-30 疲劳</text></view>
+          <view class="zone-seg red"><text class="zone-txt">&lt;-50 严重</text></view>
+        </view>
+      </view>
+    </view>
+
     <!-- ── CARD 1: Garmin 生理与恢复 4 格卡片 ── -->
     <view class="section-container">
       <view class="section-header-row">
@@ -967,5 +1023,107 @@ onPullDownRefresh(async () => {
 .empty-text {
   font-size: 24rpx;
   color: #636366;
+}
+
+/* Fitness & Form Card Styles */
+.title-with-desc {
+  display: flex;
+  flex-direction: column;
+}
+
+.sub-formula {
+  font-size: 20rpx;
+  color: #71717a;
+  margin-top: 4rpx;
+}
+
+.status-pill {
+  padding: 6rpx 18rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid;
+}
+
+.status-pill-text {
+  font-size: 22rpx;
+  font-weight: bold;
+}
+
+.fitness-card {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 28rpx;
+  padding: 28rpx 24rpx 20rpx;
+}
+
+.fitness-grid-3 {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+
+.fit-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.fit-col.divider {
+  border-left: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.fit-val {
+  font-size: 44rpx;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.text-cyan {
+  color: #38bdf8;
+}
+
+.text-pink {
+  color: #ec4899;
+}
+
+.fit-name {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-top: 8rpx;
+}
+
+.fit-sub {
+  font-size: 18rpx;
+  color: #71717a;
+  margin-top: 4rpx;
+}
+
+.tsb-zones-bar {
+  display: flex;
+  border-radius: 12rpx;
+  overflow: hidden;
+  height: 28rpx;
+  margin-top: 10rpx;
+}
+
+.zone-seg {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zone-seg.green { background-color: rgba(34, 197, 94, 0.25); border: 1rpx solid rgba(34, 197, 94, 0.4); }
+.zone-seg.blue { background-color: rgba(14, 165, 233, 0.25); border: 1rpx solid rgba(14, 165, 233, 0.4); }
+.zone-seg.yellow { background-color: rgba(234, 179, 8, 0.25); border: 1rpx solid rgba(234, 179, 8, 0.4); }
+.zone-seg.red { background-color: rgba(239, 68, 68, 0.25); border: 1rpx solid rgba(239, 68, 68, 0.4); }
+
+.zone-txt {
+  font-size: 16rpx;
+  color: #d4d4d8;
+  font-weight: 500;
 }
 </style>

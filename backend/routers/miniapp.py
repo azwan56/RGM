@@ -11,6 +11,7 @@ import calendar
 import logging
 from db import supabase_admin
 from utils.local_store import LocalStore
+from utils.running_metrics import compute_ctl_atl_tsb
 
 logger = logging.getLogger("router_miniapp")
 router = APIRouter()
@@ -102,6 +103,44 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             "vo2_max": health_data.get("vo2_max") or 45.0
         }
 
+        # 6. Compute Fitness & Form (CTL, ATL, TSB)
+        fitness_form = {
+            "ctl": 0.0,
+            "atl": 0.0,
+            "tsb": 0.0,
+            "status_label": "训练中",
+            "status_color": "#0ea5e9",
+            "history": []
+        }
+        try:
+            today = date.today()
+            trimp_series = []
+            for i in range(45, -1, -1):
+                d_str = (today - timedelta(days=i)).isoformat()
+                trimp_val = 0.0
+                for a in local_acts:
+                    if str(a.get("start_time", ""))[:10] == d_str:
+                        trimp_val += float(a.get("trimp") or 0.0)
+                trimp_series.append((d_str, trimp_val))
+            
+            ctl_atl_list = compute_ctl_atl_tsb(trimp_series)
+            if ctl_atl_list:
+                curr_ctl = ctl_atl_list[-1]["ctl"]
+                curr_atl = ctl_atl_list[-1]["atl"]
+                curr_tsb = ctl_atl_list[-1]["tsb"]
+                tsb_status = "巅峰" if curr_tsb > 5 else ("训练中" if curr_tsb >= -30 else ("疲劳" if curr_tsb >= -50 else "严重"))
+                tsb_color = "#22c55e" if curr_tsb > 5 else ("#0ea5e9" if curr_tsb >= -30 else ("#eab308" if curr_tsb >= -50 else "#ef4444"))
+                fitness_form = {
+                    "ctl": curr_ctl,
+                    "atl": curr_atl,
+                    "tsb": curr_tsb,
+                    "status_label": tsb_status,
+                    "status_color": tsb_color,
+                    "history": ctl_atl_list[-30:]
+                }
+        except Exception as e:
+            logger.warning(f"[miniapp] Fitness form calc error: {e}")
+
         return {
             "user": {
                 "id": eff_uid,
@@ -111,6 +150,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "garmin_last_sync_at": profile.get("garmin_last_sync_at"),
                 "garmin_domain": profile.get("garmin_domain") or "garmin.com",
             },
+            "fitness_form": fitness_form,
             "progress": {
                 "current_month_km": current_km,
                 "target_month_km": target_km,
