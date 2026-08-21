@@ -21,9 +21,9 @@
       }
     },
     {
-      "path": "pages/activities/activities",
+      "path": "pages/analysis/analysis",
       "style": {
-        "navigationBarTitleText": "跑步记录",
+        "navigationBarTitleText": "深度分析",
         "navigationBarBackgroundColor": "#0b0b0d",
         "navigationBarTextStyle": "white",
         "backgroundColor": "#0b0b0d",
@@ -80,8 +80,8 @@
         "text": "AI教练"
       },
       {
-        "pagePath": "pages/activities/activities",
-        "text": "动态"
+        "pagePath": "pages/analysis/analysis",
+        "text": "深度分析"
       },
       {
         "pagePath": "pages/team/team",

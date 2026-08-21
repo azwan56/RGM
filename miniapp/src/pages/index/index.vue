@@ -199,6 +199,45 @@
         </view>
       </view>
     </view>
+
+    <!-- ── CARD 2: 近期跑步记录 (最近 3 次) ── -->
+    <view v-if="dashboardData?.recent_activities?.length" class="section-container">
+      <view class="section-header-row">
+        <text class="section-title">近期跑步记录</text>
+        <text class="sub-date">最近 3 次训练</text>
+      </view>
+
+      <view class="activity-list">
+        <view
+          v-for="act in dashboardData.recent_activities.slice(0, 3)"
+          :key="act.id"
+          class="activity-card"
+        >
+          <view class="act-top">
+            <text class="act-name">{{ act.name }}</text>
+            <text class="act-time">{{ formatTime(act.start_time) }}</text>
+          </view>
+          <view class="act-data-row">
+            <view class="act-col">
+              <text class="act-main-val">{{ act.distance_km }} <text class="unit">km</text></text>
+              <text class="act-sub-label">跑步距离</text>
+            </view>
+            <view class="act-col">
+              <text class="act-sub-val">{{ act.avg_pace_str }}</text>
+              <text class="act-sub-label">平均配速</text>
+            </view>
+            <view class="act-col">
+              <text class="act-sub-val">{{ act.average_heartrate || '—' }} <text class="unit">bpm</text></text>
+              <text class="act-sub-label">平均心率</text>
+            </view>
+            <view class="act-col">
+              <text class="act-sub-val text-amber">{{ act.trimp || '—' }}</text>
+              <text class="act-sub-label">TRIMP负荷</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -970,5 +1009,75 @@ onPullDownRefresh(async () => {
 .legend-text {
   font-size: 18rpx;
   color: #8e8e93;
+}
+
+/* Recent Activities Styles */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.activity-card {
+  background-color: #151518;
+  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border-radius: 28rpx;
+  padding: 28rpx 24rpx;
+}
+
+.act-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+
+.act-name {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.act-time {
+  font-size: 22rpx;
+  color: #8e8e93;
+}
+
+.act-data-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.act-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.act-main-val {
+  font-size: 36rpx;
+  font-weight: 900;
+  color: #fc4c02;
+}
+
+.act-sub-val {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.act-sub-label {
+  font-size: 20rpx;
+  color: #636366;
+  margin-top: 6rpx;
+}
+
+.unit {
+  font-size: 20rpx;
+  color: #8e8e93;
+  font-weight: normal;
+}
+
+.text-amber {
+  color: #ffd60a;
 }
 </style>
