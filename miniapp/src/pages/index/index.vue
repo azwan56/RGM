@@ -93,71 +93,14 @@
           </text>
         </view>
 
-        <!-- SVG Fitness & Form Chart -->
-        <svg viewBox="0 0 350 185" class="fitness-svg-chart">
-          <!-- Horizontal Gridlines & Y-Axis Labels -->
-          <line x1="28" y1="18" x2="340" y2="18" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
-          <text x="24" y="21" fill="#666" font-size="9" text-anchor="end">135</text>
-
-          <line x1="28" y1="53" x2="340" y2="53" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
-          <text x="24" y="56" fill="#666" font-size="9" text-anchor="end">90</text>
-
-          <line x1="28" y1="88" x2="340" y2="88" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
-          <text x="24" y="91" fill="#666" font-size="9" text-anchor="end">45</text>
-
-          <line x1="28" y1="123" x2="340" y2="123" stroke="#333" stroke-dasharray="2,2" stroke-width="1" />
-          <text x="24" y="126" fill="#888" font-size="9" text-anchor="end">0</text>
-
-          <line x1="28" y1="158" x2="340" y2="158" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
-          <text x="24" y="161" fill="#666" font-size="9" text-anchor="end">-45</text>
-
-          <!-- TSB Vertical Bars -->
-          <rect
-            v-for="(bar, idx) in tsbBars"
-            :key="'tsb-' + idx"
-            :x="bar.x"
-            :y="bar.y"
-            :width="bar.w"
-            :height="bar.h"
-            :fill="bar.color"
-            rx="1.5"
-            opacity="0.85"
-            @click="selectPoint(bar.item)"
-          />
-
-          <!-- CTL Curve (Cyan) -->
-          <path
-            :d="ctlSvgPath"
-            fill="none"
-            stroke="#38bdf8"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-
-          <!-- ATL Curve (Pink) -->
-          <path
-            :d="atlSvgPath"
-            fill="none"
-            stroke="#ec4899"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-
-          <!-- X-Axis Date Labels -->
-          <text
-            v-for="(lbl, idx) in xAxisLabels"
-            :key="'lbl-' + idx"
-            :x="lbl.x"
-            y="178"
-            fill="#666"
-            font-size="8.5"
-            text-anchor="middle"
-          >
-            {{ lbl.text }}
-          </text>
-        </svg>
+        <!-- Native Canvas Fitness & Form Chart (Supported across all MiniApp platforms) -->
+        <canvas
+          canvas-id="fitnessChartCanvas"
+          id="fitnessChartCanvas"
+          class="fitness-chart-canvas"
+          @touchstart="handleCanvasTouch"
+          @touchmove="handleCanvasTouch"
+        />
 
         <!-- Color-Coded Legend (matching Web) -->
         <view class="chart-legend-row">
@@ -348,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
 import { request, getStoredUser, wechatLogin, UserProfile } from "../../utils/api";
 
@@ -470,99 +413,157 @@ const syncing = ref(false);
 const currentMonth = ref(new Date().getMonth() + 1);
 const activeTooltip = ref<any>(null);
 
-// SVG Chart Metrics calculation
-const svgConfig = {
-  width: 350,
-  height: 185,
-  padLeft: 30,
-  padRight: 10,
-  padTop: 18,
-  padBottom: 25,
-  minY: -45,
-  maxY: 135,
-};
+function drawFitnessChart() {
+  const ctx = uni.createCanvasContext("fitnessChartCanvas");
+  if (!ctx) return;
 
-function getY(val: number): number {
-  const plotH = svgConfig.height - svgConfig.padTop - svgConfig.padBottom;
-  const clamped = Math.max(svgConfig.minY, Math.min(svgConfig.maxY, val));
-  return svgConfig.padTop + plotH * (svgConfig.maxY - clamped) / (svgConfig.maxY - svgConfig.minY);
-}
-
-function getX(idx: number, total: number): number {
-  const plotW = svgConfig.width - svgConfig.padLeft - svgConfig.padRight;
-  if (total <= 1) return svgConfig.padLeft;
-  return svgConfig.padLeft + (idx / (total - 1)) * plotW;
-}
-
-const ctlSvgPath = computed(() => {
   const history = dashboardData.value?.fitness_form?.history || [];
-  if (!history.length) return "";
-  return history
-    .map((item: any, idx: number) => {
-      const x = getX(idx, history.length).toFixed(1);
-      const y = getY(item.ctl).toFixed(1);
-      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-});
+  if (!history.length) return;
 
-const atlSvgPath = computed(() => {
-  const history = dashboardData.value?.fitness_form?.history || [];
-  if (!history.length) return "";
-  return history
-    .map((item: any, idx: number) => {
-      const x = getX(idx, history.length).toFixed(1);
-      const y = getY(item.atl).toFixed(1);
-      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-});
+  const sysInfo = uni.getSystemInfoSync();
+  const screenW = sysInfo.windowWidth || 375;
+  const W = Math.min(350, screenW - 40);
+  const H = 190;
+  const padL = 30;
+  const padR = 8;
+  const padT = 18;
+  const padB = 24;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const minY = -45;
+  const maxY = 135;
 
-const tsbBars = computed(() => {
-  const history = dashboardData.value?.fitness_form?.history || [];
+  const getY = (val: number) => {
+    const clamped = Math.max(minY, Math.min(maxY, val));
+    return padT + (plotH * (maxY - clamped)) / (maxY - minY);
+  };
+
+  const getX = (idx: number) => {
+    if (history.length <= 1) return padL;
+    return padL + (idx / (history.length - 1)) * plotW;
+  };
+
   const yZero = getY(0);
-  return history.map((item: any, idx: number) => {
-    const x = getX(idx, history.length);
-    const yVal = getY(item.tsb);
-    const barWidth = 3.5;
-    const barX = x - barWidth / 2;
-    const barY = Math.min(yZero, yVal);
-    const barH = Math.max(1.5, Math.abs(yVal - yZero));
-    return {
-      x: barX.toFixed(1),
-      y: barY.toFixed(1),
-      w: barWidth,
-      h: barH.toFixed(1),
-      color: item.tsb_color || (item.tsb > 5 ? "#22c55e" : (item.tsb >= -30 ? "#1890ff" : (item.tsb >= -50 ? "#eab308" : "#ef4444"))),
-      item,
-    };
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. Gridlines & Y-Axis Labels
+  const gridVals = [135, 90, 45, 0, -45];
+  gridVals.forEach((val) => {
+    const y = getY(val);
+    ctx.setStrokeStyle(val === 0 ? "#383842" : "#1e1e24");
+    ctx.setLineWidth(1);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(W - padR, y);
+    ctx.stroke();
+
+    ctx.setFontSize(9);
+    ctx.setFillStyle(val === 0 ? "#8e8e93" : "#55555c");
+    ctx.setTextAlign("right");
+    ctx.fillText(String(val), padL - 4, y + 3);
   });
-});
 
-const xAxisLabels = computed(() => {
-  const history = dashboardData.value?.fitness_form?.history || [];
-  if (!history.length) return [];
-  const labels = [];
-  const step = Math.max(1, Math.floor(history.length / 6));
+  // 2. TSB Bars
+  const barW = Math.max(2.5, Math.min(6, (plotW / history.length) * 0.45));
+  history.forEach((item: any, idx: number) => {
+    const x = getX(idx);
+    const yVal = getY(item.tsb);
+    const barX = x - barW / 2;
+    const barY = Math.min(yZero, yVal);
+    const barH = Math.max(2, Math.abs(yVal - yZero));
+
+    let color = item.tsb_color;
+    if (!color) {
+      if (item.tsb > 5) color = "#22c55e";
+      else if (item.tsb >= -30) color = "#1890ff";
+      else if (item.tsb >= -50) color = "#eab308";
+      else color = "#ef4444";
+    }
+
+    ctx.setFillStyle(color);
+    ctx.fillRect(barX, barY, barW, barH);
+  });
+
+  // 3. CTL Curve (Cyan #38bdf8)
+  ctx.setStrokeStyle("#38bdf8");
+  ctx.setLineWidth(2.5);
+  ctx.setLineCap("round");
+  ctx.setLineJoin("round");
+  ctx.beginPath();
+  history.forEach((item: any, idx: number) => {
+    const x = getX(idx);
+    const y = getY(item.ctl);
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // 4. ATL Curve (Pink #ec4899)
+  ctx.setStrokeStyle("#ec4899");
+  ctx.setLineWidth(2.5);
+  ctx.setLineCap("round");
+  ctx.setLineJoin("round");
+  ctx.beginPath();
+  history.forEach((item: any, idx: number) => {
+    const x = getX(idx);
+    const y = getY(item.atl);
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // 5. X-Axis Date Labels
+  ctx.setFontSize(8.5);
+  ctx.setFillStyle("#66666e");
+  ctx.setTextAlign("center");
+  const step = Math.max(1, Math.floor(history.length / 5));
   for (let i = 0; i < history.length; i += step) {
-    labels.push({
-      x: getX(i, history.length).toFixed(1),
-      text: history[i].short_date || history[i].date?.slice(5),
-    });
+    const x = getX(i);
+    const text = history[i].short_date || history[i].date?.slice(5) || "";
+    ctx.fillText(text, x, H - 4);
   }
-  // Ensure last point label is included
-  const lastIdx = history.length - 1;
-  if (labels[labels.length - 1]?.text !== (history[lastIdx].short_date || history[lastIdx].date?.slice(5))) {
-    labels.push({
-      x: getX(lastIdx, history.length).toFixed(1),
-      text: history[lastIdx].short_date || history[lastIdx].date?.slice(5),
-    });
+  if (history.length > 0) {
+    const lastIdx = history.length - 1;
+    const text = history[lastIdx].short_date || history[lastIdx].date?.slice(5) || "";
+    ctx.fillText(text, getX(lastIdx), H - 4);
   }
-  return labels;
-});
 
-function selectPoint(item: any) {
-  activeTooltip.value = item;
+  // 6. Draw active indicator line if touched
+  if (activeTooltip.value) {
+    const activeIdx = history.findIndex((h: any) => h.date === activeTooltip.value.date);
+    if (activeIdx >= 0) {
+      const activeX = getX(activeIdx);
+      ctx.setStrokeStyle("rgba(255,255,255,0.4)");
+      ctx.setLineWidth(1);
+      ctx.beginPath();
+      ctx.moveTo(activeX, padT);
+      ctx.lineTo(activeX, H - padB);
+      ctx.stroke();
+    }
+  }
+
+  ctx.draw();
+}
+
+function handleCanvasTouch(e: any) {
+  const history = dashboardData.value?.fitness_form?.history || [];
+  if (!history.length || !e.touches || !e.touches[0]) return;
+  const touchX = e.touches[0].x;
+  const sysInfo = uni.getSystemInfoSync();
+  const screenW = sysInfo.windowWidth || 375;
+  const W = Math.min(350, screenW - 40);
+  const padL = 30;
+  const padR = 8;
+  const plotW = W - padL - padR;
+
+  const relX = Math.max(0, Math.min(plotW, touchX - padL));
+  const idx = Math.round((relX / plotW) * (history.length - 1));
+  if (idx >= 0 && idx < history.length) {
+    activeTooltip.value = history[idx];
+    drawFitnessChart();
+  }
 }
 
 async function loadDashboard() {
@@ -573,6 +574,9 @@ async function loadDashboard() {
     const data = await request(`/api/miniapp/dashboard/${uid}`);
     if (data && data.progress) {
       dashboardData.value = data;
+      nextTick(() => {
+        setTimeout(drawFitnessChart, 150);
+      });
     }
   } catch (e) {
     console.warn("Dashboard fetch fallback:", e);
@@ -618,8 +622,17 @@ function goToActivities() {
   uni.switchTab({ url: "/pages/activities/activities" });
 }
 
+onMounted(() => {
+  nextTick(() => {
+    setTimeout(drawFitnessChart, 200);
+  });
+});
+
 onShow(() => {
   loadDashboard();
+  nextTick(() => {
+    setTimeout(drawFitnessChart, 250);
+  });
 });
 
 onPullDownRefresh(async () => {
@@ -1278,9 +1291,9 @@ onPullDownRefresh(async () => {
   font-weight: bold;
 }
 
-.fitness-svg-chart {
+.fitness-chart-canvas {
   width: 100%;
-  height: 370rpx;
+  height: 380rpx;
   display: block;
 }
 
