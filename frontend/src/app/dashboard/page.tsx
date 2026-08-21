@@ -528,44 +528,50 @@ export default function DashboardPage() {
           </div>
 
           <div className="divide-y divide-white/5">
-            {(dashboardData?.recent_activities || []).map((act: any) => (
-              <div key={act.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02]">
-                    🏃
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm sm:text-base text-white">{act.name}</div>
-                    <div className="text-xs text-zinc-500 mt-0.5">{act.start_time?.replace("T", " ")?.slice(0, 16)}</div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-6 text-xs sm:text-sm">
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">距离</span>
-                    <span className="font-bold text-white text-base">{act.distance_km} km</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">配速</span>
-                    <span className="font-bold text-cyan-400">{act.avg_pace_str}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">心率</span>
-                    <span className="font-bold text-rose-400">{act.average_heartrate || "—"} bpm</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">TRIMP</span>
-                    <span className="font-bold text-amber-400">{act.trimp || "—"}</span>
-                  </div>
-                </div>
+            {(!dashboardData?.recent_activities || dashboardData.recent_activities.length === 0) ? (
+              <div className="py-8 text-center text-zinc-500 text-xs sm:text-sm">
+                暂无近期跑步记录，绑定 Garmin 账号并点击【一键同步数据】后即可自动呈现。
               </div>
-            ))}
+            ) : (
+              dashboardData.recent_activities.map((act: any) => (
+                <div key={act.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02]">
+                      🏃
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm sm:text-base text-white">{act.name}</div>
+                      <div className="text-xs text-zinc-500 mt-0.5">{act.start_time?.replace("T", " ")?.slice(0, 16)}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-6 text-xs sm:text-sm">
+                    <div>
+                      <span className="text-zinc-500 block text-[10px]">距离</span>
+                      <span className="font-bold text-white text-base">{act.distance_km} km</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 block text-[10px]">配速</span>
+                      <span className="font-bold text-cyan-400">{act.avg_pace_str}</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 block text-[10px]">心率</span>
+                      <span className="font-bold text-rose-400">{act.average_heartrate || "—"} bpm</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 block text-[10px]">TRIMP</span>
+                      <span className="font-bold text-amber-400">{act.trimp || "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </main>
 
       <GarminConnectModal
-        isOpen={garminModalOpen}
+        open={garminModalOpen}
         onClose={() => setGarminModalOpen(false)}
         uid={user?.id}
         onSuccess={() => user && loadDashboardData(user.id)}

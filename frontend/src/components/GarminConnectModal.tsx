@@ -5,20 +5,22 @@ import apiClient from "@/lib/apiClient";
 import { X, ShieldCheck, Activity, Globe } from "lucide-react";
 
 interface GarminModalProps {
-  open: boolean;
+  open?: boolean;
+  isOpen?: boolean;
   onClose: () => void;
   uid: string;
   onSuccess: () => void;
 }
 
-export default function GarminConnectModal({ open, onClose, uid, onSuccess }: GarminModalProps) {
+export default function GarminConnectModal({ open, isOpen, onClose, uid, onSuccess }: GarminModalProps) {
+  const isShown = open ?? isOpen ?? false;
   const [domain, setDomain] = useState<"garmin.cn" | "garmin.com">("garmin.cn");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  if (!open) return null;
+  if (!isShown) return null;
 
   async function handleBind(e: React.FormEvent) {
     e.preventDefault();

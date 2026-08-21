@@ -59,6 +59,7 @@ def init_db():
                 max_heartrate INTEGER,
                 average_cadence REAL,
                 avg_pace_str TEXT,
+                average_speed_mps REAL,
                 calories INTEGER,
                 aerobic_training_effect REAL,
                 anaerobic_training_effect REAL,
@@ -69,6 +70,15 @@ def init_db():
                 FOREIGN KEY(user_id) REFERENCES profiles(id)
             )
         """)
+
+        # Migration: ensure average_speed_mps exists
+        cursor.execute("PRAGMA table_info(activities)")
+        act_cols = {row[1] for row in cursor.fetchall()}
+        if "average_speed_mps" not in act_cols:
+            try:
+                cursor.execute("ALTER TABLE activities ADD COLUMN average_speed_mps REAL")
+            except Exception:
+                pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_health (
@@ -186,8 +196,8 @@ class LocalStore:
                 "id", "user_id", "name", "sport_type", "start_time", "distance_meters",
                 "moving_time_seconds", "elapsed_time_seconds", "elevation_gain_meters",
                 "average_heartrate", "max_heartrate", "average_cadence", "avg_pace_str",
-                "calories", "aerobic_training_effect", "anaerobic_training_effect", "trimp",
-                "ai_journal", "laps_data", "splits_data"
+                "average_speed_mps", "calories", "aerobic_training_effect", "anaerobic_training_effect",
+                "trimp", "ai_journal", "laps_data", "splits_data"
             ]
             row_data = []
             for col in cols:
