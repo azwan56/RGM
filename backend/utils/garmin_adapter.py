@@ -85,6 +85,56 @@ class GarminAdapter:
                     self.last_error = err1
                 return False
 
+    def fetch_user_profile_info(self) -> Dict[str, Any]:
+        """
+        Fetches user profile details from Garmin, including avatar URL, display name, full name, gender, height, weight.
+        """
+        if not self.client:
+            if not self.login():
+                return {}
+
+        info: Dict[str, Any] = {
+            "avatar_url": None,
+            "display_name": None,
+            "full_name": None,
+            "gender": None,
+            "height_cm": None,
+            "weight_kg": None,
+            "vo2max": None,
+        }
+
+        try:
+            social = self.client.connectapi("/userprofile-service/socialProfile")
+            if isinstance(social, dict):
+                info["avatar_url"] = (
+                    social.get("profileImageUrlLarge")
+                    or social.get("profileImageUrlMedium")
+                    or social.get("profileImageUrlSmall")
+                )
+                info["full_name"] = social.get("fullName")
+                info["display_name"] = social.get("fullName") or social.get("displayName")
+                logger.info(f"[garmin] Fetched Garmin user profile: name={info['display_name']}, avatar={bool(info['avatar_url'])}")
+        except Exception as e:
+            logger.warning(f"[garmin] fetch socialProfile error: {e}")
+
+        try:
+            p_info = self.client.connectapi("/userprofile-service/userprofile/personal-information")
+            if isinstance(p_info, dict):
+                user_info = p_info.get("userInfo") or {}
+                bio = p_info.get("biometricProfile") or {}
+                if user_info.get("genderType"):
+                    info["gender"] = user_info.get("genderType").lower()
+                if bio.get("height"):
+                    info["height_cm"] = round(float(bio["height"]), 1)
+                if bio.get("weight"):
+                    info["weight_kg"] = round(float(bio["weight"]) / 1000.0, 1)
+                if bio.get("vo2Max"):
+                    info["vo2max"] = round(float(bio["vo2Max"]), 1)
+        except Exception as e:
+            logger.warning(f"[garmin] fetch personal-information error: {e}")
+
+        return info
+
     def fetch_personal_records(self) -> Dict[str, Optional[int]]:
         """
         Fetches Personal Records (5K, 10K, Half Marathon, Marathon) in seconds from Garmin.

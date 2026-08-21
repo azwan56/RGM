@@ -31,7 +31,7 @@
 
           <!-- User Info -->
           <view class="user-col">
-            <image class="avatar" :src="item.avatar_url || '/static/default_avatar.png'" mode="aspectFill" />
+            <image class="avatar" :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
             <view class="name-box">
               <text class="name">{{ item.display_name }}</text>
               <text class="dist-target">{{ item.distance_km }}km / 目标 {{ item.target_km }}km</text>

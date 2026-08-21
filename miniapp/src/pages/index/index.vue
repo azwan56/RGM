@@ -3,10 +3,10 @@
     <!-- Header: User Greeting & Avatar -->
     <view class="header-card">
       <view class="user-info">
-        <image class="avatar" :src="user?.avatar_url || '/static/default_avatar.png'" mode="aspectFill" />
+        <image class="avatar" :src="dashboardData?.user?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
         <view class="text-group">
           <text class="greeting">欢迎回来，</text>
-          <text class="user-name">{{ user?.display_name || dashboardData?.user?.display_name || "跑者" }}</text>
+          <text class="user-name">{{ dashboardData?.user?.display_name || user?.display_name || "跑者" }}</text>
         </view>
       </view>
       <view class="garmin-badge" :class="{ active: dashboardData?.user?.garmin_connected }">
@@ -525,6 +525,12 @@ async function loadDashboard() {
     const data = await request(`/api/miniapp/dashboard/${uid}`);
     if (data && data.progress) {
       dashboardData.value = data;
+      if (data.user?.avatar_url || data.user?.display_name) {
+        if (!user.value) user.value = {} as any;
+        if (data.user.avatar_url) user.value.avatar_url = data.user.avatar_url;
+        if (data.user.display_name) user.value.display_name = data.user.display_name;
+        uni.setStorageSync("rgm_user", user.value);
+      }
       nextTick(() => {
         setTimeout(drawFitnessChart, 150);
       });

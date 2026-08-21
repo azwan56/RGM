@@ -48,8 +48,31 @@ def sync_single_user(uid: str) -> Dict[str, Any]:
         if not password:
             return {"success": False, "error": "Failed to decrypt Garmin credentials"}
 
-        # 2. Login to Garmin
+        # 2. Login to Garmin & Fetch Profile/Avatar
         adapter = GarminAdapter(email=email, password=password, domain=domain)
+        
+        # Sync Garmin Avatar and Name
+        try:
+            garmin_info = adapter.fetch_user_profile_info()
+            profile_updates: Dict[str, Any] = {}
+            if garmin_info.get("avatar_url"):
+                profile_updates["avatar_url"] = garmin_info["avatar_url"]
+            if garmin_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex"]):
+                profile_updates["display_name"] = garmin_info["display_name"]
+            if garmin_info.get("weight_kg") and not user.get("weight"):
+                profile_updates["weight"] = garmin_info["weight_kg"]
+            if garmin_info.get("height_cm") and not user.get("height"):
+                profile_updates["height"] = garmin_info["height_cm"]
+            if profile_updates:
+                LocalStore.upsert_profile(uid, profile_updates)
+                if supabase_admin:
+                    try:
+                        supabase_admin.table("profiles").update(profile_updates).eq("id", uid).execute()
+                    except Exception as se:
+                        logger.warning(f"[sync] Supabase profile update error: {se}")
+        except Exception as pe:
+            logger.warning(f"[sync] Garmin profile fetch error: {pe}")
+
         activities = adapter.fetch_recent_activities(limit=30)
         
         # 3. Process and upsert activities

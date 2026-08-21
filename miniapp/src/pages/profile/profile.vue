@@ -2,10 +2,10 @@
   <view class="profile-page">
     <!-- User Card -->
     <view class="user-card" @click="!user?.id && (showAuthModal = true)">
-      <image class="avatar" :src="user?.avatar_url || '/static/default_avatar.png'" mode="aspectFill" />
+      <image class="avatar" :src="profile?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
       <view class="user-meta">
-        <text class="user-name">{{ user?.display_name || "点击登录" }}</text>
-        <text class="user-id">{{ user?.id ? `ID: ${user.id.substring(0, 10)}` : "未登录 / 点击登录或切换账号" }}</text>
+        <text class="user-name">{{ profile?.display_name || user?.display_name || "跑者" }}</text>
+        <text class="user-id">{{ user?.id ? `ID: ${user.id.substring(0, 10)}` : "已连接 Garmin 同步" }}</text>
       </view>
     </view>
 
@@ -384,6 +384,12 @@ async function loadProfileData() {
     const res = await request(`/api/profile/${user.value.id}`);
     if (res?.profile) {
       profile.value = res.profile;
+      if (res.profile.avatar_url || res.profile.display_name) {
+        if (!user.value) user.value = {} as any;
+        if (res.profile.avatar_url) user.value.avatar_url = res.profile.avatar_url;
+        if (res.profile.display_name) user.value.display_name = res.profile.display_name;
+        uni.setStorageSync("rgm_user", user.value);
+      }
       garminConnected.value = !!res.profile.garmin_connected;
       garminEmail.value = res.profile.garmin_email || "";
       garminDomain.value = res.profile.garmin_domain || "garmin.cn";
