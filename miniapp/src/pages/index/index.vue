@@ -298,52 +298,6 @@
       </view>
     </view>
 
-    <!-- ── CARD 3: 2026 年度统计 ── -->
-    <view class="section-container">
-      <view class="section-header-row">
-        <text class="section-title">{{ dashboardData?.yearly_stats?.year || 2026 }} 年度统计</text>
-        <text class="progress-tag">{{ dashboardData?.yearly_stats?.progress_pct || 38.9 }}% 完成度</text>
-      </view>
-
-      <view class="yearly-card">
-        <view class="yearly-top-row">
-          <view class="yearly-big-stat">
-            <text class="big-val">{{ dashboardData?.yearly_stats?.total_km || 1324.3 }}</text>
-            <text class="big-label">年累计跑量 (km)</text>
-          </view>
-
-          <view class="yearly-sub-stats">
-            <view class="sub-stat-row">
-              <text class="sub-stat-label">🏃 累计跑次</text>
-              <text class="sub-stat-val">{{ dashboardData?.yearly_stats?.total_runs || 88 }} 次</text>
-            </view>
-            <view class="sub-stat-row">
-              <text class="sub-stat-label">📅 月均跑量</text>
-              <text class="sub-stat-val">{{ dashboardData?.yearly_stats?.avg_monthly_km || 165.5 }} km</text>
-            </view>
-            <view class="sub-stat-row">
-              <text class="sub-stat-label">🎯 年终推算</text>
-              <text class="sub-stat-val text-green">{{ dashboardData?.yearly_stats?.projected_year_km || 1986.4 }} km</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- Progress Track -->
-        <view class="yearly-progress-track">
-          <view
-            class="yearly-progress-fill"
-            :style="{ width: Math.min(100, dashboardData?.yearly_stats?.progress_pct || 38.9) + '%' }"
-          />
-        </view>
-
-        <view class="yearly-best-month">
-          <text class="badge-icon">🏆</text>
-          <text class="best-text">
-            最佳月份: {{ dashboardData?.yearly_stats?.best_month?.name || "5月" }} ({{ dashboardData?.yearly_stats?.best_month?.distance_km || 413.2 }}km) · 平均配速 {{ dashboardData?.yearly_stats?.best_month?.avg_pace || "7:41" }}
-          </text>
-        </view>
-      </view>
-    </view>
 
     <!-- Renato Canova AI Coach Tip -->
     <view class="ai-coach-card">
