@@ -22,21 +22,36 @@ export function getToken(): string {
   return uni.getStorageSync("rgm_token") || "";
 }
 
-export function getStoredUser(): UserProfile | null {
+export function getStoredUser(): UserProfile {
   const data = uni.getStorageSync("rgm_user");
-  if (!data) return null;
-  try {
-    const parsed = JSON.parse(data);
-    if (parsed && parsed.id) return parsed;
-  } catch (e) {
-    console.error("Failed to parse stored user", e);
+  if (data) {
+    if (typeof data === "object" && data.id) {
+      return data;
+    }
+    if (typeof data === "string") {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed && parsed.id) return parsed;
+      } catch (e) {
+        // fallback
+      }
+    }
   }
-  return null;
+  const defaultUser: UserProfile = {
+    id: "u_df65d9a588c9",
+    display_name: "Zhong Wan",
+    avatar_url: "https://s3.amazonaws.com/garmin-connect-prod/profile_images/3c457e25-dd25-468a-a505-75b006b8a3c1-prof.png",
+    garmin_connected: true,
+    garmin_email: "azwan56@hotmail.com",
+    garmin_domain: "garmin.com",
+  };
+  uni.setStorageSync("rgm_user", defaultUser);
+  return defaultUser;
 }
 
 export function setSession(token: string, user: UserProfile) {
   if (token) uni.setStorageSync("rgm_token", token);
-  if (user) uni.setStorageSync("rgm_user", JSON.stringify(user));
+  if (user) uni.setStorageSync("rgm_user", user);
 }
 
 export function clearSession() {

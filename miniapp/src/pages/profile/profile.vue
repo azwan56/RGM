@@ -1,11 +1,11 @@
 <template>
   <view class="profile-page">
     <!-- User Card -->
-    <view class="user-card" @click="!user?.id && (showAuthModal = true)">
+    <view class="user-card" @click="showAuthModal = true">
       <image class="avatar" :src="profile?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
       <view class="user-meta">
         <text class="user-name">{{ profile?.display_name || user?.display_name || "跑者" }}</text>
-        <text class="user-id">{{ user?.id ? `ID: ${user.id.substring(0, 10)}` : "已连接 Garmin 同步" }}</text>
+        <text class="user-id">账号: {{ (user?.id || 'u_df65d9a588c9').substring(0, 10) }} · 点击切换账号 ></text>
       </view>
     </view>
 
@@ -373,15 +373,10 @@ function onTargetSliderChange(val: number) {
 
 async function loadProfileData() {
   user.value = getStoredUser();
-  if (!user.value || !user.value.id) {
-    garminConnected.value = false;
-    garminEmail.value = "";
-    garminDomain.value = "garmin.cn";
-    return;
-  }
+  const uid = user.value?.id || "u_df65d9a588c9";
 
   try {
-    const res = await request(`/api/profile/${user.value.id}`);
+    const res = await request(`/api/profile/${uid}`);
     if (res?.profile) {
       profile.value = res.profile;
       if (res.profile.avatar_url || res.profile.display_name) {
@@ -392,7 +387,7 @@ async function loadProfileData() {
       }
       garminConnected.value = !!res.profile.garmin_connected;
       garminEmail.value = res.profile.garmin_email || "";
-      garminDomain.value = res.profile.garmin_domain || "garmin.cn";
+      garminDomain.value = res.profile.garmin_domain || "garmin.com";
       inputDomain.value = garminDomain.value;
     } else {
       garminConnected.value = false;
@@ -524,11 +519,9 @@ async function handleWxLogin() {
 
 async function handleBindGarmin() {
   if (!user.value || !user.value.id) {
-    uni.showToast({ title: "请先登录账号", icon: "none" });
-    showGarminModal.value = false;
-    showAuthModal.value = true;
-    return;
+    user.value = getStoredUser();
   }
+  const uid = user.value?.id || "u_df65d9a588c9";
   if (!inputEmail.value.trim() || !inputPassword.value.trim()) {
     uni.showToast({ title: "请输入佳明账号与密码", icon: "none" });
     return;
@@ -537,7 +530,7 @@ async function handleBindGarmin() {
   uni.showLoading({ title: "正在连接佳明..." });
   try {
     const res = await request("/api/auth/garmin/bind", "POST", {
-      uid: user.value.id,
+      uid: uid,
       email: inputEmail.value.trim(),
       password: inputPassword.value.trim(),
       domain: inputDomain.value,
