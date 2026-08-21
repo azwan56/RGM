@@ -1,0 +1,103 @@
+# ==============================================================================
+# Supabase Self-Hosted Docker Compose for Alibaba Cloud / Local Development
+# ==============================================================================
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database
+  supabase-db:
+    image: supabase/postgres:15.1.1.78
+    container_name: rgm-supabase-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_rgm_secret_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Kong API Gateway (Supabase 反向代理与路由)
+  supabase-kong:
+    image: kong:2.8.1
+    container_name: rgm-supabase-kong
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+    volumes:
+      - ./kong.yml:/var/lib/kong/kong.yml:ro
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  # 3. GoTrue Auth Engine (用户认证与 JWT 派发)
+  supabase-auth:
+    image: supabase/gotrue:v2.158.1
+    container_name: rgm-supabase-auth
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL:-http://localhost:8000}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres_rgm_secret_2026}@supabase-db:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-minimum-32-chars}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  # 4. PostgREST (自动生成 RESTful 数据接口)
+  supabase-rest:
+    image: postgrest/postgrest:v12.0.1
+    container_name: rgm-supabase-rest
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres_rgm_secret_2026}@supabase-db:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      PGRST_DB_SCHEMA: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-minimum-32-chars}
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  # 5. Supabase Storage Engine (结合阿里云 OSS 或本地存储)
+  supabase-storage:
+    image: supabase/storage-api:v1.10.1
+    container_name: rgm-supabase-storage
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.fake_anon_key}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.fake_service_key}
+      POSTGREST_URL: http://supabase-rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-minimum-32-chars}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres_rgm_secret_2026}@supabase-db:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+    volumes:
+      - storage-data:/var/lib/storage
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  storage-data:

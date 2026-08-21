@@ -1,0 +1,23 @@
+{
+  "name": "珍珍跑团助手",
+  "appid": "__UNI__RGM_CN",
+  "description": "RGM跑团管理与AI教练小程序",
+  "versionName": "2.0.0",
+  "versionCode": "200",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "wxdfff48d6d0506130",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true
+    },
+    "usingComponents": true,
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于跑步轨迹记录"
+      }
+    }
+  }
+}

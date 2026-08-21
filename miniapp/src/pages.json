@@ -1,0 +1,96 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "RGM 跑团",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/coach/coach",
+      "style": {
+        "navigationBarTitleText": "Canova AI 教练",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/activities/activities",
+      "style": {
+        "navigationBarTitleText": "跑步记录",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/team/team",
+      "style": {
+        "navigationBarTitleText": "跑团与榜单",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/profile/profile",
+      "style": {
+        "navigationBarTitleText": "个人中心",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d"
+      }
+    },
+    {
+      "path": "pages/goals/goals",
+      "style": {
+        "navigationBarTitleText": "目标与体能",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "RGM",
+    "navigationBarBackgroundColor": "#0b0b0d",
+    "backgroundColor": "#0b0b0d"
+  },
+  "tabBar": {
+    "color": "#71717a",
+    "selectedColor": "#FC4C02",
+    "backgroundColor": "#121214",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "看板"
+      },
+      {
+        "pagePath": "pages/coach/coach",
+        "text": "AI教练"
+      },
+      {
+        "pagePath": "pages/activities/activities",
+        "text": "动态"
+      },
+      {
+        "pagePath": "pages/team/team",
+        "text": "跑团"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的"
+      }
+    ]
+  }
+}
