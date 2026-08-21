@@ -50,7 +50,11 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         days_left = max(1, total_days - today.day + 1)
 
         goal = LocalStore.get_goal(eff_uid)
-        target_km = float(goal.get("target_distance") or 200.0)
+        monthly_targets = goal.get("monthly_targets")
+        if monthly_targets and isinstance(monthly_targets, list) and len(monthly_targets) >= today.month:
+            target_km = float(monthly_targets[today.month - 1] or goal.get("target_distance") or 200.0)
+        else:
+            target_km = float(goal.get("target_distance") or 200.0)
 
         current_m = LocalStore.get_month_distance_meters(eff_uid, month_start)
         current_km = round(current_m / 1000.0, 1)

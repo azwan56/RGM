@@ -158,34 +158,68 @@
           <text class="title-icon">🎯</text>
           <text class="card-title">训练目标与跑量设置</text>
         </view>
-        <text class="target-badge">{{ targetDistance }} km / 月</text>
+        <text class="target-badge" :class="{ locked: goalMode === 'custom' }">
+          {{ goalMode === 'uniform' ? `${targetDistance} km / 月` : '12 个月独立设定' }}
+        </text>
       </view>
 
-      <slider
-        :value="targetDistance"
-        :min="50"
-        :max="600"
-        :step="10"
-        activeColor="#FC4C02"
-        backgroundColor="rgba(255,255,255,0.1)"
-        block-color="#ffffff"
-        block-size="20"
-        @change="(e) => onTargetSliderChange(e.detail.value)"
-      />
-
-      <view class="breakdown-toggle" @click="showMonthlyBreakdown = !showMonthlyBreakdown">
-        <text class="toggle-text">{{ showMonthlyBreakdown ? "收起 12 个月独立设定 ▲" : "展开 12 个月独立设定 (夏训/冬训调整) ▼" }}</text>
+      <!-- Goal Mode Switcher -->
+      <view class="goal-mode-selector">
+        <view
+          class="goal-mode-btn"
+          :class="{ active: goalMode === 'uniform' }"
+          @click="setGoalMode('uniform')"
+        >
+          每月统一跑量
+        </view>
+        <view
+          class="goal-mode-btn"
+          :class="{ active: goalMode === 'custom' }"
+          @click="setGoalMode('custom')"
+        >
+          12 个月独立设定
+        </view>
       </view>
 
-      <view v-if="showMonthlyBreakdown" class="months-grid">
-        <view v-for="(val, idx) in monthlyTargets" :key="idx" class="month-cell">
-          <text class="month-label">{{ idx + 1 }}月</text>
-          <input
-            class="month-input"
-            type="number"
-            :value="val"
-            @input="(e) => monthlyTargets[idx] = parseInt(e.detail.value, 10) || 0"
-          />
+      <!-- General Slider -->
+      <view class="slider-wrapper" :class="{ disabled: goalMode === 'custom' }">
+        <slider
+          :value="targetDistance"
+          :min="50"
+          :max="600"
+          :step="10"
+          :disabled="goalMode === 'custom'"
+          :activeColor="goalMode === 'custom' ? '#4b5563' : '#FC4C02'"
+          backgroundColor="rgba(255,255,255,0.1)"
+          :block-color="goalMode === 'custom' ? '#6b7280' : '#ffffff'"
+          block-size="20"
+          @change="(e) => onTargetSliderChange(e.detail.value)"
+        />
+        <text v-if="goalMode === 'custom'" class="locked-tip">
+          🔒 当前已启用 12 个月独立设定，通用滑动条已锁定以防误触变更
+        </text>
+        <text v-else class="uniform-tip">
+          ✨ 拖动滑块将同时应用到全年 12 个月份（当前: {{ targetDistance }} km/月）
+        </text>
+      </view>
+
+      <!-- 12 Months Grid when custom -->
+      <view v-if="goalMode === 'custom'" class="custom-months-section">
+        <view class="custom-months-header">
+          <text class="cm-title">各月份独立跑量 (km)</text>
+          <text class="sync-uniform-action" @click="syncUniformToAll">一键统一为 {{ targetDistance }}km</text>
+        </view>
+
+        <view class="months-grid">
+          <view v-for="(val, idx) in monthlyTargets" :key="idx" class="month-cell">
+            <text class="month-label">{{ idx + 1 }}月</text>
+            <input
+              class="month-input"
+              type="number"
+              :value="val"
+              @input="(e) => monthlyTargets[idx] = parseInt(e.detail.value, 10) || 0"
+            />
+          </view>
         </view>
       </view>
 
@@ -363,12 +397,25 @@ const importingGarmin = ref(false);
 
 const targetDistance = ref(200);
 const monthlyTargets = ref<number[]>(Array(12).fill(200));
-const showMonthlyBreakdown = ref(false);
+const goalMode = ref<"uniform" | "custom">("uniform");
 const saving = ref(false);
 
+function setGoalMode(mode: "uniform" | "custom") {
+  goalMode.value = mode;
+  if (mode === "uniform") {
+    monthlyTargets.value = Array(12).fill(targetDistance.value);
+  }
+}
+
 function onTargetSliderChange(val: number) {
+  if (goalMode.value === "custom") return;
   targetDistance.value = val;
   monthlyTargets.value = Array(12).fill(val);
+}
+
+function syncUniformToAll() {
+  monthlyTargets.value = Array(12).fill(targetDistance.value);
+  uni.showToast({ title: `已将全部月份统一设为 ${targetDistance.value}km`, icon: "none" });
 }
 
 async function loadProfileData() {
@@ -396,8 +443,12 @@ async function loadProfileData() {
       targetDistance.value = res.goal.target_distance || 200;
       if (res.goal.monthly_targets && Array.isArray(res.goal.monthly_targets)) {
         monthlyTargets.value = res.goal.monthly_targets;
+        const first = monthlyTargets.value[0];
+        const allEqual = monthlyTargets.value.every((v) => v === first);
+        goalMode.value = allEqual ? "uniform" : "custom";
       } else {
         monthlyTargets.value = Array(12).fill(targetDistance.value);
+        goalMode.value = "uniform";
       }
     }
     if (res?.races) {
@@ -1016,26 +1067,94 @@ onShow(() => {
   font-weight: bold;
   color: #fc4c02;
   background-color: rgba(252, 76, 2, 0.1);
-  padding: 4rpx 14rpx;
+  padding: 6rpx 16rpx;
   border-radius: 12rpx;
 }
 
-.breakdown-toggle {
-  text-align: center;
-  padding: 16rpx 0;
-  margin-top: 10rpx;
+.target-badge.locked {
+  color: #06b6d4;
+  background-color: rgba(6, 182, 212, 0.1);
 }
 
-.toggle-text {
+.goal-mode-selector {
+  display: flex;
+  background-color: #121214;
+  border-radius: 18rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+  gap: 8rpx;
+}
+
+.goal-mode-btn {
+  flex: 1;
+  text-align: center;
+  padding: 14rpx 0;
+  font-size: 24rpx;
+  color: #8e8e93;
+  border-radius: 14rpx;
+  transition: all 0.2s ease;
+}
+
+.goal-mode-btn.active {
+  background-color: #242428;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.slider-wrapper {
+  margin-bottom: 20rpx;
+  transition: opacity 0.2s ease;
+}
+
+.slider-wrapper.disabled {
+  opacity: 0.45;
+}
+
+.locked-tip {
+  font-size: 20rpx;
+  color: #06b6d4;
+  margin-top: 10rpx;
+  text-align: center;
+  display: block;
+}
+
+.uniform-tip {
+  font-size: 20rpx;
+  color: #8e8e93;
+  margin-top: 10rpx;
+  text-align: center;
+  display: block;
+}
+
+.custom-months-section {
+  background-color: #121214;
+  border-radius: 20rpx;
+  padding: 20rpx;
+  margin-top: 16rpx;
+}
+
+.custom-months-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.cm-title {
   font-size: 22rpx;
-  color: #71717a;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.sync-uniform-action {
+  font-size: 20rpx;
+  color: #fc4c02;
 }
 
 .months-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12rpx;
-  margin-top: 16rpx;
 }
 
 .month-cell {
@@ -1057,7 +1176,7 @@ onShow(() => {
 .month-input {
   width: 100%;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 26rpx;
   font-weight: bold;
   color: #ffffff;
 }

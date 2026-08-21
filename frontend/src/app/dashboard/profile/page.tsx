@@ -47,6 +47,24 @@ export default function ProfilePage() {
   const [monthlyTargets, setMonthlyTargets] = useState<number[]>([
     200, 200, 200, 200, 200, 200, 200, 250, 300, 350, 400, 400,
   ]);
+  const [goalMode, setGoalMode] = useState<"uniform" | "custom">("uniform");
+
+  function handleGoalModeChange(mode: "uniform" | "custom") {
+    setGoalMode(mode);
+    if (mode === "uniform") {
+      setMonthlyTargets(Array(12).fill(targetDistance));
+    }
+  }
+
+  function handleSliderChange(val: number) {
+    if (goalMode === "custom") return;
+    setTargetDistance(val);
+    setMonthlyTargets(Array(12).fill(val));
+  }
+
+  function handleSyncUniformToAll() {
+    setMonthlyTargets(Array(12).fill(targetDistance));
+  }
 
   // Race Plans
   const [races, setRaces] = useState<RacePlan[]>([
@@ -102,8 +120,12 @@ export default function ProfilePage() {
         setTargetDistance(goal.target_distance || 200);
         if (goal.monthly_targets && Array.isArray(goal.monthly_targets)) {
           setMonthlyTargets(goal.monthly_targets);
+          const first = goal.monthly_targets[0];
+          const allEqual = goal.monthly_targets.every((v: number) => v === first);
+          setGoalMode(allEqual ? "uniform" : "custom");
         } else {
           setMonthlyTargets(Array(12).fill(goal.target_distance || 200));
+          setGoalMode("uniform");
         }
       }
       if (userRaces && Array.isArray(userRaces) && userRaces.length > 0) {
@@ -529,30 +551,110 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* ── CARD 4: 全年 12 个月跑量目标 ── */}
+          {/* ── CARD 4: 训练目标与跑量设置 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex items-center gap-2">
-              <Target className="w-5 h-5 text-cyan-400" />
-              <h2 className="text-lg font-bold text-white tracking-wide">全年 12 个月跑量目标 (km)</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-cyan-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">训练目标与跑量设置</h2>
+              </div>
+              <span
+                className={`text-xs px-3 py-1 rounded-full font-bold self-start sm:self-auto border ${
+                  goalMode === "custom"
+                    ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                    : "bg-[#FC4C02]/10 text-[#FC4C02] border-[#FC4C02]/20"
+                }`}
+              >
+                {goalMode === "uniform" ? `${targetDistance} km / 月` : "12 个月独立设定"}
+              </span>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-              {monthlyTargets.map((target, index) => (
-                <div key={index} className="bg-[#18181c] border border-white/5 rounded-2xl p-3 text-center">
-                  <span className="text-[11px] text-zinc-500 block mb-1">{index + 1} 月</span>
-                  <input
-                    type="number"
-                    value={target}
-                    onChange={(e) => {
-                      const newTargets = [...monthlyTargets];
-                      newTargets[index] = Number(e.target.value);
-                      setMonthlyTargets(newTargets);
-                    }}
-                    className="w-full bg-[#202026] text-center border border-white/10 rounded-lg py-1.5 text-sm font-bold text-white focus:outline-none focus:border-[#FC4C02]"
-                  />
-                </div>
-              ))}
+            {/* Mode Switcher */}
+            <div className="flex bg-[#18181c] p-1 rounded-2xl border border-white/5 max-w-sm">
+              <button
+                type="button"
+                onClick={() => handleGoalModeChange("uniform")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
+                  goalMode === "uniform"
+                    ? "bg-[#282830] text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                每月统一跑量
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGoalModeChange("custom")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
+                  goalMode === "custom"
+                    ? "bg-[#282830] text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                12 个月独立设定
+              </button>
             </div>
+
+            {/* General Slider */}
+            <div className={`space-y-2 transition-opacity ${goalMode === "custom" ? "opacity-40" : "opacity-100"}`}>
+              <div className="flex justify-between text-xs text-zinc-400">
+                <span>月度通用基准: <strong className="text-white text-sm">{targetDistance} km</strong></span>
+                <span>范围: 50 ~ 600 km</span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={600}
+                step={10}
+                disabled={goalMode === "custom"}
+                value={targetDistance}
+                onChange={(e) => handleSliderChange(Number(e.target.value))}
+                className="w-full accent-[#FC4C02] bg-zinc-800 h-2 rounded-lg cursor-pointer disabled:cursor-not-allowed"
+              />
+              {goalMode === "custom" ? (
+                <p className="text-[11px] text-cyan-400">
+                  🔒 当前已启用 12 个月独立设定，通用滑动条已锁定以防误触变更。可在下方单独修改每月跑量。
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-500">
+                  ✨ 拖动滑块将同时应用到全年 12 个月份。
+                </p>
+              )}
+            </div>
+
+            {/* 12 Months Grid when custom */}
+            {goalMode === "custom" && (
+              <div className="pt-4 border-t border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-zinc-300">各月份独立跑量 (km)</span>
+                  <button
+                    type="button"
+                    onClick={handleSyncUniformToAll}
+                    className="text-xs text-[#FC4C02] hover:underline"
+                  >
+                    一键统一为 {targetDistance}km
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                  {monthlyTargets.map((target, index) => (
+                    <div key={index} className="bg-[#18181c] border border-white/5 rounded-2xl p-3 text-center">
+                      <span className="text-[11px] text-zinc-500 block mb-1">{index + 1} 月</span>
+                      <input
+                        type="number"
+                        value={target}
+                        onChange={(e) => {
+                          const newTargets = [...monthlyTargets];
+                          newTargets[index] = Number(e.target.value);
+                          setMonthlyTargets(newTargets);
+                        }}
+                        className="w-full bg-[#202026] text-center border border-white/10 rounded-lg py-1.5 text-sm font-bold text-white focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Submit Button */}
