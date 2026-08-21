@@ -64,8 +64,8 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
 
         # 4. Recent activities
         recent_activities = []
-        local_acts = LocalStore.get_recent_activities(eff_uid, limit=10)
-        for a in local_acts:
+        local_acts = LocalStore.get_recent_activities(eff_uid, limit=100)
+        for a in local_acts[:10]:
             dist_m = float(a.get("distance_meters") or 0)
             dist_km = round(dist_m / 1000.0, 2)
             recent_activities.append({
@@ -103,7 +103,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             "vo2_max": health_data.get("vo2_max") or 45.0
         }
 
-        # 6. Compute Fitness & Form (CTL, ATL, TSB)
+        # 6. Compute Fitness & Form (CTL, ATL, TSB) - 90 days EWMA
         fitness_form = {
             "ctl": 0.0,
             "atl": 0.0,
@@ -114,29 +114,41 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         }
         try:
             today = date.today()
-            trimp_series = []
-            for i in range(45, -1, -1):
-                d_str = (today - timedelta(days=i)).isoformat()
-                trimp_val = 0.0
-                for a in local_acts:
-                    if str(a.get("start_time", ""))[:10] == d_str:
-                        trimp_val += float(a.get("trimp") or 0.0)
-                trimp_series.append((d_str, trimp_val))
+            daily_trimp_map = { (today - timedelta(days=i)).isoformat(): 0.0 for i in range(90, -1, -1) }
+            for a in local_acts:
+                st = str(a.get("start_time", ""))[:10]
+                if st in daily_trimp_map:
+                    daily_trimp_map[st] += float(a.get("trimp") or 0.0)
             
-            ctl_atl_list = compute_ctl_atl_tsb(trimp_series)
-            if ctl_atl_list:
-                curr_ctl = ctl_atl_list[-1]["ctl"]
-                curr_atl = ctl_atl_list[-1]["atl"]
-                curr_tsb = ctl_atl_list[-1]["tsb"]
-                tsb_status = "巅峰" if curr_tsb > 5 else ("训练中" if curr_tsb >= -30 else ("疲劳" if curr_tsb >= -50 else "严重"))
-                tsb_color = "#22c55e" if curr_tsb > 5 else ("#0ea5e9" if curr_tsb >= -30 else ("#eab308" if curr_tsb >= -50 else "#ef4444"))
+            series = sorted(daily_trimp_map.items(), key=lambda x: x[0])
+            ctl_atl_list = compute_ctl_atl_tsb(series)
+            
+            enriched_history = []
+            for item in ctl_atl_list:
+                d_obj = datetime.strptime(item["date"], "%Y-%m-%d").date()
+                tsb_val = float(item["tsb"])
+                color = "#22c55e" if tsb_val > 5 else ("#1890ff" if tsb_val >= -30 else ("#eab308" if tsb_val >= -50 else "#ef4444"))
+                label = "巅峰" if tsb_val > 5 else ("训练中" if tsb_val >= -30 else ("疲劳" if tsb_val >= -50 else "严重"))
+                enriched_history.append({
+                    "date": item["date"],
+                    "short_date": d_obj.strftime("%m-%d"),
+                    "ctl": item["ctl"],
+                    "atl": item["atl"],
+                    "tsb": tsb_val,
+                    "tsb_color": color,
+                    "tsb_label": label,
+                    "trimp": item["trimp"]
+                })
+            
+            if enriched_history:
+                latest = enriched_history[-1]
                 fitness_form = {
-                    "ctl": curr_ctl,
-                    "atl": curr_atl,
-                    "tsb": curr_tsb,
-                    "status_label": tsb_status,
-                    "status_color": tsb_color,
-                    "history": ctl_atl_list[-30:]
+                    "ctl": latest["ctl"],
+                    "atl": latest["atl"],
+                    "tsb": latest["tsb"],
+                    "status_label": latest["tsb_label"],
+                    "status_color": latest["tsb_color"],
+                    "history": enriched_history[-30:] # recent 30 days
                 }
         except Exception as e:
             logger.warning(f"[miniapp] Fitness form calc error: {e}")

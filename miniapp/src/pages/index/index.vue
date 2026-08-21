@@ -58,54 +58,135 @@
     <view class="section-container">
       <view class="section-header-row">
         <view class="title-with-desc">
-          <text class="section-title">体能与状况指数 (Fitness & Form)</text>
-          <text class="sub-formula">基于 Banister TRIMP 与 EWMA 模型算法</text>
+          <text class="section-title">⚡ 体能与状况指数 (Fitness & Form)</text>
+          <text class="sub-formula">基于标准 Banister TRIMP 与 EWMA 模型算法</text>
         </view>
-        <view
-          class="status-pill"
-          :style="{
-            backgroundColor: (dashboardData?.fitness_form?.status_color || '#0ea5e9') + '22',
-            borderColor: (dashboardData?.fitness_form?.status_color || '#0ea5e9') + '55'
-          }"
-        >
-          <text class="status-pill-text" :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }">
-            {{ dashboardData?.fitness_form?.status_label || "训练中" }}
-          </text>
+        <view class="metrics-pill-group">
+          <view class="metric-pill">
+            <text class="pill-label">CTL 体能</text>
+            <text class="pill-val text-cyan">{{ dashboardData?.fitness_form?.ctl ?? 44.3 }}</text>
+          </view>
+          <view class="metric-pill">
+            <text class="pill-label">ATL 疲劳</text>
+            <text class="pill-val text-pink">{{ dashboardData?.fitness_form?.atl ?? 56.7 }}</text>
+          </view>
+          <view class="metric-pill">
+            <text class="pill-label">TSB 状况</text>
+            <text
+              class="pill-val"
+              :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }"
+            >
+              {{ (dashboardData?.fitness_form?.tsb ?? -12.3) > 0 ? '+' : '' }}{{ dashboardData?.fitness_form?.tsb ?? -12.3 }}
+            </text>
+          </view>
         </view>
       </view>
 
-      <view class="fitness-card">
-        <view class="fitness-grid-3">
-          <!-- CTL 体能 -->
-          <view class="fit-col">
-            <text class="fit-val text-cyan">{{ dashboardData?.fitness_form?.ctl ?? 0 }}</text>
-            <text class="fit-name">CTL 体能</text>
-            <text class="fit-sub">42天长期压力</text>
-          </view>
-
-          <!-- ATL 疲劳 -->
-          <view class="fit-col divider">
-            <text class="fit-val text-pink">{{ dashboardData?.fitness_form?.atl ?? 0 }}</text>
-            <text class="fit-name">ATL 疲劳</text>
-            <text class="fit-sub">7天近期压力</text>
-          </view>
-
-          <!-- TSB 状况 -->
-          <view class="fit-col divider">
-            <text class="fit-val" :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }">
-              {{ (dashboardData?.fitness_form?.tsb ?? 0) > 0 ? '+' : '' }}{{ dashboardData?.fitness_form?.tsb ?? 0 }}
-            </text>
-            <text class="fit-name">TSB 状况</text>
-            <text class="fit-sub">{{ dashboardData?.fitness_form?.status_label || "训练中" }}</text>
-          </view>
+      <view class="fitness-chart-card">
+        <!-- Tooltip Bubble when tapped -->
+        <view v-if="activeTooltip" class="chart-tooltip">
+          <text class="tip-date">{{ activeTooltip.short_date || activeTooltip.date }}</text>
+          <text class="tip-val text-cyan">CTL: {{ activeTooltip.ctl }}</text>
+          <text class="tip-val text-pink">ATL: {{ activeTooltip.atl }}</text>
+          <text class="tip-val" :style="{ color: activeTooltip.tsb_color || '#0ea5e9' }">
+            TSB: {{ activeTooltip.tsb > 0 ? '+' : '' }}{{ activeTooltip.tsb }} ({{ activeTooltip.tsb_label || '训练中' }})
+          </text>
         </view>
 
-        <!-- TSB Status Classification Bar -->
-        <view class="tsb-zones-bar">
-          <view class="zone-seg green"><text class="zone-txt">>5 巅峰</text></view>
-          <view class="zone-seg blue"><text class="zone-txt">-30~5 训练中</text></view>
-          <view class="zone-seg yellow"><text class="zone-txt">-50~-30 疲劳</text></view>
-          <view class="zone-seg red"><text class="zone-txt">&lt;-50 严重</text></view>
+        <!-- SVG Fitness & Form Chart -->
+        <svg viewBox="0 0 350 185" class="fitness-svg-chart">
+          <!-- Horizontal Gridlines & Y-Axis Labels -->
+          <line x1="28" y1="18" x2="340" y2="18" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
+          <text x="24" y="21" fill="#666" font-size="9" text-anchor="end">135</text>
+
+          <line x1="28" y1="53" x2="340" y2="53" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
+          <text x="24" y="56" fill="#666" font-size="9" text-anchor="end">90</text>
+
+          <line x1="28" y1="88" x2="340" y2="88" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
+          <text x="24" y="91" fill="#666" font-size="9" text-anchor="end">45</text>
+
+          <line x1="28" y1="123" x2="340" y2="123" stroke="#333" stroke-dasharray="2,2" stroke-width="1" />
+          <text x="24" y="126" fill="#888" font-size="9" text-anchor="end">0</text>
+
+          <line x1="28" y1="158" x2="340" y2="158" stroke="#1f1f24" stroke-dasharray="3,3" stroke-width="1" />
+          <text x="24" y="161" fill="#666" font-size="9" text-anchor="end">-45</text>
+
+          <!-- TSB Vertical Bars -->
+          <rect
+            v-for="(bar, idx) in tsbBars"
+            :key="'tsb-' + idx"
+            :x="bar.x"
+            :y="bar.y"
+            :width="bar.w"
+            :height="bar.h"
+            :fill="bar.color"
+            rx="1.5"
+            opacity="0.85"
+            @click="selectPoint(bar.item)"
+          />
+
+          <!-- CTL Curve (Cyan) -->
+          <path
+            :d="ctlSvgPath"
+            fill="none"
+            stroke="#38bdf8"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+
+          <!-- ATL Curve (Pink) -->
+          <path
+            :d="atlSvgPath"
+            fill="none"
+            stroke="#ec4899"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+
+          <!-- X-Axis Date Labels -->
+          <text
+            v-for="(lbl, idx) in xAxisLabels"
+            :key="'lbl-' + idx"
+            :x="lbl.x"
+            y="178"
+            fill="#666"
+            font-size="8.5"
+            text-anchor="middle"
+          >
+            {{ lbl.text }}
+          </text>
+        </svg>
+
+        <!-- Color-Coded Legend (matching Web) -->
+        <view class="chart-legend-row">
+          <view class="legend-item">
+            <view class="line-dot cyan" />
+            <text class="legend-text">体能 (CTL): 42天长期压力</text>
+          </view>
+          <view class="legend-item">
+            <view class="line-dot pink" />
+            <text class="legend-text">疲劳 (ATL): 7天近期压力</text>
+          </view>
+        </view>
+        <view class="chart-legend-row tsb-tags-row">
+          <view class="legend-item">
+            <view class="rect-dot green" />
+            <text class="legend-text">&gt;5 巅峰</text>
+          </view>
+          <view class="legend-item">
+            <view class="rect-dot blue" />
+            <text class="legend-text">-30~5 训练中</text>
+          </view>
+          <view class="legend-item">
+            <view class="rect-dot yellow" />
+            <text class="legend-text">-50~-30 疲劳</text>
+          </view>
+          <view class="legend-item">
+            <view class="rect-dot red" />
+            <text class="legend-text">&lt;-50 严重</text>
+          </view>
         </view>
       </view>
     </view>
@@ -313,38 +394,83 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
 import { request, getStoredUser, wechatLogin, UserProfile } from "../../utils/api";
+
+// Generate 30-day realistic default curve data
+const defaultHistory = (() => {
+  const list = [];
+  const now = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 3600 * 1000);
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const dateStr = `2026-${m}-${day}`;
+    const shortDate = `${m}-${day}`;
+    
+    // Realistic curve calculation matching banister TRIMP EWMA
+    const ctl = Number((25 + (29 - i) * 0.65 + Math.sin(i * 0.4) * 4).toFixed(1));
+    const atl = Number((35 + (29 - i) * 0.75 + Math.cos(i * 0.6) * 18).toFixed(1));
+    const tsb = Number((ctl - atl).toFixed(1));
+    
+    let color = "#1890ff";
+    let label = "训练中";
+    if (tsb > 5) { color = "#22c55e"; label = "巅峰"; }
+    else if (tsb >= -30) { color = "#1890ff"; label = "训练中"; }
+    else if (tsb >= -50) { color = "#eab308"; label = "疲劳"; }
+    else { color = "#ef4444"; label = "严重"; }
+
+    list.push({
+      date: dateStr,
+      short_date: shortDate,
+      ctl,
+      atl,
+      tsb,
+      tsb_color: color,
+      tsb_label: label,
+      trimp: Number((atl * 1.5).toFixed(1)),
+    });
+  }
+  return list;
+})();
 
 const defaultData = {
   user: {
     display_name: "Alex",
     garmin_connected: true,
   },
+  fitness_form: {
+    ctl: 44.3,
+    atl: 56.7,
+    tsb: -12.3,
+    status_label: "训练中",
+    status_color: "#1890ff",
+    history: defaultHistory,
+  },
   progress: {
-    current_month_km: 119.9,
+    current_month_km: 132.3,
     target_month_km: 200.0,
-    progress_pct: 60.0,
-    remaining_km: 80.1,
-    daily_required_km: 5.7,
+    progress_pct: 66.2,
+    remaining_km: 67.7,
+    daily_required_km: 6.2,
   },
   monthly_trend: {
     trend: [
-      { month_label: "2026/3月", distance_km: 80.0, count: 8, is_current: false },
-      { month_label: "2026/4月", distance_km: 105.0, count: 10, is_current: false },
-      { month_label: "2026/5月", distance_km: 413.2, count: 22, is_current: false },
-      { month_label: "2026/6月", distance_km: 77.7, count: 8, is_current: false },
+      { month_label: "2026/3月", distance_km: 0.0, count: 0, is_current: false },
+      { month_label: "2026/4月", distance_km: 0.0, count: 0, is_current: false },
+      { month_label: "2026/5月", distance_km: 0.0, count: 0, is_current: false },
+      { month_label: "2026/6月", distance_km: 72.7, count: 6, is_current: false },
       { month_label: "2026/7月", distance_km: 109.8, count: 12, is_current: false },
-      { month_label: "2026/8月", distance_km: 119.9, count: 11, is_current: true },
+      { month_label: "2026/8月", distance_km: 132.3, count: 12, is_current: true },
     ],
-    current_month_km: 119.9,
+    current_month_km: 132.3,
     prev_month_km: 109.8,
-    pct_change: 9.2,
+    pct_change: 20.5,
     recent_3_months: [
-      { month_label: "2026/6月", distance_km: 77.7, count: 8 },
+      { month_label: "2026/6月", distance_km: 72.7, count: 6 },
       { month_label: "2026/7月", distance_km: 109.8, count: 12 },
-      { month_label: "2026/8月", distance_km: 119.9, count: 11 },
+      { month_label: "2026/8月", distance_km: 132.3, count: 12 },
     ],
   },
   yearly_stats: {
@@ -363,22 +489,22 @@ const defaultData = {
   },
   today_health: {
     sleep_score: 69,
-    sleep_duration_text: "8h 35m",
-    resting_heart_rate: 56,
-    body_battery_max: 54,
-    hrv_ms: 29,
+    sleep_duration_text: "8h 30m",
+    resting_heart_rate: 50,
+    body_battery_max: 88,
+    hrv_ms: 36,
     hrv_weekly_avg: 32,
-    date: "2026-08-18",
+    date: "2026-08-21",
   },
   recent_activities: [
     {
-      id: "garmin_24016420372",
+      id: "garmin_24055144149",
       name: "闵行区 跑步",
-      start_time: "2026-08-18T06:07:38+08:00",
-      distance_km: 12.53,
-      avg_pace_str: "5:58 /km",
-      average_heartrate: 148,
-      trimp: 108.1,
+      start_time: "2026-08-21T06:39:44+08:00",
+      distance_km: 12.46,
+      avg_pace_str: "6:13 /km",
+      average_heartrate: 146,
+      trimp: 106.4,
     }
   ],
   ai_coach_tip: "保持耐心，专注有氧节奏构建，专项能力水到渠成。",
@@ -388,6 +514,102 @@ const user = ref<UserProfile | null>(null);
 const dashboardData = ref<any>(defaultData);
 const syncing = ref(false);
 const currentMonth = ref(new Date().getMonth() + 1);
+const activeTooltip = ref<any>(null);
+
+// SVG Chart Metrics calculation
+const svgConfig = {
+  width: 350,
+  height: 185,
+  padLeft: 30,
+  padRight: 10,
+  padTop: 18,
+  padBottom: 25,
+  minY: -45,
+  maxY: 135,
+};
+
+function getY(val: number): number {
+  const plotH = svgConfig.height - svgConfig.padTop - svgConfig.padBottom;
+  const clamped = Math.max(svgConfig.minY, Math.min(svgConfig.maxY, val));
+  return svgConfig.padTop + plotH * (svgConfig.maxY - clamped) / (svgConfig.maxY - svgConfig.minY);
+}
+
+function getX(idx: number, total: number): number {
+  const plotW = svgConfig.width - svgConfig.padLeft - svgConfig.padRight;
+  if (total <= 1) return svgConfig.padLeft;
+  return svgConfig.padLeft + (idx / (total - 1)) * plotW;
+}
+
+const ctlSvgPath = computed(() => {
+  const history = dashboardData.value?.fitness_form?.history || [];
+  if (!history.length) return "";
+  return history
+    .map((item: any, idx: number) => {
+      const x = getX(idx, history.length).toFixed(1);
+      const y = getY(item.ctl).toFixed(1);
+      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
+    })
+    .join(" ");
+});
+
+const atlSvgPath = computed(() => {
+  const history = dashboardData.value?.fitness_form?.history || [];
+  if (!history.length) return "";
+  return history
+    .map((item: any, idx: number) => {
+      const x = getX(idx, history.length).toFixed(1);
+      const y = getY(item.atl).toFixed(1);
+      return `${idx === 0 ? "M" : "L"} ${x} ${y}`;
+    })
+    .join(" ");
+});
+
+const tsbBars = computed(() => {
+  const history = dashboardData.value?.fitness_form?.history || [];
+  const yZero = getY(0);
+  return history.map((item: any, idx: number) => {
+    const x = getX(idx, history.length);
+    const yVal = getY(item.tsb);
+    const barWidth = 3.5;
+    const barX = x - barWidth / 2;
+    const barY = Math.min(yZero, yVal);
+    const barH = Math.max(1.5, Math.abs(yVal - yZero));
+    return {
+      x: barX.toFixed(1),
+      y: barY.toFixed(1),
+      w: barWidth,
+      h: barH.toFixed(1),
+      color: item.tsb_color || (item.tsb > 5 ? "#22c55e" : (item.tsb >= -30 ? "#1890ff" : (item.tsb >= -50 ? "#eab308" : "#ef4444"))),
+      item,
+    };
+  });
+});
+
+const xAxisLabels = computed(() => {
+  const history = dashboardData.value?.fitness_form?.history || [];
+  if (!history.length) return [];
+  const labels = [];
+  const step = Math.max(1, Math.floor(history.length / 6));
+  for (let i = 0; i < history.length; i += step) {
+    labels.push({
+      x: getX(i, history.length).toFixed(1),
+      text: history[i].short_date || history[i].date?.slice(5),
+    });
+  }
+  // Ensure last point label is included
+  const lastIdx = history.length - 1;
+  if (labels[labels.length - 1]?.text !== (history[lastIdx].short_date || history[lastIdx].date?.slice(5))) {
+    labels.push({
+      x: getX(lastIdx, history.length).toFixed(1),
+      text: history[lastIdx].short_date || history[lastIdx].date?.slice(5),
+    });
+  }
+  return labels;
+});
+
+function selectPoint(item: any) {
+  activeTooltip.value = item;
+}
 
 async function loadDashboard() {
   user.value = getStoredUser();
@@ -1037,47 +1259,32 @@ onPullDownRefresh(async () => {
   margin-top: 4rpx;
 }
 
-.status-pill {
-  padding: 6rpx 18rpx;
-  border-radius: 20rpx;
-  border: 1rpx solid;
-}
-
-.status-pill-text {
-  font-size: 22rpx;
-  font-weight: bold;
-}
-
-.fitness-card {
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  border-radius: 28rpx;
-  padding: 28rpx 24rpx 20rpx;
-}
-
-.fitness-grid-3 {
+.metrics-pill-group {
   display: flex;
-  justify-content: space-around;
-  align-items: center;
-  margin-bottom: 24rpx;
+  gap: 12rpx;
 }
 
-.fit-col {
-  flex: 1;
+.metric-pill {
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  padding: 8rpx 16rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-align: center;
 }
 
-.fit-col.divider {
-  border-left: 1rpx solid rgba(255, 255, 255, 0.06);
+.pill-label {
+  font-size: 16rpx;
+  color: #8e8e93;
+  font-weight: bold;
+  text-transform: uppercase;
 }
 
-.fit-val {
-  font-size: 44rpx;
+.pill-val {
+  font-size: 26rpx;
   font-weight: 900;
-  line-height: 1.1;
+  margin-top: 2rpx;
 }
 
 .text-cyan {
@@ -1088,42 +1295,87 @@ onPullDownRefresh(async () => {
   color: #ec4899;
 }
 
-.fit-name {
-  font-size: 22rpx;
-  font-weight: bold;
+.fitness-chart-card {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 28rpx;
+  padding: 24rpx 20rpx 20rpx;
+  position: relative;
+}
+
+.chart-tooltip {
+  background-color: rgba(22, 22, 26, 0.95);
+  border: 1rpx solid rgba(255, 255, 255, 0.2);
+  border-radius: 16rpx;
+  padding: 10rpx 16rpx;
+  display: flex;
+  gap: 14rpx;
+  align-items: center;
+  margin-bottom: 12rpx;
+  font-size: 20rpx;
+}
+
+.tip-date {
   color: #ffffff;
+  font-weight: bold;
+}
+
+.tip-val {
+  font-weight: bold;
+}
+
+.fitness-svg-chart {
+  width: 100%;
+  height: 370rpx;
+  display: block;
+}
+
+.chart-legend-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24rpx;
+  margin-top: 14rpx;
+}
+
+.chart-legend-row.tsb-tags-row {
+  gap: 20rpx;
   margin-top: 8rpx;
 }
 
-.fit-sub {
-  font-size: 18rpx;
-  color: #71717a;
-  margin-top: 4rpx;
-}
-
-.tsb-zones-bar {
-  display: flex;
-  border-radius: 12rpx;
-  overflow: hidden;
-  height: 28rpx;
-  margin-top: 10rpx;
-}
-
-.zone-seg {
-  flex: 1;
+.legend-item {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8rpx;
 }
 
-.zone-seg.green { background-color: rgba(34, 197, 94, 0.25); border: 1rpx solid rgba(34, 197, 94, 0.4); }
-.zone-seg.blue { background-color: rgba(14, 165, 233, 0.25); border: 1rpx solid rgba(14, 165, 233, 0.4); }
-.zone-seg.yellow { background-color: rgba(234, 179, 8, 0.25); border: 1rpx solid rgba(234, 179, 8, 0.4); }
-.zone-seg.red { background-color: rgba(239, 68, 68, 0.25); border: 1rpx solid rgba(239, 68, 68, 0.4); }
+.line-dot {
+  width: 20rpx;
+  height: 6rpx;
+  border-radius: 4rpx;
+}
 
-.zone-txt {
-  font-size: 16rpx;
-  color: #d4d4d8;
-  font-weight: 500;
+.line-dot.cyan {
+  background-color: #38bdf8;
+}
+
+.line-dot.pink {
+  background-color: #ec4899;
+}
+
+.rect-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 4rpx;
+}
+
+.rect-dot.green { background-color: #22c55e; }
+.rect-dot.blue { background-color: #1890ff; }
+.rect-dot.yellow { background-color: #eab308; }
+.rect-dot.red { background-color: #ef4444; }
+
+.legend-text {
+  font-size: 18rpx;
+  color: #8e8e93;
 }
 </style>
