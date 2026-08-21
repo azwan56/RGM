@@ -23,6 +23,8 @@ services:
       - WECHAT_APP_ID=${WECHAT_APP_ID}
       - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
       - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ../backend/data:/app/data
     ports:
       - "127.0.0.1:8000:8000"
 
