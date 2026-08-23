@@ -2022,26 +2022,27 @@ async def log_journal_entry(req: JournalLogRequest):
     # Exclude current activity to avoid double-counting when force=True
     week_entries = [e for e in all_week_entries if e.get("activity_id") != act_id]
 
-    # 3b. Calculate week_km from activities (source of truth, journal entries may be incomplete)
+    # 3b. Calculate week_km from activities (with multi-source deduplication)
+    from utils.activity_utils import deduplicate_activities
     km = activity.get("distance_km", 0)
     week_start_ts = f"{week_start}T00:00:00"
-    week_activities = list(
-        user_ref.collection("activities")
+    raw_week_activities = [
+        a.to_dict() for a in user_ref.collection("activities")
         .where("start_date_local", ">=", week_start_ts)
         .stream()
-    )
-    # Sum only runs (exclude cross-training), exclude current activity/activities in the session
+    ]
+    # Clean deduplicated activities across Garmin / Strava / Apple Health
+    deduped_week_acts = deduplicate_activities(raw_week_activities)
+
+    # Exclude current activity (or composite sub-activities) before summing
     exclude_ids = set(str(sid) for sid in current_sub_ids) if is_composite else {act_id}
-    week_km = sum(
-        a.to_dict().get("distance_km", 0) for a in week_activities
-        if a.to_dict().get("activity_type", "run") == "run"
-        and str(a.to_dict().get("activity_id", "")) not in exclude_ids
-    ) + km
-    week_runs = sum(
-        1 for a in week_activities
-        if a.to_dict().get("activity_type", "run") == "run"
-        and str(a.to_dict().get("activity_id", "")) not in exclude_ids
-    ) + 1
+    prev_week_runs = [
+        a for a in deduped_week_acts
+        if a.get("activity_type", "run") == "run"
+        and str(a.get("activity_id", "")) not in exclude_ids
+    ]
+    week_km = sum(a.get("distance_km", 0) for a in prev_week_runs) + km
+    week_runs = len(prev_week_runs) + 1
 
     # 4. Training summary + user goal + weather (parallel)
     from utils.weather import get_training_weather, get_forecast_weather
