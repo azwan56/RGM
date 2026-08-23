@@ -82,12 +82,13 @@ export default function AnalysisPage() {
 
             <div className="h-[240px] sm:h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <RechartsLine data={healthTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <RechartsLine data={healthTrend} syncId="healthTrendSync" margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke="#1f1f24" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_label" stroke="#666" fontSize={11} tickLine={false} />
                   <YAxis
                     yAxisId="left"
                     stroke="#ef4444"
+                    width={42}
                     fontSize={11}
                     tickLine={false}
                     domain={["dataMin - 3", "dataMax + 3"]}
@@ -96,6 +97,7 @@ export default function AnalysisPage() {
                     yAxisId="right"
                     orientation="right"
                     stroke="#06b6d4"
+                    width={42}
                     fontSize={11}
                     tickLine={false}
                     domain={["dataMin - 5", "dataMax + 5"]}
@@ -158,10 +160,26 @@ export default function AnalysisPage() {
 
             <div className="h-[240px] sm:h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <RechartsLine data={healthTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <RechartsLine data={healthTrend} syncId="healthTrendSync" margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke="#1f1f24" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_label" stroke="#666" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#666" fontSize={11} tickLine={false} domain={[0, 100]} />
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#818cf8"
+                    width={42}
+                    fontSize={11}
+                    tickLine={false}
+                    domain={[0, 100]}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#eab308"
+                    width={42}
+                    fontSize={11}
+                    tickLine={false}
+                    domain={[0, 100]}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#16161a",
@@ -176,6 +194,7 @@ export default function AnalysisPage() {
                     }}
                   />
                   <Line
+                    yAxisId="left"
                     type="monotone"
                     dataKey="sleep_score"
                     name="sleep_score"
@@ -185,6 +204,7 @@ export default function AnalysisPage() {
                     activeDot={{ r: 5 }}
                   />
                   <Line
+                    yAxisId="right"
                     type="monotone"
                     dataKey="body_battery"
                     name="body_battery"
