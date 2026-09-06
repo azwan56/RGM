@@ -226,8 +226,6 @@ def wechat_miniapp_login(request: WeChatMiniAppLoginRequest):
             "created_at": datetime.utcnow().isoformat() + "Z"
         }
         LocalStore.upsert_profile(user_id, profile_data)
-        # Automatically join flagship club as a normal member
-        LocalStore.join_club_by_code(user_id, "RGM888")
 
     # 3. Issue standard JWT token
     payload = {

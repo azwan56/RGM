@@ -163,72 +163,79 @@
         <view class="metrics-pill-group">
           <view class="metric-pill">
             <text class="pill-label">CTL 体能</text>
-            <text class="pill-val text-cyan">{{ dashboardData?.fitness_form?.ctl ?? 44.3 }}</text>
+            <text class="pill-val text-cyan">{{ dashboardData?.fitness_form?.ctl ?? 0 }}</text>
           </view>
           <view class="metric-pill">
             <text class="pill-label">ATL 疲劳</text>
-            <text class="pill-val text-pink">{{ dashboardData?.fitness_form?.atl ?? 56.7 }}</text>
+            <text class="pill-val text-pink">{{ dashboardData?.fitness_form?.atl ?? 0 }}</text>
           </view>
           <view class="metric-pill">
             <text class="pill-label">TSB 状况</text>
             <text
               class="pill-val"
-              :style="{ color: dashboardData?.fitness_form?.status_color || '#0ea5e9' }"
+              :style="{ color: dashboardData?.fitness_form?.status_color || '#6b7280' }"
             >
-              {{ (dashboardData?.fitness_form?.tsb ?? -12.3) > 0 ? '+' : '' }}{{ dashboardData?.fitness_form?.tsb ?? -12.3 }}
+              {{ (dashboardData?.fitness_form?.tsb ?? 0) > 0 ? '+' : '' }}{{ dashboardData?.fitness_form?.tsb ?? 0 }}
             </text>
           </view>
         </view>
       </view>
 
       <view class="fitness-chart-card">
-        <!-- Tooltip Bubble when tapped -->
-        <view v-if="activeTooltip" class="chart-tooltip">
-          <text class="tip-date">{{ activeTooltip.short_date || activeTooltip.date }}</text>
-          <text class="tip-val text-cyan">CTL: {{ activeTooltip.ctl }}</text>
-          <text class="tip-val text-pink">ATL: {{ activeTooltip.atl }}</text>
-          <text class="tip-val" :style="{ color: activeTooltip.tsb_color || '#0ea5e9' }">
-            TSB: {{ activeTooltip.tsb > 0 ? '+' : '' }}{{ activeTooltip.tsb }} ({{ activeTooltip.tsb_label || '训练中' }})
-          </text>
-        </view>
+        <template v-if="dashboardData?.fitness_form?.history && dashboardData.fitness_form.history.length > 0">
+          <!-- Tooltip Bubble when tapped -->
+          <view v-if="activeTooltip" class="chart-tooltip">
+            <text class="tip-date">{{ activeTooltip.short_date || activeTooltip.date }}</text>
+            <text class="tip-val text-cyan">CTL: {{ activeTooltip.ctl }}</text>
+            <text class="tip-val text-pink">ATL: {{ activeTooltip.atl }}</text>
+            <text class="tip-val" :style="{ color: activeTooltip.tsb_color || '#0ea5e9' }">
+              TSB: {{ activeTooltip.tsb > 0 ? '+' : '' }}{{ activeTooltip.tsb }} ({{ activeTooltip.tsb_label || '训练中' }})
+            </text>
+          </view>
 
-        <!-- Native Canvas Fitness & Form Chart (Supported across all MiniApp platforms) -->
-        <canvas
-          canvas-id="fitnessChartCanvas"
-          id="fitnessChartCanvas"
-          class="fitness-chart-canvas"
-          @touchstart="handleCanvasTouch"
-          @touchmove="handleCanvasTouch"
-        />
+          <!-- Native Canvas Fitness & Form Chart (Supported across all MiniApp platforms) -->
+          <canvas
+            canvas-id="fitnessChartCanvas"
+            id="fitnessChartCanvas"
+            class="fitness-chart-canvas"
+            @touchstart="handleCanvasTouch"
+            @touchmove="handleCanvasTouch"
+          />
 
-        <!-- Color-Coded Legend (matching Web) -->
-        <view class="chart-legend-row">
-          <view class="legend-item">
-            <view class="line-dot cyan" />
-            <text class="legend-text">体能 (CTL): 42天长期压力</text>
+          <!-- Color-Coded Legend (matching Web) -->
+          <view class="chart-legend-row">
+            <view class="legend-item">
+              <view class="line-dot cyan" />
+              <text class="legend-text">体能 (CTL): 42天长期压力</text>
+            </view>
+            <view class="legend-item">
+              <view class="line-dot pink" />
+              <text class="legend-text">疲劳 (ATL): 7天近期压力</text>
+            </view>
           </view>
-          <view class="legend-item">
-            <view class="line-dot pink" />
-            <text class="legend-text">疲劳 (ATL): 7天近期压力</text>
+          <view class="chart-legend-row tsb-tags-row">
+            <view class="legend-item">
+              <view class="rect-dot green" />
+              <text class="legend-text">+5以上 巅峰</text>
+            </view>
+            <view class="legend-item">
+              <view class="rect-dot blue" />
+              <text class="legend-text">-30~+5 训练中</text>
+            </view>
+            <view class="legend-item">
+              <view class="rect-dot yellow" />
+              <text class="legend-text">-50~-30 疲劳</text>
+            </view>
+            <view class="legend-item">
+              <view class="rect-dot red" />
+              <text class="legend-text">-50以下 严重</text>
+            </view>
           </view>
-        </view>
-        <view class="chart-legend-row tsb-tags-row">
-          <view class="legend-item">
-            <view class="rect-dot green" />
-            <text class="legend-text">+5以上 巅峰</text>
-          </view>
-          <view class="legend-item">
-            <view class="rect-dot blue" />
-            <text class="legend-text">-30~+5 训练中</text>
-          </view>
-          <view class="legend-item">
-            <view class="rect-dot yellow" />
-            <text class="legend-text">-50~-30 疲劳</text>
-          </view>
-          <view class="legend-item">
-            <view class="rect-dot red" />
-            <text class="legend-text">-50以下 严重</text>
-          </view>
+        </template>
+        <view v-else class="empty-chart-box">
+          <text class="empty-chart-icon">📊</text>
+          <text class="empty-chart-title">暂无体能负荷数据</text>
+          <text class="empty-chart-desc">在【我的】页面绑定 Garmin 或高驰手表并同步跑步记录后，将基于 Banister TRIMP 模型自动生成 42 天 CTL/ATL/TSB 趋势分析。</text>
         </view>
       </view>
     </view>
@@ -478,7 +485,7 @@
         </view>
       </view>
       <view v-else class="empty-act-box">
-        <text class="empty-act-text">暂无运动记录，请在【我的】页面绑定佳明账号自动同步</text>
+        <text class="empty-act-text">暂无运动记录，请在【我的】页面绑定 Garmin 或高驰手表自动同步</text>
       </view>
     </view>
 
@@ -2711,5 +2718,37 @@ onPullDownRefresh(async () => {
 .best-pace {
   font-size: 20rpx;
   color: #a1a1aa;
+}
+
+/* Empty Chart State */
+.empty-chart-box {
+  padding: 60rpx 40rpx;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-chart-icon {
+  font-size: 52rpx;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
+.empty-chart-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.empty-chart-desc {
+  font-size: 22rpx;
+  color: #8e8e93;
+  line-height: 1.6;
+  max-width: 500rpx;
+  display: block;
 }
 </style>

@@ -302,6 +302,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
+                d["coros_connected"] = bool(d.get("coros_connected"))
                 return d
             return None
 
@@ -976,14 +977,7 @@ class LocalStore:
                 ORDER BY m.joined_at ASC
             """, (uid,))
             rows = cursor.fetchall()
-            clubs = [dict(r) for r in rows]
-            if not clubs:
-                # Auto join default flagship club for seamless experience
-                default_club = LocalStore.get_club("club_rgm_flagship")
-                if default_club:
-                    LocalStore.join_club_by_code(uid, default_club["invite_code"])
-                    return LocalStore.get_user_clubs(uid)
-            return clubs
+            return [dict(r) for r in rows]
 
     @staticmethod
     def join_club_by_code(user_id: str, invite_code: str, privacy_consent: bool = True) -> Optional[Dict[str, Any]]:

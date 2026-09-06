@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import { Zap, Sparkles, Target, RefreshCw, CheckCircle2, ShieldAlert, Trophy, Flame } from "lucide-react";
 
 export default function CoachPage() {
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<any>(null);
@@ -20,10 +22,10 @@ export default function CoachPage() {
         setUser(u);
         loadLatestAnalysis(u.id);
       } else {
-        loadLatestAnalysis("u_df65d9a588c9");
+        router.push("/login");
       }
     });
-  }, []);
+  }, [router]);
 
   async function loadLatestAnalysis(uid: string) {
     try {
@@ -37,11 +39,11 @@ export default function CoachPage() {
   }
 
   async function handleGenerateAnalysis() {
-    const uid = user?.id || "u_df65d9a588c9";
+    if (!user?.id) return;
     setLoading(true);
     try {
       const res = await apiClient.post("/api/coach/analysis", {
-        uid,
+        uid: user.id,
         target_race: targetRace,
         target_time: targetTime,
       });

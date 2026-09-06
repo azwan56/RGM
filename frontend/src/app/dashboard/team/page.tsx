@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
@@ -74,15 +75,19 @@ export default function TeamPage() {
   const [eventRules, setEventRules] = useState("");
 
   const [copiedCode, setCopiedCode] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const u = data?.session?.user;
-      const uid = u?.id || "u_df65d9a588c9";
-      setUser(u || { id: uid, email: "azwan56@hotmail.com" });
-      loadUserClubs(uid);
+      if (u) {
+        setUser(u);
+        loadUserClubs(u.id);
+      } else {
+        router.push("/login");
+      }
     });
-  }, []);
+  }, [router]);
 
   async function loadUserClubs(uid: string) {
     setLoading(true);
@@ -96,6 +101,15 @@ export default function TeamPage() {
         setCurrentClub(primary);
         setCurrentRole(primary.role || "member");
         loadClubDetails(primary.id, uid);
+      } else {
+        setCurrentClub(null);
+        setCurrentRole("member");
+        setDashboardMetrics(null);
+        setLeaderboard([]);
+        setMembers([]);
+        setCoachCockpit(null);
+        setEvents([]);
+        setFeed([]);
       }
     } catch (e) {
       console.error("Fetch user clubs error:", e);
@@ -105,7 +119,8 @@ export default function TeamPage() {
   }
 
   async function loadClubDetails(clubId: string, uid?: string) {
-    const effUid = uid || user?.id || "u_df65d9a588c9";
+    const effUid = uid || user?.id;
+    if (!effUid) return;
     try {
       const [dashRes, lbRes, memRes, coachRes, evtRes, feedRes] = await Promise.all([
         apiClient.get(`/api/team/${clubId}/dashboard`),
@@ -141,10 +156,10 @@ export default function TeamPage() {
   }
 
   async function handleToggleLike(activityId: string) {
-    const uid = user?.id || "u_df65d9a588c9";
+    if (!user?.id) return;
     try {
       const res = await apiClient.post(`/api/team/activities/${activityId}/like`, {
-        user_id: uid,
+        user_id: user.id,
       });
       setFeed((prev) =>
         prev.map((item) => {
@@ -165,12 +180,11 @@ export default function TeamPage() {
 
   async function handlePostComment(activityId: string) {
     const content = (commentInputs[activityId] || "").trim();
-    if (!content) return;
-    const uid = user?.id || "u_df65d9a588c9";
+    if (!content || !user?.id) return;
     setSubmittingComment((prev) => ({ ...prev, [activityId]: true }));
     try {
       const res = await apiClient.post(`/api/team/activities/${activityId}/comments`, {
-        user_id: uid,
+        user_id: user.id,
         content: content,
         author_name: user?.user_metadata?.display_name || user?.email?.split("@")[0] || "跑友",
         author_avatar: user?.user_metadata?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",
@@ -197,9 +211,9 @@ export default function TeamPage() {
   }
 
   async function handleDeleteComment(activityId: string, commentId: string) {
-    const uid = user?.id || "u_df65d9a588c9";
+    if (!user?.id) return;
     try {
-      await apiClient.delete(`/api/team/activities/${activityId}/comments/${commentId}?user_id=${uid}`);
+      await apiClient.delete(`/api/team/activities/${activityId}/comments/${commentId}?user_id=${user.id}`);
       setFeed((prev) =>
         prev.map((item) => {
           if (item.id === activityId) {
@@ -218,16 +232,16 @@ export default function TeamPage() {
 
   async function handleJoinClub(e: React.FormEvent) {
     e.preventDefault();
-    if (!inviteCodeInput.trim()) return;
+    if (!inviteCodeInput.trim() || !user?.id) return;
     try {
       const res = await apiClient.post("/api/team/join", {
-        user_id: user?.id || "u_df65d9a588c9",
+        user_id: user.id,
         invite_code: inviteCodeInput.trim().toUpperCase(),
       });
       alert(res.data.message || "加入成功！");
       setShowJoinModal(false);
       setInviteCodeInput("");
-      loadUserClubs(user?.id || "u_df65d9a588c9");
+      loadUserClubs(user.id);
     } catch (err: any) {
       alert(err.response?.data?.detail || "加入失败，请核对邀请码！");
     }
@@ -235,10 +249,10 @@ export default function TeamPage() {
 
   async function handleCreateClub(e: React.FormEvent) {
     e.preventDefault();
-    if (!newClubName.trim()) return;
+    if (!newClubName.trim() || !user?.id) return;
     try {
       const res = await apiClient.post("/api/team/clubs", {
-        owner_id: user?.id || "u_df65d9a588c9",
+        owner_id: user.id,
         name: newClubName.trim(),
         description: newClubDesc.trim(),
         city: newClubCity.trim(),
@@ -247,17 +261,17 @@ export default function TeamPage() {
       setShowCreateClubModal(false);
       setNewClubName("");
       setNewClubDesc("");
-      loadUserClubs(user?.id || "u_df65d9a588c9");
+      loadUserClubs(user.id);
     } catch (err: any) {
       alert(err.response?.data?.detail || "创建失败");
     }
   }
 
   async function handleUpdateMemberRole(targetUid: string, role: string) {
-    if (!currentClub) return;
+    if (!currentClub || !user?.id) return;
     try {
       await apiClient.post(`/api/team/${currentClub.id}/role`, {
-        operator_uid: user?.id || "u_df65d9a588c9",
+        operator_uid: user.id,
         target_uid: targetUid,
         role: role,
       });
@@ -281,16 +295,16 @@ export default function TeamPage() {
   }
 
   async function handleTransferOwner(targetUid: string, displayName: string) {
-    if (!currentClub) return;
+    if (!currentClub || !user?.id) return;
     if (!confirm(`确定要将跑团【${currentClub.name}】的团长身份移交给【${displayName}】吗？移交后您将转为认证教练身份。`)) return;
     try {
       await apiClient.post(`/api/team/${currentClub.id}/role`, {
-        operator_uid: user?.id || "u_df65d9a588c9",
+        operator_uid: user.id,
         target_uid: targetUid,
         role: "owner",
       });
       alert(`已成功将团长身份移交给【${displayName}】！`);
-      loadUserClubs(user?.id || "u_df65d9a588c9");
+      loadUserClubs(user.id);
     } catch (e: any) {
       alert(e.response?.data?.detail || "移交团长失败");
     }
@@ -328,11 +342,11 @@ export default function TeamPage() {
 
   async function handleCreateOrEditEvent(e: React.FormEvent) {
     e.preventDefault();
-    if (!currentClub || !eventTitle.trim()) return;
+    if (!currentClub || !eventTitle.trim() || !user?.id) return;
     try {
       if (editingEvent) {
         await apiClient.put(`/api/team/${currentClub.id}/events/${editingEvent.id}`, {
-          operator_uid: user?.id || "u_df65d9a588c9",
+          operator_uid: user.id,
           title: eventTitle.trim(),
           target_km: Number(eventTargetKm),
           rules: eventRules.trim(),
@@ -340,7 +354,7 @@ export default function TeamPage() {
         alert("挑战赛修改成功！");
       } else {
         await apiClient.post(`/api/team/${currentClub.id}/events`, {
-          operator_uid: user?.id || "u_df65d9a588c9",
+          operator_uid: user.id,
           title: eventTitle.trim(),
           target_km: Number(eventTargetKm),
           rules: eventRules.trim(),
@@ -362,59 +376,149 @@ export default function TeamPage() {
     <div className="min-h-screen bg-[#070708] text-white">
       <Navbar />
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Header with Multi-Club Selector and Actions */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-white/10 rounded-3xl p-6 shadow-2xl">
-          <div className="flex items-center gap-4">
-            <img
-              src={currentClub?.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
-              alt="Club Logo"
-              className="w-16 h-16 rounded-2xl object-cover border-2 border-[#FC4C02]/40 shadow-lg"
-            />
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-xl sm:text-2xl font-black text-white">
-                  {currentClub?.name || "RGM 巅峰先锋跑团"}
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
-                  {currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员"}
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400 mt-1 line-clamp-1 max-w-xl">
-                {currentClub?.description || "基于科学耐力训练与 Renato Canova 哲学的精英跑者联盟"}
-              </p>
-              <div className="flex items-center gap-3 mt-2">
-                <span className="text-[11px] text-zinc-500">📍 {currentClub?.city || "上海"}</span>
-                <span className="text-[11px] text-zinc-500">·</span>
-                <button
-                  onClick={handleCopyInviteCode}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-0.5 rounded-lg transition"
-                >
-                  专属邀请码: <span className="text-[#FC4C02] font-mono font-bold">{currentClub?.invite_code || "RGM888"}</span>
-                  {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-400" />}
-                </button>
-              </div>
+      {loading ? (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-24 text-center text-zinc-500">
+          <p>跑团数据加载中...</p>
+        </div>
+      ) : !currentClub ? (
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-8">
+          <div className="bg-gradient-to-b from-[#18181c] to-[#121215] border border-white/10 rounded-3xl p-8 sm:p-12 text-center shadow-2xl">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 text-3xl mb-6">
+              🏃‍♂️
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white mb-3">
+              您尚未加入任何跑团
+            </h1>
+            <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed mb-8">
+              加入跑团与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控；或者立即创建属于您的专属跑团！
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={() => setShowJoinModal(true)}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-[#FC4C02]/25"
+              >
+                <UserPlus className="w-4 h-4" />
+                输入邀请码加入跑团
+              </button>
+              <button
+                onClick={() => setShowCreateClubModal(true)}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-sm font-bold transition"
+              >
+                <Plus className="w-4 h-4" />
+                创建全新跑团
+              </button>
             </div>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => setShowJoinModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition shadow-sm"
-            >
-              <UserPlus className="w-4 h-4 text-[#FC4C02]" />
-              加入跑团
-            </button>
-            <button
-              onClick={() => setShowCreateClubModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20"
-            >
-              <Plus className="w-4 h-4" />
-              创建跑团
-            </button>
+          {/* Feature Highlights Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xl shrink-0">
+                🥇
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">跑团月度英雄榜</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  自动汇聚全体团员月跑量与配速排名，良性竞逐突破个人 PB。
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-xl shrink-0">
+                🏆
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">专属跑量挑战赛</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  团长与教练可随时发起公里数打卡挑战，团员达标点亮荣誉勋章。
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-xl shrink-0">
+                💬
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">跑友圈动态与 AI 点评</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  同步手表跑步记录后自动生成 AI 战报，支持队友点赞与留言互动。
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-xl shrink-0">
+                🧢
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">教练学员体能罗盘</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  科学监控全员 CTL/ATL/TSB 负荷与心率变异性，预防过度训练与伤病。
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        </main>
+      ) : (
+        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+          {/* Header with Multi-Club Selector and Actions */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-white/10 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center gap-4">
+              <img
+                src={currentClub.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                alt="Club Logo"
+                className="w-16 h-16 rounded-2xl object-cover border-2 border-[#FC4C02]/40 shadow-lg"
+              />
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-xl sm:text-2xl font-black text-white">
+                    {currentClub.name}
+                  </h1>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
+                    {currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员"}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1 line-clamp-1 max-w-xl">
+                  {currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
+                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  <span className="text-[11px] text-zinc-500">📍 {currentClub.city || "上海"}</span>
+                  {currentClub.invite_code && (
+                    <>
+                      <span className="text-[11px] text-zinc-500">·</span>
+                      <button
+                        onClick={handleCopyInviteCode}
+                        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-0.5 rounded-lg transition"
+                      >
+                        专属邀请码: <span className="text-[#FC4C02] font-mono font-bold">{currentClub.invite_code}</span>
+                        {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-400" />}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => setShowJoinModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition shadow-sm"
+              >
+                <UserPlus className="w-4 h-4 text-[#FC4C02]" />
+                加入跑团
+              </button>
+              <button
+                onClick={() => setShowCreateClubModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20"
+              >
+                <Plus className="w-4 h-4" />
+                创建跑团
+              </button>
+            </div>
+          </div>
 
         {/* 4-Tab Navigation */}
         <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
@@ -444,7 +548,7 @@ export default function TeamPage() {
             </button>
           )}
 
-          {(currentRole === "owner" || currentRole === "coach" || user?.is_admin || user?.email === "azwan56@hotmail.com") && (
+          {(currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
             <button
               onClick={() => setActiveTab("president")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
@@ -724,7 +828,7 @@ export default function TeamPage() {
         )}
 
         {/* ── TAB 2: 👥 跑团成员与管理 ── */}
-        {activeTab === "president" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin || user?.email === "azwan56@hotmail.com") && (
+        {activeTab === "president" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
             <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -737,7 +841,7 @@ export default function TeamPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-zinc-400">共 <strong className="text-white">{members.length}</strong> 位团员</span>
-                  {(currentRole === "owner" || user?.is_admin || user?.email === "azwan56@hotmail.com") && (
+                  {(currentRole === "owner" || user?.is_admin) && (
                     <button
                       onClick={() => {
                         setEditingEvent(null);
@@ -809,7 +913,7 @@ export default function TeamPage() {
                         <td className="py-3.5 px-4 font-mono text-zinc-300">{formatPb(m.marathon_pb)}</td>
                         <td className="py-3.5 px-4 text-zinc-400">{m.joined_at?.slice(0, 10)}</td>
                         <td className="py-3.5 px-4 text-right space-x-2">
-                          {(currentRole === "owner" || user?.is_admin || user?.email === "azwan56@hotmail.com") ? (
+                          {(currentRole === "owner" || user?.is_admin) ? (
                             <>
                               {m.role !== "owner" ? (
                                 <>
@@ -866,7 +970,7 @@ export default function TeamPage() {
         )}
 
         {/* ── TAB 3: 🧢 教练学员体能监控与计划罗盘 ── */}
-        {activeTab === "coach" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin || user?.email === "azwan56@hotmail.com") && (
+        {activeTab === "coach" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
             {/* Status Summary Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1331,6 +1435,7 @@ export default function TeamPage() {
           </div>
         )}
       </main>
+      )}
 
       {/* Join Club Modal */}
       {showJoinModal && (

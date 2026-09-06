@@ -177,19 +177,19 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3">
               <div className="bg-[#1a1a20] border border-white/5 px-4 py-2 rounded-2xl flex flex-col items-center min-w-[76px]">
                 <span className="text-[10px] text-[#38bdf8] font-bold tracking-wider uppercase">CTL 体能</span>
-                <span className="text-lg font-black text-white">{scienceData?.current_ctl ?? 58.7}</span>
+                <span className="text-lg font-black text-white">{scienceData?.current_ctl ?? 0}</span>
               </div>
               <div className="bg-[#1a1a20] border border-white/5 px-4 py-2 rounded-2xl flex flex-col items-center min-w-[76px]">
                 <span className="text-[10px] text-[#ec4899] font-bold tracking-wider uppercase">ATL 疲劳</span>
-                <span className="text-lg font-black text-white">{scienceData?.current_atl ?? 70.3}</span>
+                <span className="text-lg font-black text-white">{scienceData?.current_atl ?? 0}</span>
               </div>
               <div className="bg-[#1a1a20] border border-white/5 px-4 py-2 rounded-2xl flex flex-col items-center min-w-[76px]">
                 <span className="text-[10px] text-zinc-400 font-bold tracking-wider uppercase">TSB 状况</span>
                 <span
                   className="text-lg font-black"
-                  style={{ color: scienceData?.current_tsb_badge?.color || "#22c55e" }}
+                  style={{ color: scienceData?.current_tsb_badge?.color || "#6b7280" }}
                 >
-                  {scienceData?.current_tsb ?? -20.2}
+                  {scienceData?.current_tsb ?? 0}
                 </span>
               </div>
             </div>
@@ -197,60 +197,70 @@ export default function DashboardPage() {
 
           {/* Combined Chart */}
           <div className="h-[280px] sm:h-[320px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={ctlHistory.slice(-30)} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="#222" strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="short_date"
-                  stroke="#666"
-                  fontSize={11}
-                  tickLine={false}
-                />
-                <YAxis stroke="#666" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#16161a",
-                    borderColor: "rgba(255,255,255,0.15)",
-                    borderRadius: "16px",
-                    fontSize: "12px",
-                    color: "#fff",
-                  }}
-                  formatter={(val: any, name: any) => {
-                    if (name === "ctl") return [`${val}`, "体能 (CTL)"];
-                    if (name === "atl") return [`${val}`, "疲劳 (ATL)"];
-                    if (name === "tsb") return [`${val}`, "状况 (TSB)"];
-                    return [val, name];
-                  }}
-                />
-                <Bar dataKey="tsb" barSize={12} radius={[4, 4, 4, 4]}>
-                  {ctlHistory.slice(-30).map((entry: any, index: number) => {
-                    const tsbVal = Number(entry.tsb || 0);
-                    let color = "#0ea5e9";
-                    if (tsbVal > 5) color = "#22c55e";
-                    else if (tsbVal >= -30) color = "#1890ff";
-                    else if (tsbVal >= -50) color = "#eab308";
-                    else color = "#ef4444";
-                    return <Cell key={`cell-${index}`} fill={color} opacity={0.85} />;
-                  })}
-                </Bar>
-                <Line
-                  type="monotone"
-                  dataKey="ctl"
-                  name="ctl"
-                  stroke="#38bdf8"
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="atl"
-                  name="atl"
-                  stroke="#ec4899"
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {ctlHistory.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={ctlHistory.slice(-30)} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#222" strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="short_date"
+                    stroke="#666"
+                    fontSize={11}
+                    tickLine={false}
+                  />
+                  <YAxis stroke="#666" fontSize={11} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#16161a",
+                      borderColor: "rgba(255,255,255,0.15)",
+                      borderRadius: "16px",
+                      fontSize: "12px",
+                      color: "#fff",
+                    }}
+                    formatter={(val: any, name: any) => {
+                      if (name === "ctl") return [`${val}`, "体能 (CTL)"];
+                      if (name === "atl") return [`${val}`, "疲劳 (ATL)"];
+                      if (name === "tsb") return [`${val}`, "状况 (TSB)"];
+                      return [val, name];
+                    }}
+                  />
+                  <Bar dataKey="tsb" barSize={12} radius={[4, 4, 4, 4]}>
+                    {ctlHistory.slice(-30).map((entry: any, index: number) => {
+                      const tsbVal = Number(entry.tsb || 0);
+                      let color = "#0ea5e9";
+                      if (tsbVal > 5) color = "#22c55e";
+                      else if (tsbVal >= -30) color = "#1890ff";
+                      else if (tsbVal >= -50) color = "#eab308";
+                      else color = "#ef4444";
+                      return <Cell key={`cell-${index}`} fill={color} opacity={0.85} />;
+                    })}
+                  </Bar>
+                  <Line
+                    type="monotone"
+                    dataKey="ctl"
+                    name="ctl"
+                    stroke="#38bdf8"
+                    strokeWidth={2.5}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="atl"
+                    name="atl"
+                    stroke="#ec4899"
+                    strokeWidth={2.5}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-[#16161a]/30 rounded-2xl border border-white/5">
+                <Activity className="w-8 h-8 text-zinc-600 mb-2" />
+                <p className="text-sm font-bold text-zinc-300">暂无体能负荷数据</p>
+                <p className="text-xs text-zinc-500 max-w-sm mt-1">
+                  连接 Garmin 或高驰手表并同步跑步记录后，将基于 Banister TRIMP 模型自动生成 42 天 CTL/ATL/TSB 趋势分析。
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Color-Coded Legend */}

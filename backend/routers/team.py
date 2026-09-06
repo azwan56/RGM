@@ -74,10 +74,7 @@ def get_club_dashboard(club_id: str):
     """Returns club overview metrics for President and Members."""
     club = LocalStore.get_club(club_id)
     if not club:
-        club = LocalStore.get_club("club_rgm_flagship")
-        if not club:
-            raise HTTPException(status_code=404, detail="跑团不存在")
-        club_id = club["id"]
+        raise HTTPException(status_code=404, detail="跑团不存在")
 
     members = LocalStore.get_club_members(club_id)
     events = LocalStore.get_club_events(club_id)

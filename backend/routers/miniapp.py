@@ -126,55 +126,56 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             "ctl": 0.0,
             "atl": 0.0,
             "tsb": 0.0,
-            "status_label": "训练中",
-            "status_color": "#0ea5e9",
+            "status_label": "未连接",
+            "status_color": "#6b7280",
             "history": []
         }
-        try:
-            today = date.today()
-            daily_trimp_map = { (today - timedelta(days=i)).isoformat(): 0.0 for i in range(90, -1, -1) }
-            for a in local_acts:
-                st = str(a.get("start_time", ""))[:10]
-                if st in daily_trimp_map:
-                    daily_trimp_map[st] += float(a.get("trimp") or 0.0)
-            
-            series = sorted(daily_trimp_map.items(), key=lambda x: x[0])
-            ctl_atl_list = compute_ctl_atl_tsb(series)
-            
-            enriched_history = []
-            for item in ctl_atl_list:
-                d_obj = datetime.strptime(item["date"], "%Y-%m-%d").date()
-                tsb_val = float(item["tsb"])
-                color = "#22c55e" if tsb_val > 5 else ("#1890ff" if tsb_val >= -30 else ("#eab308" if tsb_val >= -50 else "#ef4444"))
-                label = "巅峰" if tsb_val > 5 else ("训练中" if tsb_val >= -30 else ("疲劳" if tsb_val >= -50 else "严重"))
-                enriched_history.append({
-                    "date": item["date"],
-                    "short_date": d_obj.strftime("%m-%d"),
-                    "ctl": item["ctl"],
-                    "atl": item["atl"],
-                    "tsb": tsb_val,
-                    "tsb_color": color,
-                    "tsb_label": label,
-                    "trimp": item["trimp"]
-                })
-            
-            if enriched_history:
-                latest = enriched_history[-1]
-                fitness_form = {
-                    "ctl": latest["ctl"],
-                    "atl": latest["atl"],
-                    "tsb": latest["tsb"],
-                    "status_label": latest["tsb_label"],
-                    "status_color": latest["tsb_color"],
-                    "history": enriched_history[-30:] # recent 30 days
-                }
-        except Exception as e:
-            logger.warning(f"[miniapp] Fitness form calc error: {e}")
+        if local_acts:
+            try:
+                today = date.today()
+                daily_trimp_map = { (today - timedelta(days=i)).isoformat(): 0.0 for i in range(90, -1, -1) }
+                for a in local_acts:
+                    st = str(a.get("start_time", ""))[:10]
+                    if st in daily_trimp_map:
+                        daily_trimp_map[st] += float(a.get("trimp") or 0.0)
+                
+                series = sorted(daily_trimp_map.items(), key=lambda x: x[0])
+                ctl_atl_list = compute_ctl_atl_tsb(series)
+                
+                enriched_history = []
+                for item in ctl_atl_list:
+                    d_obj = datetime.strptime(item["date"], "%Y-%m-%d").date()
+                    tsb_val = float(item["tsb"])
+                    color = "#22c55e" if tsb_val > 5 else ("#1890ff" if tsb_val >= -30 else ("#eab308" if tsb_val >= -50 else "#ef4444"))
+                    label = "巅峰" if tsb_val > 5 else ("训练中" if tsb_val >= -30 else ("疲劳" if tsb_val >= -50 else "严重"))
+                    enriched_history.append({
+                        "date": item["date"],
+                        "short_date": d_obj.strftime("%m-%d"),
+                        "ctl": item["ctl"],
+                        "atl": item["atl"],
+                        "tsb": tsb_val,
+                        "tsb_color": color,
+                        "tsb_label": label,
+                        "trimp": item["trimp"]
+                    })
+                
+                if enriched_history:
+                    latest = enriched_history[-1]
+                    fitness_form = {
+                        "ctl": latest["ctl"],
+                        "atl": latest["atl"],
+                        "tsb": latest["tsb"],
+                        "status_label": latest["tsb_label"],
+                        "status_color": latest["tsb_color"],
+                        "history": enriched_history[-30:] # recent 30 days
+                    }
+            except Exception as e:
+                logger.warning(f"[miniapp] Fitness form calc error: {e}")
 
         return {
             "user": {
                 "id": eff_uid,
-                "display_name": profile.get("display_name") or "Alex",
+                "display_name": profile.get("display_name") or "跑者",
                 "avatar_url": profile.get("avatar_url"),
                 "garmin_connected": bool(profile.get("garmin_connected")),
                 "garmin_last_sync_at": profile.get("garmin_last_sync_at"),
@@ -218,12 +219,12 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "coros_last_sync_at": None,
             },
             "progress": {
-                "current_month_km": 119.9,
+                "current_month_km": 0.0,
                 "target_month_km": 200.0,
-                "progress_pct": 60.0,
-                "remaining_km": 80.1,
+                "progress_pct": 0.0,
+                "remaining_km": 200.0,
                 "days_left_in_month": 14,
-                "daily_required_km": 5.7,
+                "daily_required_km": 0.0,
             },
             "weekly_progress": {
                 "week_number": iso_week,

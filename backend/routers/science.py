@@ -38,7 +38,7 @@ def get_science_metrics(uid: str):
         zones = get_canova_zones(m_pb) if m_pb else {}
 
         activities = LocalStore.get_recent_activities(uid, limit=100)
-        if not activities and not m_pb:
+        if not activities:
             return {
                 "current_ctl": 0.0,
                 "current_atl": 0.0,

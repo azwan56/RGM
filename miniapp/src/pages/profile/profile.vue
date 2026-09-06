@@ -42,31 +42,40 @@
           <text class="title-icon">🏃</text>
           <text class="card-title">我的跑团与管理</text>
         </view>
-        <text class="club-role-tag" :class="'role-' + (userClub?.role || 'owner')">
-          {{ userClub?.role === 'owner' ? '👑 跑团主理人' : userClub?.role === 'coach' ? '🧢 认证教练' : '🏃 核心团员' }}
+        <text v-if="userClub" class="club-role-tag" :class="'role-' + (userClub.role || 'member')">
+          {{ userClub.role === 'owner' ? '👑 跑团主理人' : userClub.role === 'coach' ? '🧢 认证教练' : '🏃 核心团员' }}
+        </text>
+        <text v-else class="club-role-tag role-none">
+          未加入跑团
         </text>
       </view>
 
       <!-- Joined Club Summary -->
-      <view class="joined-club-box">
+      <view v-if="userClub" class="joined-club-box">
         <view class="club-mini-info">
-          <image class="mini-logo" :src="userClub?.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+          <image class="mini-logo" :src="userClub.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
           <view class="mini-texts">
-            <text class="club-title-text">{{ userClub?.name || "RGM 巅峰先锋跑团" }}</text>
-            <text class="club-desc-text">{{ userClub?.description || "基于科学耐力训练与 Renato Canova 哲学的精英跑者联盟" }}</text>
+            <text class="club-title-text">{{ userClub.name }}</text>
+            <text class="club-desc-text">{{ userClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
           </view>
         </view>
-        <view class="invite-copy-row" @click="handleCopyClubInvite">
+        <view v-if="userClub.invite_code" class="invite-copy-row" @click="handleCopyClubInvite">
           <text class="invite-lbl">跑团专属邀请码: </text>
-          <text class="invite-code">{{ userClub?.invite_code || "RGM888" }}</text>
+          <text class="invite-code">{{ userClub.invite_code }}</text>
           <text class="copy-action"> (点击复制)</text>
         </view>
+      </view>
+
+      <!-- Unjoined Empty State -->
+      <view v-else class="joined-club-box empty-club-box" style="padding: 28rpx; text-align: center;">
+        <text style="font-size: 26rpx; color: #ffffff; font-weight: bold; display: block; margin-bottom: 8rpx;">尚未加入任何跑团</text>
+        <text style="font-size: 22rpx; color: #8e8e93; display: block; line-height: 1.5;">输入邀请码加入队友所在跑团，或一键创建属于您的全新跑团。</text>
       </view>
 
       <!-- Club Action Buttons -->
       <view class="club-btn-grid">
         <button class="club-act-btn join-btn" @click="showJoinModal = true">
-          ➕ 加入其他跑团
+          {{ userClub ? '➕ 加入其他跑团' : '➕ 输入邀请码加入' }}
         </button>
         <button class="club-act-btn create-btn" @click="showCreateModal = true">
           🏆 创建新跑团

@@ -1,25 +1,27 @@
 <template>
   <view class="team-page">
-    <!-- ── Header: Club Hero ── -->
-    <view class="club-hero-card">
-      <view class="hero-top">
-        <image class="club-logo" :src="currentClub?.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
-        <view class="club-text">
-          <view class="name-row">
-            <text class="club-name">{{ currentClub?.name || "RGM 巅峰先锋跑团" }}</text>
-            <text class="role-tag" :class="'role-' + currentRole">
-              {{ currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员" }}
-            </text>
-          </view>
-          <text class="club-desc">{{ currentClub?.description || "基于科学耐力训练与 Renato Canova 哲学的精英跑者联盟" }}</text>
-          <view class="invite-row" @click="handleCopyInvite">
-            <text class="invite-label">跑团邀请码: </text>
-            <text class="invite-val">{{ currentClub?.invite_code || "RGM888" }}</text>
-            <text class="copy-hint"> (点击复制)</text>
+    <!-- If user belongs to a club -->
+    <view v-if="currentClub">
+      <!-- ── Header: Club Hero ── -->
+      <view class="club-hero-card">
+        <view class="hero-top">
+          <image class="club-logo" :src="currentClub.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+          <view class="club-text">
+            <view class="name-row">
+              <text class="club-name">{{ currentClub.name }}</text>
+              <text class="role-tag" :class="'role-' + currentRole">
+                {{ currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员" }}
+              </text>
+            </view>
+            <text class="club-desc">{{ currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
+            <view v-if="currentClub.invite_code" class="invite-row" @click="handleCopyInvite">
+              <text class="invite-label">跑团邀请码: </text>
+              <text class="invite-val">{{ currentClub.invite_code }}</text>
+              <text class="copy-hint"> (点击复制)</text>
+            </view>
           </view>
         </view>
       </view>
-    </view>
 
     <!-- ── CARD 1: 👑 团长管理中心 (Only visible to Owner) ── -->
     <view v-if="currentRole === 'owner' || isOwnerOrDev" class="section-card owner-panel-card">
@@ -231,6 +233,56 @@
         <text class="empty-text">暂无队员近期打卡，快去完成今日跑步吧！</text>
       </view>
     </view>
+    </view>
+
+    <!-- ── Unjoined Empty State (未加入任何跑团) ── -->
+    <view v-else class="unjoined-club-view">
+      <view class="unjoined-hero-box">
+        <view class="unjoined-badge">🏃 跑团中心</view>
+        <text class="unjoined-hero-title">尚未加入跑团</text>
+        <text class="unjoined-hero-sub">加入跑团与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控；或者立即创建属于您的专属跑团！</text>
+        <view class="unjoined-btn-row">
+          <button class="unjoined-action-btn primary-join" @click="showJoinModal = true">
+            ➕ 输入邀请码加入
+          </button>
+          <button class="unjoined-action-btn secondary-create" @click="showCreateModal = true">
+            🏆 创建新跑团
+          </button>
+        </view>
+      </view>
+
+      <view class="section-card unjoined-highlights">
+        <text class="unjoined-sec-title">加入跑团即可解锁：</text>
+        <view class="unjoined-highlight-item">
+          <text class="uh-icon">🥇</text>
+          <view class="uh-content">
+            <text class="uh-title">跑团月度跑量英雄榜</text>
+            <text class="uh-desc">自动汇总全体团员月跑量与排名，良性竞逐突破个人 PB</text>
+          </view>
+        </view>
+        <view class="unjoined-highlight-item">
+          <text class="uh-icon">🏆</text>
+          <view class="uh-content">
+            <text class="uh-title">专属跑量挑战赛与活动</text>
+            <text class="uh-desc">团长发起目标里程挑战，团员打卡达标解锁专属荣誉</text>
+          </view>
+        </view>
+        <view class="unjoined-highlight-item">
+          <text class="uh-icon">💬</text>
+          <view class="uh-content">
+            <text class="uh-title">跑友圈动态与 AI 互动</text>
+            <text class="uh-desc">同步跑步记录自动生成 AI 战报与点评，队友点赞留言互勉</text>
+          </view>
+        </view>
+        <view class="unjoined-highlight-item">
+          <text class="uh-icon">🧢</text>
+          <view class="uh-content">
+            <text class="uh-title">教练学员体能罗盘</text>
+            <text class="uh-desc">科学监控学员 CTL/ATL/TSB 负荷与状态，预防过度训练与伤病</text>
+          </view>
+        </view>
+      </view>
+    </view>
 
     <!-- ── Member & Coach Management Modal (跑团成员与指定教练管理) ── -->
     <view v-if="showMembersModal" class="modal-mask" @click="showMembersModal = false" @touchmove.stop.prevent>
@@ -366,6 +418,67 @@
         </view>
       </view>
     </view>
+
+    <!-- ── Join Club Modal (加入跑团弹窗) ── -->
+    <view v-if="showJoinModal" class="modal-mask" @click="showJoinModal = false" @touchmove.stop.prevent>
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">加入跑团</text>
+          <text class="close-btn" @click="showJoinModal = false">✕</text>
+        </view>
+
+        <view class="modal-body">
+          <text class="input-label">跑团专属 6 位邀请码</text>
+          <input
+            class="text-input"
+            type="text"
+            maxlength="10"
+            :adjust-position="false"
+            :cursor-spacing="30"
+            placeholder="例如: RGM888"
+            v-model="inviteCodeInput"
+          />
+          <button class="submit-btn" :loading="joiningClub" @click="handleJoinClub">
+            立即加入
+          </button>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── Create Club Modal (创建新跑团弹窗) ── -->
+    <view v-if="showCreateModal" class="modal-mask" @click="showCreateModal = false" @touchmove.stop.prevent>
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">创建新跑团</text>
+          <text class="close-btn" @click="showCreateModal = false">✕</text>
+        </view>
+
+        <view class="modal-body">
+          <text class="input-label">跑团名称</text>
+          <input
+            class="text-input"
+            type="text"
+            :adjust-position="false"
+            :cursor-spacing="30"
+            placeholder="例如: 世纪公园破风战队"
+            v-model="newClubName"
+          />
+
+          <text class="input-label">跑团口号与简介</text>
+          <textarea
+            class="textarea-input"
+            :adjust-position="false"
+            :cursor-spacing="30"
+            placeholder="科学备赛，快乐奔跑..."
+            v-model="newClubDesc"
+          />
+
+          <button class="submit-btn" :loading="creatingClub" @click="handleCreateClub">
+            立即创建跑团
+          </button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -389,6 +502,14 @@ const memberSearchQuery = ref("");
 
 const showEventModal = ref(false);
 const showCommentModal = ref(false);
+const showJoinModal = ref(false);
+const showCreateModal = ref(false);
+
+const inviteCodeInput = ref("");
+const newClubName = ref("");
+const newClubDesc = ref("");
+const joiningClub = ref(false);
+const creatingClub = ref(false);
 
 const editingEventId = ref<string | null>(null);
 const eventTitle = ref("");
@@ -449,9 +570,74 @@ async function loadClubData() {
       members.value = memRes?.members || [];
       coachCockpit.value = coachRes || null;
       feed.value = feedRes?.feed || [];
+    } else {
+      currentClub.value = null;
+      currentRole.value = "member";
+      events.value = [];
+      leaderboard.value = [];
+      members.value = [];
+      coachCockpit.value = null;
+      feed.value = [];
     }
   } catch (e) {
     console.warn("Load club data error:", e);
+  }
+}
+
+async function handleJoinClub() {
+  if (!inviteCodeInput.value.trim()) {
+    uni.showToast({ title: "请输入邀请码", icon: "none" });
+    return;
+  }
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  joiningClub.value = true;
+  try {
+    const res = await request("/api/team/join", "POST", {
+      user_id: uid,
+      invite_code: inviteCodeInput.value.trim().toUpperCase(),
+    });
+    uni.showToast({ title: res?.message || "加入成功！", icon: "success" });
+    showJoinModal.value = false;
+    inviteCodeInput.value = "";
+    await loadClubData();
+  } catch (e: any) {
+    uni.showToast({ title: e.message || "加入失败，请核对邀请码", icon: "none" });
+  } finally {
+    joiningClub.value = false;
+  }
+}
+
+async function handleCreateClub() {
+  if (!newClubName.value.trim()) {
+    uni.showToast({ title: "请输入跑团名称", icon: "none" });
+    return;
+  }
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  creatingClub.value = true;
+  try {
+    await request("/api/team/clubs", "POST", {
+      owner_id: uid,
+      name: newClubName.value.trim(),
+      description: newClubDesc.value.trim(),
+      city: "上海"
+    });
+    uni.showToast({ title: "跑团创建成功！", icon: "success" });
+    showCreateModal.value = false;
+    newClubName.value = "";
+    newClubDesc.value = "";
+    await loadClubData();
+  } catch (e: any) {
+    uni.showToast({ title: "创建失败", icon: "none" });
+  } finally {
+    creatingClub.value = false;
   }
 }
 
@@ -1507,5 +1693,125 @@ onPullDownRefresh(async () => {
   border-radius: 20rpx;
   margin-top: 24rpx;
   border: none;
+}
+
+/* Unjoined State Styles */
+.unjoined-club-view {
+  display: flex;
+  flex-direction: column;
+  gap: 30rpx;
+}
+
+.unjoined-hero-box {
+  background: linear-gradient(135deg, #18181c 0%, #121215 100%);
+  border-radius: 36rpx;
+  padding: 50rpx 40rpx;
+  text-align: center;
+  border: 1rpx solid rgba(252, 76, 2, 0.25);
+  box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.4);
+}
+
+.unjoined-badge {
+  display: inline-block;
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background: rgba(252, 76, 2, 0.15);
+  padding: 6rpx 20rpx;
+  border-radius: 20rpx;
+  margin-bottom: 24rpx;
+}
+
+.unjoined-hero-title {
+  font-size: 38rpx;
+  font-weight: 900;
+  color: #ffffff;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.unjoined-hero-sub {
+  font-size: 24rpx;
+  color: #8e8e93;
+  line-height: 1.6;
+  display: block;
+  margin-bottom: 40rpx;
+  padding: 0 10rpx;
+}
+
+.unjoined-btn-row {
+  display: flex;
+  gap: 20rpx;
+  justify-content: center;
+}
+
+.unjoined-action-btn {
+  flex: 1;
+  height: 84rpx;
+  line-height: 84rpx;
+  font-size: 28rpx;
+  font-weight: bold;
+  border-radius: 24rpx;
+  border: none;
+}
+
+.unjoined-action-btn.primary-join {
+  background: #fc4c02;
+  color: #ffffff;
+  box-shadow: 0 8rpx 20rpx rgba(252, 76, 2, 0.3);
+}
+
+.unjoined-action-btn.secondary-create {
+  background: #242429;
+  color: #ffffff;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.unjoined-highlights {
+  padding: 36rpx;
+}
+
+.unjoined-sec-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 30rpx;
+  display: block;
+}
+
+.unjoined-highlight-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 24rpx;
+  margin-bottom: 32rpx;
+}
+
+.unjoined-highlight-item:last-child {
+  margin-bottom: 0;
+}
+
+.uh-icon {
+  font-size: 38rpx;
+  line-height: 1;
+  margin-top: 4rpx;
+}
+
+.uh-content {
+  flex: 1;
+}
+
+.uh-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 6rpx;
+  display: block;
+}
+
+.uh-desc {
+  font-size: 22rpx;
+  color: #8e8e93;
+  line-height: 1.5;
+  display: block;
 }
 </style>
