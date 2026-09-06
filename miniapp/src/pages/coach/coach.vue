@@ -252,7 +252,7 @@
           <text class="card-title">生理恢复与超量恢复指导</text>
         </view>
         <view class="recovery-box">
-          <text class="recovery-text">{{ analysis.recovery_advice }}</text>
+          <text class="recovery-text">{{ formatAdvice(analysis.recovery_advice) }}</text>
         </view>
         <text class="tip-footnote">* 密切关注晨起静息心率与睡眠质量得分。</text>
       </view>
@@ -464,6 +464,15 @@ function formatWorkout(w: any): string {
   if (typeof w === "string") return w;
   if (typeof w === "object") {
     return Object.entries(w).map(([k, v]) => `【${k}】${v}`).join("\n");
+  }
+  return String(w);
+}
+
+function formatAdvice(w: any): string {
+  if (!w) return "大课后 30 分钟内补充高碳水与适量蛋白质，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。";
+  if (typeof w === "string") return w;
+  if (typeof w === "object") {
+    return Object.entries(w).map(([k, v]) => `【${k}】${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
   }
   return String(w);
 }

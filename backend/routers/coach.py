@@ -261,6 +261,14 @@ def get_latest_coach_report(uid: str):
                 report.get("athlete_snapshot", {}).get("target_race", "目标赛事"),
                 report.get("athlete_snapshot", {}).get("race_category", "marathon")
             )
+
+        if isinstance(report.get("recovery_advice"), dict):
+            rec_d = report["recovery_advice"]
+            report["recovery_advice"] = "\n".join(f"【{k}】{v}" for k, v in rec_d.items())
+        if isinstance(report.get("focus_workout_of_the_week"), dict):
+            foc_d = report["focus_workout_of_the_week"]
+            report["focus_workout_of_the_week"] = "\n".join(f"【{k}】{v}" for k, v in foc_d.items())
+
         return report
 
     garmin_connected = bool(user_profile.get("garmin_connected", False))
@@ -594,6 +602,14 @@ Canova 针对该赛事类型的专项训练区间:
         "race_category_name": race_category_name
     }
     analysis_data["race_zones"] = zones
+
+    # Normalize recovery_advice and focus_workout_of_the_week if dict
+    if isinstance(analysis_data.get("recovery_advice"), dict):
+        rec_d = analysis_data["recovery_advice"]
+        analysis_data["recovery_advice"] = "\n".join(f"【{k}】{v}" for k, v in rec_d.items())
+    if isinstance(analysis_data.get("focus_workout_of_the_week"), dict):
+        foc_d = analysis_data["focus_workout_of_the_week"]
+        analysis_data["focus_workout_of_the_week"] = "\n".join(f"【{k}】{v}" for k, v in foc_d.items())
 
     # Save to local store
     if analysis_data:

@@ -159,6 +159,16 @@ export default function CoachPage() {
     return "text-red-400 border-red-500/30 bg-red-500/10";
   };
 
+  const formatAdviceContent = (content: any): string => {
+    if (!content) return "";
+    if (typeof content === "string") return content;
+    if (typeof content === "object") {
+      return Object.entries(content)
+        .map(([k, v]) => `【${k}】${typeof v === "object" ? JSON.stringify(v) : v}`)
+        .join("\n");
+    }
+    return String(content);
+  };
 
   return (
     <div className="min-h-screen bg-[#070708] text-white">
@@ -613,9 +623,7 @@ export default function CoachPage() {
                     <Target className="w-4 h-4" /> 本周核心专项关键课
                   </h3>
                   <div className="p-4 bg-purple-950/20 border border-purple-500/20 rounded-2xl text-sm font-medium text-purple-100 leading-relaxed whitespace-pre-line">
-                    {typeof analysis.focus_workout_of_the_week === "object" && analysis.focus_workout_of_the_week
-                      ? Object.entries(analysis.focus_workout_of_the_week).map(([k, v]) => `【${k}】${v}`).join("\n")
-                      : String(analysis.focus_workout_of_the_week || "热身 3km + 3 × 4000m @ 专项配速 + 2km 冷身")}
+                    {formatAdviceContent(analysis.focus_workout_of_the_week) || "热身 3km + 3 × 4000m @ 专项配速 + 2km 冷身"}
                   </div>
                 </div>
                 <p className="text-xs text-zinc-500 mt-4">
@@ -629,8 +637,8 @@ export default function CoachPage() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 mb-4 flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4" /> 生理恢复与超量恢复指导
                   </h3>
-                  <div className="p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-2xl text-sm font-medium text-emerald-100 leading-relaxed">
-                    {analysis.recovery_advice}
+                  <div className="p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-2xl text-sm font-medium text-emerald-100 leading-relaxed whitespace-pre-line">
+                    {formatAdviceContent(analysis.recovery_advice) || "大课后 30 分钟内补充高碳水与适量蛋白质，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。"}
                   </div>
                 </div>
                 <p className="text-xs text-zinc-500 mt-4">
