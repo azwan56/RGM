@@ -23,12 +23,20 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [importingGarmin, setImportingGarmin] = useState(false);
   const [garminModalOpen, setGarminModalOpen] = useState(false);
+  const [modalBrand, setModalBrand] = useState<"garmin" | "coros">("garmin");
   const [garminConnected, setGarminConnected] = useState(false);
   const [garminEmail, setGarminEmail] = useState("");
   const [garminDomain, setGarminDomain] = useState("garmin.cn");
   const [unbinding, setUnbinding] = useState(false);
 
+  const [corosConnected, setCorosConnected] = useState(false);
+  const [corosAccount, setCorosAccount] = useState("");
+  const [corosDomain, setCorosDomain] = useState("teamcnapi.coros.com");
+  const [unbindingCoros, setUnbindingCoros] = useState(false);
+
   const [displayName, setDisplayName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [gender, setGender] = useState("male");
   const [heightCm, setHeightCm] = useState<number | "">(175);
   const [weightKg, setWeightKg] = useState<number | "">(65);
@@ -44,6 +52,8 @@ export default function ProfilePage() {
 
   // Goals
   const [targetDistance, setTargetDistance] = useState<number>(200);
+  const [weeklyTarget, setWeeklyTarget] = useState<number>(50);
+  const [savingWeekly, setSavingWeekly] = useState(false);
   const [monthlyTargets, setMonthlyTargets] = useState<number[]>([
     200, 200, 200, 200, 200, 200, 200, 250, 300, 350, 400, 400,
   ]);
@@ -102,10 +112,14 @@ export default function ProfilePage() {
       const { profile, goal, races: userRaces } = res.data;
       if (profile) {
         setDisplayName(profile.display_name || "");
+        setAvatarUrl(profile.avatar_url || "");
         setGender(profile.gender || "male");
         setGarminConnected(Boolean(profile.garmin_connected));
         setGarminEmail(profile.garmin_email || "");
         setGarminDomain(profile.garmin_domain || "garmin.cn");
+        setCorosConnected(Boolean(profile.coros_connected));
+        setCorosAccount(profile.coros_account || "");
+        setCorosDomain(profile.coros_domain || "teamcnapi.coros.com");
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.years_running) setYearsRunning(profile.years_running);
@@ -118,6 +132,11 @@ export default function ProfilePage() {
       }
       if (goal) {
         setTargetDistance(goal.target_distance || 200);
+        if (goal.weekly_target) {
+          setWeeklyTarget(Number(goal.weekly_target));
+        } else {
+          setWeeklyTarget(Math.max(10, Math.round((goal.target_distance || 200) / 4)));
+        }
         if (goal.monthly_targets && Array.isArray(goal.monthly_targets)) {
           setMonthlyTargets(goal.monthly_targets);
           const first = goal.monthly_targets[0];
@@ -138,6 +157,74 @@ export default function ProfilePage() {
     }
   }
 
+  function compressImageToBlob(file: File, maxDim = 800, quality = 0.85): Promise<Blob> {
+    return new Promise((resolve) => {
+      if (file.type === "image/svg+xml" || file.type === "image/gif") {
+        return resolve(file);
+      }
+      const reader = new FileReader();
+      reader.onload = (readerEvent) => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(file);
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                resolve(blob);
+              } else {
+                resolve(file);
+              }
+            },
+            "image/jpeg",
+            quality
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = readerEvent.target?.result as string;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !user?.id) return;
+    setUploadingAvatar(true);
+    try {
+      const uploadBlob = await compressImageToBlob(file);
+      const formData = new FormData();
+      formData.append("file", uploadBlob, "avatar.jpg");
+      const res = await apiClient.post(`/api/profile/${encodeURIComponent(user.id)}/avatar`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      if (res.data?.avatar_url) {
+        setAvatarUrl(res.data.avatar_url);
+        alert("✅ 头像上传成功并已实时生效！");
+      }
+    } catch (err: any) {
+      alert("头像上传失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = "";
+    }
+  }
+
   async function handleUnbindGarmin() {
     if (!confirm("确定解除佳明账号绑定吗？解除后将停止自动同步运动数据。")) return;
     setUnbinding(true);
@@ -149,6 +236,20 @@ export default function ProfilePage() {
       alert("解除失败: " + (e?.message || e));
     } finally {
       setUnbinding(false);
+    }
+  }
+
+  async function handleUnbindCoros() {
+    if (!confirm("确定解除高驰账号绑定吗？解除后将停止自动同步运动数据。")) return;
+    setUnbindingCoros(true);
+    try {
+      await apiClient.post("/api/auth/coros/unbind", { uid: user?.id });
+      alert("高驰账号已解除绑定");
+      if (user?.id) loadProfile(user.id);
+    } catch (e: any) {
+      alert("解除失败: " + (e?.message || e));
+    } finally {
+      setUnbindingCoros(false);
     }
   }
 
@@ -203,6 +304,21 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSaveWeeklyOnly() {
+    if (!user?.id) return;
+    setSavingWeekly(true);
+    try {
+      await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}/goal`, {
+        weekly_target: weeklyTarget,
+      });
+      alert(`✅ 常规周跑量目标已单独保存为 ${weeklyTarget} km/周！`);
+    } catch (e: any) {
+      alert("保存失败: " + (e?.message || e));
+    } finally {
+      setSavingWeekly(false);
+    }
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -211,7 +327,8 @@ export default function ProfilePage() {
     try {
       // 1. Update Profile
       await apiClient.put(`/api/profile/${user.id}`, {
-        display_name: displayName,
+        display_name: displayName.trim() || undefined,
+        avatar_url: avatarUrl || undefined,
         gender,
         height_cm: heightCm || null,
         weight_kg: weightKg || null,
@@ -227,6 +344,7 @@ export default function ProfilePage() {
       // 2. Update Goal
       await apiClient.put(`/api/profile/${user.id}/goal`, {
         target_distance: targetDistance,
+        weekly_target: weeklyTarget,
         monthly_targets: monthlyTargets,
       });
 
@@ -258,16 +376,19 @@ export default function ProfilePage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
-          {/* ── CARD 0: Garmin 佳明数据直连 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* ── CARD 0: 运动手表数据直连 (Garmin & COROS) ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <h2 className="text-lg font-bold text-white tracking-wide">运动手表数据直连</h2>
+
+            {/* Garmin Row */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
               <div className="flex items-start sm:items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 flex items-center justify-center text-[#FC4C02] shrink-0">
-                  <Zap className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-2xl bg-[#0A84FF]/10 border border-[#0A84FF]/30 flex items-center justify-center text-[#0A84FF] shrink-0 font-bold text-xs">
+                  佳明
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-white tracking-wide">Garmin (佳明) 数据直连</h2>
+                    <h3 className="text-sm font-bold text-white">Garmin (佳明) 手表</h3>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
                         garminConnected
@@ -280,8 +401,8 @@ export default function ProfilePage() {
                   </div>
                   <p className="text-xs text-zinc-400 mt-1">
                     {garminConnected
-                      ? `已绑定佳明账号：${garminEmail} (${garminDomain}) · 自动同步跑步记录与生理健康数据`
-                      : "连接佳明账号后，系统将自动同步手表中的所有跑步、心率、睡眠与体能指标"}
+                      ? `已绑定：${garminEmail} (${garminDomain}) · 自动同步跑步记录与生理健康数据`
+                      : "直连官方服务器，自动同步跑步记录、心率、夜间 HRV 与睡眠体能"}
                   </p>
                 </div>
               </div>
@@ -294,18 +415,124 @@ export default function ProfilePage() {
                     disabled={unbinding}
                     className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
                   >
-                    {unbinding ? "正在解绑..." : "解除绑定"}
+                    {unbinding ? "正在解绑..." : "解除佳明绑定"}
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setGarminModalOpen(true)}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white hover:opacity-90 transition active:scale-95 shadow-lg shadow-[#FC4C02]/20"
+                    onClick={() => { setModalBrand("garmin"); setGarminModalOpen(true); }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-600 text-white transition active:scale-95 shadow-lg shadow-blue-500/20"
                   >
                     <Zap className="w-4 h-4" />
                     绑定佳明账号
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* COROS Row */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 flex items-center justify-center text-[#FC4C02] shrink-0 font-bold text-xs">
+                  高驰
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-white">COROS (高驰) 手表</h3>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
+                        corosConnected
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          : "bg-zinc-800 text-zinc-400 border-white/5"
+                      }`}
+                    >
+                      {corosConnected ? "已连接 ✓" : "未连接"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    {corosConnected
+                      ? `已绑定：${corosAccount} (${corosDomain}) · 自动同步跑步记录与训练负荷`
+                      : "直连高驰 Training Hub，自动同步跑步记录、心率区间与训练负荷"}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                {corosConnected ? (
+                  <button
+                    type="button"
+                    onClick={handleUnbindCoros}
+                    disabled={unbindingCoros}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
+                  >
+                    {unbindingCoros ? "正在解绑..." : "解除高驰绑定"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setModalBrand("coros"); setGarminModalOpen(true); }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] hover:bg-orange-600 text-white transition active:scale-95 shadow-lg shadow-[#FC4C02]/20"
+                  >
+                    <Zap className="w-4 h-4" />
+                    绑定高驰账号
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── CARD 0.5: 跑者个人形象与昵称 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-center gap-2">
+              <User className="w-5 h-5 text-amber-500" />
+              <h2 className="text-lg font-bold text-white tracking-wide">跑者基本资料与形象</h2>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="relative group shrink-0">
+                <img
+                  src={avatarUrl || "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0"}
+                  alt="跑者头像"
+                  className="w-24 h-24 rounded-full object-cover border-2 border-white/10 shadow-lg group-hover:border-[#FC4C02] transition"
+                />
+                <label className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition">
+                  <span className="text-[11px] font-bold">更换头像</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                  />
+                </label>
+              </div>
+
+              <div className="flex-1 w-full space-y-3">
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称 (Display Name)</label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="例如: Alex Wan / 珍珍"
+                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                  />
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    该昵称将展示在跑团花名册、大盘排行榜与 Renato Canova 科学训练档案中
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 cursor-pointer transition">
+                    <span>📷 上传本地图片替换头像</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                    />
+                  </label>
+                  {uploadingAvatar && <span className="text-xs text-[#FC4C02] animate-pulse">正在上传头像...</span>}
+                </div>
               </div>
             </div>
           </div>
@@ -569,6 +796,76 @@ export default function ProfilePage() {
               </span>
             </div>
 
+            {/* ── 常规周跑量计划 (可单独设置与单独保存) ── */}
+            <div className="bg-[#18181c] border border-emerald-500/20 rounded-2xl p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🏃</span>
+                  <h3 className="text-sm font-bold text-white tracking-wide">常规周跑量计划 (每周目标)</h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs px-3 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    {weeklyTarget} km / 周
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveWeeklyOnly}
+                    disabled={savingWeekly}
+                    className="px-3 py-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition active:scale-95 disabled:opacity-50 shadow-md shadow-emerald-600/20"
+                  >
+                    {savingWeekly ? "保存中..." : "单独保存周跑量"}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-xs text-zinc-400">
+                周跑量目标无需按 52 周单独设定，设定常规周目标后自动应用于全年的每周训练进度与负荷追踪，可完全独立于月跑量设置。
+              </p>
+
+              {/* Quick Pills */}
+              <div className="flex flex-wrap gap-2">
+                {[30, 40, 50, 60, 70, 80, 100].map((km) => (
+                  <button
+                    key={km}
+                    type="button"
+                    onClick={() => setWeeklyTarget(km)}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg border transition ${
+                      weeklyTarget === km
+                        ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20"
+                        : "bg-[#202026] text-zinc-300 border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    {km}k
+                  </button>
+                ))}
+              </div>
+
+              {/* Weekly Slider */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span>微调滑块: <strong className="text-emerald-400">{weeklyTarget} km</strong></span>
+                  <span>范围: 10 ~ 160 km</span>
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={160}
+                  step={5}
+                  value={weeklyTarget}
+                  onChange={(e) => setWeeklyTarget(Number(e.target.value))}
+                  className="w-full accent-emerald-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                />
+                <p className="text-[11px] text-zinc-500">
+                  相当于月均完成约 {Math.round(weeklyTarget * 4.3)} km 跑步负荷。
+                </p>
+              </div>
+            </div>
+
+            {/* ── 月跑量计划 ── */}
+            <div className="pt-2 border-t border-white/5">
+              <h3 className="text-xs font-bold text-zinc-400 mb-3">📅 月度跑量规划</h3>
+            </div>
+
             {/* Mode Switcher */}
             <div className="flex bg-[#18181c] p-1 rounded-2xl border border-white/5 max-w-sm">
               <button
@@ -675,6 +972,7 @@ export default function ProfilePage() {
         open={garminModalOpen}
         onClose={() => setGarminModalOpen(false)}
         uid={user?.id}
+        initialBrand={modalBrand}
         onSuccess={() => {
           if (user?.id) loadProfile(user.id);
         }}

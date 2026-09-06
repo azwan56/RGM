@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { Zap, Activity, User, Users, LineChart, LogIn, LogOut } from "lucide-react";
+import { Zap, Activity, User, Users, LineChart, LogIn, LogOut, Shield } from "lucide-react";
 import AuthModal from "./AuthModal";
 
 export default function Navbar() {
@@ -32,6 +32,7 @@ export default function Navbar() {
     { label: "Canova AI 教练", href: "/dashboard/coach", icon: Zap },
     { label: "深度分析", href: "/dashboard/analysis", icon: LineChart },
     { label: "跑团与排行榜", href: "/dashboard/team", icon: Users },
+    { label: "超级管理", href: "/dashboard/admin", icon: Shield },
   ];
 
   return (

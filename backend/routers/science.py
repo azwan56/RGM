@@ -34,10 +34,26 @@ def get_science_metrics(uid: str):
     """
     try:
         profile = LocalStore.get_profile(uid) or {}
-        m_pb = profile.get("marathon_pb") or 11369
-        zones = get_canova_zones(m_pb)
+        m_pb = profile.get("marathon_pb")
+        zones = get_canova_zones(m_pb) if m_pb else {}
 
         activities = LocalStore.get_recent_activities(uid, limit=100)
+        if not activities and not m_pb:
+            return {
+                "current_ctl": 0.0,
+                "current_atl": 0.0,
+                "current_tsb": 0.0,
+                "current_tsb_badge": {"category": "none", "label": "未连接", "color": "#6b7280"},
+                "vdot": None,
+                "race_predictions": {
+                    "five_k": "—",
+                    "ten_k": "—",
+                    "half_marathon": "—",
+                    "marathon": "—",
+                },
+                "canova_zones": zones,
+                "ctl_atl_tsb_history": []
+            }
         
         # Build daily trimp map for last 90 days
         daily_trimp_map: Dict[str, float] = {}
@@ -45,7 +61,7 @@ def get_science_metrics(uid: str):
             d_str = (date.today() - timedelta(days=i)).isoformat()
             daily_trimp_map[d_str] = 0.0
 
-        best_vdot = 45.0
+        best_vdot = 0.0
         for act in activities:
             st = str(act.get("start_time", ""))[:10]
             if st in daily_trimp_map:
@@ -79,15 +95,17 @@ def get_science_metrics(uid: str):
                 "trimp": item["trimp"]
             })
 
-        latest_item = enriched_history[-1] if enriched_history else {"ctl": 58.7, "atl": 70.3, "tsb": -20.2}
+        latest_item = enriched_history[-1] if enriched_history else {"ctl": 0.0, "atl": 0.0, "tsb": 0.0}
         latest_tsb_badge = get_tsb_badge_info(latest_item["tsb"])
 
         def fmt_time(secs: int) -> str:
+            if not secs or secs <= 0:
+                return "—"
             h = int(secs // 3600)
             m = int((secs % 3600) // 60)
             s = int(secs % 60)
             if h > 0:
-                return f"{h}:{m:02d}:{sec:02d}" if 'sec' in locals() else f"{h}:{m:02d}:{s:02d}"
+                return f"{h}:{m:02d}:{s:02d}"
             return f"{m}:{s:02d}"
 
         return {
@@ -95,45 +113,32 @@ def get_science_metrics(uid: str):
             "current_atl": latest_item["atl"],
             "current_tsb": latest_item["tsb"],
             "current_tsb_badge": latest_tsb_badge,
-            "vdot": round(best_vdot, 1),
+            "vdot": round(best_vdot, 1) if best_vdot > 0 else None,
             "race_predictions": {
-                "five_k": fmt_time(vdot_to_race_time(best_vdot, 5000)),
-                "ten_k": fmt_time(vdot_to_race_time(best_vdot, 10000)),
-                "half_marathon": fmt_time(vdot_to_race_time(best_vdot, 21097.5)),
-                "marathon": fmt_time(vdot_to_race_time(best_vdot, 42195)),
+                "five_k": fmt_time(vdot_to_race_time(best_vdot, 5000)) if best_vdot > 0 else "—",
+                "ten_k": fmt_time(vdot_to_race_time(best_vdot, 10000)) if best_vdot > 0 else "—",
+                "half_marathon": fmt_time(vdot_to_race_time(best_vdot, 21097.5)) if best_vdot > 0 else "—",
+                "marathon": fmt_time(vdot_to_race_time(best_vdot, 42195)) if best_vdot > 0 else "—",
             },
             "canova_zones": zones,
             "ctl_atl_tsb_history": enriched_history
         }
     except Exception as e:
         logger.warning(f"[science] Metrics calculation fallback: {e}")
-        today = date.today()
-        dummy_chart = []
-        for i in range(30, -1, -1):
-            d = today - timedelta(days=i)
-            dummy_chart.append({
-                "date": d.isoformat(),
-                "short_date": d.strftime("%m-%d"),
-                "trimp": round(20 + (i % 5) * 15, 1),
-                "ctl": round(55 + i * 0.2, 1),
-                "atl": round(68 + (i % 4) * 4, 1),
-                "tsb": round(-15 - (i % 5) * 2, 1),
-                "tsb_color": "#0ea5e9"
-            })
         return {
-            "current_ctl": 58.7,
-            "current_atl": 70.3,
-            "current_tsb": -20.2,
-            "current_tsb_badge": {"category": "training", "label": "训练中", "color": "#0ea5e9"},
-            "vdot": 52.5,
+            "current_ctl": 0.0,
+            "current_atl": 0.0,
+            "current_tsb": 0.0,
+            "current_tsb_badge": {"category": "none", "label": "未连接", "color": "#6b7280"},
+            "vdot": None,
             "race_predictions": {
-                "five_k": "19:45",
-                "ten_k": "41:10",
-                "half_marathon": "1:31:30",
-                "marathon": "3:10:45",
+                "five_k": "—",
+                "ten_k": "—",
+                "half_marathon": "—",
+                "marathon": "—",
             },
-            "canova_zones": get_canova_zones(11369),
-            "ctl_atl_tsb_history": dummy_chart
+            "canova_zones": {},
+            "ctl_atl_tsb_history": []
         }
 
 

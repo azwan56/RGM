@@ -1,7 +1,11 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
+import os
+import time
+import jwt
+from config import settings
 from db import supabase_admin
 from utils.local_store import LocalStore
 from utils.garmin_adapter import GarminAdapter
@@ -17,7 +21,9 @@ class ProfileUpdateRequest(BaseModel):
     gender: Optional[str] = None
     date_of_birth: Optional[str] = None
     height_cm: Optional[float] = None
+    height: Optional[float] = None
     weight_kg: Optional[float] = None
+    weight: Optional[float] = None
     years_running: Optional[int] = None
     bio: Optional[str] = None
     max_heart_rate: Optional[int] = None
@@ -29,8 +35,9 @@ class ProfileUpdateRequest(BaseModel):
     wecom_webhook_url: Optional[str] = None
 
 class GoalUpdateRequest(BaseModel):
-    target_distance: float
+    target_distance: Optional[float] = None
     monthly_targets: Optional[List[int]] = None
+    weekly_target: Optional[float] = None
     period_type: Optional[str] = "monthly"
     year: Optional[int] = None
 
@@ -55,34 +62,31 @@ def secs_to_time_str(s: Optional[int]) -> str:
 def get_user_profile(uid: str):
     """Gets user profile, current year goal, and race plans."""
     profile = LocalStore.get_profile(uid)
-    if not profile and supabase_admin:
-        try:
-            p_res = supabase_admin.table("profiles").select("*").eq("id", uid).execute()
-            if p_res.data and len(p_res.data) > 0:
-                profile = p_res.data[0]
-        except Exception as e:
-            logger.warning(f"[profile] Supabase get profile fallback: {e}")
 
     if not profile:
         profile = {
             "id": uid,
-            "display_name": "跑者",
+            "display_name": "微信跑者",
             "avatar_url": None,
             "garmin_connected": False,
             "garmin_email": None,
-            "garmin_domain": "garmin.com",
-            "marathon_pb": 11369,
-            "half_pb": 5100,
-            "ten_k_pb": 2400,
-            "five_k_pb": 1140,
-            "max_heart_rate": 190,
-            "resting_heart_rate": 56,
-            "height_cm": 175.0,
-            "weight_kg": 65.0,
-            "years_running": 3,
+            "garmin_domain": "garmin.cn",
+            "coros_connected": False,
+            "coros_account": None,
+            "coros_domain": "teamcnapi.coros.com",
+            "marathon_pb": 0,
+            "half_pb": 0,
+            "ten_k_pb": 0,
+            "five_k_pb": 0,
+            "max_heart_rate": 0,
+            "resting_heart_rate": 0,
+            "height_cm": 0,
+            "weight_kg": 0,
+            "years_running": 0,
         }
 
     profile.pop("garmin_encrypted_password", None)
+    profile.pop("coros_encrypted_password", None)
     goal = LocalStore.get_goal(uid)
     races = LocalStore.get_race_plans(uid)
 
@@ -96,29 +100,137 @@ def update_user_profile(uid: str, req: ProfileUpdateRequest):
     if not payload:
         return {"message": "Nothing to update"}
 
-    LocalStore.upsert_profile(uid, payload)
+    # Handle aliases
+    if "height" in payload and "height_cm" not in payload:
+        payload["height_cm"] = payload.pop("height")
+    if "weight" in payload and "weight_kg" not in payload:
+        payload["weight_kg"] = payload.pop("weight")
 
-    if supabase_admin:
-        try:
-            supabase_admin.table("profiles").update(payload).eq("id", uid).execute()
-        except Exception as e:
-            logger.warning(f"[profile] Supabase update profile fallback: {e}")
+    LocalStore.upsert_profile(uid, payload)
 
     return {"message": "个人资料更新成功", "data": payload}
 
 
+class AvatarBase64Request(BaseModel):
+    image_base64: str
+    ext: Optional[str] = ".jpg"
+
+
+@router.post("/{uid}/avatar-base64")
+async def upload_user_avatar_base64(uid: str, req: AvatarBase64Request):
+    """
+    Accepts Base64 encoded avatar image, writes to static avatars folder,
+    updates LocalStore profile, and returns public URL.
+    Works seamlessly with WeChat request合法域名 without needing uploadFile domain.
+    """
+    import base64
+    ext = (req.ext or ".jpg").lower()
+    if not ext.startswith("."):
+        ext = f".{ext}"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+
+    avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+
+    safe_uid = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in uid)
+    filename = f"avatar_{safe_uid}_{int(time.time())}{ext}"
+    filepath = os.path.join(avatars_dir, filename)
+
+    try:
+        raw_b64 = req.image_base64
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+        img_bytes = base64.b64decode(raw_b64)
+        with open(filepath, "wb") as f:
+            f.write(img_bytes)
+    except Exception as e:
+        logger.error(f"[profile] Failed to decode and save base64 avatar for {uid}: {e}")
+        raise HTTPException(status_code=500, detail="保存头像文件失败")
+
+    avatar_url = f"https://rgm.vanpower.net/api/avatars/{filename}"
+    LocalStore.upsert_profile(uid, {"avatar_url": avatar_url})
+
+    return {
+        "avatar_url": avatar_url,
+        "message": "头像上传成功 🎉"
+    }
+
+
+@router.post("/{uid}/avatar")
+async def upload_user_avatar(uid: str, file: UploadFile = File(...)):
+    """
+    Uploads a user avatar image, saves it to persistent static storage,
+    updates the user profile in LocalStore, and returns the public URL.
+    """
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    orig_name = file.filename or "avatar.jpg"
+    ext = os.path.splitext(orig_name)[1].lower()
+    if not ext or ext not in allowed_exts:
+        ext = ".jpg"
+
+    avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+
+    safe_uid = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in uid)
+    filename = f"avatar_{safe_uid}_{int(time.time())}{ext}"
+    filepath = os.path.join(avatars_dir, filename)
+
+    try:
+        contents = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"[profile] Failed to save avatar for {uid}: {e}")
+        raise HTTPException(status_code=500, detail="保存头像文件失败")
+
+    avatar_url = f"https://rgm.vanpower.net/api/avatars/{filename}"
+    LocalStore.upsert_profile(uid, {"avatar_url": avatar_url})
+
+    return {
+        "avatar_url": avatar_url,
+        "message": "头像上传成功 🎉"
+    }
+
+
 @router.put("/{uid}/goal")
+@router.post("/{uid}/goal")
+@router.put("/{uid}/goals")
+@router.post("/{uid}/goals")
 def update_user_goal(uid: str, req: GoalUpdateRequest):
-    """Updates user monthly/yearly running distance target."""
+    """Updates user monthly/yearly running distance target or weekly target independently."""
     import datetime
     current_year = req.year or datetime.date.today().year
-    monthly_arr = req.monthly_targets or [int(req.target_distance)] * 12
+
+    existing_goal = LocalStore.get_goal(uid) or {}
+
+    if req.target_distance is not None:
+        target_dist = float(req.target_distance)
+    elif existing_goal.get("target_distance") is not None:
+        target_dist = float(existing_goal.get("target_distance"))
+    else:
+        target_dist = 200.0
+
+    if req.weekly_target is not None:
+        weekly_tgt = float(req.weekly_target)
+    elif existing_goal.get("weekly_target") is not None:
+        weekly_tgt = float(existing_goal.get("weekly_target"))
+    else:
+        weekly_tgt = round(target_dist / 4.0, 1)
+
+    if req.monthly_targets is not None:
+        monthly_arr = req.monthly_targets
+    elif existing_goal.get("monthly_targets") is not None:
+        monthly_arr = existing_goal.get("monthly_targets")
+    else:
+        monthly_arr = [int(target_dist)] * 12
 
     payload = {
         "user_id": uid,
         "year": current_year,
-        "period_type": req.period_type or "monthly",
-        "target_distance": req.target_distance,
+        "period_type": req.period_type or existing_goal.get("period_type") or "monthly",
+        "target_distance": target_dist,
+        "weekly_target": weekly_tgt,
         "monthly_targets": monthly_arr,
     }
 

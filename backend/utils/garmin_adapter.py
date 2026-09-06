@@ -38,13 +38,14 @@ class GarminAdapter:
         self.is_cn = ("garmin.cn" in self.domain or self.domain == "cn")
         self.last_error: Optional[str] = None
         self.client: Optional[Garmin] = None
+        self.needs_mfa: bool = False
 
         os.makedirs(TOKEN_DIR, exist_ok=True)
         safe_email = self.email.replace("@", "_at_").replace(".", "_")
         self.token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if self.is_cn else 'global'}.json")
 
     def login(self) -> bool:
-        """Logs into Garmin Connect with automatic region fallback & OAuth token caching."""
+        """Logs into Garmin Connect with MFA awareness, automatic region fallback & OAuth token caching."""
         if not HAS_GARMINCONNECT:
             self.last_error = "garminconnect 依赖未安装"
             return False
@@ -52,14 +53,26 @@ class GarminAdapter:
         # Attempt 1: with user's selected domain & token persistence
         try:
             logger.info(f"[garmin] Attempting login {self.email} (is_cn={self.is_cn}, token_path={self.token_path})...")
-            self.client = Garmin(self.email, self.password, is_cn=self.is_cn)
-            self.client.login(tokenstore=self.token_path)
+            self.client = Garmin(self.email, self.password, is_cn=self.is_cn, return_on_mfa=True)
+            mfa_status, _ = self.client.login(tokenstore=self.token_path)
+            if mfa_status == "needs_mfa":
+                logger.info(f"[garmin] MFA Required for {self.email} on is_cn={self.is_cn}")
+                self.needs_mfa = True
+                self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                return False
+
             logger.info(f"[garmin] Login successful for {self.email} on is_cn={self.is_cn}")
             self.last_error = None
+            self.needs_mfa = False
             return True
         except Exception as e1:
             err1 = str(e1)
             logger.warning(f"[garmin] Primary region (is_cn={self.is_cn}) failed for {self.email}: {err1}")
+
+            if "mfa" in err1.lower():
+                self.needs_mfa = True
+                self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                return False
 
             # Attempt 2: Try alternate region fallback
             alt_is_cn = not self.is_cn
@@ -67,23 +80,63 @@ class GarminAdapter:
             alt_token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if alt_is_cn else 'global'}.json")
             try:
                 logger.info(f"[garmin] Attempting alternate region fallback (is_cn={alt_is_cn})...")
-                alt_client = Garmin(self.email, self.password, is_cn=alt_is_cn)
-                alt_client.login(tokenstore=alt_token_path)
+                alt_client = Garmin(self.email, self.password, is_cn=alt_is_cn, return_on_mfa=True)
+                mfa_status, _ = alt_client.login(tokenstore=alt_token_path)
+                if mfa_status == "needs_mfa":
+                    logger.info(f"[garmin] MFA Required for {self.email} on alternate is_cn={alt_is_cn}")
+                    self.client = alt_client
+                    self.is_cn = alt_is_cn
+                    self.domain = "garmin.cn" if alt_is_cn else "garmin.com"
+                    self.token_path = alt_token_path
+                    self.needs_mfa = True
+                    self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                    return False
+
                 logger.info(f"[garmin] Fallback login successful for {self.email} on is_cn={alt_is_cn}")
                 self.client = alt_client
                 self.is_cn = alt_is_cn
                 self.domain = "garmin.cn" if alt_is_cn else "garmin.com"
                 self.token_path = alt_token_path
                 self.last_error = None
+                self.needs_mfa = False
                 return True
             except Exception as e2:
                 err2 = str(e2)
                 logger.error(f"[garmin] Alternate region (is_cn={alt_is_cn}) also failed for {self.email}: {err2}")
-                if "403" in err1 or "Portal login failed" in err1:
-                    self.last_error = "佳明官方全球服务器安全策略拦截 (HTTP 403)。如果您使用的是国内购买的手表或 Garmin Connect App，请选择【中国版 (garmin.cn)】"
+                if "429" in err1 or "rate limit" in err1.lower():
+                    self.last_error = "佳明官方安全风控拦截（尝试过于频繁），请等待 2~3 分钟后再试。"
+                elif "401" in err1 or "unauthorized" in err1.lower():
+                    self.last_error = "佳明账号或密码错误。国内购买手表或使用中国版 Connect App 请选【中国版 (garmin.cn)】，海外账号请选【国际版 (garmin.com)】。"
+                elif "403" in err1 or "Portal login failed" in err1:
+                    self.last_error = "佳明官方服务器安全策略拦截 (HTTP 403)。如果您使用的是国内购买的手表，请选择【中国版 (garmin.cn)】"
                 else:
                     self.last_error = err1
                 return False
+
+    def complete_mfa(self, mfa_code: str) -> bool:
+        """Completes MFA login using the supplied 6-digit verification code."""
+        if not self.client:
+            self.last_error = "MFA 会话已失效，请重新输入密码点击绑定"
+            return False
+        try:
+            clean_code = mfa_code.strip()
+            logger.info(f"[garmin] Submitting MFA code {clean_code} for {self.email}...")
+            self.client.resume_login({}, clean_code)
+            # Dump token to disk
+            if hasattr(self.client, "client") and hasattr(self.client.client, "dump"):
+                try:
+                    self.client.client.dump(self.token_path)
+                    logger.info(f"[garmin] Successfully dumped tokens to {self.token_path}")
+                except Exception as de:
+                    logger.warning(f"[garmin] Failed to dump tokens: {de}")
+            self.last_error = None
+            self.needs_mfa = False
+            return True
+        except Exception as e:
+            err = str(e)
+            logger.error(f"[garmin] MFA completion failed for {self.email}: {err}")
+            self.last_error = "验证码错误或已过期，请重新核对邮件/短信中的 6 位验证码"
+            return False
 
     def fetch_user_profile_info(self) -> Dict[str, Any]:
         """
@@ -196,6 +249,27 @@ class GarminAdapter:
             logger.error(f"[garmin] Error fetching activities for {self.email}: {e}")
             return []
 
+    def fetch_activities_by_date(self, start_date: str = "2026-01-01", end_date: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetches all activities between start_date and end_date from Garmin and normalizes them."""
+        if not self.client:
+            if not self.login():
+                return []
+
+        try:
+            target_end = end_date or date.today().isoformat()
+            logger.info(f"[garmin] Fetching activities from {start_date} to {target_end} for {self.email}...")
+            raw_acts = self.client.get_activities_by_date(start_date, target_end)
+            normalized = []
+            for act in raw_acts:
+                norm = self._normalize_activity(act)
+                if norm:
+                    normalized.append(norm)
+            logger.info(f"[garmin] Successfully fetched and normalized {len(normalized)} activities for {self.email}")
+            return normalized
+        except Exception as e:
+            logger.error(f"[garmin] Error fetching activities by date for {self.email}: {e}")
+            return []
+
     def _normalize_activity(self, act: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         raw_id = act.get("activityId")
         if not raw_id:
@@ -253,6 +327,7 @@ class GarminAdapter:
             "source": f"garmin_{'cn' if self.is_cn else 'global'}",
             "name": act.get("activityName") or "Garmin 跑步",
             "activity_type": mapped_type,
+            "sport_type": mapped_type,
             "start_time": start_iso,
             "distance_meters": distance_m,
             "moving_time_seconds": moving_s,
@@ -284,7 +359,7 @@ class GarminAdapter:
             "source": f"garmin_{'cn' if self.is_cn else 'global'}",
         }
 
-        # 1. User Summary Baseline (RHR, VO2 Max, Sleep, Body Battery)
+        # 1. User Summary Baseline (RHR, VO2 Max, Body Battery)
         try:
             summary = self.client.get_user_summary(date_str)
             if isinstance(summary, dict):
@@ -294,24 +369,51 @@ class GarminAdapter:
                 vo2 = summary.get("vo2MaxPrecise") or summary.get("vo2Max") or summary.get("userDailySummary", {}).get("vo2Max")
                 if vo2 and vo2 > 0:
                     metrics["vo2_max"] = round(float(vo2), 1)
-                dur = summary.get("sleepDuration") or summary.get("userDailySummary", {}).get("sleepDuration")
-                if dur and dur > 0:
-                    metrics["sleep_duration_seconds"] = int(dur)
-                    metrics["sleep_duration_hours"] = round(dur / 3600.0, 1)
-                score = summary.get("sleepScore") or summary.get("userDailySummary", {}).get("sleepScore")
-                if score and score > 0:
-                    metrics["sleep_score"] = int(score)
-                else:
-                    # Realistic baseline if duration exists
-                    if dur and dur > 0:
-                        metrics["sleep_score"] = min(100, max(50, int((dur / 28800.0) * 85)))
                 bb = summary.get("bodyBatteryHighestValue") or summary.get("userDailySummary", {}).get("bodyBatteryHighestValue")
                 if bb and bb > 0:
                     metrics["body_battery_max"] = int(bb)
+                bb_min = summary.get("bodyBatteryLowestValue") or summary.get("userDailySummary", {}).get("bodyBatteryLowestValue")
+                if bb_min and bb_min > 0:
+                    metrics["body_battery_min"] = int(bb_min)
         except Exception as e:
             logger.warning(f"[garmin] Could not fetch user summary for {date_str}: {e}")
 
-        # 2. HRV Data
+        # 2. Sleep Data (Dedicated Garmin Wellness Daily Sleep Endpoint)
+        try:
+            sleep_data = self.client.get_sleep_data(date_str)
+            if isinstance(sleep_data, dict):
+                dto = sleep_data.get("dailySleepDTO")
+                if isinstance(dto, dict):
+                    dur = dto.get("sleepTimeSeconds")
+                    if dur and dur > 0:
+                        metrics["sleep_duration_seconds"] = int(dur)
+                        metrics["sleep_duration_hours"] = round(dur / 3600.0, 1)
+
+                    scores = dto.get("sleepScores")
+                    if isinstance(scores, dict):
+                        overall = scores.get("overall", {}).get("value")
+                        if overall is not None and overall > 0:
+                            metrics["sleep_score"] = int(overall)
+
+                    # Realistic baseline if watch tracks sleep time but doesn't calculate sleep score
+                    if "sleep_score" not in metrics and dur and dur > 0:
+                        metrics["sleep_score"] = min(100, max(50, int((dur / 28800.0) * 85)))
+
+                # Fallback: resting heart rate from sleep data if missing
+                if "resting_heart_rate" not in metrics:
+                    rhr_sleep = sleep_data.get("restingHeartRate")
+                    if rhr_sleep and rhr_sleep > 0:
+                        metrics["resting_heart_rate"] = int(rhr_sleep)
+
+                # Fallback: overnight average HRV from sleep data if missing
+                if "hrv_last_night_avg" not in metrics:
+                    avg_hrv = sleep_data.get("avgOvernightHrv")
+                    if avg_hrv and avg_hrv > 0:
+                        metrics["hrv_last_night_avg"] = round(float(avg_hrv), 1)
+        except Exception as se:
+            logger.warning(f"[garmin] Could not fetch sleep data for {date_str}: {se}")
+
+        # 3. HRV Data
         try:
             hrv_data = self.client.get_hrv_data(date_str)
             if isinstance(hrv_data, dict):

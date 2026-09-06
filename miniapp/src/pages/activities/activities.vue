@@ -40,7 +40,7 @@
     </view>
 
     <view v-else class="empty-state">
-      <text class="empty-text">暂无运动记录，请前往首页点击同步 Garmin 数据。</text>
+      <text class="empty-text">暂无运动记录，请绑定 Garmin / 高驰手表后点击同步数据。</text>
     </view>
 
     <!-- AI Evaluation Modal -->

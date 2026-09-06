@@ -16,17 +16,6 @@ from utils.running_metrics import compute_ctl_atl_tsb
 logger = logging.getLogger("router_miniapp")
 router = APIRouter()
 
-def resolve_effective_uid(uid: str) -> str:
-    """If requested uid has no profile or no connected Garmin, fallback to active runner."""
-    p = LocalStore.get_profile(uid)
-    if p and p.get("garmin_connected"):
-        return uid
-    
-    users = LocalStore.get_all_garmin_connected_users()
-    if users:
-        return users[0]["id"]
-    return uid
-
 @router.get("/dashboard/{uid}")
 def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     """
@@ -40,8 +29,15 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     7. AI Coach Tip of the Day
     """
     try:
-        eff_uid = resolve_effective_uid(uid)
+        eff_uid = uid
         profile = LocalStore.get_profile(eff_uid) or {}
+        if not profile:
+            profile = {
+                "id": eff_uid,
+                "display_name": "微信跑者",
+                "garmin_connected": False
+            }
+            LocalStore.upsert_profile(eff_uid, profile)
 
         # 2. Compute Monthly Goal Progress
         today = date.today()
@@ -61,6 +57,9 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         progress_pct = round((current_km / target_km) * 100, 1) if target_km > 0 else 0.0
         remaining_km = max(0.0, round(target_km - current_km, 1))
         daily_req = round(remaining_km / days_left, 1)
+
+        # 2.1 Weekly Progress
+        weekly_progress = LocalStore.get_weekly_stats(eff_uid, target_km=goal.get("weekly_target"))
 
         # 3. Monthly Trend (6 months) & Yearly Stats (2026)
         monthly_trend = LocalStore.get_monthly_trend(eff_uid, num_months=6)
@@ -86,26 +85,41 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             })
 
         # 5. Today's Health Snapshot (4-grid card data)
-        health_data = LocalStore.get_latest_health(eff_uid) or {}
-        sleep_hours = health_data.get("sleep_duration_hours") or 8.5
-        sleep_score = health_data.get("sleep_score") or 69
-        rhr = health_data.get("resting_heart_rate") or 56
-        body_battery = health_data.get("body_battery_max") or 54
-        hrv_val = health_data.get("hrv_last_night_avg") or 29
-        hrv_weekly = health_data.get("hrv_weekly_avg") or 32
+        health_data = LocalStore.get_latest_health(eff_uid)
+        if health_data:
+            sleep_hours = health_data.get("sleep_duration_hours")
+            sleep_sec = health_data.get("sleep_duration_seconds")
+            sleep_score = health_data.get("sleep_score")
+            rhr = health_data.get("resting_heart_rate")
+            body_battery = health_data.get("body_battery_max")
+            hrv_val = health_data.get("hrv_last_night_avg")
+            hrv_weekly = health_data.get("hrv_weekly_avg")
 
-        today_health = {
-            "date": health_data.get("date") or today.isoformat(),
-            "sleep_score": sleep_score,
-            "sleep_duration_hours": sleep_hours,
-            "sleep_duration_text": f"{int(sleep_hours)}h {int((sleep_hours%1)*60)}m",
-            "resting_heart_rate": rhr,
-            "body_battery_max": body_battery,
-            "hrv_ms": int(hrv_val),
-            "hrv_weekly_avg": int(hrv_weekly),
-            "hrv_status": health_data.get("hrv_status") or "UNBALANCED",
-            "vo2_max": health_data.get("vo2_max") or 45.0
-        }
+            sleep_text = None
+            if sleep_sec and sleep_sec > 0:
+                hours = int(sleep_sec // 3600)
+                mins = int((sleep_sec % 3600) // 60)
+                sleep_text = f"{hours}h {mins}m"
+            elif sleep_hours and sleep_hours > 0:
+                hours = int(sleep_hours)
+                mins = int(round((sleep_hours % 1) * 60))
+                sleep_text = f"{hours}h {mins}m"
+
+            today_health = {
+                "date": health_data.get("date") or today.isoformat(),
+                "sleep_score": sleep_score,
+                "sleep_duration_hours": sleep_hours,
+                "sleep_duration_seconds": sleep_sec,
+                "sleep_duration_text": sleep_text,
+                "resting_heart_rate": rhr,
+                "body_battery_max": body_battery,
+                "hrv_ms": int(hrv_val) if hrv_val is not None else None,
+                "hrv_weekly_avg": int(hrv_weekly) if hrv_weekly is not None else None,
+                "hrv_status": health_data.get("hrv_status") or "BALANCED",
+                "vo2_max": health_data.get("vo2_max")
+            }
+        else:
+            today_health = None
 
         # 6. Compute Fitness & Form (CTL, ATL, TSB) - 90 days EWMA
         fitness_form = {
@@ -165,6 +179,10 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "garmin_connected": bool(profile.get("garmin_connected")),
                 "garmin_last_sync_at": profile.get("garmin_last_sync_at"),
                 "garmin_domain": profile.get("garmin_domain") or "garmin.com",
+                "coros_connected": bool(profile.get("coros_connected")),
+                "coros_account": profile.get("coros_account"),
+                "coros_domain": profile.get("coros_domain") or "teamcnapi.coros.com",
+                "coros_last_sync_at": profile.get("coros_last_sync_at"),
             },
             "fitness_form": fitness_form,
             "progress": {
@@ -175,6 +193,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "days_left_in_month": days_left,
                 "daily_required_km": daily_req,
             },
+            "weekly_progress": weekly_progress,
             "monthly_trend": monthly_trend,
             "yearly_stats": yearly_stats,
             "recent_activities": recent_activities,
@@ -184,14 +203,19 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[miniapp] Error compiling dashboard: {e}")
         today = date.today()
+        iso_year, iso_week, _ = today.isocalendar()
         return {
             "user": {
                 "id": uid,
                 "display_name": "跑者",
                 "avatar_url": None,
-                "garmin_connected": True,
+                "garmin_connected": False,
                 "garmin_last_sync_at": None,
                 "garmin_domain": "garmin.com",
+                "coros_connected": False,
+                "coros_account": None,
+                "coros_domain": "teamcnapi.coros.com",
+                "coros_last_sync_at": None,
             },
             "progress": {
                 "current_month_km": 119.9,
@@ -201,55 +225,50 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "days_left_in_month": 14,
                 "daily_required_km": 5.7,
             },
+            "weekly_progress": {
+                "week_number": iso_week,
+                "week_label": f"第{iso_week}周",
+                "week_start": "",
+                "week_end": "",
+                "current_week_km": 0.0,
+                "target_week_km": 50.0,
+                "total_runs": 0,
+                "progress_pct": 0.0,
+                "remaining_km": 50.0,
+                "days_left_in_week": 7,
+                "daily_required_km": 7.1,
+                "daily_breakdown": []
+            },
             "monthly_trend": {
-                "trend": [
-                    {"month_label": "2026/3月", "distance_km": 80.0, "count": 8, "is_current": False},
-                    {"month_label": "2026/4月", "distance_km": 105.0, "count": 10, "is_current": False},
-                    {"month_label": "2026/5月", "distance_km": 413.2, "count": 22, "is_current": False},
-                    {"month_label": "2026/6月", "distance_km": 77.7, "count": 8, "is_current": False},
-                    {"month_label": "2026/7月", "distance_km": 109.8, "count": 12, "is_current": False},
-                    {"month_label": "2026/8月", "distance_km": 119.9, "count": 11, "is_current": True},
-                ],
-                "current_month_km": 119.9,
-                "prev_month_km": 109.8,
-                "pct_change": 9.2,
-                "recent_3_months": [
-                    {"month_label": "2026/6月", "distance_km": 77.7, "count": 8},
-                    {"month_label": "2026/7月", "distance_km": 109.8, "count": 12},
-                    {"month_label": "2026/8月", "distance_km": 119.9, "count": 11},
-                ]
+                "trend": [],
+                "current_month_km": 0.0,
+                "prev_month_km": 0.0,
+                "pct_change": 0.0,
+                "recent_3_months": []
             },
             "yearly_stats": {
-                "year": 2026,
-                "total_km": 1324.3,
-                "total_runs": 88,
-                "avg_monthly_km": 165.5,
-                "projected_year_km": 1986.4,
-                "target_year_km": 3400.0,
-                "progress_pct": 38.9,
+                "year": now.year,
+                "total_km": 0.0,
+                "total_runs": 0,
+                "avg_monthly_km": 0.0,
+                "projected_year_km": 0.0,
+                "target_year_km": 2400.0,
+                "progress_pct": 0.0,
                 "best_month": {
-                    "name": "5月",
-                    "distance_km": 413.2,
-                    "avg_pace": "7:41"
+                    "name": f"{now.month}月",
+                    "distance_km": 0.0,
+                    "avg_pace": "—"
                 }
             },
             "recent_activities": [],
-            "today_health": {
-                "sleep_score": 69,
-                "sleep_duration_text": "8h 35m",
-                "resting_heart_rate": 56,
-                "body_battery_max": 54,
-                "hrv_ms": 29,
-                "hrv_weekly_avg": 32,
-                "hrv_status":"UNBALANCED"
-            },
-            "ai_coach_tip": "保持耐心，专注有氧节奏构建，专项能力水到渠成。"
+            "today_health": None,
+            "ai_coach_tip": "欢迎使用 RGM 跑团助手！请在【我的】页面绑定佳明设备以开启全自动化训练分析。"
         }
 
 @router.get("/activities/{uid}")
 def get_miniapp_activities(uid: str, limit: int = 50) -> Dict[str, Any]:
     """Returns activity list for activities tab in mini program."""
-    eff_uid = resolve_effective_uid(uid)
+    eff_uid = uid
     acts = LocalStore.get_recent_activities(eff_uid, limit=limit)
     formatted = []
     for a in acts:

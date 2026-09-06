@@ -15,73 +15,88 @@
           <text class="card-icon">📊</text>
           <text class="card-title">生理恢复与健康历史趋势 (30天)</text>
         </view>
-        <text class="card-sub">对比夜间 HRV、静息心率 (RHR) 与睡眠质量波动</text>
+        <text class="card-sub">对比夜间 HRV、静息心率 (RHR) 与睡眠质量波动（默认自动展示最新数据）</text>
       </view>
 
-      <!-- Sub-Chart 1: HRV vs RHR -->
-      <view class="sub-chart-box">
-        <view class="sub-chart-title-row">
-          <text class="sub-chart-icon">💓</text>
-          <text class="sub-chart-name">夜间 HRV (ms) 与 静息心率 RHR (bpm) 趋势图</text>
-        </view>
-
-        <!-- Tooltip -->
-        <view v-if="activeHrvTooltip" class="chart-tooltip">
-          <text class="tip-date">{{ activeHrvTooltip.date_label || activeHrvTooltip.date }}</text>
-          <text class="tip-val text-cyan">HRV: {{ activeHrvTooltip.hrv }} ms</text>
-          <text class="tip-val text-rose">RHR: {{ activeHrvTooltip.resting_heart_rate }} bpm</text>
-        </view>
-
-        <canvas
-          canvas-id="hrvRhrCanvas"
-          id="hrvRhrCanvas"
-          class="trend-canvas"
-          @touchstart="handleHrvTouch"
-          @touchmove="handleHrvTouch"
-        />
-
-        <view class="chart-legend-row">
-          <view class="legend-item">
-            <view class="dot cyan" />
-            <text class="legend-text">夜间 HRV (ms)</text>
-          </view>
-          <view class="legend-item">
-            <view class="dot rose" />
-            <text class="legend-text">静息心率 (RHR bpm)</text>
-          </view>
-        </view>
+      <!-- Empty State if no trend data -->
+      <view v-if="!healthTrend.length" class="empty-analysis-box">
+        <text class="empty-icon">📊</text>
+        <text class="empty-title">暂无生理历史数据</text>
+        <text class="empty-desc">请在【我的】页面登录微信并绑定 Garmin / 高驰手表，系统将自动同步夜间 HRV、静息心率与睡眠质量趋势。</text>
       </view>
 
-      <!-- Sub-Chart 2: Body Battery vs Sleep Score -->
-      <view class="sub-chart-box divider-top">
-        <view class="sub-chart-title-row">
-          <text class="sub-chart-icon">⚡</text>
-          <text class="sub-chart-name">身体电量 (%) 与 睡眠质量得分</text>
-        </view>
-
-        <!-- Tooltip -->
-        <view v-if="activeBatteryTooltip" class="chart-tooltip">
-          <text class="tip-date">{{ activeBatteryTooltip.date_label || activeBatteryTooltip.date }}</text>
-          <text class="tip-val text-indigo">睡眠: {{ activeBatteryTooltip.sleep_score }} 分</text>
-          <text class="tip-val text-amber">电量: {{ activeBatteryTooltip.body_battery }}%</text>
-        </view>
-
-        <canvas
-          canvas-id="batterySleepCanvas"
-          id="batterySleepCanvas"
-          class="trend-canvas"
-          @touchstart="handleBatteryTouch"
-          @touchmove="handleBatteryTouch"
-        />
-
-        <view class="chart-legend-row">
-          <view class="legend-item">
-            <view class="dot indigo" />
-            <text class="legend-text">睡眠质量得分 (分)</text>
+      <view v-else>
+        <!-- Sub-Chart 1: HRV vs RHR -->
+        <view class="sub-chart-box">
+          <view class="sub-chart-title-row">
+            <text class="sub-chart-icon">💓</text>
+            <text class="sub-chart-name">夜间 HRV (ms) 与 静息心率 RHR (bpm) 趋势图</text>
           </view>
-          <view class="legend-item">
-            <view class="dot amber" />
-            <text class="legend-text">身体电量 Max (%)</text>
+
+          <!-- Tooltip -->
+          <view v-if="activeHrvTooltip" class="chart-tooltip">
+            <view class="date-badge-box">
+              <text class="tip-date">{{ activeHrvTooltip.date_label || activeHrvTooltip.date }}</text>
+              <text v-if="isLatestDate(activeHrvTooltip.date)" class="latest-pill">最新</text>
+            </view>
+            <text class="tip-val text-cyan">HRV: {{ activeHrvTooltip.hrv }} ms</text>
+            <text class="tip-val text-rose">RHR: {{ activeHrvTooltip.resting_heart_rate }} bpm</text>
+          </view>
+
+          <canvas
+            canvas-id="hrvRhrCanvas"
+            id="hrvRhrCanvas"
+            class="trend-canvas"
+            @touchstart="handleHrvTouch"
+            @touchmove="handleHrvTouch"
+          />
+
+          <view class="chart-legend-row">
+            <view class="legend-item">
+              <view class="dot cyan" />
+              <text class="legend-text">夜间 HRV (ms)</text>
+            </view>
+            <view class="legend-item">
+              <view class="dot rose" />
+              <text class="legend-text">静息心率 (RHR bpm)</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- Sub-Chart 2: Body Battery vs Sleep Score -->
+        <view class="sub-chart-box divider-top">
+          <view class="sub-chart-title-row">
+            <text class="sub-chart-icon">⚡</text>
+            <text class="sub-chart-name">身体电量 (%) 与 睡眠质量得分</text>
+          </view>
+
+          <!-- Tooltip -->
+          <view v-if="activeBatteryTooltip" class="chart-tooltip">
+            <view class="date-badge-box">
+              <text class="tip-date">{{ activeBatteryTooltip.date_label || activeBatteryTooltip.date }}</text>
+              <text v-if="isLatestDate(activeBatteryTooltip.date)" class="latest-pill">最新</text>
+            </view>
+            <text class="tip-val text-indigo">睡眠: {{ activeBatteryTooltip.sleep_score }} 分</text>
+            <text class="tip-val text-amber">电量: {{ activeBatteryTooltip.body_battery }}%</text>
+          </view>
+
+          <canvas
+            canvas-id="batterySleepCanvas"
+            id="batterySleepCanvas"
+            class="trend-canvas"
+            @touchstart="handleBatteryTouch"
+            @touchmove="handleBatteryTouch"
+          />
+
+          <view class="chart-legend-row">
+            <view class="legend-item">
+              <view class="dot indigo" />
+              <text class="legend-text">睡眠质量得分 (分)</text>
+            </view>
+            <view class="legend-item">
+              <view class="dot amber" />
+              <text class="legend-text">身体电量 Max (%)</text>
+            </view>
           </view>
         </view>
       </view>
@@ -92,12 +107,12 @@
       <view class="vdot-hero-card">
         <view class="vdot-top">
           <text class="vdot-tag">⚡ JACK DANIELS VDOT</text>
-          <text class="vdot-val">{{ scienceData?.vdot || 52.5 }}</text>
+          <text class="vdot-val">{{ scienceData?.vdot != null ? scienceData.vdot : "—" }}</text>
           <text class="vdot-desc">基于近期最佳跑步配速与心率区间综合计算的跑力值。</text>
         </view>
         <view class="vdot-level-row">
           <text class="level-label">评估等级: </text>
-          <text class="level-badge">进阶马拉松跑者</text>
+          <text class="level-badge">{{ scienceData?.vdot ? '进阶马拉松跑者' : '暂未评估' }}</text>
         </view>
       </view>
 
@@ -110,19 +125,19 @@
         <view class="predictions-grid">
           <view class="pred-tile">
             <text class="dist-label">5 公里</text>
-            <text class="time-val">{{ scienceData?.race_predictions?.five_k || "19:45" }}</text>
+            <text class="time-val">{{ scienceData?.race_predictions?.five_k || "—" }}</text>
           </view>
           <view class="pred-tile">
             <text class="dist-label">10 公里</text>
-            <text class="time-val">{{ scienceData?.race_predictions?.ten_k || "41:10" }}</text>
+            <text class="time-val">{{ scienceData?.race_predictions?.ten_k || "—" }}</text>
           </view>
           <view class="pred-tile">
             <text class="dist-label">半程马拉松</text>
-            <text class="time-val text-primary">{{ scienceData?.race_predictions?.half_marathon || "1:31:30" }}</text>
+            <text class="time-val text-primary">{{ scienceData?.race_predictions?.half_marathon || "—" }}</text>
           </view>
           <view class="pred-tile">
             <text class="dist-label">全程马拉松</text>
-            <text class="time-val text-rose">{{ scienceData?.race_predictions?.marathon || "3:10:45" }}</text>
+            <text class="time-val text-rose">{{ scienceData?.race_predictions?.marathon || "—" }}</text>
           </view>
         </view>
       </view>
@@ -158,7 +173,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
-import { request, getStoredUser } from "../../utils/api";
+import { request, getStoredUser, checkAndAutoLogin } from "../../utils/api";
 
 const defaultCanovaZones: Record<string, any> = {
   aerobic_base: {
@@ -194,12 +209,12 @@ const defaultCanovaZones: Record<string, any> = {
 };
 
 const scienceData = ref<any>({
-  vdot: 52.5,
+  vdot: null,
   race_predictions: {
-    five_k: "19:45",
-    ten_k: "41:10",
-    half_marathon: "1:31:30",
-    marathon: "3:10:45"
+    five_k: "—",
+    ten_k: "—",
+    half_marathon: "—",
+    marathon: "—"
   },
   canova_zones: defaultCanovaZones
 });
@@ -209,28 +224,21 @@ const healthTrend = ref<any[]>([]);
 const activeHrvTooltip = ref<any>(null);
 const activeBatteryTooltip = ref<any>(null);
 
-// Generate default 30-day realistic trend
-const defaultTrend = (() => {
-  const list = [];
-  const now = new Date();
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 24 * 3600 * 1000);
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const shortDate = `${m}-${day}`;
-    list.push({
-      date: `2026-${m}-${day}`,
-      date_label: shortDate,
-      resting_heart_rate: 50 + Math.floor(Math.sin(i * 0.7) * 4),
-      hrv: 35 + Math.floor(Math.cos(i * 0.8) * 8),
-      body_battery: 65 + Math.floor(Math.sin(i * 0.6) * 22),
-      sleep_score: 74 + Math.floor(Math.cos(i * 0.5) * 15)
-    });
-  }
-  return list;
-})();
+function isLatestDate(dateStr: string) {
+  if (!healthTrend.value.length) return false;
+  const last = healthTrend.value[healthTrend.value.length - 1];
+  return last?.date === dateStr;
+}
 
-healthTrend.value = defaultTrend;
+function selectIndex(idx: number) {
+  if (!healthTrend.value.length) return;
+  const clampedIdx = Math.max(0, Math.min(healthTrend.value.length - 1, idx));
+  const target = healthTrend.value[clampedIdx];
+  activeHrvTooltip.value = target;
+  activeBatteryTooltip.value = target;
+  drawHrvRhrChart();
+  drawBatterySleepChart();
+}
 
 function drawHrvRhrChart() {
   const ctx = uni.createCanvasContext("hrvRhrCanvas");
@@ -307,17 +315,33 @@ function drawHrvRhrChart() {
     ctx.fillText(data[data.length - 1].date_label, getX(data.length - 1), H - 4);
   }
 
-  // Active Indicator
+  // Active Indicator & Highlight Dots
   if (activeHrvTooltip.value) {
     const idx = data.findIndex((d) => d.date === activeHrvTooltip.value.date);
     if (idx >= 0) {
       const activeX = getX(idx);
+      const activeY_Hrv = getY_Hrv(activeHrvTooltip.value.hrv);
+      const activeY_Rhr = getY_Rhr(activeHrvTooltip.value.resting_heart_rate);
+
+      // Vertical line
       ctx.setStrokeStyle("rgba(255,255,255,0.4)");
       ctx.setLineWidth(1);
       ctx.beginPath();
       ctx.moveTo(activeX, padT);
       ctx.lineTo(activeX, H - padB);
       ctx.stroke();
+
+      // Highlight Dot - HRV (Cyan)
+      ctx.setFillStyle("#06b6d4");
+      ctx.beginPath();
+      ctx.arc(activeX, activeY_Hrv, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight Dot - RHR (Rose)
+      ctx.setFillStyle("#ef4444");
+      ctx.beginPath();
+      ctx.arc(activeX, activeY_Rhr, 4.5, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -399,17 +423,33 @@ function drawBatterySleepChart() {
     ctx.fillText(data[data.length - 1].date_label, getX(data.length - 1), H - 4);
   }
 
-  // Active Indicator
+  // Active Indicator & Highlight Dots
   if (activeBatteryTooltip.value) {
     const idx = data.findIndex((d) => d.date === activeBatteryTooltip.value.date);
     if (idx >= 0) {
       const activeX = getX(idx);
+      const activeY_Sleep = getY(activeBatteryTooltip.value.sleep_score);
+      const activeY_Battery = getY(activeBatteryTooltip.value.body_battery);
+
+      // Vertical line
       ctx.setStrokeStyle("rgba(255,255,255,0.4)");
       ctx.setLineWidth(1);
       ctx.beginPath();
       ctx.moveTo(activeX, padT);
       ctx.lineTo(activeX, H - padB);
       ctx.stroke();
+
+      // Highlight Dot - Sleep (Indigo)
+      ctx.setFillStyle("#818cf8");
+      ctx.beginPath();
+      ctx.arc(activeX, activeY_Sleep, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight Dot - Battery (Amber)
+      ctx.setFillStyle("#eab308");
+      ctx.beginPath();
+      ctx.arc(activeX, activeY_Battery, 4.5, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -428,10 +468,7 @@ function handleHrvTouch(e: any) {
 
   const relX = Math.max(0, Math.min(plotW, touchX - padL));
   const idx = Math.round((relX / plotW) * (healthTrend.value.length - 1));
-  if (idx >= 0 && idx < healthTrend.value.length) {
-    activeHrvTooltip.value = healthTrend.value[idx];
-    drawHrvRhrChart();
-  }
+  selectIndex(idx);
 }
 
 function handleBatteryTouch(e: any) {
@@ -446,15 +483,16 @@ function handleBatteryTouch(e: any) {
 
   const relX = Math.max(0, Math.min(plotW, touchX - padL));
   const idx = Math.round((relX / plotW) * (healthTrend.value.length - 1));
-  if (idx >= 0 && idx < healthTrend.value.length) {
-    activeBatteryTooltip.value = healthTrend.value[idx];
-    drawBatterySleepChart();
-  }
+  selectIndex(idx);
 }
 
 async function loadData() {
-  const user = getStoredUser();
-  const uid = user?.id || "u_df65d9a588c9";
+  let user = getStoredUser();
+  if (!user) {
+    user = await checkAndAutoLogin();
+  }
+  if (!user || !user.id) return;
+  const uid = user.id;
 
   try {
     const [sciRes, healthRes] = await Promise.all([
@@ -471,6 +509,9 @@ async function loadData() {
 
     if (healthRes?.trend && healthRes.trend.length) {
       healthTrend.value = healthRes.trend;
+      const latest = healthRes.trend[healthRes.trend.length - 1];
+      activeHrvTooltip.value = latest;
+      activeBatteryTooltip.value = latest;
     }
 
     nextTick(() => {
@@ -572,6 +613,35 @@ onPullDownRefresh(async () => {
   display: block;
 }
 
+.empty-analysis-box {
+  background-color: #1a1a1e;
+  border-radius: 24rpx;
+  padding: 50rpx 30rpx;
+  text-align: center;
+  margin: 10rpx 0 20rpx;
+}
+
+.empty-icon {
+  font-size: 56rpx;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
+.empty-title {
+  font-size: 30rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 10rpx;
+  display: block;
+}
+
+.empty-desc {
+  font-size: 24rpx;
+  color: #8e8e93;
+  line-height: 1.5;
+  display: block;
+}
+
 .sub-chart-box {
   margin-bottom: 30rpx;
 }
@@ -606,25 +676,47 @@ onPullDownRefresh(async () => {
 }
 
 .chart-tooltip {
-  background-color: rgba(22, 22, 26, 0.95);
-  border: 1rpx solid rgba(255, 255, 255, 0.2);
-  border-radius: 16rpx;
-  padding: 10rpx 16rpx;
+  background: linear-gradient(135deg, rgba(30, 30, 36, 0.95) 0%, rgba(20, 20, 24, 0.95) 100%);
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  border-radius: 18rpx;
+  padding: 12rpx 20rpx;
   display: flex;
-  gap: 16rpx;
+  gap: 20rpx;
   align-items: center;
-  margin-bottom: 12rpx;
-  font-size: 20rpx;
+  margin-bottom: 14rpx;
+  font-size: 22rpx;
+}
+
+.date-badge-box {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
 }
 
 .tip-date {
   color: #ffffff;
   font-weight: bold;
+  font-family: monospace;
+}
+
+.latest-pill {
+  font-size: 18rpx;
+  background-color: rgba(48, 209, 88, 0.2);
+  color: #30d158;
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+  font-weight: bold;
 }
 
 .tip-val {
   font-weight: bold;
+  font-family: monospace;
 }
+
+.text-cyan { color: #06b6d4; }
+.text-rose { color: #ef4444; }
+.text-indigo { color: #818cf8; }
+.text-amber { color: #eab308; }
 
 .chart-legend-row {
   display: flex;
@@ -658,67 +750,82 @@ onPullDownRefresh(async () => {
 
 /* VDOT & Predictions */
 .section-container {
+  display: flex;
+  flex-direction: column;
+  gap: 36rpx;
   margin-bottom: 48rpx;
 }
 
 .vdot-hero-card {
-  background: linear-gradient(135deg, #1c1818 0%, #151315 100%);
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  background: linear-gradient(135deg, #1c1917 0%, #0c0a09 100%);
+  border: 1rpx solid rgba(249, 115, 22, 0.3);
   border-radius: 32rpx;
   padding: 36rpx 30rpx;
-  margin-bottom: 24rpx;
+  box-shadow: 0 10rpx 30rpx rgba(249, 115, 22, 0.1);
+}
+
+.vdot-top {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
 }
 
 .vdot-tag {
-  font-size: 22rpx;
+  font-size: 20rpx;
   font-weight: 900;
-  color: #fc4c02;
-  letter-spacing: 1rpx;
-  display: block;
+  color: #ea580c;
+  letter-spacing: 2rpx;
 }
 
 .vdot-val {
-  font-size: 64rpx;
+  font-size: 72rpx;
   font-weight: 900;
-  color: #ffffff;
-  margin: 12rpx 0;
-  display: block;
+  color: #f97316;
+  line-height: 1;
+  font-family: monospace;
 }
 
 .vdot-desc {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: #a8a29e;
   line-height: 1.4;
-  display: block;
+  margin-top: 6rpx;
 }
 
 .vdot-level-row {
   margin-top: 24rpx;
   padding-top: 20rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.06);
-  font-size: 22rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
 }
 
 .level-label {
-  color: #71717a;
+  font-size: 22rpx;
+  color: #78716c;
 }
 
 .level-badge {
-  color: #34c759;
+  font-size: 22rpx;
   font-weight: bold;
+  color: #fed7aa;
+  background-color: rgba(249, 115, 22, 0.2);
+  padding: 4rpx 16rpx;
+  border-radius: 10rpx;
 }
 
 .predictions-card {
   background-color: #121215;
   border: 1rpx solid rgba(255, 255, 255, 0.08);
   border-radius: 32rpx;
-  padding: 36rpx 28rpx;
+  padding: 32rpx 28rpx;
 }
 
 .pred-header {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 10rpx;
   margin-bottom: 24rpx;
 }
 
@@ -735,28 +842,28 @@ onPullDownRefresh(async () => {
 .predictions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18rpx;
+  gap: 16rpx;
 }
 
 .pred-tile {
-  background-color: #18181c;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 22rpx;
-  padding: 24rpx;
+  background-color: #1a1a1e;
+  border-radius: 20rpx;
+  padding: 22rpx;
   display: flex;
   flex-direction: column;
+  gap: 8rpx;
 }
 
 .dist-label {
-  font-size: 22rpx;
+  font-size: 20rpx;
   color: #8e8e93;
-  margin-bottom: 8rpx;
 }
 
 .time-val {
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: 900;
   color: #ffffff;
+  font-family: monospace;
 }
 
 .text-primary {
@@ -764,58 +871,46 @@ onPullDownRefresh(async () => {
 }
 
 .text-rose {
-  color: #ff453a;
+  color: #f43f5e;
 }
 
-.text-cyan {
-  color: #06b6d4;
-}
-
-.text-indigo {
-  color: #818cf8;
-}
-
-.text-amber {
-  color: #eab308;
-}
-
-/* Canova Zones Grid */
+/* Canova Zones */
 .canova-grid {
   display: flex;
   flex-direction: column;
-  gap: 20rpx;
+  gap: 16rpx;
 }
 
 .zone-card {
-  background-color: #18181c;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
-  border-radius: 24rpx;
-  padding: 26rpx;
+  background-color: #1a1a1e;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  border-left: 6rpx solid #fc4c02;
 }
 
 .zone-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12rpx;
+  margin-bottom: 10rpx;
 }
 
 .zone-name {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffd60a;
-}
-
-.zone-range {
-  font-size: 28rpx;
-  font-weight: 900;
   color: #ffffff;
 }
 
+.zone-range {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  font-family: monospace;
+}
+
 .zone-desc {
-  font-size: 22rpx;
+  font-size: 20rpx;
   color: #8e8e93;
   line-height: 1.4;
-  display: block;
 }
 </style>

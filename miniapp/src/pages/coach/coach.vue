@@ -76,7 +76,7 @@
     <view v-else class="empty-card">
       <text class="empty-icon">⚡</text>
       <text class="empty-title">Canova AI 教练就绪</text>
-      <text class="empty-desc">点击下方按钮，AI 教练将基于您的近期 Garmin 训练与生理负荷生成专属报告。</text>
+      <text class="empty-desc">点击下方按钮，AI 教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。</text>
       <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成最新训练诊断</button>
     </view>
   </view>
@@ -85,19 +85,19 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
-import { request, getStoredUser, UserProfile } from "../../utils/api";
+import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
 
 const defaultAnalysis = {
-  summary: "有氧基础扎实，当前处于专项准备期，需注重 95%~100% 专项配速延伸与爬升适应。",
-  fitness_status: "近期跑量稳定在周均 30~40km，静息心率维持在 56 bpm 清晨基线，心率与配速匹配度良好，具备进阶高强度专项负荷的生理基础。",
-  periodization_phase: "专项准备期 (Special Period)",
+  summary: "欢迎来到 Renato Canova AI 耐力教练专区！绑定 Garmin 或高驰手表后将自动生成您的专属报告。",
+  fitness_status: "系统将基于您的每日配速、静息心率与夜间 HRV 恢复状态，智能量化评估专项耐力与疲劳水平。",
+  periodization_phase: "准备启动期 (Preparation)",
   key_suggestions: [
-    "针对 9 月 12 日武功山 50K 赛事（剩 25 天），重点强化下坡肌肉离心收缩与陡坡快走转换能力。",
-    "每周安排一次 15~18km 的渐速长距离跑 (Progression Run)，末段 5km 提升至半马配速段 (4:18/km)。",
-    "保持轻松跑日的绝对低心率控制（<135 bpm），坚决剔除非专项的疲劳垃圾跑量。"
+    "在【我的】页面绑定您的 Garmin 或高驰账号，开启历史运动与每日生理指标同步。",
+    "以轻松跑 (Zone 2) 为主积累有氧基线，建立慢肌纤维毛细血管网。",
+    "保持科学作息，长跑后注意水分电解质补充与睡眠恢复。"
   ],
-  focus_workout_of_the_week: "热身 3km + 3 × 4000m @ 越野/公路混合专项配速 (间歇 1000m 漂浮跑) + 2km 冷身",
-  recovery_advice: "训练后 30 分钟内补充 4:1 比例高碳水与乳清蛋白，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。"
+  focus_workout_of_the_week: "基础有氧建立：轻松跑 30~45 分钟，心率控制在最大心率的 65%~75% 之间。",
+  recovery_advice: "夜间保证 7~8 小时高质量睡眠，观察晨起静息心率变化，建立稳定生理基线。"
 };
 
 const user = ref<UserProfile | null>(null);
@@ -106,7 +106,11 @@ const loading = ref(false);
 
 async function loadLatestReport() {
   user.value = getStoredUser();
-  const uid = user.value?.id || "u_df65d9a588c9";
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value || !user.value.id) return;
+  const uid = user.value.id;
 
   try {
     const res = await request(`/api/coach/latest/${uid}`);
@@ -120,7 +124,11 @@ async function loadLatestReport() {
 
 async function handleReAnalyze() {
   user.value = getStoredUser();
-  const uid = user.value?.id || "u_df65d9a588c9";
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value || !user.value.id) return;
+  const uid = user.value.id;
 
   loading.value = true;
   uni.showLoading({ title: "AI 深度推理中..." });
@@ -128,8 +136,8 @@ async function handleReAnalyze() {
   try {
     const res = await request("/api/coach/analysis", "POST", {
       uid,
-      target_race: "武功山 50K",
-      target_time: "8:00:00"
+      target_race: "半程马拉松",
+      target_time: "1:45:00"
     });
     uni.hideLoading();
     if (res && res.summary) {

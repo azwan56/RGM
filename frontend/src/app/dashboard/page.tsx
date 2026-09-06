@@ -43,6 +43,7 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [scienceData, setScienceData] = useState<any>(null);
   const [garminModalOpen, setGarminModalOpen] = useState(false);
+  const [modalBrand, setModalBrand] = useState<"garmin" | "coros">("garmin");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -74,7 +75,10 @@ export default function DashboardPage() {
 
   async function handleSync() {
     if (!user) return;
-    if (!dashboardData?.user?.garmin_connected) {
+    const hasGarmin = Boolean(dashboardData?.user?.garmin_connected);
+    const hasCoros = Boolean(dashboardData?.user?.coros_connected);
+    if (!hasGarmin && !hasCoros) {
+      setModalBrand("garmin");
       setGarminModalOpen(true);
       return;
     }
@@ -83,7 +87,7 @@ export default function DashboardPage() {
     try {
       const res = await apiClient.post("/api/sync/trigger", { uid: user.id });
       if (res.data?.success === false) {
-        alert("同步提示: " + (res.data?.error || "佳明连接中，请稍后再试"));
+        alert("同步提示: " + (res.data?.error || "设备连接中，请稍后再试"));
       }
       await loadDashboardData(user.id);
     } catch (e) {
@@ -110,23 +114,36 @@ export default function DashboardPage() {
               <span>跑步控制台 Dashboard</span>
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              追踪当前训练周期负荷，直连佳明手表与 Renato Canova 科学训练系统
+              追踪当前训练周期负荷，直连佳明 / 高驰手表与 Renato Canova 科学训练系统
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            {dashboardData?.user?.garmin_connected ? (
-              <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                Garmin 已连接
+            {dashboardData?.user?.garmin_connected || dashboardData?.user?.coros_connected ? (
+              <div className="flex items-center gap-2">
+                {dashboardData?.user?.garmin_connected && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Garmin 已连接
+                  </div>
+                )}
+                {dashboardData?.user?.coros_connected && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                    COROS 已连接
+                  </div>
+                )}
               </div>
             ) : (
               <button
-                onClick={() => setGarminModalOpen(true)}
+                onClick={() => {
+                  setModalBrand("garmin");
+                  setGarminModalOpen(true);
+                }}
                 className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#FC4C02] text-white hover:bg-orange-600 transition active:scale-95 shadow-md shadow-[#FC4C02]/20"
               >
                 <Zap className="w-3.5 h-3.5" />
-                绑定 Garmin 账号
+                绑定运动设备 (Garmin/高驰)
               </button>
             )}
 
@@ -136,7 +153,7 @@ export default function DashboardPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-[#1a1a1e] border border-white/10 hover:border-white/20 transition active:scale-95 text-zinc-200"
             >
               <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin text-[#FC4C02]" : ""}`} />
-              {syncing ? "正在从 Garmin 同步..." : "一键同步数据"}
+              {syncing ? "正在从手表同步..." : "一键同步数据"}
             </button>
           </div>
         </div>
@@ -265,14 +282,14 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── CARD 2: Garmin 生理与恢复卡片 (4-Grid) ── */}
+        {/* ── CARD 2: 生理与恢复卡片 (Garmin / COROS) ── */}
         <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl">
           <div className="flex items-center justify-between mb-6">
             <div>
               <div className="flex items-center gap-2">
                 <Compass className="w-5 h-5 text-emerald-400" />
                 <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">
-                  Garmin 生理与恢复卡片
+                  生理与恢复卡片
                 </h2>
               </div>
               <p className="text-xs text-zinc-400 mt-1">
@@ -280,7 +297,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="text-xs text-zinc-500 bg-white/5 px-3 py-1.5 rounded-full border border-white/5">
-              Garmin Direct Sync
+              Device Direct Sync
             </div>
           </div>
 
@@ -293,10 +310,16 @@ export default function DashboardPage() {
               </div>
               <div>
                 <div className="text-2xl sm:text-3xl font-black text-white">
-                  {todayHealth?.sleep_score ?? 69} <span className="text-sm font-medium text-zinc-400">分</span>
+                  {todayHealth?.sleep_score != null ? (
+                    <>
+                      {todayHealth.sleep_score} <span className="text-sm font-medium text-zinc-400">分</span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500 font-medium text-xl">—</span>
+                  )}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  时长 {todayHealth?.sleep_duration_text || "8h 35m"}
+                  {todayHealth?.sleep_duration_text ? `时长 ${todayHealth.sleep_duration_text}` : "未同步睡眠"}
                 </div>
               </div>
             </div>
@@ -309,7 +332,13 @@ export default function DashboardPage() {
               </div>
               <div>
                 <div className="text-2xl sm:text-3xl font-black text-rose-400">
-                  {todayHealth?.resting_heart_rate ?? 56} <span className="text-sm font-medium text-zinc-400">bpm</span>
+                  {todayHealth?.resting_heart_rate != null ? (
+                    <>
+                      {todayHealth.resting_heart_rate} <span className="text-sm font-medium text-zinc-400">bpm</span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500 font-medium text-xl">—</span>
+                  )}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">清晨生理基线</div>
               </div>
@@ -323,12 +352,12 @@ export default function DashboardPage() {
               </div>
               <div>
                 <div className="text-2xl sm:text-3xl font-black text-amber-300">
-                  {todayHealth?.body_battery_max ?? 54}%
+                  {todayHealth?.body_battery_max != null ? `${todayHealth.body_battery_max}%` : "—"}
                 </div>
                 <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-2">
                   <div
                     className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 rounded-full"
-                    style={{ width: `${Math.min(100, todayHealth?.body_battery_max ?? 54)}%` }}
+                    style={{ width: `${Math.min(100, todayHealth?.body_battery_max ?? 0)}%` }}
                   />
                 </div>
               </div>
@@ -342,10 +371,18 @@ export default function DashboardPage() {
               </div>
               <div>
                 <div className="text-2xl sm:text-3xl font-black text-cyan-400">
-                  {todayHealth?.hrv_ms ?? 29} <span className="text-sm font-medium text-zinc-400">ms</span>
+                  {todayHealth?.hrv_ms != null ? (
+                    <>
+                      {todayHealth.hrv_ms} <span className="text-sm font-medium text-zinc-400">ms</span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500 font-medium text-xl">—</span>
+                  )}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  周均: {todayHealth?.hrv_weekly_avg ?? 32} ms · VO2Max {todayHealth?.vo2_max ?? 45}
+                  {todayHealth?.hrv_weekly_avg ? `周均: ${todayHealth.hrv_weekly_avg} ms` : ""}
+                  {todayHealth?.vo2_max ? ` · VO2Max ${todayHealth.vo2_max}` : ""}
+                  {!todayHealth?.hrv_weekly_avg && !todayHealth?.vo2_max && (todayHealth?.hrv_status ? `状态: ${todayHealth.hrv_status}` : "清晨静息基线")}
                 </div>
               </div>
             </div>
@@ -523,14 +560,14 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">近期训练明细</h2>
-              <p className="text-xs text-zinc-400 mt-1">Garmin 自动同步记录与 TRIMP 负荷</p>
+              <p className="text-xs text-zinc-400 mt-1">Garmin / 高驰自动同步记录与 TRIMP 负荷</p>
             </div>
           </div>
 
           <div className="divide-y divide-white/5">
             {(!dashboardData?.recent_activities || dashboardData.recent_activities.length === 0) ? (
               <div className="py-8 text-center text-zinc-500 text-xs sm:text-sm">
-                暂无近期跑步记录，绑定 Garmin 账号并点击【一键同步数据】后即可自动呈现。
+                暂无近期跑步记录，绑定 Garmin 或高驰账号并点击【一键同步数据】后即可自动呈现。
               </div>
             ) : (
               dashboardData.recent_activities.map((act: any) => (
@@ -574,6 +611,7 @@ export default function DashboardPage() {
         open={garminModalOpen}
         onClose={() => setGarminModalOpen(false)}
         uid={user?.id}
+        initialBrand={modalBrand}
         onSuccess={() => user && loadDashboardData(user.id)}
       />
     </div>

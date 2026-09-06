@@ -39,45 +39,51 @@ Canova 哲学的核心要点：
 }
 """
 
-def resolve_effective_uid(uid: str) -> str:
-    p = LocalStore.get_profile(uid)
-    if p and p.get("garmin_connected"):
-        return uid
-    users = LocalStore.get_all_garmin_connected_users()
-    if users:
-        return users[0]["id"]
-    return uid
-
 @router.get("/latest/{uid}")
 def get_latest_coach_report(uid: str):
     """
     Returns latest cached Canova AI coach report for fast UI rendering.
     """
-    eff_uid = resolve_effective_uid(uid)
+    eff_uid = uid
     report = LocalStore.get_coach_report(eff_uid)
     if report:
         return report
 
-    # Generate default high-quality Canova baseline report
     p = LocalStore.get_profile(eff_uid) or {}
-    m_pb = p.get("marathon_pb") or 11370
+    garmin_connected = bool(p.get("garmin_connected", False))
+    coros_connected = bool(p.get("coros_connected", False))
+
+    if not garmin_connected and not coros_connected:
+        return {
+            "summary": "欢迎来到 Renato Canova AI 耐力教练专区！请在【我的】页面绑定 Garmin 或高驰 (COROS) 账号同步您的历史运动。",
+            "fitness_status": "暂未检测到手表现用运动数据。系统将在您完成首次数据同步后，自动评估您的乳酸阈值与专项耐力储备。",
+            "periodization_phase": "准备启动期 (Preparation)",
+            "key_suggestions": [
+                "连接佳明或高驰设备并开启全天候心率监测，建立个人的静息心率与夜间 HRV 基线。",
+                "初级阶段建议以基础有氧轻松跑 (Zone 2) 为主，建立慢肌纤维毛细血管网与心肺储备。",
+                "保持科学作息，每次长跑后及时进行针对性拉伸放松与水分电解质补充。"
+            ],
+            "focus_workout_of_the_week": "基础有氧建立：轻松跑 30~45 分钟，心率控制在最大心率的 65%~75% 之间。",
+            "recovery_advice": "夜间保证 7~8 小时高质量睡眠，观察晨起静息心率变化，建立稳定生理基准。"
+        }
+
     return {
-        "summary": "有氧基础扎实，当前处于专项准备期，需注重 95%~100% 专项配速延伸与爬升适应。",
-        "fitness_status": "近期跑量稳定在周均 30~40km，静息心率维持在 56 bpm 清晨基线，心率与配速匹配度良好，具备进阶高强度专项负荷的生理基础。",
+        "summary": "有氧基础扎实，当前处于专项准备期，需注重 95%~100% 专项配速延伸与心率适应。",
+        "fitness_status": "近期跑量稳定在周均 30~40km，静息心率维持良好基线，心率与配速匹配度良好，具备进阶专项负荷的生理基础。",
         "periodization_phase": "专项准备期 (Special Period)",
         "key_suggestions": [
-          "针对 9 月 12 日武功山 50K 赛事（剩 25 天），重点强化下坡肌肉离心收缩与陡坡快走转换能力。",
-          "每周安排一次 15~18km 的渐速长距离跑 (Progression Run)，末段 5km 提升至半马配速段 (4:18/km)。",
-          "保持轻松跑日的绝对低心率控制（<135 bpm），坚决剔除非专项的疲劳垃圾跑量。"
+            "每周安排一次 15~18km 的渐速长距离跑 (Progression Run)，末段提升至半马目标配速段。",
+            "保持轻松跑日的绝对低心率控制，坚决剔除非专项的疲劳垃圾跑量。",
+            "结合核心肌群与下肢力量训练，提高奔跑经济性与抗伤病能力。"
         ],
-        "focus_workout_of_the_week": "热身 3km + 3 × 4000m @ 越野/公路混合专项配速 (间歇 1000m 漂浮跑) + 2km 冷身",
-        "recovery_advice": "训练后 30 分钟内补充 4:1 比例高碳水与乳清蛋白，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。"
+        "focus_workout_of_the_week": "热身 2km + 3 × 3000m @ 专项目标配速 (间歇 3 分钟慢跑) + 2km 冷身",
+        "recovery_advice": "训练后 30 分钟内补充高碳水与适量蛋白质，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。"
     }
 
 @router.post("/analysis")
 def generate_coach_analysis(request: CoachAnalysisRequest):
     """Generates Renato Canova AI Coach comprehensive analysis for the user using LLM."""
-    eff_uid = resolve_effective_uid(request.uid)
+    eff_uid = request.uid
     
     # 1. Fetch real runner profile
     user_profile = LocalStore.get_profile(eff_uid) or {}
@@ -111,8 +117,9 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 - 5公里 PB: 19:24
 - 目标比赛: {request.target_race} (目标成绩: {request.target_time})
 - 参赛计划: {json.dumps(races, ensure_ascii=False)}
-- 最大心率: {user_profile.get('max_heart_rate', 190)}, 静息心率: {health.get('resting_heart_rate', 56)} bpm
-- 身体电量: {health.get('body_battery_max', 54)}%, 夜间 HRV: {health.get('hrv_last_night_avg', 29)} ms
+- 最大心率: {user_profile.get('max_heart_rate', 190)}, 静息心率: {health.get('resting_heart_rate') or '—'} bpm
+- 身体电量: {health.get('body_battery_max') or '—'}%, 夜间 HRV: {health.get('hrv_last_night_avg') or '—'} ms
+- 睡眠恢复: {health.get('sleep_score') or '—'} 分 (睡眠时长: {health.get('sleep_duration_hours') or '—'} 小时)
 
 Canova 马拉松专项配速区间参考:
 {json.dumps(zones, ensure_ascii=False, indent=2)}

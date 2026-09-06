@@ -18,17 +18,21 @@ logger = logging.getLogger("rgm_scheduler")
 scheduler = BackgroundScheduler()
 
 def sync_all_connected_users():
-    """Iterates through all users with garmin_connected=True and triggers sync."""
+    """Iterates through all users with garmin_connected=True or coros_connected=True and triggers sync."""
     try:
         # 1. Fetch from LocalStore
-        users = LocalStore.get_all_garmin_connected_users()
+        users = LocalStore.get_all_syncable_users()
         user_map = {u["id"]: u for u in users}
 
         # 2. Also check Supabase if available
         if supabase_admin:
             try:
-                res = supabase_admin.table("profiles").select("id, display_name").eq("garmin_connected", True).execute()
-                for su in (res.data or []):
+                res_g = supabase_admin.table("profiles").select("id, display_name").eq("garmin_connected", True).execute()
+                for su in (res_g.data or []):
+                    if su["id"] not in user_map:
+                        user_map[su["id"]] = su
+                res_c = supabase_admin.table("profiles").select("id, display_name").eq("coros_connected", True).execute()
+                for su in (res_c.data or []):
                     if su["id"] not in user_map:
                         user_map[su["id"]] = su
             except Exception:
@@ -36,16 +40,16 @@ def sync_all_connected_users():
 
         all_users = list(user_map.values())
         if not all_users:
-            logger.info("[scheduler] No connected Garmin users to sync.")
+            logger.info("[scheduler] No connected Garmin/COROS users to sync.")
             return
 
-        logger.info(f"[scheduler] ⏳ Starting automatic polling sync for {len(all_users)} Garmin user(s)...")
+        logger.info(f"[scheduler] ⏳ Starting automatic polling sync for {len(all_users)} device user(s)...")
 
         from routers.sync import sync_single_user
         for idx, u in enumerate(all_users):
             uid = u["id"]
             try:
-                logger.info(f"[scheduler] [{idx+1}/{len(all_users)}] Auto-syncing Garmin for user {uid} ({u.get('display_name')})...")
+                logger.info(f"[scheduler] [{idx+1}/{len(all_users)}] Auto-syncing devices for user {uid} ({u.get('display_name')})...")
                 res = sync_single_user(uid)
                 if res.get("success"):
                     logger.info(f"[scheduler] ✅ User {uid} auto-sync success: {res.get('synced_activities', 0)} activities synced.")
