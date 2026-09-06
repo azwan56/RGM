@@ -127,86 +127,124 @@
         <text class="fitness-detail">{{ analysis.fitness_status }}</text>
       </view>
 
-      <!-- ── CARD 1.2: 多赛事宏观统筹与战术推演 ── -->
+      <!-- ── CARD 1.2: 多赛事宏观统筹与战术推演 (Multi-Race Strategy) ── -->
       <view v-if="analysis.multi_race_strategy" class="section-card multi-race-card">
-        <view class="card-title-row">
-          <text class="section-icon">📅</text>
-          <text class="card-title">Canova 多赛事宏观统筹与战术推演</text>
+        <view class="multi-race-header">
+          <view class="multi-race-header-titles">
+            <view class="card-title-row">
+              <text class="section-icon">📅</text>
+              <text class="card-title">Canova 多赛事宏观统筹与战术推演</text>
+            </view>
+            <text class="multi-race-subtitle">
+              A/B/C 梯队科学分级 · 规避过密疲劳冲突 · 黄金以赛代练配对 · 跨赛道专项切换
+            </text>
+          </view>
+          <view class="total-races-badge">
+            <text class="sparkle-icon">✨</text>
+            <text class="total-races-text">共统筹 {{ (analysis.multi_race_strategy.race_timeline_advice || []).length }} 场目标赛事</text>
+          </view>
         </view>
 
         <!-- Macrocycle Overview -->
         <view class="macrocycle-box">
-          <text class="macrocycle-label">🏆 赛季大周期统筹：</text>
+          <view class="macrocycle-header">
+            <text class="macrocycle-icon">🏆</text>
+            <text class="macrocycle-label">赛季宏观周期统筹：</text>
+          </view>
           <text class="macrocycle-text">{{ analysis.multi_race_strategy.macro_cycle_overview }}</text>
         </view>
 
-        <!-- Race Timeline List -->
-        <view class="race-timeline-list">
-          <view
-            v-for="(r, idx) in (analysis.multi_race_strategy.race_timeline_advice || [])"
-            :key="r.id || idx"
-            class="race-item"
-            :class="`tier-${r.tier ? r.tier.toLowerCase() : 'b'}`"
-          >
-            <view class="race-item-header">
-              <view class="race-title-row">
-                <view class="race-title-left">
-                  <view class="race-tier-badge" :class="`badge-${r.tier ? r.tier.toLowerCase() : 'b'}`">
-                    <text class="badge-text">{{ r.tactical_role || `${r.tier} 标` }}</text>
+        <!-- Timeline Section -->
+        <view class="timeline-section">
+          <view class="timeline-section-header">
+            <text class="timeline-section-title">赛事日历与专项执行规程</text>
+          </view>
+
+          <!-- Race Timeline List -->
+          <view class="race-timeline-list">
+            <view
+              v-for="(r, idx) in (analysis.multi_race_strategy.race_timeline_advice || [])"
+              :key="r.id || idx"
+              class="race-item"
+              :class="`tier-${(r.tier || 'B').toLowerCase()}`"
+            >
+              <view class="race-item-header">
+                <view class="race-title-row">
+                  <view class="race-title-left">
+                    <view class="race-tier-badge" :class="`badge-${(r.tier || 'B').toLowerCase()}`">
+                      <text class="badge-text">{{ r.tactical_role || `${r.tier || 'B'} 标` }}</text>
+                    </view>
+                    <text class="race-item-name">{{ r.race_name }}</text>
                   </view>
-                  <text class="race-item-name">{{ r.race_name }}</text>
-                </view>
-                <text v-if="r.days_left !== undefined" class="race-days-countdown">
-                  {{ r.days_left }}天后
-                </text>
-              </view>
-
-              <!-- A/B/C Priority Switcher -->
-              <view class="priority-switch-row">
-                <text class="switch-tip-lbl">调整定位:</text>
-                <view class="priority-btns">
-                  <button
-                    class="p-btn"
-                    :class="{ active: (r.tier || '').toUpperCase() === 'A' }"
-                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'A')"
-                  >A 标 (核心)</button>
-                  <button
-                    class="p-btn"
-                    :class="{ active: (r.tier || '').toUpperCase() === 'B' }"
-                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'B')"
-                  >B 标 (代练)</button>
-                  <button
-                    class="p-btn"
-                    :class="{ active: (r.tier || '').toUpperCase() === 'C' }"
-                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'C')"
-                  >C 标 (拉练)</button>
+                  <text v-if="r.days_left !== undefined" class="race-days-countdown">
+                    倒计时 <text class="days-num">{{ r.days_left }}</text> 天
+                  </text>
                 </view>
 
-                <button
-                  v-if="targetRace !== r.race_name && !targetRace.includes(r.race_name) && !r.race_name.includes(targetRace)"
-                  class="set-target-btn"
-                  @click.stop="handleSelectTargetRace(r)"
-                >
-                  🎯 设为主备赛
-                </button>
+                <!-- Interactive A/B/C Priority Switcher -->
+                <view class="priority-switch-row">
+                  <view class="priority-left-group">
+                    <text class="switch-tip-lbl">调整级别:</text>
+                    <view class="priority-btns">
+                      <button
+                        class="p-btn p-btn-a"
+                        :class="{ active: (r.tier || '').toUpperCase() === 'A' }"
+                        :disabled="updatingPriority === (r.id || r.race_name)"
+                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'A')"
+                      >A 标 (核心)</button>
+                      <button
+                        class="p-btn p-btn-b"
+                        :class="{ active: (r.tier || '').toUpperCase() === 'B' }"
+                        :disabled="updatingPriority === (r.id || r.race_name)"
+                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'B')"
+                      >B 标 (代练)</button>
+                      <button
+                        class="p-btn p-btn-c"
+                        :class="{ active: (r.tier || '').toUpperCase() === 'C' }"
+                        :disabled="updatingPriority === (r.id || r.race_name)"
+                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'C')"
+                      >C 标 (拉练)</button>
+                    </view>
+                  </view>
+
+                  <button
+                    class="set-target-btn"
+                    :class="{ 'is-active-target': isCurrentTarget(r) }"
+                    @click.stop="handleSelectTargetRace(r)"
+                  >
+                    {{ isCurrentTarget(r) ? "🎯 当前主备赛" : "设为主目标" }}
+                  </button>
+                </view>
               </view>
-            </view>
 
-            <view class="race-detail-row">
-              <text class="detail-label">🎯 专项配速/心率：</text>
-              <text class="detail-content">{{ r.pacing_strategy }}</text>
-            </view>
+              <!-- Two Execution Boxes: Pacing Strategy & Taper/Recovery Rules -->
+              <view class="race-execution-boxes">
+                <view class="exec-box">
+                  <view class="exec-box-title">
+                    <text class="exec-icon">🎯</text>
+                    <text class="exec-label">目标配速与心率战术</text>
+                  </view>
+                  <text class="exec-desc">{{ r.pacing_strategy }}</text>
+                </view>
 
-            <view class="race-detail-row">
-              <text class="detail-label">⏳ 减量与恢复规程：</text>
-              <text class="detail-content">{{ r.taper_recovery_rule }}</text>
+                <view class="exec-box">
+                  <view class="exec-box-title">
+                    <text class="exec-icon">⏳</text>
+                    <text class="exec-label">减量规程与超量恢复</text>
+                  </view>
+                  <text class="exec-desc">{{ r.taper_recovery_rule }}</text>
+                </view>
+              </view>
             </view>
           </view>
         </view>
 
-        <!-- Conflict & Synergy Warning -->
+        <!-- Conflict & Strategic Diagnostics Banner -->
         <view v-if="analysis.multi_race_strategy.conflict_resolution" class="conflict-box">
-          <text class="conflict-title">⚠️ 战术规避与周期协同：</text>
+          <view class="conflict-title-row">
+            <text class="conflict-icon">⚠️</text>
+            <text class="conflict-title">战术规避与周期协同要点：</text>
+          </view>
           <text class="conflict-desc">{{ analysis.multi_race_strategy.conflict_resolution }}</text>
         </view>
       </view>
@@ -319,12 +357,28 @@ const defaultAnalysis = {
     "保持科学作息，长跑后注意水分电解质补充与睡眠恢复。"
   ],
   focus_workout_of_the_week: "基础有氧建立：轻松跑 30~45 分钟，心率控制在最大心率的 65%~75% 之间。",
-  recovery_advice: "夜间保证 7~8 小时高质量睡眠，观察晨起静息心率变化，建立稳定生理基线。"
+  recovery_advice: "夜间保证 7~8 小时高质量睡眠，观察晨起静息心率变化，建立稳定生理基线。",
+  multi_race_strategy: {
+    macro_cycle_overview: "基于您的赛季目标与生理恢复基线，系统已构建多维度宏观备赛周期。核心原则是保 A 标突破、用 B 标实战质检、用 C 标作为基础有氧模拟拉练。",
+    race_timeline_advice: [
+      {
+        id: "race-1",
+        race_name: "武功山 50K",
+        days_left: 60,
+        tier: "A",
+        tactical_role: "A 标核心突破 (Goal Race)",
+        pacing_strategy: "前程爬升克制在有氧阈值 (Zone 2) 75% 心率上限以内，杜绝乳酸过早堆积；中后程山脊跑段切换巡航配速，下坡注意技术动作缓冲与股四头肌离心负荷控制。",
+        taper_recovery_rule: "赛前 21 天开启阶段性减量：倒数第 3 周总跑量削减 20%，倒数第 2 周削减 40%，赛前周仅保留低心率调整跑与短冲刺神经激活，超量补偿碳水糖原储量。"
+      }
+    ],
+    conflict_resolution: "若多场赛事间隔小于 3 周，严禁连续安排高强度全力拼搏；B/C 标赛事后必须安排 5~7 天低心率恢复窗口，避免神经肌肉系统累积隐性疲劳。"
+  }
 };
 
 const user = ref<UserProfile | null>(null);
 const analysis = ref<any>(defaultAnalysis);
 const loading = ref(false);
+const updatingPriority = ref<string>("");
 const userRaces = ref<any[]>([]);
 
 const athleteInfo = computed(() => analysis.value?.athlete_snapshot || {});
@@ -338,6 +392,13 @@ const tsbClass = computed(() => {
   if (val >= -45) return "tsb-fatigued";
   return "tsb-danger";
 });
+
+function isCurrentTarget(r: any): boolean {
+  if (!r) return false;
+  const name = r.race_name || r.name;
+  if (!name || !targetRace.value) return false;
+  return targetRace.value === name || targetRace.value.includes(name) || name.includes(targetRace.value);
+}
 
 async function loadLatestReport() {
   user.value = getStoredUser();
@@ -390,7 +451,27 @@ function handleSelectRegisteredRace(r: any) {
 }
 
 function handleSelectTargetRace(r: any) {
-  targetRace.value = r.race_name || r.name;
+  const raceName = r.race_name || r.name;
+  if (!raceName) return;
+  targetRace.value = raceName;
+  const matching = userRaces.value.find((ur: any) => ur.name === raceName || ur.race_name === raceName);
+  if (matching) {
+    if (matching.target_time) targetTime.value = matching.target_time;
+    if (matching.race_type) {
+      const rt = String(matching.race_type).toLowerCase();
+      if (rt.includes("越野") || rt.includes("trail") || rt.includes("50k") || rt.includes("100k") || rt.includes("160")) {
+        raceType.value = "trail";
+      } else if (rt.includes("半")) {
+        raceType.value = "half";
+      } else if (rt.includes("10")) {
+        raceType.value = "10k";
+      } else if (rt.includes("5")) {
+        raceType.value = "5k";
+      } else {
+        raceType.value = "marathon";
+      }
+    }
+  }
   handleReAnalyze();
 }
 
@@ -402,7 +483,8 @@ async function handleUpdatePriority(raceIdentifier: string, priority: string) {
   if (!user.value || !user.value.id) return;
   const uid = user.value.id;
 
-  uni.showLoading({ title: "调整定位推演中..." });
+  updatingPriority.value = raceIdentifier;
+  uni.showLoading({ title: "战术重排推演中..." });
   try {
     const res = await request("/api/coach/race-priority", "POST", {
       uid,
@@ -412,19 +494,23 @@ async function handleUpdatePriority(raceIdentifier: string, priority: string) {
     });
     uni.hideLoading();
     if (res && res.multi_race_strategy) {
-      analysis.value = res;
+      analysis.value = {
+        ...analysis.value,
+        multi_race_analysis: res.multi_race_analysis,
+        multi_race_strategy: res.multi_race_strategy,
+      };
+      if (res.races) {
+        userRaces.value = res.races;
+      }
       uni.showToast({ title: "战术推演已重排", icon: "success" });
     } else {
       uni.showToast({ title: "已更新赛事定位", icon: "success" });
     }
-    // Refresh user races list
-    const rRes = await request(`/api/profile/${uid}/races`);
-    if (Array.isArray(rRes)) {
-      userRaces.value = rRes;
-    }
   } catch (err) {
     uni.hideLoading();
     uni.showToast({ title: "更新失败", icon: "none" });
+  } finally {
+    updatingPriority.value = "";
   }
 }
 
@@ -995,98 +1081,171 @@ onPullDownRefresh(async () => {
 
 .multi-race-card {
   border-left: 6rpx solid #bf5af2;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.multi-race-header {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 20rpx;
+  margin-bottom: 22rpx;
+}
+
+.multi-race-subtitle {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  line-height: 1.4;
+  margin-top: 4rpx;
+  display: block;
+}
+
+.total-races-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  background-color: rgba(175, 82, 222, 0.12);
+  border: 1rpx solid rgba(175, 82, 222, 0.25);
+  padding: 6rpx 16rpx;
+  border-radius: 16rpx;
+  align-self: flex-start;
+}
+
+.sparkle-icon {
+  font-size: 20rpx;
+}
+
+.total-races-text {
+  font-size: 20rpx;
+  color: #d8b4fe;
+  font-weight: 600;
 }
 
 .macrocycle-box {
-  background: linear-gradient(135deg, rgba(88, 28, 135, 0.25), rgba(26, 26, 30, 0.8));
-  border: 1rpx solid rgba(191, 90, 242, 0.3);
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.3) 0%, rgba(24, 24, 28, 0.95) 50%, rgba(49, 46, 129, 0.25) 100%);
+  border: 1rpx solid rgba(191, 90, 242, 0.25);
   border-radius: 20rpx;
-  padding: 20rpx;
-  margin-bottom: 24rpx;
+  padding: 22rpx;
+  margin-bottom: 26rpx;
+}
+
+.macrocycle-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 8rpx;
+}
+
+.macrocycle-icon {
+  font-size: 24rpx;
 }
 
 .macrocycle-label {
   font-size: 22rpx;
   font-weight: bold;
   color: #d8b4fe;
-  display: block;
-  margin-bottom: 8rpx;
 }
 
 .macrocycle-text {
   font-size: 24rpx;
   color: #f3f4f6;
-  line-height: 1.5;
+  line-height: 1.6;
+  display: block;
+}
+
+.timeline-section {
+  margin-bottom: 20rpx;
+}
+
+.timeline-section-title {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #a1a1aa;
+  letter-spacing: 1rpx;
+  text-transform: uppercase;
+  margin-bottom: 16rpx;
   display: block;
 }
 
 .race-timeline-list {
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
-  margin-bottom: 24rpx;
+  gap: 20rpx;
 }
 
 .race-item {
-  background-color: #1a1a1e;
-  border-radius: 20rpx;
+  background-color: #18181c;
+  border-radius: 24rpx;
   padding: 22rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s ease;
 }
 
 .race-item.tier-a {
-  border-color: rgba(244, 63, 94, 0.4);
-  background-color: rgba(30, 18, 24, 0.9);
+  border-color: rgba(244, 63, 94, 0.45);
+  background-color: rgba(32, 18, 24, 0.95);
+  box-shadow: 0 6rpx 24rpx rgba(244, 63, 94, 0.1);
 }
 
 .race-item.tier-b {
-  border-color: rgba(56, 189, 248, 0.3);
-  background-color: rgba(18, 24, 30, 0.9);
+  border-color: rgba(56, 189, 248, 0.35);
+  background-color: rgba(18, 26, 32, 0.95);
+}
+
+.race-item.tier-c {
+  border-color: rgba(255, 255, 255, 0.08);
+  background-color: #18181c;
 }
 
 .race-item-header {
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 16rpx;
+  margin-bottom: 16rpx;
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  margin-bottom: 16rpx;
+  gap: 14rpx;
 }
 
 .race-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10rpx;
 }
 
 .race-title-left {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  flex: 1;
+  flex-wrap: wrap;
 }
 
 .race-tier-badge {
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
   font-size: 20rpx;
-  font-weight: bold;
+  font-weight: 900;
+  border: 1rpx solid transparent;
 }
 
 .badge-a {
   background-color: rgba(244, 63, 94, 0.2);
-  color: #fb7185;
-  border: 1rpx solid rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+  border-color: rgba(244, 63, 94, 0.45);
 }
 
 .badge-b {
   background-color: rgba(56, 189, 248, 0.2);
-  color: #38bdf8;
-  border: 1rpx solid rgba(56, 189, 248, 0.4);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.4);
 }
 
 .badge-c {
   background-color: rgba(161, 161, 170, 0.2);
   color: #d4d4d8;
-  border: 1rpx solid rgba(161, 161, 170, 0.4);
+  border-color: rgba(161, 161, 170, 0.4);
 }
 
 .badge-text {
@@ -1094,15 +1253,20 @@ onPullDownRefresh(async () => {
 }
 
 .race-item-name {
-  font-size: 26rpx;
+  font-size: 28rpx;
   font-weight: bold;
   color: #ffffff;
 }
 
 .race-days-countdown {
   font-size: 22rpx;
-  color: #bf5af2;
-  font-weight: bold;
+  color: #a1a1aa;
+  font-weight: 500;
+}
+
+.days-num {
+  color: #d8b4fe;
+  font-weight: 900;
 }
 
 .priority-switch-row {
@@ -1110,15 +1274,24 @@ onPullDownRefresh(async () => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10rpx;
+  gap: 12rpx;
+  background-color: #121215;
   padding: 10rpx 14rpx;
-  background-color: rgba(0, 0, 0, 0.35);
-  border-radius: 14rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.05);
+}
+
+.priority-left-group {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex-wrap: wrap;
 }
 
 .switch-tip-lbl {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: #71717a;
+  font-weight: bold;
 }
 
 .priority-btns {
@@ -1132,9 +1305,10 @@ onPullDownRefresh(async () => {
   height: 44rpx;
   line-height: 44rpx;
   font-size: 20rpx;
+  font-weight: bold;
   color: #a1a1aa;
   background-color: rgba(255, 255, 255, 0.05);
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
   border-radius: 10rpx;
 }
 
@@ -1142,25 +1316,25 @@ onPullDownRefresh(async () => {
   border: none;
 }
 
-.p-btn.active:nth-child(1) {
-  background-color: rgba(244, 63, 94, 0.25);
-  color: #fb7185;
-  border-color: #f43f5e;
-  font-weight: bold;
+.p-btn-a.active {
+  background-color: #f43f5e;
+  color: #ffffff;
+  border-color: #fb7185;
+  box-shadow: 0 2rpx 10rpx rgba(244, 63, 94, 0.4);
 }
 
-.p-btn.active:nth-child(2) {
-  background-color: rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
+.p-btn-b.active {
+  background-color: #0284c7;
+  color: #ffffff;
   border-color: #38bdf8;
-  font-weight: bold;
+  box-shadow: 0 2rpx 10rpx rgba(56, 189, 248, 0.4);
 }
 
-.p-btn.active:nth-child(3) {
-  background-color: rgba(161, 161, 170, 0.25);
-  color: #e4e4e7;
-  border-color: #a1a1aa;
-  font-weight: bold;
+.p-btn-c.active {
+  background-color: #52525b;
+  color: #ffffff;
+  border-color: #71717a;
+  box-shadow: 0 2rpx 10rpx rgba(113, 113, 122, 0.4);
 }
 
 .set-target-btn {
@@ -1169,57 +1343,90 @@ onPullDownRefresh(async () => {
   height: 44rpx;
   line-height: 44rpx;
   font-size: 20rpx;
-  color: #d8b4fe;
-  background-color: rgba(191, 90, 242, 0.15);
-  border: 1rpx solid rgba(191, 90, 242, 0.35);
-  border-radius: 10rpx;
+  font-weight: bold;
+  color: #a1a1aa;
+  background-color: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 12rpx;
 }
 
 .set-target-btn::after {
   border: none;
 }
 
-.race-detail-row {
-  margin-top: 10rpx;
-  background-color: rgba(0, 0, 0, 0.25);
-  padding: 12rpx 16rpx;
-  border-radius: 14rpx;
+.set-target-btn.is-active-target {
+  background-color: rgba(147, 51, 234, 0.25);
+  color: #e9d5ff;
+  border-color: #a855f7;
 }
 
-.detail-label {
-  font-size: 20rpx;
+.race-execution-boxes {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.exec-box {
+  background-color: #121215;
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.05);
+}
+
+.exec-box-title {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 6rpx;
+}
+
+.exec-icon {
+  font-size: 22rpx;
+}
+
+.exec-label {
+  font-size: 22rpx;
   font-weight: bold;
   color: #a1a1aa;
-  margin-bottom: 4rpx;
-  display: block;
 }
 
-.detail-content {
+.exec-desc {
   font-size: 22rpx;
   color: #e4e4e7;
-  line-height: 1.4;
+  line-height: 1.5;
+  font-weight: 300;
   display: block;
 }
 
 .conflict-box {
-  background-color: rgba(245, 158, 11, 0.1);
-  border: 1rpx solid rgba(245, 158, 11, 0.35);
+  background-color: rgba(245, 158, 11, 0.08);
+  border: 1rpx solid rgba(245, 158, 11, 0.3);
   border-radius: 20rpx;
   padding: 20rpx;
+}
+
+.conflict-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 8rpx;
+}
+
+.conflict-icon {
+  font-size: 24rpx;
 }
 
 .conflict-title {
   font-size: 22rpx;
   font-weight: bold;
   color: #fbbf24;
-  display: block;
-  margin-bottom: 8rpx;
 }
 
 .conflict-desc {
   font-size: 22rpx;
   color: #fef3c7;
   line-height: 1.5;
+  font-weight: 300;
   display: block;
 }
 
