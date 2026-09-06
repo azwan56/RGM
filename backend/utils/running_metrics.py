@@ -97,50 +97,200 @@ def compute_ctl_atl_tsb(
 
     return results
 
+def format_duration(seconds: Optional[int]) -> str:
+    """Formats seconds into HH:MM:SS or MM:SS."""
+    if not seconds or seconds <= 0:
+        return "—"
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+def get_age_from_dob(dob_str: Optional[str]) -> Optional[int]:
+    """Calculates age in years from YYYY-MM-DD string."""
+    if not dob_str:
+        return None
+    try:
+        from datetime import date, datetime
+        dob = datetime.strptime(str(dob_str)[:10], "%Y-%m-%d").date()
+        today = date.today()
+        age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return max(0, age)
+    except Exception:
+        return None
+
 def get_canova_zones(marathon_pb_seconds: int) -> Dict[str, Dict[str, Any]]:
     """
     Calculates Renato Canova Training Pace Zones based on Marathon Pace (MP).
-    Zones:
-    - Fundamental (90-95% MP)
-    - Special (95-100% MP)
-    - Specific (100-105% MP)
-    - Max Specific (105-110% MP)
-    - Recovery (>110% MP)
     """
-    if not marathon_pb_seconds or marathon_pb_seconds <= 0:
-        marathon_pb_seconds = 10800 # 3:00:00 default
+    return get_race_specific_zones(
+        race_type="marathon",
+        target_time_seconds=marathon_pb_seconds,
+        pb_seconds=marathon_pb_seconds
+    )
 
-    mp_sec_per_km = marathon_pb_seconds / 42.195
+def get_race_specific_zones(
+    race_type: str,
+    target_time_seconds: Optional[int] = None,
+    pb_seconds: Optional[int] = None,
+    max_hr: int = 190,
+    rest_hr: int = 56
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Calculates Renato Canova Specificity Training Zones adapted for:
+    - marathon: Full Marathon (100% MP specificity)
+    - half: Half Marathon (LT2 threshold specificity)
+    - 10k: 10K Road/Track (VO2max & Specific Speed Endurance)
+    - 5k: 5K Road/Track (Maximal Aerobic Power & Lactate Capacity)
+    - trail: Trail Running / Ultra (Elevation D+, Eccentric Loading, %HRR zones)
+    """
+    r_type = (race_type or "marathon").lower()
+    if "trail" in r_type or "越野" in r_type or "ultra" in r_type or "50k" in r_type or "100k" in r_type:
+        hrr = max(20, max_hr - rest_hr)
+        def calc_hr(pct: float) -> int:
+            return int(round(rest_hr + hrr * pct))
+
+        return {
+            "recovery": {
+                "name": "极低强度主动恢复 (Active Recovery / Flat Easy)",
+                "range": f"心率 < {calc_hr(0.60)} bpm (或 < 68% Max HR)",
+                "desc": "平路极低强度慢跑或快走，促进下肢微循环，排除下肢组织水肿与酸痛"
+            },
+            "fundamental": {
+                "name": "山地持续有氧爬升 (Mountain Aerobic / Power Hiking)",
+                "range": f"心率 {calc_hr(0.60)} - {calc_hr(0.72)} bpm",
+                "desc": "下肢慢肌纤维耐力构建，结合手杖与前脚掌发力的山地快步走 (Power Hiking)"
+            },
+            "special": {
+                "name": "混氧门槛爬升推进 (Threshold Climbing / Continuous D+)",
+                "range": f"心率 {calc_hr(0.72)} - {calc_hr(0.82)} bpm",
+                "desc": "长上坡连续输出能力，逼近乳酸门槛，训练肌糖原节约与乳酸清除速率"
+            },
+            "specific": {
+                "name": "越野比赛专项节奏与技术下坡 (Trail Specific Pace & Tech Downhill)",
+                "range": f"心率 {calc_hr(0.75)} - {calc_hr(0.85)} bpm",
+                "desc": "模拟实战节奏，强化大腿股四头肌离心收缩耐受力与技术下坡敏捷性"
+            },
+            "max_specific": {
+                "name": "陡坡短间歇刺激 (Hill Repeats / VO2max Surge)",
+                "range": f"心率 > {calc_hr(0.88)} bpm",
+                "desc": "15%~25% 陡坡 1~2 分钟全力重复冲刺，提升下肢神经肌肉募集与最大摄氧量"
+            }
+        }
+
+    # Distance-based pacing calculation
+    dist_km = 42.195
+    if "half" in r_type or "半" in r_type:
+        dist_km = 21.0975
+    elif "10" in r_type:
+        dist_km = 10.0
+    elif "5" in r_type:
+        dist_km = 5.0
+
+    base_seconds = target_time_seconds or pb_seconds
+    if not base_seconds or base_seconds <= 0:
+        if dist_km == 42.195:
+            base_seconds = 11370 # 3:09:30
+        elif dist_km == 21.0975:
+            base_seconds = 5457  # 1:30:57
+        elif dist_km == 10.0:
+            base_seconds = 2426  # 40:26
+        else:
+            base_seconds = 1164  # 19:24
+
+    rp_sec_per_km = base_seconds / dist_km
 
     def fmt_pace(sec_km: float) -> str:
         m = int(sec_km // 60)
         s = int(round(sec_km % 60))
         return f"{m}:{s:02d}"
 
+    if "half" in r_type or "半" in r_type:
+        return {
+            "recovery": {
+                "name": "恢复跑 / 低心率慢跑 (Recovery)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.78)} - {fmt_pace(rp_sec_per_km / 0.85)} /km",
+                "desc": "毛细血管微循环激活与代谢废物排酸"
+            },
+            "fundamental": {
+                "name": "基础有氧耐力 (Fundamental Endurance)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.85)} - {fmt_pace(rp_sec_per_km / 0.92)} /km",
+                "desc": "半马配速 85%~92%，大容量有氧长跑 (LSD/基础积累)"
+            },
+            "special": {
+                "name": "专项准备推进 (Special Aerobic Endurance)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.92)} - {fmt_pace(rp_sec_per_km / 0.98)} /km",
+                "desc": "接近全马比赛配速，乳酸稳态积累与能量节约"
+            },
+            "specific": {
+                "name": "半马比赛专项乳酸门槛 (Half Marathon Specific LT2)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.98)} - {fmt_pace(rp_sec_per_km / 1.02)} /km",
+                "desc": "目标半马配速 98%~102%，核心专项耐力与门槛巡航"
+            },
+            "max_specific": {
+                "name": "专项速度储备 (Specific Speed Reserve)",
+                "range": f"{fmt_pace(rp_sec_per_km / 1.04)} - {fmt_pace(rp_sec_per_km / 1.10)} /km",
+                "desc": "10K/5K 配速间歇，推高 VO2max 与神经肌肉效率"
+            }
+        }
+    elif "10" in r_type or "5" in r_type:
+        dist_name = "10K" if "10" in r_type else "5K"
+        return {
+            "recovery": {
+                "name": "恢复跑 / 基础慢跑 (Recovery)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.72)} - {fmt_pace(rp_sec_per_km / 0.80)} /km",
+                "desc": "极低强度轻松慢跑，恢复中枢神经系统"
+            },
+            "fundamental": {
+                "name": "基础有氧基线 (General Aerobic Base)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.80)} - {fmt_pace(rp_sec_per_km / 0.88)} /km",
+                "desc": "有氧支撑与基础里程构建"
+            },
+            "special": {
+                "name": "乳酸阈值门槛跑 (Lactate Threshold Tempo)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.88)} - {fmt_pace(rp_sec_per_km / 0.95)} /km",
+                "desc": "半马配速稳态跑，拉高无氧阈值平台"
+            },
+            "specific": {
+                "name": f"{dist_name} 比赛专项配速 (Race Specific Pace)",
+                "range": f"{fmt_pace(rp_sec_per_km / 0.98)} - {fmt_pace(rp_sec_per_km / 1.02)} /km",
+                "desc": f"100% {dist_name} 目标比赛配速间歇 (如 5×2000m 或 6×1000m)"
+            },
+            "max_specific": {
+                "name": "速度与乳酸耐受突破 (Lactic Power / Speed Surge)",
+                "range": f"{fmt_pace(rp_sec_per_km / 1.05)} - {fmt_pace(rp_sec_per_km / 1.15)} /km",
+                "desc": "短间歇冲刺 (400m/800m)，强化快肌纤维募集与冲刺能力"
+            }
+        }
+
+    # Default: Full Marathon
     return {
         "recovery": {
             "name": "恢复跑 / 基础慢跑 (Recovery/Easy)",
-            "range": f"{fmt_pace(mp_sec_per_km / 0.80)} - {fmt_pace(mp_sec_per_km / 0.88)} /km",
+            "range": f"{fmt_pace(rp_sec_per_km / 0.80)} - {fmt_pace(rp_sec_per_km / 0.88)} /km",
             "desc": "毛细血管增生与有氧基础构建"
         },
         "fundamental": {
             "name": "基础有氧耐力 (Fundamental Endurance)",
-            "range": f"{fmt_pace(mp_sec_per_km / 0.90)} - {fmt_pace(mp_sec_per_km / 0.95)} /km",
+            "range": f"{fmt_pace(rp_sec_per_km / 0.90)} - {fmt_pace(rp_sec_per_km / 0.95)} /km",
             "desc": "马拉松配速的 90%~95%，持续有氧长跑 (LSD/Progression)"
         },
         "special": {
             "name": "专项准备能力 (Special Endurance)",
-            "range": f"{fmt_pace(mp_sec_per_km / 0.95)} - {fmt_pace(mp_sec_per_km / 1.00)} /km",
+            "range": f"{fmt_pace(rp_sec_per_km / 0.95)} - {fmt_pace(rp_sec_per_km / 1.00)} /km",
             "desc": "马拉松配速的 95%~100%，乳酸阈值与专项耐力结合"
         },
         "specific": {
             "name": "马拉松专项速度 (Marathon Specific)",
-            "range": f"{fmt_pace(mp_sec_per_km / 1.00)} - {fmt_pace(mp_sec_per_km / 1.05)} /km",
+            "range": f"{fmt_pace(rp_sec_per_km / 1.00)} - {fmt_pace(rp_sec_per_km / 1.05)} /km",
             "desc": "目标全马配速 100%~105%，比赛核心专项刺激"
         },
         "max_specific": {
             "name": "最大专项速度 (Maximum Specific)",
-            "range": f"{fmt_pace(mp_sec_per_km / 1.05)} - {fmt_pace(mp_sec_per_km / 1.12)} /km",
+            "range": f"{fmt_pace(rp_sec_per_km / 1.05)} - {fmt_pace(rp_sec_per_km / 1.12)} /km",
             "desc": "半马/10K 配速间歇，提升 VO2max 与速度储备"
         }
     }
+

@@ -454,6 +454,110 @@ class LocalStore:
         return rows
 
     @staticmethod
+    def get_training_load(uid: str, days: int = 60) -> Dict[str, Any]:
+        """
+        Calculates Banister impulse-response model metrics:
+        - CTL (Fitness - 42d EWMA)
+        - ATL (Fatigue - 7d EWMA)
+        - TSB (Form = CTL - ATL)
+        - ACWR (Acute:Chronic Workload Ratio)
+        - Physiological status & injury risk warnings
+        """
+        start_date = date.today() - timedelta(days=days)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT start_time, distance_meters, moving_time_seconds, average_heartrate, trimp
+                FROM activities
+                WHERE user_id = ? AND start_time >= ?
+                ORDER BY start_time ASC
+            """, (uid, start_date.isoformat()))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        profile = LocalStore.get_profile(uid) or {}
+        max_hr = float(profile.get("max_heart_rate") or 190)
+        rest_hr = float(profile.get("resting_heart_rate") or 56)
+        gender = str(profile.get("gender") or "male")
+
+        from utils.running_metrics import calculate_trimp, compute_ctl_atl_tsb
+
+        # Group TRIMP by YYYY-MM-DD
+        daily_map: Dict[str, float] = {}
+        for r in rows:
+            st = str(r.get("start_time") or "")[:10]
+            if not st:
+                continue
+            trimp = float(r.get("trimp") or 0)
+            if trimp <= 0:
+                dur_min = float(r.get("moving_time_seconds") or 0) / 60.0
+                avg_hr = float(r.get("average_heartrate") or 0)
+                if dur_min > 0 and avg_hr > rest_hr:
+                    trimp = calculate_trimp(dur_min, avg_hr, rest_hr, max_hr, gender)
+            daily_map[st] = daily_map.get(st, 0.0) + trimp
+
+        # Build day-by-day continuous series (decay happens on rest days with 0 TRIMP)
+        today = date.today()
+        cur_date = start_date
+        daily_series = []
+        while cur_date <= today:
+            d_str = cur_date.isoformat()
+            daily_series.append((d_str, daily_map.get(d_str, 0.0)))
+            cur_date += timedelta(days=1)
+
+        tsb_history = compute_ctl_atl_tsb(daily_series)
+        if not tsb_history:
+            return {
+                "ctl": 0.0,
+                "atl": 0.0,
+                "tsb": 0.0,
+                "acwr": 0.0,
+                "status": "初始基线建立中",
+                "status_code": "initial",
+                "risk_warning": None,
+                "history_last_14d": []
+            }
+
+        latest = tsb_history[-1]
+        ctl = latest["ctl"]
+        atl = latest["atl"]
+        tsb = latest["tsb"]
+        acwr = round(atl / max(1.0, ctl), 2)
+
+        if tsb > 15:
+            status = "巅峰就绪 (Peak Form)"
+            status_code = "fresh"
+            risk = None
+        elif tsb >= -10:
+            status = "平衡稳健 (Neutral Form)"
+            status_code = "neutral"
+            risk = None
+        elif tsb >= -30:
+            status = "最佳吸收 (Productive Training)"
+            status_code = "optimal"
+            risk = None
+        elif tsb >= -45:
+            status = "高度疲劳 (High Fatigue)"
+            status_code = "fatigued"
+            risk = "近期急性疲劳 (ATL) 累积过快，注意控制高强度课密度，保证水分、电解质与夜间充足睡眠。"
+        else:
+            status = "过度负荷 / 伤病高危预警 (High Injury Risk)"
+            status_code = "danger"
+            risk = "⚠️ 警报：短期负荷已达机能红线 (TSB < -45)，肌肉与韧带过度承压，强烈建议安排 48~72 小时减量慢跑或彻底休整，严禁盲目执行大强度刺激！"
+
+        return {
+            "ctl": ctl,
+            "atl": atl,
+            "tsb": tsb,
+            "acwr": acwr,
+            "status": status,
+            "status_code": status_code,
+            "risk_warning": risk,
+            "history_last_14d": tsb_history[-14:]
+        }
+
+
+    @staticmethod
     def get_month_distance_meters(uid: str, month_start: str) -> float:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
@@ -1430,18 +1534,52 @@ class LocalStore:
         return board
 
     @staticmethod
-    def generate_canova_critique(activity: Dict[str, Any]) -> str:
+    def generate_canova_critique(activity: Dict[str, Any], profile: Optional[Dict[str, Any]] = None) -> str:
         """
-        Generates Renato Canova endurance training philosophy critique based on actual workout metrics.
+        Generates Renato Canova endurance training philosophy critique based on actual workout metrics,
+        personal heart rate reserve (%HRR), age-related recovery, and race terrain (trail vs road).
         """
         dist_m = float(activity.get("distance_meters") or 0)
         dist_km = round(dist_m / 1000.0, 2)
         pace_str = activity.get("avg_pace_str") or "5:30"
         avg_hr = activity.get("average_heartrate")
         trimp = float(activity.get("trimp") or 50)
+        elev_gain = float(activity.get("elevation_gain_meters") or 0)
+        act_name = str(activity.get("name") or "")
 
         if dist_km < 1.0:
             return "短距离激活训练，建议结合动态拉伸与下肢力量辅助练习。"
+
+        if profile is None and activity.get("user_id"):
+            profile = LocalStore.get_profile(activity["user_id"])
+
+        max_hr = float((profile.get("max_heart_rate") if profile else None) or 190)
+        rest_hr = float((profile.get("resting_heart_rate") if profile else None) or 56)
+        hrr = max(20.0, max_hr - rest_hr)
+
+        # Dynamic physiological thresholds
+        recovery_ceiling = rest_hr + hrr * 0.62  # Active recovery ceiling
+        aerobic_ceiling = rest_hr + hrr * 0.75   # Fundamental aerobic ceiling
+        threshold_ceiling = rest_hr + hrr * 0.88 # Lactate threshold ceiling
+
+        from utils.running_metrics import get_age_from_dob
+        age = get_age_from_dob(profile.get("date_of_birth") if profile else None)
+        age_advice = ""
+        if age and age >= 50:
+            age_advice = f"（鉴于跑者周岁已满 {age} 岁，大负荷后结缔组织与肌糖原再生需充裕时间，建议保证 48~72 小时超量恢复窗口并强化核心抗阻）"
+
+        # Check for Trail / Mountain running
+        is_trail = elev_gain >= 200 or "越野" in act_name or "山" in act_name or "trail" in act_name.lower()
+        if is_trail:
+            if elev_gain >= 500 or dist_km >= 20:
+                workout_type = "Renato Canova 山地大爬升专项耐力 (Mountain D+ Specific Endurance)"
+                analysis = f"本次克服累计爬升 +{int(elev_gain)}m，推进 {dist_km}km，均心率 {avg_hr or '—'}bpm。不仅考验心肺氧转，更是对股四头肌离心抗撕裂能力与长陡坡快步走 (Power Hiking) 专项神经肌肉募集的深度刺激。"
+                advice = f"山地下坡离心收缩对下肢肌纤维微损伤较深，建议课后 30 分钟内足量补充蛋白质与电解质，做好大腿前侧与髂胫束筋膜滚压放松。{age_advice}"
+            else:
+                workout_type = "山地起伏路有氧感知 (Trail Undulation Aerobic)"
+                analysis = f"山地起伏推进 {dist_km}km (爬升 +{int(elev_gain)}m)，均速 {pace_str}。有效激活非铺装路面下肢踝关节本体感觉与核心抗扭转平衡。"
+                advice = f"越野重在时间负荷与心率稳态，注意下坡落脚缓震，避免关节硬着陆。{age_advice}"
+            return f"【{workout_type}】{analysis} 💡 教练建议：{advice}"
 
         pace_seconds = 330
         if ":" in pace_str:
@@ -1452,36 +1590,36 @@ class LocalStore:
                 pass
 
         if dist_km >= 20:
-            if avg_hr and avg_hr < 145:
+            if avg_hr and avg_hr < aerobic_ceiling:
                 workout_type = "Renato Canova 基础长距离耐力课 (Fundamental Aerobic Long Run)"
-                analysis = f"本次完成 {dist_km}km，配速 {pace_str}，平均心率仅 {avg_hr}bpm。极佳的有氧基础支撑，脂肪氧化供能效率高，微血管网得到充分激活。"
-                advice = "核心耐力储备极佳！明日建议安排彻底休整或 6~8km 超低心率排酸慢跑。"
+                analysis = f"本次完成 {dist_km}km，配速 {pace_str}，平均心率 {avg_hr}bpm (低于个人的有氧上限 {int(aerobic_ceiling)}bpm)。极佳的有氧基础支撑，微血管网与慢肌纤维氧化供能得到充分激活。"
+                advice = f"核心耐力储备极佳！明日建议安排彻底休整或 6~8km 超低心率排酸慢跑。{age_advice}"
             else:
                 workout_type = "马拉松专项耐力刺激 (Specific Marathon Endurance)"
-                analysis = f"本次高质量推进 {dist_km}km，配速 {pace_str}，心率维持在 {avg_hr or '中高'}bpm。属于典型的 Canova 专项耐力构建课，有效提升后程抗疲劳韧性。"
-                advice = "肌糖原消耗深度较大，建议 30 分钟内足量补充优质碳水与电解质，后天再安排慢跑。"
+                analysis = f"本次高质量推进 {dist_km}km，配速 {pace_str}，心率维持在 {avg_hr or '中高'}bpm。属于典型的 Canova 专项耐力构建课，有效推升后程抗疲劳韧性。"
+                advice = f"肌糖原消耗深度较大，建议 30 分钟内足量补充优质碳水与电解质，后天再安排主课。{age_advice}"
         elif dist_km >= 12:
-            if pace_seconds <= 300:
+            if avg_hr and avg_hr >= threshold_ceiling:
                 workout_type = "快速持续跑 / 混氧门槛突破 (Fast Continuous Progression)"
-                analysis = f"本次推进 {dist_km}km，配速达 {pace_str}，平均心率 {avg_hr or '—'}bpm。乳酸清除速率与摄氧效率兼备，有效推高乳酸门槛速度。"
-                advice = "高强度课完成质量极高！接下来 48 小时应以低心率慢跑排酸为主，避免连续大负荷。"
+                analysis = f"本次推进 {dist_km}km，配速达 {pace_str}，平均心率 {avg_hr}bpm 触达乳酸门槛区。乳酸清除速率与摄氧效率兼备，有效推高乳酸门槛巡航速度。"
+                advice = f"高强度课完成质量极高！接下来 48 小时应以低心率慢跑排酸为主，避免连续大负荷。{age_advice}"
             else:
                 workout_type = "稳态专项有氧进阶 (Aerobic Endurance Progression)"
                 analysis = f"完成 {dist_km}km 专项课，配速 {pace_str}，心率负荷处于稳态吸收区间（TRIMP: {trimp}）。心率漂移可控，肌肉收缩力与步频节奏协调。"
-                advice = "训练节奏保持得非常好，建议课后做好腘绳肌与小腿放松。"
+                advice = f"训练节奏保持得非常好，建议课后做好腘绳肌与小腿放松。{age_advice}"
         elif dist_km >= 6:
-            if avg_hr and avg_hr < 135:
+            if avg_hr and avg_hr < recovery_ceiling:
                 workout_type = "低心率排酸主动恢复 (Active Recovery Run)"
-                analysis = f"轻松完成 {dist_km}km，平均心率 {avg_hr}bpm。有效促进下肢微循环，加速代谢废物清除，无额外中枢神经疲劳负担。"
+                analysis = f"轻松完成 {dist_km}km，平均心率 {avg_hr}bpm (低于恢复阈值 {int(recovery_ceiling)}bpm)。有效促进下肢微循环，加速代谢废物清除，无额外中枢神经疲劳负担。"
                 advice = "极佳的恢复跑执行力！身体已充分就绪，下一堂主课可按计划冲击目标配速。"
             else:
                 workout_type = "日常基础有氧构建 (General Aerobic Foundation)"
-                analysis = f"跑程 {dist_km}km，配速 {pace_str}，平均心率 {avg_hr or '145'}bpm。步态节奏平稳，有效维持有氧基础与下肢肌腱刚性。"
-                advice = "课表执行到位，明天可根据体感自由选择休整或轻度慢跑。"
+                analysis = f"跑程 {dist_km}km，配速 {pace_str}，平均心率 {avg_hr or '—'}bpm。步态节奏平稳，有效维持有氧基础与下肢肌腱刚性。"
+                advice = f"课表执行到位，明天可根据体感自由选择休整或轻度慢跑。{age_advice}"
         else:
             workout_type = "短程激活与速度感知 (Short Activation Run)"
             analysis = f"短程奔跑 {dist_km}km，步频顺畅，适合赛前神经激活或大强度课后的排酸调整。"
-            advice = "适度热身与拉伸，保持良好身体机能。"
+            advice = f"适度热身与拉伸，保持良好身体机能。{age_advice}"
 
         return f"【{workout_type}】{analysis} 💡 教练建议：{advice}"
 
