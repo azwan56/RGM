@@ -47,6 +47,7 @@ class RacePlanRequest(BaseModel):
     race_type: str
     race_date: str
     target_time: str
+    priority: Optional[Any] = 1
 
 def secs_to_time_str(s: Optional[int]) -> str:
     if not s or s <= 0:
@@ -312,3 +313,16 @@ def delete_user_race(uid: str, race_id: str):
     """Deletes a race plan."""
     LocalStore.delete_race_plan(uid, race_id)
     return {"message": "比赛计划已删除", "races": LocalStore.get_race_plans(uid)}
+
+
+class RacePriorityUpdateRequest(BaseModel):
+    priority: Any
+
+@router.patch("/{uid}/races/{race_id}/priority")
+@router.post("/{uid}/races/{race_id}/priority")
+def update_race_priority(uid: str, race_id: str, req: RacePriorityUpdateRequest):
+    """Quickly updates the A/B/C tier priority for a user's race."""
+    raw_pri = str(req.priority).upper()
+    pri_int = 1 if raw_pri in ["A", "1"] else (2 if raw_pri in ["B", "2"] else 3)
+    LocalStore.update_race_plan_priority(uid, race_id, pri_int)
+    return {"message": "赛事优先级已更新", "races": LocalStore.get_race_plans(uid)}

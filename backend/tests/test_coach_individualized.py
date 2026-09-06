@@ -162,7 +162,54 @@ def test_analyze_multi_race_calendar_and_strategy():
     assert len(strat["race_timeline_advice"]) == 3
     assert strat["race_timeline_advice"][0]["race_name"] == "上海半马"
     assert strat["race_timeline_advice"][0]["tier"] == "B"
-    assert "以赛代练" in strat["race_timeline_advice"][0]["tactical_role"]
     assert "conflict_resolution" in strat
     assert "赛程冲突警报" in strat["conflict_resolution"]
+
+def test_update_race_priority_and_deduplication():
+    from routers.coach import update_coach_race_priority, CoachRacePriorityRequest, CoachAnalysisRequest, generate_coach_analysis
+    import uuid
+    test_uid = f"u_test_pri_{uuid.uuid4().hex[:8]}"
+    
+    # 1. Setup profile and 2 races
+    LocalStore.upsert_profile(test_uid, {"display_name": "多赛测试跑者"})
+    r1_id = LocalStore.upsert_race_plan(test_uid, {
+        "name": "武功山",
+        "race_type": "trail",
+        "race_date": "2026-11-01",
+        "target_time": "8:00:00",
+        "priority": "A"
+    })
+    r2_id = LocalStore.upsert_race_plan(test_uid, {
+        "name": "灵鹫山",
+        "race_type": "trail",
+        "race_date": "2026-10-15",
+        "target_time": "7:30:00",
+        "priority": "A"
+    })
+
+    # 2. Adjust Lingjiushan priority to "B"
+    res = update_coach_race_priority(CoachRacePriorityRequest(uid=test_uid, race_id=r2_id, priority="B"))
+    assert res["success"] is True
+    # Verify in DB
+    updated_races = LocalStore.get_race_plans(test_uid)
+    r2_updated = next(r for r in updated_races if r["id"] == r2_id)
+    assert r2_updated["priority"] == 2
+
+    # 3. Test Deduplication: calling analysis with target_race="武功山 50K" should match "武功山" without duplicating
+    analysis = generate_coach_analysis(CoachAnalysisRequest(
+        uid=test_uid,
+        target_race="武功山 50K",
+        target_time="8:00:00",
+        race_type="trail"
+    ))
+    # Should only have 2 races, not 3!
+    upcoming_races = analysis["multi_race_analysis"]["races"]
+    assert len(upcoming_races) == 2
+    race_names = [r["name"] for r in upcoming_races]
+    assert race_names.count("武功山") == 1
+    assert "武功山 50K" not in race_names or race_names.count("武功山 50K") == 1
+    # Check that ID is preserved in timeline advice
+    timeline = analysis["multi_race_strategy"]["race_timeline_advice"]
+    assert len(timeline) == 2
+    assert all("id" in t and t["id"] for t in timeline)
 

@@ -31,6 +31,8 @@ export default function CoachPage() {
   const [targetRace, setTargetRace] = useState("武功山 50K");
   const [targetTime, setTargetTime] = useState("8:00:00");
   const [raceType, setRaceType] = useState("trail");
+  const [userRaces, setUserRaces] = useState<any[]>([]);
+  const [updatingPriority, setUpdatingPriority] = useState<string | null>(null);
 
   const racePresets = [
     { label: "🏔️ 武功山 50K (越野)", race: "武功山 50K", time: "8:00:00", type: "trail" },
@@ -53,21 +55,70 @@ export default function CoachPage() {
 
   async function loadLatestAnalysis(uid: string) {
     try {
+      // 1. Fetch user registered race plans
+      let realRaces: any[] = [];
+      try {
+        const rRes = await apiClient.get(`/api/profile/${uid}/races`);
+        if (rRes.data?.races) {
+          realRaces = rRes.data.races;
+          setUserRaces(realRaces);
+        }
+      } catch (err) {
+        console.warn("User races fetch error:", err);
+      }
+
+      // 2. Fetch coach report
       const res = await apiClient.get(`/api/coach/latest/${uid}`);
       if (res.data && res.data.summary) {
         setAnalysis(res.data);
-        if (res.data.athlete_snapshot?.target_race) {
-          setTargetRace(res.data.athlete_snapshot.target_race);
+        const savedTarget = res.data.athlete_snapshot?.target_race;
+        if (savedTarget) {
+          setTargetRace(savedTarget);
+        } else if (realRaces.length > 0) {
+          setTargetRace(realRaces[0].name);
+          if (realRaces[0].target_time) setTargetTime(realRaces[0].target_time);
         }
+
         if (res.data.athlete_snapshot?.target_time) {
           setTargetTime(res.data.athlete_snapshot.target_time);
         }
         if (res.data.athlete_snapshot?.race_category) {
           setRaceType(res.data.athlete_snapshot.race_category);
         }
+      } else if (realRaces.length > 0) {
+        // Auto-select first registered race if no previous report
+        setTargetRace(realRaces[0].name);
+        if (realRaces[0].target_time) setTargetTime(realRaces[0].target_time);
       }
     } catch (e) {
       console.error("Latest coach report fetch error:", e);
+    }
+  }
+
+  async function handleUpdateRacePriority(raceIdOrName: string, priority: "A" | "B" | "C") {
+    if (!user?.id) return;
+    setUpdatingPriority(raceIdOrName);
+    try {
+      const res = await apiClient.post("/api/coach/race-priority", {
+        uid: user.id,
+        race_id: raceIdOrName,
+        priority,
+      });
+      if (res.data?.success) {
+        setAnalysis((prev: any) => ({
+          ...prev,
+          multi_race_analysis: res.data.multi_race_analysis,
+          multi_race_strategy: res.data.multi_race_strategy,
+        }));
+        if (res.data.races) {
+          setUserRaces(res.data.races);
+        }
+      }
+    } catch (e: any) {
+      console.error("Failed to update race priority:", e);
+      alert("调整赛事定位失败: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setUpdatingPriority(null);
     }
   }
 
@@ -201,8 +252,70 @@ export default function CoachPage() {
               </span>
             </div>
 
-            {/* Quick Presets */}
+            {/* User Registered Races Quick Selector */}
+            {userRaces.length > 0 && (
+              <div className="space-y-1.5 pb-3 border-b border-white/5">
+                <div className="text-[11px] text-zinc-400 font-bold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-purple-300">
+                    <span>🚩</span> 您已登记的备赛日程（点击切换当前分析主目标）：
+                  </span>
+                  <span className="text-[10px] text-zinc-500 font-normal">
+                    共 {userRaces.length} 场
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {userRaces.map((r: any) => {
+                    const isSelected = targetRace === r.name;
+                    const rawPri = String(r.priority || 1).toUpperCase();
+                    const tier = (rawPri === "2" || rawPri === "B") ? "B" : ((rawPri === "3" || rawPri === "C") ? "C" : "A");
+                    const tierBadgeClass = tier === "A"
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                      : tier === "B"
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                      : "bg-zinc-800 text-zinc-300 border-zinc-700";
+
+                    return (
+                      <button
+                        key={r.id || r.name}
+                        onClick={() => {
+                          setTargetRace(r.name);
+                          if (r.target_time) setTargetTime(r.target_time);
+                          if (r.race_type) {
+                            const rt = String(r.race_type).toLowerCase();
+                            if (rt.includes("越野") || rt.includes("trail") || rt.includes("50k") || rt.includes("100k") || rt.includes("160")) {
+                              setRaceType("trail");
+                            } else if (rt.includes("半")) {
+                              setRaceType("half");
+                            } else if (rt.includes("10")) {
+                              setRaceType("10k");
+                            } else if (rt.includes("5")) {
+                              setRaceType("5k");
+                            } else {
+                              setRaceType("marathon");
+                            }
+                          }
+                        }}
+                        className={`text-xs px-3 py-1.5 rounded-xl border transition-all flex items-center gap-2 ${
+                          isSelected
+                            ? "bg-purple-600 border-purple-500 text-white font-bold shadow-lg shadow-purple-600/30 ring-2 ring-purple-400"
+                            : "bg-[#18181c] border-white/10 text-zinc-300 hover:border-purple-500/50 hover:text-white"
+                        }`}
+                      >
+                        <span>{r.race_type?.includes("越野") ? "🏔️" : "🏅"}</span>
+                        <span>{r.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${tierBadgeClass}`}>
+                          {tier} 标
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Presets (Fallback or New Goal Exploration) */}
             <div className="flex flex-wrap gap-2">
+              <span className="text-[11px] text-zinc-500 self-center mr-1">参考预设:</span>
               {racePresets.map((p, idx) => (
                 <button
                   key={idx}
@@ -211,7 +324,7 @@ export default function CoachPage() {
                     setTargetTime(p.time);
                     setRaceType(p.type);
                   }}
-                  className={`text-xs px-3 py-1.5 rounded-xl border transition-all ${
+                  className={`text-xs px-2.5 py-1 rounded-xl border transition-all ${
                     targetRace === p.race
                       ? "bg-purple-600/30 border-purple-500 text-purple-200 font-bold"
                       : "bg-[#18181c] border-white/5 text-zinc-400 hover:text-white"
@@ -335,7 +448,7 @@ export default function CoachPage() {
                               : "bg-[#18181c] border-white/5"
                           }`}
                         >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 pb-3 border-b border-white/5">
                             <div className="flex items-center gap-2.5 flex-wrap">
                               <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${tierBadgeClass}`}>
                                 {r.tactical_role || `${r.tier} 标`}
@@ -343,12 +456,92 @@ export default function CoachPage() {
                               <span className="text-sm sm:text-base font-black text-white">
                                 {r.race_name}
                               </span>
+                              {r.days_left !== undefined && (
+                                <span className="text-xs text-zinc-400 font-medium">
+                                  倒计时 <strong className="text-purple-300 font-bold">{r.days_left}</strong> 天
+                                </span>
+                              )}
                             </div>
-                            {r.days_left !== undefined && (
-                              <span className="text-xs text-zinc-400 font-medium">
-                                倒计时 <strong className="text-purple-300 font-bold">{r.days_left}</strong> 天
-                              </span>
-                            )}
+
+                            {/* Interactive A/B/C Priority Switcher */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-1 bg-[#121215] p-1 rounded-xl border border-white/5">
+                                <span className="text-[10px] text-zinc-500 font-bold px-1">调整级别:</span>
+                                <button
+                                  type="button"
+                                  disabled={updatingPriority === (r.id || r.race_name)}
+                                  onClick={() => handleUpdateRacePriority(r.id || r.race_name, "A")}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                                    r.tier === "A"
+                                      ? "bg-rose-500 text-white shadow-sm shadow-rose-500/50 ring-1 ring-rose-300"
+                                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                                  }`}
+                                  title="A 标：核心目标之战，安排最高优先级与深度赛前减量"
+                                >
+                                  A 标 (核心)
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={updatingPriority === (r.id || r.race_name)}
+                                  onClick={() => handleUpdateRacePriority(r.id || r.race_name, "B")}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                                    r.tier === "B"
+                                      ? "bg-cyan-500 text-white shadow-sm shadow-cyan-500/50 ring-1 ring-cyan-300"
+                                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                                  }`}
+                                  title="B 标：以赛代练，门槛巡航检验补给，无需深度减量"
+                                >
+                                  B 标 (代练)
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={updatingPriority === (r.id || r.race_name)}
+                                  onClick={() => handleUpdateRacePriority(r.id || r.race_name, "C")}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                                    r.tier === "C"
+                                      ? "bg-zinc-600 text-white shadow-sm shadow-zinc-600/50 ring-1 ring-zinc-400"
+                                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                                  }`}
+                                  title="C 标：模拟拉练，作为长距离基础跑，低负荷安全完赛"
+                                >
+                                  C 标 (拉练)
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTargetRace(r.race_name);
+                                  // Update zones & auto-fill
+                                  const matchingUserRace = userRaces.find((ur: any) => ur.name === r.race_name);
+                                  if (matchingUserRace) {
+                                    if (matchingUserRace.target_time) setTargetTime(matchingUserRace.target_time);
+                                    if (matchingUserRace.race_type) {
+                                      const rt = String(matchingUserRace.race_type).toLowerCase();
+                                      if (rt.includes("越野") || rt.includes("trail") || rt.includes("50k") || rt.includes("100k") || rt.includes("160")) {
+                                        setRaceType("trail");
+                                      } else if (rt.includes("半")) {
+                                        setRaceType("half");
+                                      } else if (rt.includes("10")) {
+                                        setRaceType("10k");
+                                      } else if (rt.includes("5")) {
+                                        setRaceType("5k");
+                                      } else {
+                                        setRaceType("marathon");
+                                      }
+                                    }
+                                  }
+                                }}
+                                className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                                  targetRace === r.race_name
+                                    ? "bg-purple-600/30 border-purple-500 text-purple-200"
+                                    : "bg-[#18181c] border-white/10 text-zinc-400 hover:text-white hover:border-purple-500/50"
+                                }`}
+                                title="设为当前专项深度分析的单一聚焦点"
+                              >
+                                {targetRace === r.race_name ? "当前主备赛" : "设为主目标"}
+                              </button>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">

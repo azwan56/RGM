@@ -13,6 +13,7 @@ export interface RacePlan {
   race_date: string;
   target_time: string;
   days_left?: number;
+  priority?: number | string;
 }
 
 import GarminConnectModal from "@/components/GarminConnectModal";
@@ -261,6 +262,7 @@ export default function ProfilePage() {
       race_date: new Date().toISOString().slice(0, 10),
       target_time: "3:30:00",
       days_left: 60,
+      priority: 1,
     };
     setRaces([...races, newRace]);
   }
@@ -627,6 +629,19 @@ export default function ProfilePage() {
                         placeholder="例如 3:30:00 或 40:00:00"
                         className="w-full bg-[#202026] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-zinc-400 block mb-1.5">赛事定位分级 (Canova A/B/C)</label>
+                      <select
+                        value={race.priority || 1}
+                        onChange={(e) => updateRace(idx, "priority", Number(e.target.value))}
+                        className="w-full bg-[#202026] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                      >
+                        <option value={1}>A 标核心目标 (Goal Race / 全力突破)</option>
+                        <option value={2}>B 标以赛代练 (Tune-up Test / 门槛验证)</option>
+                        <option value={3}>C 标模拟拉练 (Training Run / 基础长跑)</option>
+                      </select>
                     </div>
                   </div>
                 </div>

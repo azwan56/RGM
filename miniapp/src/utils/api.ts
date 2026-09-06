@@ -66,7 +66,7 @@ export function clearSession() {
  */
 export async function request<T = any>(
   url: string,
-  method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "GET",
   data?: any
 ): Promise<T> {
   const token = getToken();

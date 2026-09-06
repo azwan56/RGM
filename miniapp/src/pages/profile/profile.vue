@@ -170,7 +170,12 @@
       <view v-if="races.length" class="race-list">
         <view v-for="(race, idx) in races" :key="race.id || idx" class="race-item">
           <view class="race-top">
-            <text class="race-name">{{ race.name }}</text>
+            <view class="race-name-group">
+              <text class="race-name">{{ race.name }}</text>
+              <text class="race-priority-tag" :class="`p-tag-${race.priority == 1 || race.priority === 'A' ? 'a' : race.priority == 2 || race.priority === 'B' ? 'b' : 'c'}`">
+                {{ race.priority == 1 || race.priority === 'A' ? 'A 标' : race.priority == 2 || race.priority === 'B' ? 'B 标' : 'C 标' }}
+              </text>
+            </view>
             <view class="race-badge" :class="{ urgent: race.days_left < 30 }">
               <text class="badge-text">{{ race.days_left }} 天{{ race.days_left < 30 ? " 冲刺" : "" }}</text>
             </view>
@@ -179,6 +184,26 @@
             <text class="race-type-tag">{{ race.race_type }}</text>
             <text class="race-date">{{ race.race_date }}</text>
             <text class="race-target">目标: {{ race.target_time }}</text>
+          </view>
+          <view class="race-priority-row">
+            <text class="race-priority-lbl">定位调整:</text>
+            <view class="priority-actions">
+              <button
+                class="min-p-btn"
+                :class="{ active: race.priority == 1 || race.priority === 'A' }"
+                @click="handleUpdateRacePriority(race.id || race.name, 1)"
+              >A 标 (核心)</button>
+              <button
+                class="min-p-btn"
+                :class="{ active: race.priority == 2 || race.priority === 'B' }"
+                @click="handleUpdateRacePriority(race.id || race.name, 2)"
+              >B 标 (代练)</button>
+              <button
+                class="min-p-btn"
+                :class="{ active: race.priority == 3 || race.priority === 'C' }"
+                @click="handleUpdateRacePriority(race.id || race.name, 3)"
+              >C 标 (拉练)</button>
+            </view>
           </view>
         </view>
       </view>
@@ -1282,6 +1307,24 @@ async function loadProfileData() {
   }
 }
 
+async function handleUpdateRacePriority(raceIdOrName: string, priority: number) {
+  if (!user.value || !user.value.id) return;
+  const uid = user.value.id;
+  try {
+    uni.showLoading({ title: "更新赛事定位..." });
+    await request(`/api/profile/${uid}/races/${raceIdOrName}/priority`, "POST", { priority });
+    uni.hideLoading();
+    uni.showToast({ title: "已更新赛事定位", icon: "success" });
+    const found = races.value.find((r: any) => r.id === raceIdOrName || r.name === raceIdOrName);
+    if (found) {
+      found.priority = priority;
+    }
+  } catch (e) {
+    uni.hideLoading();
+    uni.showToast({ title: "更新失败", icon: "none" });
+  }
+}
+
 function handleCopyClubInvite() {
   if (!userClub.value?.invite_code) return;
   uni.setClipboardData({
@@ -1989,6 +2032,93 @@ onShow(() => {
 
 .race-type-tag {
   color: #fc4c02;
+}
+
+.race-name-group {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.race-priority-tag {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+}
+
+.p-tag-a {
+  background-color: rgba(244, 63, 94, 0.2);
+  color: #fb7185;
+  border: 1rpx solid rgba(244, 63, 94, 0.35);
+}
+
+.p-tag-b {
+  background-color: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1rpx solid rgba(56, 189, 248, 0.35);
+}
+
+.p-tag-c {
+  background-color: rgba(161, 161, 170, 0.2);
+  color: #d4d4d8;
+  border: 1rpx solid rgba(161, 161, 170, 0.35);
+}
+
+.race-priority-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 14rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.race-priority-lbl {
+  font-size: 20rpx;
+  color: #8e8e93;
+}
+
+.priority-actions {
+  display: flex;
+  gap: 8rpx;
+}
+
+.min-p-btn {
+  margin: 0;
+  padding: 2rpx 12rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  font-size: 18rpx;
+  color: #a1a1aa;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 8rpx;
+}
+
+.min-p-btn::after {
+  border: none;
+}
+
+.min-p-btn.active:nth-child(1) {
+  background-color: rgba(244, 63, 94, 0.25);
+  color: #fb7185;
+  border-color: #f43f5e;
+  font-weight: bold;
+}
+
+.min-p-btn.active:nth-child(2) {
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  border-color: #38bdf8;
+  font-weight: bold;
+}
+
+.min-p-btn.active:nth-child(3) {
+  background-color: rgba(161, 161, 170, 0.25);
+  color: #e4e4e7;
+  border-color: #a1a1aa;
+  font-weight: bold;
 }
 
 /* PB Grid */

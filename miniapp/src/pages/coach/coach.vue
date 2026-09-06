@@ -74,6 +74,26 @@
         </view>
       </view>
 
+      <!-- Registered User Races Quick Selector -->
+      <view v-if="userRaces.length" class="registered-races-row">
+        <text class="registered-label">🚩 您已登记的备赛日程 (点击直接切换为当前备赛)：</text>
+        <view class="registered-chips">
+          <view
+            v-for="r in userRaces"
+            :key="r.id || r.name"
+            class="reg-chip"
+            :class="{ active: targetRace === r.name || targetRace.includes(r.name) || r.name.includes(targetRace) }"
+            @click="handleSelectRegisteredRace(r)"
+          >
+            <text class="reg-chip-tier" :class="`tier-${r.priority == 1 || r.priority === 'A' ? 'a' : r.priority == 2 || r.priority === 'B' ? 'b' : 'c'}`">
+              {{ r.priority == 1 || r.priority === 'A' ? 'A标' : r.priority == 2 || r.priority === 'B' ? 'B标' : 'C标' }}
+            </text>
+            <text class="reg-chip-name">{{ r.name }}</text>
+            <text v-if="r.days_left !== undefined" class="reg-chip-days">{{ r.days_left }}天</text>
+          </view>
+        </view>
+      </view>
+
       <view class="inputs-row">
         <view class="input-col flex-2">
           <text class="input-label">目标赛事</text>
@@ -124,18 +144,52 @@
         <view class="race-timeline-list">
           <view
             v-for="(r, idx) in (analysis.multi_race_strategy.race_timeline_advice || [])"
-            :key="idx"
+            :key="r.id || idx"
             class="race-item"
             :class="`tier-${r.tier ? r.tier.toLowerCase() : 'b'}`"
           >
             <view class="race-item-header">
-              <view class="race-tier-badge" :class="`badge-${r.tier ? r.tier.toLowerCase() : 'b'}`">
-                <text class="badge-text">{{ r.tactical_role || `${r.tier} 标` }}</text>
+              <view class="race-title-row">
+                <view class="race-title-left">
+                  <view class="race-tier-badge" :class="`badge-${r.tier ? r.tier.toLowerCase() : 'b'}`">
+                    <text class="badge-text">{{ r.tactical_role || `${r.tier} 标` }}</text>
+                  </view>
+                  <text class="race-item-name">{{ r.race_name }}</text>
+                </view>
+                <text v-if="r.days_left !== undefined" class="race-days-countdown">
+                  {{ r.days_left }}天后
+                </text>
               </view>
-              <text class="race-item-name">{{ r.race_name }}</text>
-              <text v-if="r.days_left !== undefined" class="race-days-countdown">
-                {{ r.days_left }}天后
-              </text>
+
+              <!-- A/B/C Priority Switcher -->
+              <view class="priority-switch-row">
+                <text class="switch-tip-lbl">调整定位:</text>
+                <view class="priority-btns">
+                  <button
+                    class="p-btn"
+                    :class="{ active: (r.tier || '').toUpperCase() === 'A' }"
+                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'A')"
+                  >A 标 (核心)</button>
+                  <button
+                    class="p-btn"
+                    :class="{ active: (r.tier || '').toUpperCase() === 'B' }"
+                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'B')"
+                  >B 标 (代练)</button>
+                  <button
+                    class="p-btn"
+                    :class="{ active: (r.tier || '').toUpperCase() === 'C' }"
+                    @click.stop="handleUpdatePriority(r.id || r.race_name, 'C')"
+                  >C 标 (拉练)</button>
+                </view>
+
+                <button
+                  v-if="targetRace !== r.race_name && !targetRace.includes(r.race_name) && !r.race_name.includes(targetRace)"
+                  class="set-target-btn"
+                  @click.stop="handleSelectTargetRace(r)"
+                >
+                  🎯 设为主备赛
+                </button>
+              </view>
             </view>
 
             <view class="race-detail-row">
@@ -271,6 +325,7 @@ const defaultAnalysis = {
 const user = ref<UserProfile | null>(null);
 const analysis = ref<any>(defaultAnalysis);
 const loading = ref(false);
+const userRaces = ref<any[]>([]);
 
 const athleteInfo = computed(() => analysis.value?.athlete_snapshot || {});
 const tsbMetrics = computed(() => analysis.value?.tsb_metrics || {});
@@ -308,6 +363,68 @@ async function loadLatestReport() {
     }
   } catch (e) {
     console.warn("Fetch coach report fallback:", e);
+  }
+
+  try {
+    const rRes = await request(`/api/profile/${uid}/races`);
+    if (Array.isArray(rRes)) {
+      userRaces.value = rRes;
+    }
+  } catch (e) {
+    console.warn("Fetch user races fallback:", e);
+  }
+}
+
+function handleSelectRegisteredRace(r: any) {
+  targetRace.value = r.name;
+  if (r.target_time) {
+    targetTime.value = r.target_time;
+  }
+  if (r.race_type) {
+    const rt = (r.race_type || "").toLowerCase();
+    if (rt.includes("trail") || rt.includes("越野")) raceType.value = "trail";
+    else if (rt.includes("half") || rt.includes("半")) raceType.value = "half";
+    else if (rt.includes("10k")) raceType.value = "10k";
+    else raceType.value = "marathon";
+  }
+}
+
+function handleSelectTargetRace(r: any) {
+  targetRace.value = r.race_name || r.name;
+  handleReAnalyze();
+}
+
+async function handleUpdatePriority(raceIdentifier: string, priority: string) {
+  user.value = getStoredUser();
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value || !user.value.id) return;
+  const uid = user.value.id;
+
+  uni.showLoading({ title: "调整定位推演中..." });
+  try {
+    const res = await request("/api/coach/race-priority", "POST", {
+      uid,
+      race_identifier: raceIdentifier,
+      priority,
+      target_race: targetRace.value
+    });
+    uni.hideLoading();
+    if (res && res.multi_race_strategy) {
+      analysis.value = res;
+      uni.showToast({ title: "战术推演已重排", icon: "success" });
+    } else {
+      uni.showToast({ title: "已更新赛事定位", icon: "success" });
+    }
+    // Refresh user races list
+    const rRes = await request(`/api/profile/${uid}/races`);
+    if (Array.isArray(rRes)) {
+      userRaces.value = rRes;
+    }
+  } catch (err) {
+    uni.hideLoading();
+    uni.showToast({ title: "更新失败", icon: "none" });
   }
 }
 
@@ -599,6 +716,79 @@ onPullDownRefresh(async () => {
   font-weight: bold;
 }
 
+/* Registered User Races */
+.registered-races-row {
+  margin-top: 14rpx;
+  margin-bottom: 18rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.registered-label {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  display: block;
+  margin-bottom: 10rpx;
+}
+
+.registered-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.reg-chip {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 6rpx 16rpx;
+  border-radius: 16rpx;
+}
+
+.reg-chip.active {
+  background-color: rgba(175, 82, 222, 0.2);
+  border-color: #af52de;
+}
+
+.reg-chip-tier {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 2rpx 8rpx;
+  border-radius: 8rpx;
+}
+
+.reg-chip-tier.tier-a {
+  background-color: rgba(244, 63, 94, 0.25);
+  color: #fb7185;
+}
+
+.reg-chip-tier.tier-b {
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+}
+
+.reg-chip-tier.tier-c {
+  background-color: rgba(161, 161, 170, 0.25);
+  color: #d4d4d8;
+}
+
+.reg-chip-name {
+  font-size: 22rpx;
+  color: #f3f4f6;
+}
+
+.reg-chip.active .reg-chip-name {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.reg-chip-days {
+  font-size: 18rpx;
+  color: #c084fc;
+}
+
 .inputs-row {
   display: flex;
   gap: 16rpx;
@@ -847,10 +1037,22 @@ onPullDownRefresh(async () => {
 
 .race-item-header {
   display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.race-title-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16rpx;
+}
+
+.race-title-left {
+  display: flex;
+  align-items: center;
   gap: 12rpx;
+  flex: 1;
 }
 
 .race-tier-badge {
@@ -883,7 +1085,6 @@ onPullDownRefresh(async () => {
 }
 
 .race-item-name {
-  flex: 1;
   font-size: 26rpx;
   font-weight: bold;
   color: #ffffff;
@@ -893,6 +1094,80 @@ onPullDownRefresh(async () => {
   font-size: 22rpx;
   color: #bf5af2;
   font-weight: bold;
+}
+
+.priority-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+  padding: 10rpx 14rpx;
+  background-color: rgba(0, 0, 0, 0.35);
+  border-radius: 14rpx;
+}
+
+.switch-tip-lbl {
+  font-size: 20rpx;
+  color: #8e8e93;
+}
+
+.priority-btns {
+  display: flex;
+  gap: 8rpx;
+}
+
+.p-btn {
+  margin: 0;
+  padding: 4rpx 14rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  font-size: 20rpx;
+  color: #a1a1aa;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 10rpx;
+}
+
+.p-btn::after {
+  border: none;
+}
+
+.p-btn.active:nth-child(1) {
+  background-color: rgba(244, 63, 94, 0.25);
+  color: #fb7185;
+  border-color: #f43f5e;
+  font-weight: bold;
+}
+
+.p-btn.active:nth-child(2) {
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  border-color: #38bdf8;
+  font-weight: bold;
+}
+
+.p-btn.active:nth-child(3) {
+  background-color: rgba(161, 161, 170, 0.25);
+  color: #e4e4e7;
+  border-color: #a1a1aa;
+  font-weight: bold;
+}
+
+.set-target-btn {
+  margin: 0;
+  padding: 4rpx 14rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  font-size: 20rpx;
+  color: #d8b4fe;
+  background-color: rgba(191, 90, 242, 0.15);
+  border: 1rpx solid rgba(191, 90, 242, 0.35);
+  border-radius: 10rpx;
+}
+
+.set-target-btn::after {
+  border: none;
 }
 
 .race-detail-row {

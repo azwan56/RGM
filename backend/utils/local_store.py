@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import json
+import uuid
 import random
 import string
 import logging
@@ -974,10 +975,20 @@ class LocalStore:
     def upsert_race_plan(uid: str, plan_data: Dict[str, Any]):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            plan_id = plan_data.get("id") or f"race_{int(datetime.utcnow().timestamp()*1000)}"
+            plan_id = plan_data.get("id") or f"race_{int(datetime.utcnow().timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+            raw_pri = str(plan_data.get("priority", 1)).upper()
+            if raw_pri in ["A", "1"]:
+                pri = 1
+            elif raw_pri in ["B", "2"]:
+                pri = 2
+            elif raw_pri in ["C", "3"]:
+                pri = 3
+            else:
+                pri = 1
+
             cursor.execute("""
-                INSERT OR REPLACE INTO race_plans (id, user_id, name, race_type, race_date, target_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO race_plans (id, user_id, name, race_type, race_date, target_time, priority, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 plan_id,
                 uid,
@@ -985,10 +996,23 @@ class LocalStore:
                 plan_data.get("race_type") or "全马",
                 plan_data.get("race_date") or date.today().isoformat(),
                 plan_data.get("target_time") or "3:30:00",
+                pri,
                 datetime.utcnow().isoformat() + "Z"
             ))
             conn.commit()
             return plan_id
+
+    @staticmethod
+    def update_race_plan_priority(uid: str, race_identifier: str, priority: int) -> bool:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE race_plans 
+                SET priority = ? 
+                WHERE user_id = ? AND (id = ? OR name = ?)
+            """, (priority, uid, race_identifier, race_identifier))
+            conn.commit()
+            return cursor.rowcount > 0
 
     @staticmethod
     def delete_race_plan(uid: str, race_id: str):

@@ -145,6 +145,7 @@ def generate_fallback_multi_race_strategy(multi_analysis: Dict[str, Any], target
             role = "C 标模拟拉练 (Training Run)"
 
         timeline_advice.append({
+            "id": r.get("id") or r_name,
             "race_name": r_name,
             "tier": tier,
             "tactical_role": role,
@@ -172,6 +173,52 @@ def generate_fallback_multi_race_strategy(multi_analysis: Dict[str, Any], target
         "macro_cycle_overview": multi_analysis.get("macrocycle_summary", "多赛事宏观统筹，科学划分 A/B/C 梯队与疲劳释放节奏。"),
         "race_timeline_advice": timeline_advice,
         "conflict_resolution": "\n\n".join(conflict_texts)
+    }
+
+
+class CoachRacePriorityRequest(BaseModel):
+    uid: str
+    race_id: Optional[str] = None
+    race_identifier: Optional[str] = None
+    priority: Any  # "A", "B", "C" or 1, 2, 3
+    target_race: Optional[str] = None
+
+
+@router.post("/race-priority")
+def update_coach_race_priority(req: CoachRacePriorityRequest):
+    """
+    Updates the priority (A/B/C) of a race for the user,
+    re-analyzes the multi-race calendar, and immediately updates the cached coach report.
+    """
+    eff_uid = req.uid
+    race_key = req.race_id or req.race_identifier or ""
+    raw_pri = str(req.priority).upper()
+    pri_int = 1 if raw_pri in ["A", "1"] else (2 if raw_pri in ["B", "2"] else 3)
+    tier_label = "A 标 (核心突破)" if pri_int == 1 else ("B 标 (以赛代练)" if pri_int == 2 else "C 标 (模拟拉练)")
+
+    # 1. Update in local store
+    LocalStore.update_race_plan_priority(eff_uid, race_key, pri_int)
+
+    # 2. Get fresh races & re-analyze
+    races = LocalStore.get_race_plans(eff_uid)
+    multi_race_analysis = analyze_multi_race_calendar(races)
+
+    # 3. Update cached report if present
+    report = LocalStore.get_coach_report(eff_uid) or {}
+    target_race = req.target_race or report.get("athlete_snapshot", {}).get("target_race", "目标赛事")
+    race_category = report.get("athlete_snapshot", {}).get("race_category", "marathon")
+
+    multi_race_strategy = generate_fallback_multi_race_strategy(multi_race_analysis, target_race, race_category)
+    report["multi_race_analysis"] = multi_race_analysis
+    report["multi_race_strategy"] = multi_race_strategy
+    LocalStore.save_coach_report(eff_uid, report)
+
+    return {
+        "success": True,
+        "message": f"已将赛事优先级调整为 {tier_label}",
+        "races": races,
+        "multi_race_analysis": multi_race_analysis,
+        "multi_race_strategy": multi_race_strategy
     }
 
 
@@ -360,8 +407,29 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 
     races = LocalStore.get_race_plans(eff_uid)
     eval_races = list(races) if races else []
-    has_target = any(r.get("name") == target_race for r in eval_races)
-    if not has_target and target_race:
+    
+    # Check if target_race matches an existing race in eval_races (exact or substring/clean match)
+    matched_race = None
+    clean_target = (target_race or "").strip().lower().replace(" ", "")
+    for r in eval_races:
+        r_name = str(r.get("name") or "").strip().lower().replace(" ", "")
+        if r_name == clean_target:
+            matched_race = r
+            break
+        if len(clean_target) >= 2 and len(r_name) >= 2:
+            if clean_target in r_name or r_name in clean_target:
+                matched_race = r
+                break
+
+    if matched_race:
+        # Align with existing database record to prevent duplicate Wugongshan / split names
+        target_race = matched_race["name"]
+        if not request.target_time or request.target_time == "—":
+            target_time_str = matched_race.get("target_time") or target_time_str
+        if not request.race_type:
+            race_category, race_category_name = resolve_race_category(target_race, matched_race.get("race_type"))
+    elif not eval_races and target_race:
+        # ONLY add synthetic race when user has ZERO registered races in DB!
         eval_races.append({
             "id": "target_active",
             "name": target_race,
@@ -370,6 +438,7 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
             "target_time": target_time_str,
             "priority": "A"
         })
+
     multi_race_analysis = analyze_multi_race_calendar(eval_races)
 
     # Build prompt context
@@ -483,6 +552,24 @@ Canova 针对该赛事类型的专项训练区间:
             fallback_strat.update({k: v for k, v in raw_strategy.items() if v})
         analysis_data["multi_race_strategy"] = fallback_strat
     else:
+        # Attach id and days_left from multi_race_analysis if missing
+        advice_list = raw_strategy.get("race_timeline_advice") or []
+        races_map = {r["name"]: r for r in multi_race_analysis.get("races", [])}
+        for adv in advice_list:
+            adv_name = adv.get("race_name", "")
+            matched_r = races_map.get(adv_name)
+            if not matched_r:
+                for rn, r_obj in races_map.items():
+                    if adv_name in rn or rn in adv_name:
+                        matched_r = r_obj
+                        break
+            if matched_r:
+                adv["id"] = matched_r.get("id") or matched_r["name"]
+                if "days_left" not in adv:
+                    adv["days_left"] = matched_r.get("days_left", 0)
+            else:
+                adv["id"] = adv_name
+
         analysis_data["multi_race_strategy"] = raw_strategy
 
     analysis_data["multi_race_analysis"] = multi_race_analysis
