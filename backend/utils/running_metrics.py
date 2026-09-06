@@ -294,3 +294,145 @@ def get_race_specific_zones(
         }
     }
 
+def analyze_multi_race_calendar(races: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Analyzes athlete's multiple race calendar according to Renato Canova's periodization principles:
+    - Filters and sorts upcoming races
+    - Classifies/validates A/B/C race tiers:
+        * A 标 (Goal Race): Primary breakthrough target, peaked taper.
+        * B 标 (Tune-up / Test Race): 3-6 weeks before A race, lactate threshold validation without full taper.
+        * C 标 (Training Run): Long aerobic run (LSD) replacement, controlled effort.
+    - Calculates inter-race day gaps
+    - Detects schedule conflicts (< 21 days between marathons/ultras) and issues warnings
+    - Identifies golden preparation pairings (e.g. Half Marathon 4-6 weeks before Full Marathon)
+    - Detects cross-discipline challenges (e.g. Road Marathon vs Mountain Trail)
+    """
+    from datetime import date, datetime
+    today = date.today()
+    upcoming = []
+
+    for r in (races or []):
+        r_dict = dict(r)
+        date_str = str(r_dict.get("race_date") or "")[:10]
+        try:
+            r_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            days_left = (r_date - today).days
+            if days_left >= 0:
+                r_dict["parsed_date"] = r_date
+                r_dict["days_left"] = days_left
+                r_dict["race_date_clean"] = date_str
+                upcoming.append(r_dict)
+        except Exception:
+            continue
+
+    upcoming.sort(key=lambda x: x["parsed_date"])
+
+    if not upcoming:
+        return {
+            "total_upcoming": 0,
+            "races": [],
+            "conflicts": [],
+            "pairings": [],
+            "cross_discipline": [],
+            "macrocycle_summary": "当前暂未录入未来比赛计划，训练以建立稳态基础有氧与力量基线为主。"
+        }
+
+    # Resolve A/B/C tiers
+    has_explicit_a = any(str(r.get("priority") or "").upper() in ["A", "1"] for r in upcoming)
+    for idx, r in enumerate(upcoming):
+        raw_pri = str(r.get("priority") or "").upper()
+        if raw_pri in ["A", "1"]:
+            tier = "A"
+            role = "A 标核心目标 (Goal Race)"
+        elif raw_pri in ["B", "2"]:
+            tier = "B"
+            role = "B 标以赛代练 (Tune-up Test)"
+        elif raw_pri in ["C", "3"]:
+            tier = "C"
+            role = "C 标训练拉练 (Training Run)"
+        else:
+            if not has_explicit_a and idx == len(upcoming) - 1:
+                tier = "A"
+                role = "A 标核心目标 (Goal Race)"
+            elif idx == 0 and len(upcoming) > 1:
+                tier = "B"
+                role = "B 标以赛代练 (Tune-up Test)"
+            else:
+                tier = "B" if "半" in str(r.get("race_type") or "") else "A"
+                role = "B 标以赛代练" if tier == "B" else "A 标核心目标"
+        r["tier"] = tier
+        r["role"] = role
+
+    conflicts = []
+    pairings = []
+    cross_discipline = []
+
+    for i in range(len(upcoming) - 1):
+        r1 = upcoming[i]
+        r2 = upcoming[i + 1]
+        gap = (r2["parsed_date"] - r1["parsed_date"]).days
+        r1["gap_to_next"] = gap
+
+        r1_type = str(r1.get("race_type") or "").lower()
+        r2_type = str(r2.get("race_type") or "").lower()
+        r1_is_major = any(k in r1_type or k in r1["name"].lower() for k in ["全马", "marathon", "50k", "100k", "越野", "trail"])
+        r2_is_major = any(k in r2_type or k in r2["name"].lower() for k in ["全马", "marathon", "50k", "100k", "越野", "trail"])
+
+        # Conflict: 2 major races < 21 days
+        if gap < 21 and r1_is_major and r2_is_major:
+            conflicts.append({
+                "race1": r1["name"],
+                "race2": r2["name"],
+                "gap_days": gap,
+                "warning": f"【赛程冲突警报】{r1['name']} 与 {r2['name']} 间隔仅 {gap} 天！大负荷全马/越野后深层肌纤维与结缔组织微损伤至少需要 21~28 天超量修复。Canova 建议：必须将后一场设为 C 标（以赛代练/慢跑陪跑），严禁背靠背连续拼全力突破，否则极易诱发应力性骨折与中枢疲劳崩溃。"
+            })
+
+        # Optimal B -> A tune-up pairing: 20-45 days before a major race
+        r1_is_tuneup = any(k in r1_type or k in r1["name"].lower() for k in ["半马", "half", "10k", "10公里"])
+        r2_is_marathon = any(k in r2_type or k in r2["name"].lower() for k in ["全马", "marathon"])
+        if 20 <= gap <= 45 and r1_is_tuneup and r2_is_marathon:
+            pairings.append({
+                "tuneup_race": r1["name"],
+                "goal_race": r2["name"],
+                "gap_days": gap,
+                "strategy": f"【黄金以赛代练配对】{r1['name']} 位于 {r2['name']} 赛前 {gap} 天（4~6 周窗口）。属于标准的 Canova B 标专项准备实战：在 {r1['name']} 中以目标半马配速巡航检验乳酸门槛，赛前无需深度减量（减 3 天即可），赛后 4~5 天低心率排酸后无缝衔接全马最后专项收敛。"
+            })
+
+        # Cross-discipline transition
+        r1_is_trail = "越野" in r1["name"] or "trail" in r1_type or "50k" in r1["name"].lower()
+        r2_is_trail = "越野" in r2["name"] or "trail" in r2_type or "50k" in r2["name"].lower()
+        if r1_is_trail != r2_is_trail:
+            cross_discipline.append({
+                "from_race": r1["name"],
+                "to_race": r2["name"],
+                "transition_tip": f"【跨赛道专项切换】从 {r1['name']} ({'越野' if r1_is_trail else '路跑'}) 转向 {r2['name']} ({'越野' if r2_is_trail else '路跑'})：需经历专项转换。若从路跑转越野，赛后第 2 周起需逐步加入山地手杖爬升 (D+) 与下坡离心抗阻；若从越野转公路，赛前 4 周必须停止大爬升以唤醒平地步频刚性与跑步经济性。"
+            })
+
+    # Summary description
+    a_races = [r["name"] for r in upcoming if r["tier"] == "A"]
+    b_races = [r["name"] for r in upcoming if r["tier"] == "B"]
+    summary_parts = []
+    if a_races:
+        summary_parts.append(f"核心突破 A 标：【{' / '.join(a_races)}】")
+    if b_races:
+        summary_parts.append(f"以赛代练 B 标：【{' / '.join(b_races)}】")
+    if conflicts:
+        summary_parts.append(f"⚠️ 存在 {len(conflicts)} 处赛程过密冲突需战术规避")
+
+    # Clean serializable objects (remove parsed_date)
+    serializable_races = []
+    for r in upcoming:
+        rc = dict(r)
+        rc.pop("parsed_date", None)
+        serializable_races.append(rc)
+
+    return {
+        "total_upcoming": len(serializable_races),
+        "races": serializable_races,
+        "conflicts": conflicts,
+        "pairings": pairings,
+        "cross_discipline": cross_discipline,
+        "macrocycle_summary": " · ".join(summary_parts) if summary_parts else "按赛历时间节点逐步推进专项周期化训练"
+    }
+
+

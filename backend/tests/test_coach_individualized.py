@@ -129,3 +129,40 @@ def test_generate_canova_critique_individualized():
     }
     master_critique = LocalStore.generate_canova_critique(road_act, profile=master_profile)
     assert "72 小时" in master_critique or "大师组" in master_critique or "超量恢复" in master_critique
+
+def test_analyze_multi_race_calendar_and_strategy():
+    from utils.running_metrics import analyze_multi_race_calendar
+    from routers.coach import generate_fallback_multi_race_strategy
+
+    # 1. Test multi-race calendar with conflicts, pairings, and trail cross-discipline
+    races = [
+        {"name": "上海半马", "race_type": "half", "race_date": "2026-10-18", "target_time": "1:32:00", "priority": "B"},
+        {"name": "无锡马拉松", "race_type": "marathon", "race_date": "2026-11-15", "target_time": "3:15:00", "priority": "A"},
+        {"name": "武功山 50K", "race_type": "trail", "race_date": "2026-11-29", "target_time": "8:00:00", "priority": "A"}
+    ]
+    res = analyze_multi_race_calendar(races)
+    assert res["total_upcoming"] == 3
+    # Shanghai Half is B
+    assert res["races"][0]["tier"] == "B"
+    # Wuxi Marathon is A
+    assert res["races"][1]["tier"] == "A"
+    # Golden pairing between Shanghai Half & Wuxi Marathon (28 days)
+    assert len(res["pairings"]) == 1
+    assert "黄金以赛代练配对" in res["pairings"][0]["strategy"]
+    # Conflict between Wuxi Marathon & WuGongShan 50K (14 days < 21 days)
+    assert len(res["conflicts"]) == 1
+    assert "赛程冲突警报" in res["conflicts"][0]["warning"]
+    # Cross discipline transition between Wuxi (road) and WuGongShan (trail)
+    assert len(res["cross_discipline"]) == 1
+    assert "跨赛道专项切换" in res["cross_discipline"][0]["transition_tip"]
+
+    # 2. Test fallback strategy generator
+    strat = generate_fallback_multi_race_strategy(res, "无锡马拉松", "marathon")
+    assert "macro_cycle_overview" in strat
+    assert len(strat["race_timeline_advice"]) == 3
+    assert strat["race_timeline_advice"][0]["race_name"] == "上海半马"
+    assert strat["race_timeline_advice"][0]["tier"] == "B"
+    assert "以赛代练" in strat["race_timeline_advice"][0]["tactical_role"]
+    assert "conflict_resolution" in strat
+    assert "赛程冲突警报" in strat["conflict_resolution"]
+

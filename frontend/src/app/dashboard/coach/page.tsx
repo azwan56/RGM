@@ -18,7 +18,9 @@ import {
   Timer,
   Activity,
   User,
-  Heart
+  Heart,
+  Calendar,
+  AlertTriangle
 } from "lucide-react";
 
 export default function CoachPage() {
@@ -277,6 +279,117 @@ export default function CoachPage() {
                 {analysis.fitness_status}
               </p>
             </div>
+
+            {/* Canova Multi-Race Strategic Periodization Roadmap */}
+            {analysis.multi_race_strategy && (
+              <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-purple-400" />
+                      Canova 多赛事宏观统筹与战术推演 (Multi-Race Strategy)
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      A/B/C 梯队科学分级 · 规避过密疲劳冲突 · 黄金以赛代练配对 · 跨赛道专项切换
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-semibold">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    共统筹 {(analysis.multi_race_strategy.race_timeline_advice || []).length} 场目标赛事
+                  </div>
+                </div>
+
+                {/* Macrocycle Overview */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-[#18181c] to-indigo-950/30 border border-purple-500/20">
+                  <div className="text-xs font-bold text-purple-300 mb-1 flex items-center gap-1.5">
+                    <span>🏆</span> 赛季宏观周期统筹：
+                  </div>
+                  <div className="text-xs sm:text-sm text-zinc-200 leading-relaxed font-normal">
+                    {analysis.multi_race_strategy.macro_cycle_overview}
+                  </div>
+                </div>
+
+                {/* Race Timeline Cards */}
+                <div className="space-y-3">
+                  <div className="text-xs font-bold text-zinc-400 tracking-wider uppercase">
+                    赛事日历与专项执行规程
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
+                    {(analysis.multi_race_strategy.race_timeline_advice || []).map((r: any, idx: number) => {
+                      const isA = r.tier === "A";
+                      const isB = r.tier === "B";
+                      const tierBadgeClass = isA
+                        ? "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                        : isB
+                        ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300";
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-4 sm:p-5 rounded-2xl border transition-all ${
+                            isA
+                              ? "bg-[#18181f] border-rose-500/30 shadow-lg shadow-rose-950/10"
+                              : isB
+                              ? "bg-[#16181d] border-cyan-500/20"
+                              : "bg-[#18181c] border-white/5"
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${tierBadgeClass}`}>
+                                {r.tactical_role || `${r.tier} 标`}
+                              </span>
+                              <span className="text-sm sm:text-base font-black text-white">
+                                {r.race_name}
+                              </span>
+                            </div>
+                            {r.days_left !== undefined && (
+                              <span className="text-xs text-zinc-400 font-medium">
+                                倒计时 <strong className="text-purple-300 font-bold">{r.days_left}</strong> 天
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                            <div className="bg-[#121215] p-3 rounded-xl border border-white/5">
+                              <div className="text-zinc-400 font-bold mb-1 flex items-center gap-1">
+                                <span>🎯</span> 目标配速与心率战术
+                              </div>
+                              <p className="text-zinc-300 leading-relaxed font-light">
+                                {r.pacing_strategy}
+                              </p>
+                            </div>
+
+                            <div className="bg-[#121215] p-3 rounded-xl border border-white/5">
+                              <div className="text-zinc-400 font-bold mb-1 flex items-center gap-1">
+                                <span>⏳</span> 减量规程与超量恢复
+                              </div>
+                              <p className="text-zinc-300 leading-relaxed font-light">
+                                {r.taper_recovery_rule}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Conflict & Strategic Diagnostics Banner */}
+                {analysis.multi_race_strategy.conflict_resolution && (
+                  <div className="p-4 rounded-2xl bg-[#18181c] border border-amber-500/30 text-xs space-y-2">
+                    <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      战术规避与周期协同要点：
+                    </div>
+                    <div className="text-zinc-300 leading-relaxed whitespace-pre-line font-light">
+                      {analysis.multi_race_strategy.conflict_resolution}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Specificity Training Zones (Canova Zones for Target Race) */}
             {zones && (

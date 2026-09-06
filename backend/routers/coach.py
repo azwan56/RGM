@@ -11,7 +11,8 @@ from utils.running_metrics import (
     get_race_specific_zones,
     get_age_from_dob,
     format_duration,
-    calculate_vdot
+    calculate_vdot,
+    analyze_multi_race_calendar
 )
 
 logger = logging.getLogger("router_coach")
@@ -41,8 +42,14 @@ Canova 哲学的核心准则：
    - 若 TSB 在 -10 ~ -30，处于最佳负荷吸收区，可按部就班推进专项课。
    - 若 TSB > +10，处于减量就绪巅峰期，重点激活神经兴奋性。
 5. 【杜绝无效垃圾跑量】：坚决反对既不够慢又不够快的“中间垃圾配速”，轻松跑必须绝对低心率，专项课必须绝对保质量。
+6. 【多赛事战略统筹与 A/B/C 梯队分级 (Multi-Race Periodization)】：
+   - A 标 (Goal Race / 突破之战)：全赛季最高优先级目标，赛前严格执行 14~21 天专项减量 (Tapering)，追求体能峰值 (Peak CTL & Positive TSB)。
+   - B 标 (Tune-up Test / 以赛代练)：距离 A 标 3~6 周的实战测试（如全马前 4 周的半马），以 98%~100% 目标配速巡航验证乳酸门槛与补给，赛前仅需减量 3 天，赛后 4~5 天低心率排酸。
+   - C 标 (Training Run / 模拟拉练)：完全作为周末长距离有氧耐力跑 (LSD) 替代课，严禁拼尽全力，赛前无减量，赛后无需特殊休息。
+   - 严禁赛程过密：若两场全马或百公里越野间隔 < 21 天，必须强制将后一场降格为 C 标慢跑完赛，坚决防止应力性骨折与中枢神经过度消耗。
+   - 跨项转换（路跑与越野）：路跑转越野需在赛前 4~8 周加入手杖爬升 (D+) 与下坡股四头肌离心抗阻；越野转路跑必须在赛前 4 周回归平路维持步频刚性与跑步经济性。
 
-请根据跑者真实的生理特征、近期打卡、健康睡眠、负荷平衡指数 (CTL/ATL/TSB) 与目标赛事，直接以中文标准 JSON 格式输出深度个性化训练诊断报告：
+请根据跑者真实的生理特征、近期打卡、健康睡眠、负荷平衡指数 (CTL/ATL/TSB)、目标赛事以及多赛事赛历统筹，直接以中文标准 JSON 格式输出深度个性化训练诊断报告：
 {
   "summary": "一句话核心战略评价（结合跑者当前体能阶段与目标赛事）",
   "fitness_status": "体能与近期负荷诊断（深度剖析跑量、配速、心率、TSB状态与身体疲劳程度）",
@@ -53,7 +60,20 @@ Canova 哲学的核心准则：
     "针对性战术/训练建议 3 (动作经济性/力量/补给)"
   ],
   "focus_workout_of_the_week": "本周最核心的关键专项课设计（必须高度匹配目标赛事类型，写明热身、主课间歇/配速/心率、冷身与执行注意事项）",
-  "recovery_advice": "个性化恢复指导（针对当前睡眠评分、HRV、TSB 疲劳与跑者年龄恢复特点）"
+  "recovery_advice": "个性化恢复指导（针对当前睡眠评分、HRV、TSB 疲劳与跑者年龄恢复特点）",
+  "multi_race_strategy": {
+    "macro_cycle_overview": "宏观大周期战略统筹阐述（如何协调赛历中多场赛事的体能高峰与先后次序）",
+    "race_timeline_advice": [
+      {
+        "race_name": "赛事名称",
+        "tier": "A / B / C",
+        "tactical_role": "核心突破 / 以赛代练 / 模拟拉练",
+        "pacing_strategy": "针对该场赛事的配速/心率与战术执行策略",
+        "taper_recovery_rule": "赛前减量建议与赛后超量恢复周期"
+      }
+    ],
+    "conflict_resolution": "赛程冲突化解或跨项转换战术规避建议（若无冲突则给予宏观周期肯定）"
+  }
 }
 """
 
@@ -86,6 +106,75 @@ def resolve_race_category(race_name: str, race_type: Optional[str] = None) -> tu
         return "marathon", "全程马拉松 (Full Marathon)"
 
 
+def generate_fallback_multi_race_strategy(multi_analysis: Dict[str, Any], target_race: str, race_category: str) -> Dict[str, Any]:
+    """Generates Renato Canova periodization strategy when LLM output lacks multi_race_strategy."""
+    races = multi_analysis.get("races") or []
+    if not races:
+        return {
+            "macro_cycle_overview": f"当前赛历以主目标【{target_race}】为单核推进。依照 Renato Canova 大周期推进律，建议在赛前 4~6 周安排一场 B 标测试赛（如半马或 10K），用以实战校验乳酸门槛平台与补给反应。",
+            "race_timeline_advice": [
+                {
+                    "race_name": target_race,
+                    "tier": "A",
+                    "tactical_role": "A 标核心目标 (Goal Race)",
+                    "days_left": 60,
+                    "pacing_strategy": "赛前 14~21 天启动专项减量收敛，比赛日严格执行 100% 专项配速，前程克制，后程凭借糖原节约能力平稳巡航。",
+                    "taper_recovery_rule": "赛前 3 周削减跑量 20%，赛前 2 周削减 40%，赛前 1 周仅保留 20-30 分钟慢跑与短冲刺激；赛后执行 14~21 天超量修复。"
+                }
+            ],
+            "conflict_resolution": "单赛事备战周期结构清晰，无赛程重叠冲突，全力聚焦核心专项课质量。"
+        }
+
+    timeline_advice = []
+    for r in races:
+        tier = r.get("tier", "B")
+        r_name = r.get("name", "未命名赛事")
+        days_left = r.get("days_left", 0)
+
+        if tier == "A":
+            pacing = "追求巅峰突破。前程严格压制心率在乳酸门槛 (LT2) 以内，后半程利用稳态代谢储备逐步加速收敛。"
+            taper = "赛前 14~21 天启动渐进减量（削减 40%~60% 容量但保持配速神经张力）；赛后强制安排 14~21 天深层组织修复。"
+            role = "A 标核心突破 (Goal Race)"
+        elif tier == "B":
+            pacing = "以 98%~100% 专项配速巡航实战，核心检验乳酸门槛平台、测试补给策略与鞋服装备，终点前切忌无谓拼尽全力导致过度疲劳。"
+            taper = "赛前仅需减量 3~4 天保持肌肉弹性；赛后 4~5 天低心率慢跑排酸后即可恢复专项课表。"
+            role = "B 标以赛代练 (Tune-up Test)"
+        else:
+            pacing = "严格作为长距离基础有氧 (LSD) 训练课，心率严格压制在最大心率 75% 以下，严禁被赛道人群节奏带偏。"
+            taper = "赛前无需减量，当作普通训练周末；赛后无需深度休息，次日慢跑恢复即可。"
+            role = "C 标模拟拉练 (Training Run)"
+
+        timeline_advice.append({
+            "race_name": r_name,
+            "tier": tier,
+            "tactical_role": role,
+            "days_left": days_left,
+            "pacing_strategy": pacing,
+            "taper_recovery_rule": taper
+        })
+
+    conflicts = multi_analysis.get("conflicts") or []
+    pairings = multi_analysis.get("pairings") or []
+    cross = multi_analysis.get("cross_discipline") or []
+
+    conflict_texts = []
+    for c in conflicts:
+        conflict_texts.append(c["warning"])
+    for p in pairings:
+        conflict_texts.append(p["strategy"])
+    for x in cross:
+        conflict_texts.append(x["transition_tip"])
+
+    if not conflict_texts:
+        conflict_texts.append("各赛事之间时间间隔分布合理，符合 Canova 周期化推进规律，无严重疲劳冲突。")
+
+    return {
+        "macro_cycle_overview": multi_analysis.get("macrocycle_summary", "多赛事宏观统筹，科学划分 A/B/C 梯队与疲劳释放节奏。"),
+        "race_timeline_advice": timeline_advice,
+        "conflict_resolution": "\n\n".join(conflict_texts)
+    }
+
+
 @router.get("/latest/{uid}")
 def get_latest_coach_report(uid: str):
     """
@@ -116,10 +205,23 @@ def get_latest_coach_report(uid: str):
                 "gender": user_profile.get("gender") or "male",
                 "years_running": user_profile.get("years_running") or 2
             }
+        if "multi_race_analysis" not in report or "multi_race_strategy" not in report:
+            user_races = LocalStore.get_race_plans(eff_uid)
+            multi_analysis = analyze_multi_race_calendar(user_races)
+            report["multi_race_analysis"] = multi_analysis
+            report["multi_race_strategy"] = generate_fallback_multi_race_strategy(
+                multi_analysis,
+                report.get("athlete_snapshot", {}).get("target_race", "目标赛事"),
+                report.get("athlete_snapshot", {}).get("race_category", "marathon")
+            )
         return report
 
     garmin_connected = bool(user_profile.get("garmin_connected", False))
     coros_connected = bool(user_profile.get("coros_connected", False))
+
+    user_races = LocalStore.get_race_plans(eff_uid)
+    multi_analysis = analyze_multi_race_calendar(user_races)
+    multi_strategy = generate_fallback_multi_race_strategy(multi_analysis, "首选目标赛", "marathon")
 
     if not garmin_connected and not coros_connected:
         return {
@@ -146,7 +248,9 @@ def get_latest_coach_report(uid: str):
                 "age": age,
                 "gender": user_profile.get("gender") or "male",
                 "years_running": user_profile.get("years_running") or 2
-            }
+            },
+            "multi_race_analysis": multi_analysis,
+            "multi_race_strategy": multi_strategy
         }
 
     return {
@@ -173,7 +277,9 @@ def get_latest_coach_report(uid: str):
             "age": age,
             "gender": user_profile.get("gender") or "male",
             "years_running": user_profile.get("years_running") or 2
-        }
+        },
+        "multi_race_analysis": multi_analysis,
+        "multi_race_strategy": multi_strategy
     }
 
 @router.post("/analysis")
@@ -238,7 +344,7 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
         rest_hr=rest_hr
     )
 
-    # 4. Fetch recent 15 activities & race plans
+    # 4. Fetch recent 15 activities & multi-race calendar
     local_acts = LocalStore.get_recent_activities(eff_uid, limit=15)
     activities_summary = []
     for a in local_acts:
@@ -253,6 +359,18 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
         })
 
     races = LocalStore.get_race_plans(eff_uid)
+    eval_races = list(races) if races else []
+    has_target = any(r.get("name") == target_race for r in eval_races)
+    if not has_target and target_race:
+        eval_races.append({
+            "id": "target_active",
+            "name": target_race,
+            "race_type": request.race_type or race_category,
+            "race_date": (date.today() + timedelta(days=60)).isoformat(),
+            "target_time": target_time_str,
+            "priority": "A"
+        })
+    multi_race_analysis = analyze_multi_race_calendar(eval_races)
 
     # Build prompt context
     user_context = f"""
@@ -281,7 +399,13 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 - 目标比赛: {target_race}
 - 赛事类型: {race_category_name}
 - 目标成绩: {target_time_str}
-- 已登记比赛日历: {json.dumps(races, ensure_ascii=False)}
+
+多赛事赛历统筹评估 (Canova A/B/C Macrocycle):
+- 宏观赛历概括: {multi_race_analysis.get('macrocycle_summary')}
+- 待跑赛事梯队: {json.dumps(multi_race_analysis.get('races', []), ensure_ascii=False, indent=2)}
+- 密集赛程冲突预警: {json.dumps(multi_race_analysis.get('conflicts', []), ensure_ascii=False, indent=2)}
+- 黄金以赛代练配对: {json.dumps(multi_race_analysis.get('pairings', []), ensure_ascii=False, indent=2)}
+- 跨项转换专项考量: {json.dumps(multi_race_analysis.get('cross_discipline', []), ensure_ascii=False, indent=2)}
 
 Canova 针对该赛事类型的专项训练区间:
 {json.dumps(zones, ensure_ascii=False, indent=2)}
@@ -350,6 +474,18 @@ Canova 针对该赛事类型的专项训练区间:
             "focus_workout_of_the_week": workout_desc,
             "recovery_advice": rec_text
         }
+
+    # Ensure robust multi-race strategy is present
+    raw_strategy = analysis_data.get("multi_race_strategy") if analysis_data else None
+    if not raw_strategy or not isinstance(raw_strategy, dict) or not raw_strategy.get("race_timeline_advice"):
+        fallback_strat = generate_fallback_multi_race_strategy(multi_race_analysis, target_race, race_category)
+        if raw_strategy and isinstance(raw_strategy, dict):
+            fallback_strat.update({k: v for k, v in raw_strategy.items() if v})
+        analysis_data["multi_race_strategy"] = fallback_strat
+    else:
+        analysis_data["multi_race_strategy"] = raw_strategy
+
+    analysis_data["multi_race_analysis"] = multi_race_analysis
 
     # Inject metadata into response
     analysis_data["tsb_metrics"] = {

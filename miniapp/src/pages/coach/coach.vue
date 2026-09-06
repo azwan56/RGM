@@ -107,6 +107,56 @@
         <text class="fitness-detail">{{ analysis.fitness_status }}</text>
       </view>
 
+      <!-- ── CARD 1.2: 多赛事宏观统筹与战术推演 ── -->
+      <view v-if="analysis.multi_race_strategy" class="section-card multi-race-card">
+        <view class="card-title-row">
+          <text class="section-icon">📅</text>
+          <text class="card-title">Canova 多赛事宏观统筹与战术推演</text>
+        </view>
+
+        <!-- Macrocycle Overview -->
+        <view class="macrocycle-box">
+          <text class="macrocycle-label">🏆 赛季大周期统筹：</text>
+          <text class="macrocycle-text">{{ analysis.multi_race_strategy.macro_cycle_overview }}</text>
+        </view>
+
+        <!-- Race Timeline List -->
+        <view class="race-timeline-list">
+          <view
+            v-for="(r, idx) in (analysis.multi_race_strategy.race_timeline_advice || [])"
+            :key="idx"
+            class="race-item"
+            :class="`tier-${r.tier ? r.tier.toLowerCase() : 'b'}`"
+          >
+            <view class="race-item-header">
+              <view class="race-tier-badge" :class="`badge-${r.tier ? r.tier.toLowerCase() : 'b'}`">
+                <text class="badge-text">{{ r.tactical_role || `${r.tier} 标` }}</text>
+              </view>
+              <text class="race-item-name">{{ r.race_name }}</text>
+              <text v-if="r.days_left !== undefined" class="race-days-countdown">
+                {{ r.days_left }}天后
+              </text>
+            </view>
+
+            <view class="race-detail-row">
+              <text class="detail-label">🎯 专项配速/心率：</text>
+              <text class="detail-content">{{ r.pacing_strategy }}</text>
+            </view>
+
+            <view class="race-detail-row">
+              <text class="detail-label">⏳ 减量与恢复规程：</text>
+              <text class="detail-content">{{ r.taper_recovery_rule }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- Conflict & Synergy Warning -->
+        <view v-if="analysis.multi_race_strategy.conflict_resolution" class="conflict-box">
+          <text class="conflict-title">⚠️ 战术规避与周期协同：</text>
+          <text class="conflict-desc">{{ analysis.multi_race_strategy.conflict_resolution }}</text>
+        </view>
+      </view>
+
       <!-- ── CARD 1.5: CANOVA 比赛专项刺激区间 ── -->
       <view v-if="analysis.race_zones" class="section-card">
         <view class="card-title-row">
@@ -742,6 +792,151 @@ onPullDownRefresh(async () => {
   font-size: 24rpx;
   color: #e5e5ea;
   line-height: 1.5;
+}
+
+.multi-race-card {
+  border-left: 6rpx solid #bf5af2;
+}
+
+.macrocycle-box {
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.25), rgba(26, 26, 30, 0.8));
+  border: 1rpx solid rgba(191, 90, 242, 0.3);
+  border-radius: 20rpx;
+  padding: 20rpx;
+  margin-bottom: 24rpx;
+}
+
+.macrocycle-label {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #d8b4fe;
+  display: block;
+  margin-bottom: 8rpx;
+}
+
+.macrocycle-text {
+  font-size: 24rpx;
+  color: #f3f4f6;
+  line-height: 1.5;
+  display: block;
+}
+
+.race-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  margin-bottom: 24rpx;
+}
+
+.race-item {
+  background-color: #1a1a1e;
+  border-radius: 20rpx;
+  padding: 22rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.race-item.tier-a {
+  border-color: rgba(244, 63, 94, 0.4);
+  background-color: rgba(30, 18, 24, 0.9);
+}
+
+.race-item.tier-b {
+  border-color: rgba(56, 189, 248, 0.3);
+  background-color: rgba(18, 24, 30, 0.9);
+}
+
+.race-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+  gap: 12rpx;
+}
+
+.race-tier-badge {
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  font-size: 20rpx;
+  font-weight: bold;
+}
+
+.badge-a {
+  background-color: rgba(244, 63, 94, 0.2);
+  color: #fb7185;
+  border: 1rpx solid rgba(244, 63, 94, 0.4);
+}
+
+.badge-b {
+  background-color: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1rpx solid rgba(56, 189, 248, 0.4);
+}
+
+.badge-c {
+  background-color: rgba(161, 161, 170, 0.2);
+  color: #d4d4d8;
+  border: 1rpx solid rgba(161, 161, 170, 0.4);
+}
+
+.badge-text {
+  font-size: 20rpx;
+}
+
+.race-item-name {
+  flex: 1;
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.race-days-countdown {
+  font-size: 22rpx;
+  color: #bf5af2;
+  font-weight: bold;
+}
+
+.race-detail-row {
+  margin-top: 10rpx;
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 12rpx 16rpx;
+  border-radius: 14rpx;
+}
+
+.detail-label {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #a1a1aa;
+  margin-bottom: 4rpx;
+  display: block;
+}
+
+.detail-content {
+  font-size: 22rpx;
+  color: #e4e4e7;
+  line-height: 1.4;
+  display: block;
+}
+
+.conflict-box {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1rpx solid rgba(245, 158, 11, 0.35);
+  border-radius: 20rpx;
+  padding: 20rpx;
+}
+
+.conflict-title {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #fbbf24;
+  display: block;
+  margin-bottom: 8rpx;
+}
+
+.conflict-desc {
+  font-size: 22rpx;
+  color: #fef3c7;
+  line-height: 1.5;
+  display: block;
 }
 
 .empty-card {
