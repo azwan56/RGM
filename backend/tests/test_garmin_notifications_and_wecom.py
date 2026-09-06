@@ -145,3 +145,32 @@ def test_wecom_fetch_monthly_leaderboard_filters_expired():
         assert len(entries) == 1
         assert entries[0]["uid"] == "user_active"
         assert entries[0]["total_distance_km"] == 50.0
+
+
+def test_coach_weekly_progress_deduplication():
+    """Verify deduplication works correctly when calculating weekly progress across Garmin and Strava."""
+    from utils.activity_utils import deduplicate_activities
+    from routers.sync import get_period_start
+
+    week_start_dt = get_period_start("weekly")
+    week_start_str = week_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Simulate 5 distinct days with duplicate Garmin and Strava entries
+    activities = [
+        {"activity_id": "garmin_1", "start_date_local": f"{week_start_str[:10]}T07:00:00", "distance_km": 10.0, "source": "garmin", "activity_type": "run"},
+        {"activity_id": "strava_1", "start_date_local": f"{week_start_str[:10]}T07:00:00Z", "distance_km": 10.0, "source": "strava", "activity_type": "run"},
+        {"activity_id": "garmin_2", "start_date_local": f"{week_start_str[:10]}T19:00:00", "distance_km": 5.0, "source": "garmin", "activity_type": "run"},
+        {"activity_id": "strava_2", "start_date_local": f"{week_start_str[:10]}T19:00:00Z", "distance_km": 5.0, "source": "strava", "activity_type": "run"},
+        {"activity_id": "garmin_3", "start_date_local": f"{week_start_str[:10]}T08:00:00", "distance_km": 0.0, "source": "garmin", "activity_type": "cross_training"},
+        {"activity_id": "apple_1", "start_date_local": f"{week_start_str[:10]}T09:00:00", "distance_km": 3.0, "source": "AppleHealth", "activity_type": "run"},
+    ]
+
+    deduped = deduplicate_activities(activities)
+    runs = [a for a in deduped if a.get("activity_type", "run") == "run" and a.get("source") != "AppleHealth"]
+
+    week_km = round(sum(float(a.get("distance_km", 0) or 0) for a in runs), 2)
+    week_runs = len(runs)
+
+    assert week_km == 15.0
+    assert week_runs == 2
+

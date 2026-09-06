@@ -213,11 +213,11 @@ def group_activities_into_sessions(activities: list) -> list:
             continue
         
         try:
-            prev_start = datetime.fromisoformat(prev_act.get("start_date_local", ""))
+            prev_start = datetime.fromisoformat(prev_act.get("start_date_local", "").replace("Z", "")).replace(tzinfo=None)
             prev_elapsed = timedelta(seconds=prev_act.get("elapsed_time", 0))
             prev_end = prev_start + prev_elapsed
             
-            curr_start = datetime.fromisoformat(act.get("start_date_local", ""))
+            curr_start = datetime.fromisoformat(act.get("start_date_local", "").replace("Z", "")).replace(tzinfo=None)
             gap = (curr_start - prev_end).total_seconds()
         except Exception as e:
             print(f"[grouping] Error parsing dates: {e}")
@@ -2015,34 +2015,40 @@ async def log_journal_entry(req: JournalLogRequest):
             return {"entry": existing_data, "journal_id": journal_id, "cached": True}
 
     # 3. This week's context (Monday = start, Sunday = end, matching Strava)
-    from datetime import date as _dt, timedelta
-    today = _dt.today()
-    week_start = (today - timedelta(days=today.weekday())).isoformat()  # Monday
-    all_week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start).order_by("date").stream()]
+    from routers.sync import get_period_start
+    from utils.activity_utils import deduplicate_activities
+    week_start_dt = get_period_start("weekly")
+    week_start_str = week_start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    week_start_date = week_start_dt.strftime("%Y-%m-%d")
+
+    all_week_entries = [d.to_dict() for d in entries_ref.where("date", ">=", week_start_date).order_by("date").stream()]
     # Exclude current activity to avoid double-counting when force=True
     week_entries = [e for e in all_week_entries if e.get("activity_id") != act_id]
 
     # 3b. Calculate week_km from activities (with multi-source deduplication)
-    from utils.activity_utils import deduplicate_activities
-    km = activity.get("distance_km", 0)
-    week_start_ts = f"{week_start}T00:00:00"
     raw_week_activities = [
         a.to_dict() for a in user_ref.collection("activities")
-        .where("start_date_local", ">=", week_start_ts)
+        .where("start_date_local", ">=", week_start_str)
         .stream()
     ]
+    # Ensure current activity is present in candidate pool
+    found_curr = any(
+        str(a.get("activity_id", "") or a.get("id", "")) == act_id
+        for a in raw_week_activities
+    )
+    if not found_curr:
+        raw_week_activities.append(activity)
+
     # Clean deduplicated activities across Garmin / Strava / Apple Health
     deduped_week_acts = deduplicate_activities(raw_week_activities)
 
-    # Exclude current activity (or composite sub-activities) before summing
-    exclude_ids = set(str(sid) for sid in current_sub_ids) if is_composite else {act_id}
-    prev_week_runs = [
+    week_runs_list = [
         a for a in deduped_week_acts
         if a.get("activity_type", "run") == "run"
-        and str(a.get("activity_id", "")) not in exclude_ids
+        and a.get("source") != "AppleHealth"
     ]
-    week_km = sum(a.get("distance_km", 0) for a in prev_week_runs) + km
-    week_runs = len(prev_week_runs) + 1
+    week_km = round(sum(float(a.get("distance_km", 0) or 0) for a in week_runs_list), 2)
+    week_runs = len(week_runs_list)
 
     # 4. Training summary + user goal + weather (parallel)
     from utils.weather import get_training_weather, get_forecast_weather

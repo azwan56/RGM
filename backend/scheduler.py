@@ -201,7 +201,7 @@ def run_daily_sync() -> dict:
             pass
                     
             results["synced"] += 1
-            logger.info(f"[scheduler] Synced {uid}: {round(lb_dist, 1)}km/{lb_runs} runs (month), {round(wk_dist, 1)}km/{wk_runs} runs (week)")
+            logger.info(f"[scheduler] Synced leaderboards for {uid}")
 
         except Exception as e:
             results["failed"] += 1
