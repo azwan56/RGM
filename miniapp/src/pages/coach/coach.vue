@@ -409,8 +409,20 @@ async function loadLatestReport() {
   const uid = user.value.id;
 
   try {
+    const rRes = await request(`/api/profile/${uid}/races`);
+    if (Array.isArray(rRes)) {
+      userRaces.value = rRes;
+    }
+  } catch (e) {
+    console.warn("Fetch user races fallback:", e);
+  }
+
+  try {
     const res = await request(`/api/coach/latest/${uid}`);
     if (res && res.summary) {
+      if (!res.multi_race_strategy) {
+        res.multi_race_strategy = { ...defaultAnalysis.multi_race_strategy };
+      }
       analysis.value = res;
       if (res.athlete_snapshot?.target_race) {
         targetRace.value = res.athlete_snapshot.target_race;
@@ -426,13 +438,25 @@ async function loadLatestReport() {
     console.warn("Fetch coach report fallback:", e);
   }
 
-  try {
-    const rRes = await request(`/api/profile/${uid}/races`);
-    if (Array.isArray(rRes)) {
-      userRaces.value = rRes;
+  // Ensure race_timeline_advice is populated if user has registered races
+  if (analysis.value && analysis.value.multi_race_strategy) {
+    const advice = analysis.value.multi_race_strategy.race_timeline_advice;
+    if ((!advice || advice.length === 0) && userRaces.value.length > 0) {
+      analysis.value.multi_race_strategy.race_timeline_advice = userRaces.value.map((r: any) => {
+        const isA = r.priority == 1 || r.priority === 'A';
+        const isB = r.priority == 2 || r.priority === 'B';
+        const tier = isA ? 'A' : isB ? 'B' : 'C';
+        return {
+          id: r.id || r.name,
+          race_name: r.name,
+          days_left: r.days_left,
+          tier,
+          tactical_role: isA ? 'A 标核心突破 (Goal Race)' : isB ? 'B 标以赛代练 (Tune-up Test)' : 'C 标模拟拉练 (Training Run)',
+          pacing_strategy: isA ? '前程严格控制在目标配速/心率储备 75% 内，杜绝乳酸过早堆积，后程根据体能稳步释放。' : isB ? '以 98%~100% 目标巡航配速实战质检，检验补给与心率门槛，无需拼尽全力。' : '作为周末长距离有氧基础跑，完全以轻松安全完赛为主，低生理负荷。',
+          taper_recovery_rule: isA ? '赛前 14~21 天开启阶段性阶梯减量，大幅削减跑量保持强度，超量补偿糖原。' : isB ? '赛前微调减量 3 天，赛后安排 4~5 天低心率慢跑排酸。' : '赛前无需深度减量，赛后正常拉伸休息即可。'
+        };
+      });
     }
-  } catch (e) {
-    console.warn("Fetch user races fallback:", e);
   }
 }
 
