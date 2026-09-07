@@ -10,7 +10,7 @@ from db import supabase_admin
 from utils.local_store import LocalStore
 from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
-from utils.running_metrics import get_age_from_dob
+from utils.running_metrics import get_age_from_dob, estimate_vo2max
 from utils.encryption import decrypt_string
 
 logger = logging.getLogger("router_profile")
@@ -37,6 +37,15 @@ class ProfileUpdateRequest(BaseModel):
     five_k_pb: Optional[int] = None
     wecom_webhook_url: Optional[str] = None
 
+class EstimateVo2maxRequest(BaseModel):
+    five_k_pb: Optional[Any] = None
+    ten_k_pb: Optional[Any] = None
+    half_pb: Optional[Any] = None
+    marathon_pb: Optional[Any] = None
+    max_heart_rate: Optional[int] = None
+    resting_heart_rate: Optional[int] = None
+    save: Optional[bool] = False
+
 class GoalUpdateRequest(BaseModel):
     target_distance: Optional[float] = None
     monthly_targets: Optional[List[int]] = None
@@ -51,6 +60,26 @@ class RacePlanRequest(BaseModel):
     race_date: str
     target_time: str
     priority: Optional[Any] = 1
+
+def parse_time_to_seconds(val: Any) -> Optional[int]:
+    if val is None or val == "":
+        return None
+    if isinstance(val, (int, float)):
+        return int(val) if val > 0 else None
+    s_val = str(val).strip()
+    if not s_val:
+        return None
+    if s_val.isdigit():
+        return int(s_val)
+    parts = s_val.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+    except Exception:
+        return None
+    return None
 
 def secs_to_time_str(s: Optional[int]) -> str:
     if not s or s <= 0:
@@ -379,6 +408,53 @@ def sync_device_profile(uid: str):
         "message": f"成功从 {source_names} 同步身体指标数据！",
         "synced_fields": list(updates.keys()),
         "profile": updated_profile
+    }
+
+
+@router.post("/{uid}/estimate-vo2max")
+def estimate_user_vo2max(uid: str, req: Optional[EstimateVo2maxRequest] = None):
+    """
+    Estimates user VO2Max using Jack Daniels VDOT formula (from best race performances)
+    and Heart Rate Ratio method (Uth-Sørensen formula).
+    Falls back to user stored profile if arguments not provided.
+    """
+    user = LocalStore.get_profile(uid) or {}
+
+    pb_5k = parse_time_to_seconds(req.five_k_pb if req and req.five_k_pb is not None else user.get("five_k_pb"))
+    pb_10k = parse_time_to_seconds(req.ten_k_pb if req and req.ten_k_pb is not None else user.get("ten_k_pb"))
+    pb_half = parse_time_to_seconds(req.half_pb if req and req.half_pb is not None else user.get("half_pb"))
+    pb_marathon = parse_time_to_seconds(req.marathon_pb if req and req.marathon_pb is not None else user.get("marathon_pb"))
+    max_hr = req.max_heart_rate if req and req.max_heart_rate is not None else user.get("max_heart_rate")
+    rest_hr = req.resting_heart_rate if req and req.resting_heart_rate is not None else user.get("resting_heart_rate")
+
+    res = estimate_vo2max(
+        pb_5k_seconds=pb_5k,
+        pb_10k_seconds=pb_10k,
+        pb_half_seconds=pb_half,
+        pb_marathon_seconds=pb_marathon,
+        max_hr=max_hr,
+        rest_hr=rest_hr
+    )
+
+    if not res.get("estimated_vo2max"):
+        return {
+            "success": False,
+            "message": "未能推算出 VO2Max：请先填写至少一项比赛成绩（5K、10K、半马或全马）或心率数据！",
+            "estimated_vo2max": None,
+            "candidates": []
+        }
+
+    # If requested to save or user profile has no vo2max
+    if req and req.save and res.get("estimated_vo2max"):
+        LocalStore.upsert_profile(uid, {"vo2max": res["estimated_vo2max"]})
+
+    return {
+        "success": True,
+        "estimated_vo2max": res["estimated_vo2max"],
+        "primary_source": res["primary_source"],
+        "method": res["method"],
+        "message": res["message"],
+        "candidates": res["candidates"]
     }
 
 

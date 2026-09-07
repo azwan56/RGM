@@ -137,3 +137,46 @@ def test_sync_device_profile_mock(monkeypatch):
     # Cleanup
     LocalStore.delete_profile(test_uid)
     LocalStore.delete_profile(coros_uid)
+
+def test_estimate_vo2max_api():
+    init_db()
+    test_uid = "u_test_estimate_vdot_runner"
+    
+    # User with 5K PB 18:25 (1105s), 10K PB 36:52 (2212s), Full PB 3:12:05 (11525s)
+    LocalStore.upsert_profile(test_uid, {
+        "id": test_uid,
+        "display_name": "PB Runner",
+        "five_k_pb": 1105,
+        "ten_k_pb": 2212,
+        "marathon_pb": 11525,
+        "max_heart_rate": 190,
+        "resting_heart_rate": 52
+    })
+
+    # Test estimate without body (falls back to profile)
+    res = client.post(f"/api/profile/{test_uid}/estimate-vo2max")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["estimated_vo2max"] is not None
+    assert data["estimated_vo2max"] >= 50.0
+    assert len(data["candidates"]) >= 3
+    assert any("VDOT" in c["method"] for c in data["candidates"])
+
+    # Test estimate with custom override in body and save=True
+    override_res = client.post(f"/api/profile/{test_uid}/estimate-vo2max", json={
+        "five_k_pb": "18:00", # 1080s -> VDOT ~55.9
+        "save": True
+    })
+    assert override_res.status_code == 200
+    odata = override_res.json()
+    assert odata["success"] is True
+    assert odata["estimated_vo2max"] >= 55.0
+
+    # Verify profile vo2max was saved
+    p = LocalStore.get_profile(test_uid)
+    assert p["vo2max"] == odata["estimated_vo2max"]
+
+    # Cleanup
+    LocalStore.delete_profile(test_uid)
+

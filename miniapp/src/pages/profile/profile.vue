@@ -318,7 +318,10 @@
 
         <!-- 最大摄氧量 VO2Max -->
         <view class="form-group">
-          <text class="label">最大摄氧量 (VO2Max)</text>
+          <view class="label-with-tag">
+            <text class="label">最大摄氧量 (VO2Max)</text>
+            <text class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
+          </view>
           <input
             class="form-input"
             type="digit"
@@ -1605,6 +1608,47 @@ async function handleSyncDeviceProfile() {
   }
 }
 
+const estimatingVo2 = ref(false);
+
+async function handleEstimateVo2max() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  estimatingVo2.value = true;
+  try {
+    uni.showLoading({ title: "依据成绩测算中..." });
+    const res = await request(`/api/profile/${uid}/estimate-vo2max`, "POST", {
+      five_k_pb: profile.value?.five_k_pb,
+      ten_k_pb: profile.value?.ten_k_pb,
+      half_pb: profile.value?.half_pb,
+      marathon_pb: profile.value?.marathon_pb,
+      max_heart_rate: profile.value?.max_heart_rate,
+      resting_heart_rate: profile.value?.resting_heart_rate,
+      save: false,
+    });
+    uni.hideLoading();
+    if (res?.success && res?.estimated_vo2max) {
+      if (!profile.value) profile.value = {};
+      profile.value.vo2max = res.estimated_vo2max;
+      uni.showModal({
+        title: "VO2Max 测算成功",
+        content: `${res.message}\n\n已自动填入输入框，点击页面下方“保存个人资料与目标”即可正式生效。`,
+        showCancel: false,
+        confirmText: "我知道了"
+      });
+    } else {
+      uni.showToast({ title: res?.message || "未能测算出数值，请确认已填入 PB 成绩", icon: "none" });
+    }
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: err?.message || "推算失败", icon: "none" });
+  } finally {
+    estimatingVo2.value = false;
+  }
+}
+
 async function handleSaveAll() {
   const uid = user.value?.id;
   if (!uid) {
@@ -2405,6 +2449,13 @@ onShow(() => {
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
   border: 1rpx solid rgba(252, 76, 2, 0.3);
+}
+
+.estimate-pill-btn {
+  font-size: 20rpx;
+  color: #fc4c02;
+  font-weight: bold;
+  padding: 2rpx 8rpx;
 }
 
 .picker-input-box {

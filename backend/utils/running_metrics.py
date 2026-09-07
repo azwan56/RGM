@@ -63,6 +63,75 @@ def vdot_to_race_time(vdot: float, distance_meters: float) -> int:
 
     return int(round((low_s + high_s) / 2.0))
 
+def estimate_vo2max(
+    pb_5k_seconds: Optional[int] = None,
+    pb_10k_seconds: Optional[int] = None,
+    pb_half_seconds: Optional[int] = None,
+    pb_marathon_seconds: Optional[int] = None,
+    max_hr: Optional[int] = None,
+    rest_hr: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Estimates VO2Max using Jack Daniels VDOT formula (from best race performances)
+    and Heart Rate Ratio method (Uth-Sørensen formula).
+    Returns recommended VO2Max and the estimation breakdown.
+    """
+    candidates = []
+
+    # 1. 5K VDOT
+    if pb_5k_seconds and 600 <= pb_5k_seconds <= 3600:
+        v = calculate_vdot(5000.0, float(pb_5k_seconds))
+        if v > 0:
+            candidates.append({"source": "5公里 PB", "method": "Jack Daniels VDOT", "value": v})
+
+    # 2. 10K VDOT
+    if pb_10k_seconds and 1200 <= pb_10k_seconds <= 7200:
+        v = calculate_vdot(10000.0, float(pb_10k_seconds))
+        if v > 0:
+            candidates.append({"source": "10公里 PB", "method": "Jack Daniels VDOT", "value": v})
+
+    # 3. Half Marathon VDOT
+    if pb_half_seconds and 3000 <= pb_half_seconds <= 15000:
+        v = calculate_vdot(21097.5, float(pb_half_seconds))
+        if v > 0:
+            candidates.append({"source": "半程马拉松 PB", "method": "Jack Daniels VDOT", "value": v})
+
+    # 4. Marathon VDOT
+    if pb_marathon_seconds and 7200 <= pb_marathon_seconds <= 30000:
+        v = calculate_vdot(42195.0, float(pb_marathon_seconds))
+        if v > 0:
+            candidates.append({"source": "全程马拉松 PB", "method": "Jack Daniels VDOT", "value": v})
+
+    # 5. Heart Rate Ratio: VO2Max ≈ 15.3 * (HRmax / HRrest)
+    if max_hr and rest_hr and max_hr > rest_hr and rest_hr >= 35 and max_hr >= 140:
+        hr_vo2 = round(15.3 * (float(max_hr) / float(rest_hr)), 1)
+        if 25.0 <= hr_vo2 <= 85.0:
+            candidates.append({"source": f"心率比值 ({max_hr}/{rest_hr} bpm)", "method": "Uth-Sørensen 心率公式", "value": hr_vo2})
+
+    if not candidates:
+        return {
+            "estimated_vo2max": None,
+            "primary_source": None,
+            "candidates": [],
+            "message": "缺少有效的 PB 成绩或心率数据，无法推算"
+        }
+
+    # Best estimate: prioritize VDOT from race performances
+    vdot_candidates = [c for c in candidates if "VDOT" in c["method"]]
+    if vdot_candidates:
+        best = max(vdot_candidates, key=lambda x: x["value"])
+        primary = best
+    else:
+        primary = candidates[0]
+
+    return {
+        "estimated_vo2max": primary["value"],
+        "primary_source": primary["source"],
+        "method": primary["method"],
+        "candidates": candidates,
+        "message": f"基于【{primary['source']}】通过 {primary['method']} 成功推算出 VO2Max 为 {primary['value']}"
+    }
+
 def compute_ctl_atl_tsb(
     daily_trimp_series: List[Tuple[str, float]],
     ctl_decay_days: int = 42,

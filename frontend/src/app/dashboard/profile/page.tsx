@@ -374,6 +374,35 @@ export default function ProfilePage() {
     }
   }
 
+  const [estimatingVo2, setEstimatingVo2] = useState(false);
+
+  async function handleEstimateVo2max() {
+    if (!user) return;
+    setEstimatingVo2(true);
+    try {
+      const res = await apiClient.post(`/api/profile/${user.id}/estimate-vo2max`, {
+        five_k_pb: fiveKPb,
+        ten_k_pb: tenKPb,
+        half_pb: halfPb,
+        marathon_pb: marathonPb,
+        max_heart_rate: maxHr ? Number(maxHr) : null,
+        resting_heart_rate: restHr ? Number(restHr) : null,
+        save: false,
+      });
+      if (res.data?.success && res.data?.estimated_vo2max) {
+        setVo2max(res.data.estimated_vo2max);
+        alert(`✅ ${res.data.message}\n\n已自动填入上方 VO2Max 框，点击页面底部“保存跑者档案”即可持久保存！`);
+      } else {
+        alert(res.data?.message || "未能推算出 VO2Max，请先填写任意距离 PB 成绩");
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.detail || e.message || "推算失败";
+      alert("VO2Max 推算提示: " + errMsg);
+    } finally {
+      setEstimatingVo2(false);
+    }
+  }
+
   async function handleSaveWeeklyOnly() {
     if (!user?.id) return;
     setSavingWeekly(true);
@@ -852,7 +881,18 @@ export default function ProfilePage() {
 
               {/* 最大摄氧量 VO2Max */}
               <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">最大摄氧量 (VO2Max)</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-zinc-400">最大摄氧量 (VO2Max)</label>
+                  <button
+                    type="button"
+                    onClick={handleEstimateVo2max}
+                    disabled={estimatingVo2}
+                    className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
+                    title="基于您在上方填写的 5K/10K/半马/全马 PB 成绩自动测算 VDOT"
+                  >
+                    <span>⚡ 依据 PB 测算</span>
+                  </button>
+                </div>
                 <input
                   type="number"
                   step="0.1"
