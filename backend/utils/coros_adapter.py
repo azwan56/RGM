@@ -168,15 +168,85 @@ class CorosAdapter:
         return False
 
     def fetch_user_profile_info(self) -> Dict[str, Any]:
-        """Returns normalized user profile information (avatar, display name, etc.)."""
-        return {
+        """Returns normalized user profile information (avatar, display name, gender, height, weight, birth date, vo2max)."""
+        info: Dict[str, Any] = {
             "avatar_url": self.avatar_url,
             "display_name": self.nick_name,
             "gender": None,
+            "date_of_birth": None,
             "height_cm": None,
             "weight_kg": None,
             "vo2max": None,
+            "max_heart_rate": None,
+            "resting_heart_rate": None,
         }
+
+        if not self.access_token and not self.login():
+            return info
+
+        # 1. Query private profile for biometrics
+        try:
+            url = f"{self.base_url}/profile/private/query"
+            resp = requests.post(url, json={}, headers=self._get_headers(), timeout=10)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if str(res_json.get("result")) == "0000":
+                    p_data = res_json.get("data") or {}
+                    
+                    # Gender: 1=male, 2=female or string
+                    g = p_data.get("gender") or p_data.get("sex")
+                    if g in [1, "1", "male", "MALE", "m", "M"]:
+                        info["gender"] = "male"
+                    elif g in [2, "2", "female", "FEMALE", "f", "F"]:
+                        info["gender"] = "female"
+                    
+                    # Height (cm)
+                    h = p_data.get("height")
+                    if h:
+                        info["height_cm"] = round(float(h), 1)
+                    
+                    # Weight (kg or grams)
+                    w = p_data.get("weight")
+                    if w:
+                        w_val = float(w)
+                        info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
+                    
+                    # Birth date / Birthday
+                    b = p_data.get("birthday") or p_data.get("birthDate") or p_data.get("birth_date")
+                    if b:
+                        b_str = str(b).strip()
+                        if len(b_str) == 8 and b_str.isdigit():
+                            info["date_of_birth"] = f"{b_str[:4]}-{b_str[4:6]}-{b_str[6:]}"
+                        elif "-" in b_str:
+                            info["date_of_birth"] = b_str[:10]
+                        elif b_str.isdigit() and len(b_str) >= 10:
+                            ts = int(b_str[:10])
+                            info["date_of_birth"] = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+                    if p_data.get("maxHeartRate"):
+                        info["max_heart_rate"] = int(p_data["maxHeartRate"])
+                    if p_data.get("restHeartRate"):
+                        info["resting_heart_rate"] = int(p_data["restHeartRate"])
+        except Exception as e:
+            logger.warning(f"[coros] fetch_user_profile_info /profile/private/query error: {e}")
+
+        # 2. Query EvoLab analysis for VO2Max
+        try:
+            url = f"{self.base_url}/analyse/query"
+            resp = requests.post(url, json={}, headers=self._get_headers(), timeout=10)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if str(res_json.get("result")) == "0000":
+                    a_data = res_json.get("data") or {}
+                    vo2 = a_data.get("vo2Max") or a_data.get("vo2max") or a_data.get("runningVo2Max")
+                    if vo2:
+                        info["vo2max"] = round(float(vo2), 1)
+        except Exception as e:
+            logger.warning(f"[coros] fetch_user_profile_info /analyse/query error: {e}")
+
+        logger.info(f"[coros] Resolved profile metrics: DOB={info['date_of_birth']}, gender={info['gender']}, "
+                    f"height={info['height_cm']}cm, weight={info['weight_kg']}kg, VO2Max={info['vo2max']}")
+        return info
 
     def fetch_recent_activities(self, limit: int = 30) -> List[Dict[str, Any]]:
         """Fetches latest running activities from COROS."""

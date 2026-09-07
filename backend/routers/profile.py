@@ -9,6 +9,8 @@ from config import settings
 from db import supabase_admin
 from utils.local_store import LocalStore
 from utils.garmin_adapter import GarminAdapter
+from utils.coros_adapter import CorosAdapter
+from utils.running_metrics import get_age_from_dob
 from utils.encryption import decrypt_string
 
 logger = logging.getLogger("router_profile")
@@ -24,6 +26,7 @@ class ProfileUpdateRequest(BaseModel):
     height: Optional[float] = None
     weight_kg: Optional[float] = None
     weight: Optional[float] = None
+    vo2max: Optional[float] = None
     years_running: Optional[int] = None
     bio: Optional[str] = None
     max_heart_rate: Optional[int] = None
@@ -83,11 +86,15 @@ def get_user_profile(uid: str):
             "resting_heart_rate": 0,
             "height_cm": 0,
             "weight_kg": 0,
+            "vo2max": None,
             "years_running": 0,
+            "gender": "male",
+            "date_of_birth": None,
         }
 
     profile.pop("garmin_encrypted_password", None)
     profile.pop("coros_encrypted_password", None)
+    profile["age"] = get_age_from_dob(profile.get("date_of_birth"))
     goal = LocalStore.get_goal(uid)
     races = LocalStore.get_race_plans(uid)
 
@@ -291,6 +298,87 @@ def import_garmin_pb(uid: str):
         "message": "成功从 Garmin 导入个人最佳成绩 (PB)！",
         "prs": prs,
         "formatted": formatted
+    }
+
+
+@router.post("/{uid}/sync-device-profile")
+def sync_device_profile(uid: str):
+    """
+    Directly pulls user biometrics (date of birth, gender, height, weight, vo2max, HR thresholds)
+    from connected Garmin Connect or COROS Training Hub account and updates user profile.
+    """
+    user = LocalStore.get_profile(uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="跑者资料不存在")
+
+    has_garmin = user.get("garmin_connected") and user.get("garmin_encrypted_password")
+    has_coros = user.get("coros_connected") and user.get("coros_encrypted_password")
+
+    if not has_garmin and not has_coros:
+        raise HTTPException(status_code=400, detail="未连接任何手表账号，请先在设置中绑定 Garmin 或 COROS！")
+
+    updates: Dict[str, Any] = {}
+    sources = []
+
+    # 1. Garmin
+    if has_garmin:
+        try:
+            email = user.get("garmin_email")
+            enc_pwd = user.get("garmin_encrypted_password")
+            domain = user.get("garmin_domain") or "garmin.cn"
+            pwd = decrypt_string(enc_pwd)
+            if pwd:
+                adapter = GarminAdapter(email=email, password=pwd, domain=domain)
+                g_info = adapter.fetch_user_profile_info()
+                for k in ["date_of_birth", "gender", "height_cm", "weight_kg", "vo2max", "max_heart_rate", "resting_heart_rate", "avatar_url"]:
+                    if g_info.get(k) is not None:
+                        updates[k] = g_info[k]
+                if g_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                    updates["display_name"] = g_info["display_name"]
+                sources.append("Garmin")
+        except Exception as ge:
+            logger.error(f"[profile] Garmin sync biometrics failed for {uid}: {ge}")
+
+    # 2. COROS
+    if has_coros:
+        try:
+            account = user.get("coros_account")
+            enc_pwd = user.get("coros_encrypted_password")
+            domain = user.get("coros_domain") or "teamcnapi.coros.com"
+            pwd = decrypt_string(enc_pwd)
+            if pwd:
+                c_adapter = CorosAdapter(account=account, password=pwd, domain=domain)
+                c_info = c_adapter.fetch_user_profile_info()
+                for k in ["date_of_birth", "gender", "height_cm", "weight_kg", "vo2max", "max_heart_rate", "resting_heart_rate"]:
+                    if c_info.get(k) is not None and (k not in updates or updates[k] is None):
+                        updates[k] = c_info[k]
+                if c_info.get("avatar_url") and not updates.get("avatar_url") and not user.get("avatar_url"):
+                    updates["avatar_url"] = c_info["avatar_url"]
+                if c_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                    updates["display_name"] = c_info["display_name"]
+                sources.append("COROS")
+        except Exception as ce:
+            logger.error(f"[profile] COROS sync biometrics failed for {uid}: {ce}")
+
+    if not updates:
+        return {
+            "success": False,
+            "message": "未能从手表服务获取到身体指标数据，请检查网络或稍后再试",
+            "profile": user
+        }
+
+    LocalStore.upsert_profile(uid, updates)
+    updated_profile = LocalStore.get_profile(uid)
+    updated_profile.pop("garmin_encrypted_password", None)
+    updated_profile.pop("coros_encrypted_password", None)
+    updated_profile["age"] = get_age_from_dob(updated_profile.get("date_of_birth"))
+
+    source_names = " / ".join(sources)
+    return {
+        "success": True,
+        "message": f"成功从 {source_names} 同步身体指标数据！",
+        "synced_fields": list(updates.keys()),
+        "profile": updated_profile
     }
 
 

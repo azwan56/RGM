@@ -151,9 +151,12 @@ class GarminAdapter:
             "display_name": None,
             "full_name": None,
             "gender": None,
+            "date_of_birth": None,
             "height_cm": None,
             "weight_kg": None,
             "vo2max": None,
+            "max_heart_rate": None,
+            "resting_heart_rate": None,
         }
 
         try:
@@ -170,22 +173,66 @@ class GarminAdapter:
         except Exception as e:
             logger.warning(f"[garmin] fetch socialProfile error: {e}")
 
+        # 1. Primary personal information endpoint
         try:
             p_info = self.client.connectapi("/userprofile-service/userprofile/personal-information")
             if isinstance(p_info, dict):
                 user_info = p_info.get("userInfo") or {}
                 bio = p_info.get("biometricProfile") or {}
-                if user_info.get("genderType"):
-                    info["gender"] = user_info.get("genderType").lower()
+                
+                # Birth date / DOB
+                dob = user_info.get("birthDate") or p_info.get("birthDate")
+                if dob:
+                    info["date_of_birth"] = str(dob)[:10]
+
+                # Gender
+                g_val = user_info.get("genderType") or p_info.get("gender")
+                if g_val:
+                    info["gender"] = str(g_val).lower()
+                
+                # Height (cm)
                 if bio.get("height"):
                     info["height_cm"] = round(float(bio["height"]), 1)
+                
+                # Weight (convert grams to kg)
                 if bio.get("weight"):
-                    info["weight_kg"] = round(float(bio["weight"]) / 1000.0, 1)
-                if bio.get("vo2Max"):
-                    info["vo2max"] = round(float(bio["vo2Max"]), 1)
+                    w_val = float(bio["weight"])
+                    info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
+                
+                # VO2Max
+                vo2 = bio.get("vo2Max") or bio.get("vo2MaxRunning")
+                if vo2:
+                    info["vo2max"] = round(float(vo2), 1)
+
+                # Heart Rate thresholds if available
+                if bio.get("maxHeartRate"):
+                    info["max_heart_rate"] = int(bio["maxHeartRate"])
+                if bio.get("restingHeartRate"):
+                    info["resting_heart_rate"] = int(bio["restingHeartRate"])
         except Exception as e:
             logger.warning(f"[garmin] fetch personal-information error: {e}")
 
+        # 2. Fallback to user-settings endpoint
+        try:
+            user_settings = self.client.get_user_profile() # /userprofile-service/userprofile/user-settings
+            if isinstance(user_settings, dict):
+                user_data = user_settings.get("userData") or {}
+                if user_data.get("birthDate") and not info["date_of_birth"]:
+                    info["date_of_birth"] = str(user_data["birthDate"])[:10]
+                if user_data.get("gender") and not info["gender"]:
+                    info["gender"] = str(user_data["gender"]).lower()
+                if user_data.get("height") and not info["height_cm"]:
+                    info["height_cm"] = round(float(user_data["height"]), 1)
+                if user_data.get("weight") and not info["weight_kg"]:
+                    w_val = float(user_data["weight"])
+                    info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
+                if user_data.get("vo2MaxRunning") and not info["vo2max"]:
+                    info["vo2max"] = round(float(user_data["vo2MaxRunning"]), 1)
+        except Exception as e:
+            logger.warning(f"[garmin] fetch user-settings error: {e}")
+
+        logger.info(f"[garmin] Resolved profile metrics: DOB={info['date_of_birth']}, gender={info['gender']}, "
+                    f"height={info['height_cm']}cm, weight={info['weight_kg']}kg, VO2Max={info['vo2max']}")
         return info
 
     def fetch_personal_records(self) -> Dict[str, Optional[int]]:

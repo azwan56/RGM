@@ -52,6 +52,7 @@ def init_db():
                 years_running INTEGER DEFAULT 3,
                 bio TEXT,
                 date_of_birth TEXT,
+                vo2max REAL,
                 wecom_webhook_url TEXT,
                 created_at TEXT
             )
@@ -240,6 +241,10 @@ def init_db():
             cursor.execute("ALTER TABLE profiles ADD COLUMN coros_domain TEXT DEFAULT 'teamcnapi.coros.com'")
         if "coros_last_sync_at" not in existing_cols:
             cursor.execute("ALTER TABLE profiles ADD COLUMN coros_last_sync_at TEXT")
+        if "vo2max" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN vo2max REAL")
+        if "date_of_birth" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN date_of_birth TEXT")
 
         # Seed default flagship club if none exists
         cursor.execute("SELECT COUNT(*) FROM clubs")

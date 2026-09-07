@@ -256,9 +256,103 @@
           <text class="title-icon">💓</text>
           <text class="card-title">生理参数与身体指标</text>
         </view>
+        <button
+          class="import-garmin-btn"
+          :loading="syncingDeviceProfile"
+          :disabled="syncingDeviceProfile || (!garminConnected && !corosConnected)"
+          @click="handleSyncDeviceProfile"
+        >
+          从手表同步指标
+        </button>
       </view>
 
+      <text class="desc-text" style="margin-bottom: 20rpx;">
+        Canova 教练根据年龄、性别、静息心率与最大摄氧量 (VO2Max) 智能自适应训练配速区间与超量恢复。
+      </text>
+
       <view class="form-grid-2">
+        <!-- 出生日期 & 动态年龄 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">出生日期 (Date of Birth)</text>
+            <text v-if="displayAge !== null" class="age-badge-pill">
+              {{ displayAge }} 岁 · {{ displayAge >= 50 ? '大师组 (50+)' : displayAge >= 40 ? '壮年大师组 (40+)' : '黄金年龄组' }}
+            </text>
+          </view>
+          <picker
+            mode="date"
+            :value="profile?.date_of_birth || '1990-01-01'"
+            start="1940-01-01"
+            :end="todayDateStr"
+            @change="onDateOfBirthChange"
+          >
+            <view class="picker-input-box">
+              <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
+                {{ profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)' }}
+              </text>
+              <text class="picker-arrow">📅</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 生理性别 -->
+        <view class="form-group">
+          <text class="label">生理性别</text>
+          <view class="gender-pill-group">
+            <view
+              class="gender-pill"
+              :class="{ active: (profile?.gender || 'male') === 'male' }"
+              @click="onGenderSelect('male')"
+            >
+              <text>♂ 男 (Male)</text>
+            </view>
+            <view
+              class="gender-pill"
+              :class="{ active: profile?.gender === 'female' }"
+              @click="onGenderSelect('female')"
+            >
+              <text>♀ 女 (Female)</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 最大摄氧量 VO2Max -->
+        <view class="form-group">
+          <text class="label">最大摄氧量 (VO2Max)</text>
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="例如 54.0"
+            :value="profile?.vo2max || ''"
+            @input="onInputVo2max"
+          />
+        </view>
+
+        <!-- 身高 -->
+        <view class="form-group">
+          <text class="label">身高 (cm)</text>
+          <input
+            class="form-input"
+            type="number"
+            placeholder="175"
+            :value="profile?.height || profile?.height_cm || ''"
+            @input="onInputHeight"
+          />
+        </view>
+
+        <!-- 体重 -->
+        <view class="form-group">
+          <text class="label">体重 (kg)</text>
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="68.0"
+            :value="profile?.weight || profile?.weight_kg || ''"
+            @input="onInputWeight"
+          />
+        </view>
+
+        <!-- 最大心率 -->
         <view class="form-group">
           <text class="label">最大心率 (Max HR)</text>
           <input
@@ -269,6 +363,8 @@
             @input="onInputMaxHr"
           />
         </view>
+
+        <!-- 静息心率 -->
         <view class="form-group">
           <text class="label">静息心率 (Rest HR)</text>
           <input
@@ -279,24 +375,16 @@
             @input="onInputRestHr"
           />
         </view>
-        <view class="form-group">
-          <text class="label">身高 (cm)</text>
+
+        <!-- 跑龄 (年) -->
+        <view class="form-group full-width-group">
+          <text class="label">跑龄 (年)</text>
           <input
             class="form-input"
             type="number"
-            placeholder="175"
-            :value="profile?.height || ''"
-            @input="onInputHeight"
-          />
-        </view>
-        <view class="form-group">
-          <text class="label">体重 (kg)</text>
-          <input
-            class="form-input"
-            type="digit"
-            placeholder="68.0"
-            :value="profile?.weight || ''"
-            @input="onInputWeight"
+            placeholder="3"
+            :value="profile?.years_running || ''"
+            @input="onInputYearsRunning"
           />
         </view>
       </view>
@@ -856,7 +944,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import {
   request,
@@ -882,6 +970,14 @@ const defaultProfile = {
   coros_connected: false,
   coros_account: "",
   coros_domain: "teamcnapi.coros.com",
+  gender: "male",
+  date_of_birth: "",
+  vo2max: null,
+  years_running: 3,
+  height: 175,
+  weight: 65,
+  max_heart_rate: 190,
+  resting_heart_rate: 56,
 };
 
 const user = ref<UserProfile | null>(null);
@@ -1405,11 +1501,108 @@ function onInputRestHr(e: any) {
 function onInputHeight(e: any) {
   if (!profile.value) profile.value = {};
   profile.value.height = parseFloat(e.detail.value) || 0;
+  profile.value.height_cm = profile.value.height;
 }
 
 function onInputWeight(e: any) {
   if (!profile.value) profile.value = {};
   profile.value.weight = parseFloat(e.detail.value) || 0;
+  profile.value.weight_kg = profile.value.weight;
+}
+
+const syncingDeviceProfile = ref(false);
+
+const todayDateStr = computed(() => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+});
+
+function computeAge(dobStr?: string): number | null {
+  if (!dobStr) return null;
+  try {
+    const parts = String(dobStr).slice(0, 10).split("-");
+    if (parts.length < 3) return null;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dob = new Date(y, m, d);
+    if (isNaN(dob.getTime())) return null;
+    const today = new Date();
+    let a = today.getFullYear() - dob.getFullYear();
+    const monthDiff = today.getMonth() - dob.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+      a--;
+    }
+    return Math.max(0, a);
+  } catch {
+    return null;
+  }
+}
+
+const displayAge = computed(() => {
+  if (profile.value?.age !== undefined && profile.value?.age !== null) {
+    return profile.value.age;
+  }
+  return computeAge(profile.value?.date_of_birth);
+});
+
+function onDateOfBirthChange(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.date_of_birth = e.detail?.value || "";
+  profile.value.age = computeAge(profile.value.date_of_birth);
+}
+
+function onGenderSelect(g: string) {
+  if (!profile.value) profile.value = {};
+  profile.value.gender = g;
+}
+
+function onInputVo2max(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.vo2max = e.detail?.value ? parseFloat(e.detail.value) : null;
+}
+
+function onInputYearsRunning(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.years_running = e.detail?.value ? parseInt(e.detail.value, 10) : null;
+}
+
+async function handleSyncDeviceProfile() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!garminConnected.value && !corosConnected.value) {
+    uni.showToast({ title: "请先连接 Garmin 或高驰", icon: "none" });
+    return;
+  }
+  syncingDeviceProfile.value = true;
+  try {
+    uni.showLoading({ title: "同步手表身体数据..." });
+    const res = await request(`/api/profile/${uid}/sync-device-profile`, "POST");
+    uni.hideLoading();
+    if (res?.success && res?.profile) {
+      profile.value = { ...profile.value, ...res.profile };
+      if (res.profile.avatar_url && !user.value?.avatar_url) {
+        user.value.avatar_url = res.profile.avatar_url;
+      }
+      if (res.profile.display_name && (!user.value?.display_name || user.value.display_name === "微信跑者")) {
+        user.value.display_name = res.profile.display_name;
+      }
+      uni.showToast({ title: res.message || "同步成功！", icon: "success" });
+    } else {
+      uni.showToast({ title: res?.message || "未能获取到手表数据", icon: "none" });
+    }
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: err?.message || "同步失败，请检查手表连接", icon: "none" });
+  } finally {
+    syncingDeviceProfile.value = false;
+  }
 }
 
 async function handleSaveAll() {
@@ -1425,6 +1618,10 @@ async function handleSaveAll() {
       resting_heart_rate: profile.value?.resting_heart_rate,
       height_cm: profile.value?.height || profile.value?.height_cm,
       weight_kg: profile.value?.weight || profile.value?.weight_kg,
+      gender: profile.value?.gender,
+      date_of_birth: profile.value?.date_of_birth,
+      vo2max: profile.value?.vo2max !== undefined && profile.value?.vo2max !== null && profile.value?.vo2max !== "" ? Number(profile.value.vo2max) : null,
+      years_running: profile.value?.years_running,
     });
 
     const finalMonthlyTargets = goalMode.value === "uniform"
@@ -1438,7 +1635,7 @@ async function handleSaveAll() {
       monthly_targets: finalMonthlyTargets,
     });
 
-    uni.showToast({ title: "个人跑量目标已保存", icon: "success" });
+    uni.showToast({ title: "个人资料与目标已保存", icon: "success" });
   } catch (err: any) {
     uni.showToast({ title: err?.message || "保存失败", icon: "none" });
   } finally {
@@ -2187,6 +2384,73 @@ onShow(() => {
   padding: 0 16rpx;
   font-size: 26rpx;
   color: #ffffff;
+}
+
+.full-width-group {
+  grid-column: span 2;
+}
+
+.label-with-tag {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+
+.age-badge-pill {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background-color: rgba(252, 76, 2, 0.15);
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(252, 76, 2, 0.3);
+}
+
+.picker-input-box {
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+  color: #ffffff;
+}
+
+.placeholder-text {
+  color: #636366;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+}
+
+.gender-pill-group {
+  display: flex;
+  gap: 12rpx;
+  height: 72rpx;
+}
+
+.gender-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  font-size: 24rpx;
+  color: #8e8e93;
+}
+
+.gender-pill.active {
+  background-color: rgba(252, 76, 2, 0.15);
+  border-color: #fc4c02;
+  color: #fc4c02;
+  font-weight: bold;
 }
 
 /* Target & Goal Planning */

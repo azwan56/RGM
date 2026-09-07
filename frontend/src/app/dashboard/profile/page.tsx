@@ -44,6 +44,32 @@ export default function ProfilePage() {
   const [yearsRunning, setYearsRunning] = useState<number | "">(3);
   const [maxHr, setMaxHr] = useState<number | "">(190);
   const [restHr, setRestHr] = useState<number | "">(56);
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [vo2max, setVo2max] = useState<number | "">("");
+  const [age, setAge] = useState<number | null>(null);
+  const [syncingDeviceProfile, setSyncingDeviceProfile] = useState(false);
+
+  function computeAge(dobStr: string): number | null {
+    if (!dobStr) return null;
+    try {
+      const parts = dobStr.slice(0, 10).split("-");
+      if (parts.length < 3) return null;
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dob = new Date(y, m, d);
+      if (isNaN(dob.getTime())) return null;
+      const today = new Date();
+      let a = today.getFullYear() - dob.getFullYear();
+      const monthDiff = today.getMonth() - dob.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+        a--;
+      }
+      return Math.max(0, a);
+    } catch {
+      return null;
+    }
+  }
 
   // PB (HH:MM:SS or MM:SS)
   const [marathonPb, setMarathonPb] = useState("3:09:30");
@@ -123,6 +149,13 @@ export default function ProfilePage() {
         setCorosDomain(profile.coros_domain || "teamcnapi.coros.com");
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
+        if (profile.date_of_birth) {
+          setDateOfBirth(profile.date_of_birth);
+          setAge(profile.age !== undefined && profile.age !== null ? profile.age : computeAge(profile.date_of_birth));
+        }
+        if (profile.vo2max !== undefined && profile.vo2max !== null) {
+          setVo2max(profile.vo2max);
+        }
         if (profile.years_running) setYearsRunning(profile.years_running);
         if (profile.max_heart_rate) setMaxHr(profile.max_heart_rate);
         if (profile.resting_heart_rate) setRestHr(profile.resting_heart_rate);
@@ -306,6 +339,41 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSyncDeviceProfile() {
+    if (!user) return;
+    setSyncingDeviceProfile(true);
+    try {
+      const res = await apiClient.post(`/api/profile/${user.id}/sync-device-profile`);
+      if (res.data?.success && res.data?.profile) {
+        const p = res.data.profile;
+        if (p.date_of_birth) {
+          setDateOfBirth(p.date_of_birth);
+          setAge(p.age !== undefined && p.age !== null ? p.age : computeAge(p.date_of_birth));
+        }
+        if (p.gender) setGender(p.gender);
+        if (p.height_cm) setHeightCm(p.height_cm);
+        if (p.weight_kg) setWeightKg(p.weight_kg);
+        if (p.vo2max !== undefined && p.vo2max !== null) setVo2max(p.vo2max);
+        if (p.max_heart_rate) setMaxHr(p.max_heart_rate);
+        if (p.resting_heart_rate) setRestHr(p.resting_heart_rate);
+        if (p.display_name && (!displayName || displayName === "跑者" || displayName === "微信跑者")) {
+          setDisplayName(p.display_name);
+        }
+        if (p.avatar_url && !avatarUrl) {
+          setAvatarUrl(p.avatar_url);
+        }
+        alert(res.data.message || "✅ 成功从手表同步身体指标！");
+      } else {
+        alert(res.data?.message || "未能获取到手表数据");
+      }
+    } catch (e: any) {
+      const errMsg = e.response?.data?.detail || e.message || "同步失败，请检查手表账号连接";
+      alert("手表同步提示: " + errMsg);
+    } finally {
+      setSyncingDeviceProfile(false);
+    }
+  }
+
   async function handleSaveWeeklyOnly() {
     if (!user?.id) return;
     setSavingWeekly(true);
@@ -332,6 +400,8 @@ export default function ProfilePage() {
         display_name: displayName.trim() || undefined,
         avatar_url: avatarUrl || undefined,
         gender,
+        date_of_birth: dateOfBirth || null,
+        vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
         weight_kg: weightKg || null,
         years_running: yearsRunning || null,
@@ -723,62 +793,51 @@ export default function ProfilePage() {
 
           {/* ── CARD 3: 生理参数与跑者身材 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex items-center gap-2">
-              <Heart className="w-5 h-5 text-rose-500" />
-              <h2 className="text-lg font-bold text-white tracking-wide">生理参数与身体指标</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Heart className="w-5 h-5 text-rose-500" />
+                  <h2 className="text-lg font-bold text-white tracking-wide">生理参数与身体指标</h2>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Renato Canova 教练根据实际年龄、性别与 VO2Max 精准自适应训练配速与超量恢复窗口
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSyncDeviceProfile}
+                disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
+                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-white transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#FC4C02] ${syncingDeviceProfile ? "animate-spin" : ""}`} />
+                {syncingDeviceProfile ? "正在同步手表身体指标..." : "从手表同步指标"}
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (Max HR bpm)</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {/* 出生日期 & 年龄 */}
+              <div className="sm:col-span-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-zinc-400">出生日期 (Date of Birth)</label>
+                  {age !== null && (
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
+                      {age} 岁 · {age >= 50 ? "大师组 (50+)" : age >= 40 ? "壮年大师组 (40+)" : "黄金年龄组"}
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="number"
-                  value={maxHr}
-                  onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
+                  type="date"
+                  value={dateOfBirth}
+                  onChange={(e) => {
+                    setDateOfBirth(e.target.value);
+                    setAge(computeAge(e.target.value));
+                  }}
                   className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
                 />
               </div>
 
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (Resting HR bpm)</label>
-                <input
-                  type="number"
-                  value={restHr}
-                  onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
-                <input
-                  type="number"
-                  value={yearsRunning}
-                  onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
-                <input
-                  type="number"
-                  value={heightCm}
-                  onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
-                <input
-                  type="number"
-                  value={weightKg}
-                  onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
+              {/* 性别 */}
               <div>
                 <label className="text-xs text-zinc-400 block mb-1.5">性别</label>
                 <select
@@ -789,6 +848,75 @@ export default function ProfilePage() {
                   <option value="male">男 (Male)</option>
                   <option value="female">女 (Female)</option>
                 </select>
+              </div>
+
+              {/* 最大摄氧量 VO2Max */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">最大摄氧量 (VO2Max)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={vo2max}
+                  onChange={(e) => setVo2max(e.target.value ? Number(e.target.value) : "")}
+                  placeholder="例如 54.0"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 身高 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
+                <input
+                  type="number"
+                  value={heightCm}
+                  onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 体重 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 最大心率 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (Max HR bpm)</label>
+                <input
+                  type="number"
+                  value={maxHr}
+                  onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 静息心率 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (Resting HR bpm)</label>
+                <input
+                  type="number"
+                  value={restHr}
+                  onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 跑龄 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
+                <input
+                  type="number"
+                  value={yearsRunning}
+                  onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
               </div>
             </div>
           </div>
