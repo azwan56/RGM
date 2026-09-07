@@ -5,7 +5,7 @@ import json
 from datetime import date
 from fastapi.testclient import TestClient
 from main import app
-from utils.local_store import LocalStore
+from utils.local_store import LocalStore, DB_PATH
 
 client = TestClient(app)
 
@@ -36,7 +36,7 @@ def setup_test_runner():
     yield
 
     # Cleanup test data
-    with sqlite3.connect(LocalStore.get_db_path() if hasattr(LocalStore, "get_db_path") else "data/rgm.db") as conn:
+    with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM goals WHERE user_id = ? OR user_id = ?", (TEST_UID, TEST_EMAIL))
         c.execute("DELETE FROM profiles WHERE id = ? OR email = ?", (TEST_UID, TEST_EMAIL))

@@ -799,12 +799,19 @@ export default function TrainingPlanView({
                 {(activeWeek.days || []).map((day: any, dIdx: number) => {
                   const typeMeta = workoutTypeStyles[day.workout_type] || workoutTypeStyles.easy_run;
                   const isRest = day.workout_type === "rest";
+                  const todayStr = new Date().toLocaleDateString("en-CA");
+                  const isPast = Boolean(day.date && day.date < todayStr);
+                  const isMissed = Boolean(day.is_missed ?? (isPast && !day.completed && !isRest && (day.distance_km || 0) > 0));
 
                   return (
                     <div
                       key={dIdx}
                       className={`bg-[#121215] border rounded-3xl p-4 flex flex-col justify-between transition-all hover:border-purple-500/40 ${
-                        day.completed ? "border-emerald-500/30 bg-emerald-950/5" : typeMeta.border
+                        day.completed
+                          ? "border-emerald-500/30 bg-emerald-950/5"
+                          : isMissed
+                          ? "border-rose-500/40 bg-rose-950/15 shadow-[0_0_15px_rgba(244,63,94,0.08)]"
+                          : typeMeta.border
                       }`}
                     >
                       <div className="space-y-3">
@@ -818,9 +825,21 @@ export default function TrainingPlanView({
                               {day.date ? day.date.substring(5) : ""}
                             </span>
                           </div>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${typeMeta.badge}`}>
-                            {typeMeta.label}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {isMissed && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black border border-rose-500/40 bg-rose-500/20 text-rose-300 animate-pulse">
+                                ✗ 缺跑
+                              </span>
+                            )}
+                            {day.completed && day.actual_distance_km && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                                实跑 {day.actual_distance_km}k
+                              </span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${typeMeta.badge}`}>
+                              {typeMeta.label}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Title & Distance */}
@@ -877,13 +896,35 @@ export default function TrainingPlanView({
                           onClick={() => handleToggleQuickComplete(activeWeek.week_index, dIdx, day)}
                           className={`flex-1 py-1 px-2 rounded-xl text-[10px] font-bold border transition flex items-center justify-center gap-1 ${
                             day.completed
-                              ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                              ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 hover:bg-emerald-500/30"
+                              : isMissed
+                              ? "bg-rose-500/15 border-rose-500/40 text-rose-400 hover:bg-rose-500/25 hover:border-rose-500"
                               : "bg-[#18181c] border-white/10 text-zinc-400 hover:text-white"
                           }`}
-                          title={day.completed ? "点击取消完成状态" : "点击打卡完成"}
+                          title={
+                            day.completed
+                              ? (day.actual_pace ? `已打卡：实跑 ${day.actual_distance_km || 0}km，配速 ${day.actual_pace}` : "点击取消完成状态")
+                              : isMissed
+                              ? "该课表已过且未检测到打卡，点击补卡"
+                              : "点击打卡完成"
+                          }
                         >
-                          <Check className={`w-3 h-3 ${day.completed ? "text-emerald-400" : "text-zinc-500"}`} />
-                          {day.completed ? "已完成" : "打卡"}
+                          {day.completed ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span>{day.actual_distance_km ? `已打卡 ${day.actual_distance_km}km` : "已完成"}</span>
+                            </>
+                          ) : isMissed ? (
+                            <>
+                              <X className="w-3.5 h-3.5 text-rose-400" />
+                              <span>缺跑 · 点击补卡</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-zinc-500" />
+                              <span>打卡</span>
+                            </>
+                          )}
                         </button>
 
                         <button

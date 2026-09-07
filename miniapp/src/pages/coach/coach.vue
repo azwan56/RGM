@@ -247,16 +247,20 @@
             v-for="(day, dIdx) in (activeMiniWeek.days || [])"
             :key="dIdx"
             class="daily-card"
-            :class="[getWorkoutBorderClass(day.workout_type), { 'is-completed': day.completed }]"
+            :class="[getWorkoutBorderClass(day.workout_type), { 'is-completed': day.completed, 'is-missed': isDayMissed(day) }]"
           >
             <view class="daily-card-top">
               <view class="day-date-box">
                 <text class="day-name">{{ day.day_of_week }}</text>
                 <text class="day-date">{{ day.date ? day.date.substring(5) : '' }}</text>
               </view>
-              <text class="type-badge" :class="getWorkoutBadgeClass(day.workout_type)">
-                {{ getWorkoutTypeLabel(day.workout_type) }}
-              </text>
+              <view class="badge-group">
+                <text v-if="isDayMissed(day)" class="missed-badge">✗ 缺跑</text>
+                <text v-if="day.completed && day.actual_distance_km" class="actual-km-badge">实跑 {{ day.actual_distance_km }}k</text>
+                <text class="type-badge" :class="getWorkoutBadgeClass(day.workout_type)">
+                  {{ getWorkoutTypeLabel(day.workout_type) }}
+                </text>
+              </view>
             </view>
 
             <view class="daily-card-body">
@@ -285,10 +289,12 @@
             <view class="daily-card-actions">
               <button
                 class="action-complete-btn"
-                :class="{ completed: day.completed }"
+                :class="{ completed: day.completed, missed: isDayMissed(day) }"
                 @click="handleToggleComplete(activeMiniWeek.week_index, dIdx, day)"
               >
-                <text class="btn-text">{{ day.completed ? '✅ 已打卡' : '打卡' }}</text>
+                <text class="btn-text">
+                  {{ day.completed ? (day.actual_distance_km ? `✅ 已打卡 ${day.actual_distance_km}km` : '✅ 已完成') : (isDayMissed(day) ? '❌ 缺跑 · 补卡' : '打卡') }}
+                </text>
               </button>
               <button
                 class="action-edit-btn"
@@ -830,6 +836,16 @@ function getWorkoutBorderClass(type: string): string {
     rest: "border-rest"
   };
   return map[type] || "border-rest";
+}
+
+function isDayMissed(day: any): boolean {
+  if (!day) return false;
+  if (day.is_missed !== undefined) return Boolean(day.is_missed);
+  if (day.completed) return false;
+  if (day.workout_type === "rest") return false;
+  if (!day.date) return false;
+  const todayStr = new Date().toLocaleDateString("en-CA");
+  return day.date < todayStr && (Number(day.distance_km) || 0) > 0;
 }
 
 async function loadUserPlan() {
@@ -2610,6 +2626,37 @@ onPullDownRefresh(async () => {
   background-color: rgba(48, 209, 88, 0.03);
 }
 
+.daily-card.is-missed {
+  border-color: rgba(255, 69, 58, 0.45);
+  background: linear-gradient(180deg, rgba(255, 69, 58, 0.1) 0%, rgba(20, 16, 18, 0.95) 100%);
+}
+
+.badge-group {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.missed-badge {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  background: rgba(255, 69, 58, 0.2);
+  color: #ff453a;
+  border: 1rpx solid rgba(255, 69, 58, 0.4);
+}
+
+.actual-km-badge {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  background: rgba(48, 209, 88, 0.15);
+  color: #30d158;
+  border: 1rpx solid rgba(48, 209, 88, 0.3);
+}
+
 .daily-card-top {
   display: flex;
   justify-content: space-between;
@@ -2751,6 +2798,13 @@ onPullDownRefresh(async () => {
   background-color: rgba(48, 209, 88, 0.2);
   border-color: #30d158;
   color: #30d158;
+  font-weight: bold;
+}
+
+.action-complete-btn.missed {
+  background-color: rgba(255, 69, 58, 0.18);
+  border-color: rgba(255, 69, 58, 0.5);
+  color: #ff453a;
   font-weight: bold;
 }
 

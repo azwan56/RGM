@@ -481,6 +481,16 @@ class LocalStore:
             cursor.execute(f"INSERT OR REPLACE INTO activities ({', '.join(cols)}) VALUES ({', '.join(placeholders)})", row_data)
             conn.commit()
 
+        # Trigger training plan auto-reconciliation if active plan exists
+        try:
+            uid = act.get("user_id")
+            if uid:
+                active_plan = LocalStore.get_user_active_training_plan(uid, reconcile=False)
+                if active_plan:
+                    LocalStore.reconcile_training_plan_activities(active_plan, uid)
+        except Exception as e:
+            logger.warning(f"Plan reconciliation after upsert_activity skipped: {e}")
+
     @staticmethod
     def get_recent_activities(uid: str, limit: int = 15) -> List[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
@@ -1930,8 +1940,165 @@ class LocalStore:
 
         return LocalStore.get_training_plan(plan_id) or plan_data
 
+    save_training_plan = upsert_training_plan
+
     @staticmethod
-    def get_training_plan(plan_id: str) -> Optional[Dict[str, Any]]:
+    def get_db_path() -> str:
+        return DB_PATH
+
+    @staticmethod
+    def reconcile_training_plan_activities(plan: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Automatically aligns runner's synced activities with daily workouts in the training plan:
+        1. If an activity exists on that day: auto marks completed: True, auto_matched: True, actual_distance_km, actual_pace, actual_heartrate.
+        2. If workout_type == 'rest' and date < today: marks completed: True, auto_rest: True.
+        3. If workout_type != 'rest' and date < today and not completed: marks is_missed: True (Red 'X' indicator).
+        4. If date >= today: normal pending state (is_missed: False).
+        Preserves manual overrides if user explicitly checked or unchecked.
+        """
+        if not plan or not plan.get("schedule_data"):
+            return plan
+
+        sched = plan.get("schedule_data")
+        if isinstance(sched, str):
+            try:
+                sched = json.loads(sched)
+                plan["schedule_data"] = sched
+            except Exception:
+                return plan
+
+        weeks = sched.get("weeks") or []
+        if not weeks:
+            return plan
+
+        uid = user_id or plan.get("user_id")
+        if not uid:
+            return plan
+        canonical_uid = LocalStore.resolve_user_id(uid)
+
+        start_date_str = str(plan.get("start_date") or "")
+        now_beijing = datetime.utcnow() + timedelta(hours=8)
+        today_str = now_beijing.strftime("%Y-%m-%d")
+
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                if start_date_str:
+                    cursor.execute("""
+                        SELECT id, name, sport_type, start_time, distance_meters, 
+                               moving_time_seconds, avg_pace_str, average_heartrate
+                        FROM activities
+                        WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                        ORDER BY start_time ASC
+                    """, (canonical_uid, uid, start_date_str))
+                else:
+                    cursor.execute("""
+                        SELECT id, name, sport_type, start_time, distance_meters, 
+                               moving_time_seconds, avg_pace_str, average_heartrate
+                        FROM activities
+                        WHERE user_id = ? OR user_id = ?
+                        ORDER BY start_time ASC
+                    """, (canonical_uid, uid))
+                act_rows = [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error querying activities for plan reconciliation: {e}")
+            act_rows = []
+
+        acts_by_day: Dict[str, List[Dict[str, Any]]] = {}
+        for a in act_rows:
+            st = str(a.get("start_time") or "")[:10]
+            if st:
+                if st not in acts_by_day:
+                    acts_by_day[st] = []
+                acts_by_day[st].append(a)
+
+        changed = False
+        for w in weeks:
+            for day in (w.get("days") or []):
+                d_date = str(day.get("date") or "")
+                w_type = day.get("workout_type") or "easy_run"
+                is_rest = (w_type == "rest")
+                dist_km = float(day.get("distance_km") or 0.0)
+
+                matching_acts = acts_by_day.get(d_date, [])
+                if matching_acts:
+                    total_m = sum(float(a.get("distance_meters") or 0.0) for a in matching_acts)
+                    actual_km = round(total_m / 1000.0, 1)
+                    primary_act = matching_acts[-1]
+                    pace = primary_act.get("avg_pace_str") or "—"
+                    hr = primary_act.get("average_heartrate")
+
+                    if not day.get("completed"):
+                        day["completed"] = True
+                        changed = True
+                    if day.get("is_missed"):
+                        day["is_missed"] = False
+                        changed = True
+                    if not day.get("auto_matched"):
+                        day["auto_matched"] = True
+                        changed = True
+                    if day.get("actual_distance_km") != actual_km:
+                        day["actual_distance_km"] = actual_km
+                        changed = True
+                    if day.get("actual_pace") != pace:
+                        day["actual_pace"] = pace
+                        changed = True
+                    if hr and day.get("actual_heartrate") != hr:
+                        day["actual_heartrate"] = hr
+                        changed = True
+                else:
+                    if day.get("manual_completed"):
+                        if not day.get("completed"):
+                            day["completed"] = True
+                            changed = True
+                        if day.get("is_missed"):
+                            day["is_missed"] = False
+                            changed = True
+                    elif day.get("manual_override"):
+                        pass
+                    else:
+                        if d_date and d_date < today_str:
+                            if is_rest:
+                                if not day.get("completed"):
+                                    day["completed"] = True
+                                    day["auto_rest"] = True
+                                    changed = True
+                                if day.get("is_missed"):
+                                    day["is_missed"] = False
+                                    changed = True
+                            else:
+                                if dist_km > 0:
+                                    if day.get("completed"):
+                                        day["completed"] = False
+                                        changed = True
+                                    if not day.get("is_missed"):
+                                        day["is_missed"] = True
+                                        changed = True
+                        else:
+                            if day.get("is_missed"):
+                                day["is_missed"] = False
+                                changed = True
+
+        plan_id = plan.get("id")
+        if changed and plan_id:
+            try:
+                now_iso = datetime.utcnow().isoformat() + "Z"
+                with sqlite3.connect(DB_PATH) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE training_plans 
+                        SET schedule_data = ?, updated_at = ?
+                        WHERE id = ?
+                    """, (json.dumps(sched, ensure_ascii=False), now_iso, plan_id))
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to auto-save reconciled plan {plan_id}: {e}")
+
+        return plan
+
+    @staticmethod
+    def get_training_plan(plan_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1945,10 +2112,12 @@ class LocalStore:
                     res["schedule_data"] = json.loads(res["schedule_data"])
                 except Exception:
                     pass
+            if reconcile:
+                res = LocalStore.reconcile_training_plan_activities(res, res.get("user_id"))
             return res
 
     @staticmethod
-    def get_user_active_training_plan(user_id: str) -> Optional[Dict[str, Any]]:
+    def get_user_active_training_plan(user_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(user_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -1976,6 +2145,8 @@ class LocalStore:
                     res["schedule_data"] = json.loads(res["schedule_data"])
                 except Exception:
                     pass
+            if reconcile:
+                res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
             return res
 
     @staticmethod
@@ -2004,7 +2175,7 @@ class LocalStore:
         workout_update: Dict[str, Any], 
         operator_uid: str
     ) -> Optional[Dict[str, Any]]:
-        plan = LocalStore.get_training_plan(plan_id)
+        plan = LocalStore.get_training_plan(plan_id, reconcile=False)
         if not plan:
             return None
 
@@ -2043,6 +2214,22 @@ class LocalStore:
             if key in workout_update:
                 target_day[key] = workout_update[key]
 
+        if "completed" in workout_update:
+            if workout_update["completed"]:
+                target_day["completed"] = True
+                target_day["manual_completed"] = True
+                target_day["manual_override"] = False
+                target_day["is_missed"] = False
+            else:
+                target_day["completed"] = False
+                target_day["manual_completed"] = False
+                target_day["manual_override"] = True
+                now_beijing = datetime.utcnow() + timedelta(hours=8)
+                today_str = now_beijing.strftime("%Y-%m-%d")
+                d_date = str(target_day.get("date") or "")
+                if d_date and d_date < today_str and target_day.get("workout_type") != "rest":
+                    target_day["is_missed"] = True
+
         target_day["last_modified_by"] = operator_uid
         target_day["last_modified_at"] = datetime.utcnow().isoformat() + "Z"
 
@@ -2063,7 +2250,7 @@ class LocalStore:
             """, (json.dumps(sched, ensure_ascii=False), operator_uid, now_iso, plan_id))
             conn.commit()
 
-        return LocalStore.get_training_plan(plan_id)
+        return LocalStore.get_training_plan(plan_id, reconcile=False)
 
     @staticmethod
     def delete_training_plan(plan_id: str) -> bool:
