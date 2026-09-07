@@ -686,6 +686,13 @@ class GenerateTrainingPlanRequest(BaseModel):
     preferred_long_run_day: Optional[str] = "Sunday"  # "Sunday" or "Saturday"
     club_id: Optional[str] = None
     operator_uid: Optional[str] = None
+    align_with_user_goal: Optional[bool] = True
+    user_weekly_target: Optional[float] = None
+
+
+class SyncPlanToGoalsRequest(BaseModel):
+    user_id: Optional[str] = None
+    sync_mode: Optional[str] = "average"  # "average" (mean weekly mileage) or "current_week"
 
 
 class UpdateWorkoutRequest(BaseModel):
@@ -736,6 +743,10 @@ CANOVA_PLAN_SYSTEM_PROMPT = """你是一位享誉国际的耐力运动首席训�
    - 课目标题必须明确写为“【比赛日】赛事名称 (A/B/C 标)”，里程填写真实比赛公里数（如 50km），并根据 A/B/C 标定位给出针对性实战控心率与补给说明；
    - 比赛次日严禁安排长距离大课，强制彻底休息或排酸极慢步 (workout_type: "rest", 0km)；
    - 比赛当周以该比赛完全替代周末长距离大课，严禁在同一周末既跑 50K 比赛次日又跑 21K 长距离！
+6. 跑者自定跑量目标基准对齐 (Weekly & Monthly Target Alignment):
+   - 计划的基准容量必须锚定跑者的自定周跑量目标 (Weekly Target km) 与月度目标；
+   - 第 1 周起始跑量应收敛在跑者自定周目标的 ±5%~10% 范围内，符合其日常生活作息习惯，切勿盲目大幅偏离；
+   - 渐进周按波浪式（递增 ≤ 10%），减量周自然下浮至 70%~75%，使整套周期的平均跑量与跑者的心智预期高度契合！
 
 请直接以严格的 JSON 格式输出，不得带有除 JSON 外的任何解释文字：
 {
@@ -958,11 +969,12 @@ def generate_fallback_training_plan(
     pb_marathon_sec: Optional[int],
     max_long_run_18m_km: float,
     age: Optional[int],
-    scheduled_races: Optional[List[Dict[str, Any]]] = None
+    scheduled_races: Optional[List[Dict[str, Any]]] = None,
+    user_weekly_target: Optional[float] = 50.0
 ) -> Dict[str, Any]:
     """
     Intelligently generates a complete, scientifically rigorous Canova/Daniels training plan
-    tailored to runner's age, VDOT paces, and 18-month historical performances when LLM output needs fallback.
+    tailored to runner's age, VDOT paces, 18-month historical performances, and self-defined weekly target.
     """
     # Calculate key paces
     easy_pace_low = "5:35"
@@ -990,10 +1002,16 @@ def generate_fallback_training_plan(
     weeks = []
     days_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
+    # Target base weekly mileage anchoring
+    base_weekly_tgt = float(user_weekly_target or 50.0)
+    base_weekly_tgt = max(20.0, min(120.0, base_weekly_tgt))
+    scale_f = max(0.65, min(1.65, base_weekly_tgt / 42.0))
+
     # Base starting long run
     start_lr_dist = min(max_long_run_18m_km * 0.75 if max_long_run_18m_km else 18.0, 22.0)
     if is_trail:
         start_lr_dist = min(start_lr_dist, 20.0)
+    start_lr_dist = round(max(start_lr_dist, base_weekly_tgt * 0.36), 1)
 
     for w_idx in range(1, weeks_count + 1):
         w_start = start_monday + timedelta(weeks=w_idx - 1)
@@ -1039,12 +1057,18 @@ def generate_fallback_training_plan(
                 w_title = f"第 {w_idx} 周 · {focus_name} 专项推进"
                 w_focus = f"核心围绕【{focus_name}】设计关键课，结合每周渐速长跑稳固体能"
 
-        # Calculate weekly long run distance (with down-weeks)
+        # Calculate weekly long run & session distances with user weekly target anchoring
         if phase in ["比赛周 (Race Week)", "赛前减量期 (Tapering)", "减量吸收周 (Down-week)"]:
-            lr_km = round(start_lr_dist * 0.7, 1)
+            w_mult = 0.72
+            lr_km = round(start_lr_dist * 0.72, 1)
         else:
-            prog = min(w_idx * 1.5, 12.0)
-            lr_km = round(min(start_lr_dist + prog, 32.0 if not is_trail else 28.0), 1)
+            prog = min((w_idx - 1) * 0.04, 0.20)
+            w_mult = 1.0 + prog
+            lr_km = round(min(start_lr_dist * w_mult, 34.0 if not is_trail else 28.0), 1)
+
+        easy_km = round(max(8.0 * scale_f * (0.8 if w_mult < 1.0 else 1.0), 5.0), 1)
+        quality_km = round(max(10.0 * scale_f * (0.85 if w_mult < 1.0 else 1.0), 6.0), 1)
+        shakeout_km = round(max(6.0 * scale_f * (0.8 if w_mult < 1.0 else 1.0), 4.0), 1)
 
         days_list = []
         # Days structure based on days_per_week
@@ -1072,10 +1096,10 @@ def generate_fallback_training_plan(
                     "date": cur_date,
                     "workout_type": "easy_run",
                     "title": "低心率基础有氧轻松跑 (Zone 2)",
-                    "distance_km": 10.0,
+                    "distance_km": easy_km,
                     "target_pace": f"{easy_pace_low} - {easy_pace_high} /km",
                     "target_hr_zone": "心率 130-142 bpm (Zone 2)",
-                    "description": f"热身 1km + 8km 低心率稳态巡航跑 + 1km 冷身。结束后做 4 组 100m 跨步冲刺 (Strides) 激活神经刚性。",
+                    "description": f"热身 1km + {max(1.0, round(easy_km - 2.0, 1))}km 低心率稳态巡航跑 + 1km 冷身。结束后做 4 组 100m 跨步冲刺 (Strides) 激活神经刚性。",
                     "completed": False,
                     "coach_notes": ""
                 }
@@ -1086,10 +1110,10 @@ def generate_fallback_training_plan(
                         "date": cur_date,
                         "workout_type": "easy_run",
                         "title": "排酸轻松慢跑 / 力量训练",
-                        "distance_km": 6.0,
+                        "distance_km": shakeout_km,
                         "target_pace": f"{easy_pace_high} /km",
                         "target_hr_zone": "心率 < 135 bpm",
-                        "description": "极慢速排酸跑 6km，结束后完成 15 分钟核心深蹲与臀中肌抗阻力量。",
+                        "description": f"极慢速排酸跑 {shakeout_km}km，结束后完成 15 分钟核心深蹲与臀中肌抗阻力量。",
                         "completed": False,
                         "coach_notes": ""
                     }
@@ -1113,10 +1137,10 @@ def generate_fallback_training_plan(
                         "date": cur_date,
                         "workout_type": "trail_climb",
                         "title": "山地爬坡与阶梯抗阻专项 (D+ 爬升强化)",
-                        "distance_km": 12.0,
+                        "distance_km": quality_km,
                         "target_pace": "心率控制为主",
                         "target_hr_zone": "心率 145-160 bpm (LT1-LT2)",
-                        "description": "热身 2km + 连续起伏坡道/台阶往返 8km (累计爬升 +400m，上坡手杖快走，下坡轻快练习股四头肌离心缓冲) + 2km 冷身。",
+                        "description": f"热身 2km + 连续起伏坡道/台阶往返 {max(1.0, round(quality_km - 4.0, 1))}km (累计爬升 +400m，上坡手杖快走，下坡轻快练习股四头肌离心缓冲) + 2km 冷身。",
                         "completed": False,
                         "coach_notes": ""
                     }
@@ -1125,11 +1149,11 @@ def generate_fallback_training_plan(
                         "day_of_week": d_name,
                         "date": cur_date,
                         "workout_type": "interval",
-                        "title": "VO2Max 速度间歇：6 × 1000m",
-                        "distance_km": 11.0,
+                        "title": f"VO2Max 速度间歇 ({quality_km}km 综合)",
+                        "distance_km": quality_km,
                         "target_pace": f"{interval_pace} /km",
                         "target_hr_zone": "心率 165-175 bpm (Zone 4/5)",
-                        "description": f"热身 2km + 6 × 1000m @ {interval_pace} (间歇 2 分钟原地慢走) + 2km 冷身放松。",
+                        "description": f"热身 2km + 6 × 1000m @ {interval_pace} (间歇 2 分钟原地慢走) + 冷身放松。总量 {quality_km}km。",
                         "completed": False,
                         "coach_notes": ""
                     }
@@ -1139,10 +1163,10 @@ def generate_fallback_training_plan(
                         "date": cur_date,
                         "workout_type": "tempo",
                         "title": "乳酸门槛巡航跑 (LT2 稳态延伸)",
-                        "distance_km": 12.0,
+                        "distance_km": quality_km,
                         "target_pace": f"{tempo_pace} /km",
                         "target_hr_zone": "心率 155-165 bpm (LT2)",
-                        "description": f"热身 2km + 3 × 2500m @ {tempo_pace} (间歇 3 分钟慢跑) + 2km 冷身。强化乳酸清除非专项耐受力。",
+                        "description": f"热身 2km + 3 × 2500m @ {tempo_pace} (间歇 3 分钟慢跑) + 冷身。强化乳酸清除非专项耐受力，总量 {quality_km}km。",
                         "completed": False,
                         "coach_notes": ""
                     }
@@ -1166,10 +1190,10 @@ def generate_fallback_training_plan(
                         "date": cur_date,
                         "workout_type": "easy_run",
                         "title": "周末前唤醒轻松跑 (Shakeout)",
-                        "distance_km": 8.0,
+                        "distance_km": shakeout_km,
                         "target_pace": f"{easy_pace_low} - {easy_pace_high} /km",
                         "target_hr_zone": "心率 128-138 bpm",
-                        "description": "轻松舒适慢跑，活动关节与心肺神经，不堆积疲劳。",
+                        "description": f"轻松舒适慢跑 {shakeout_km}km，活动关节与心肺神经，不堆积疲劳。",
                         "completed": False,
                         "coach_notes": ""
                     }
@@ -1301,6 +1325,11 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
     # 12-18 months (540 days) real race and long run history
     history_18m = LocalStore.extract_runner_race_history(canonical_uid, days=540)
 
+    # Fetch runner's self-defined goals (weekly target & monthly targets)
+    user_goal = LocalStore.get_goal(canonical_uid) or {}
+    user_weekly_target = float(req.user_weekly_target or user_goal.get("weekly_target") or 50.0)
+    user_monthly_target = float(user_goal.get("target_distance") or (user_weekly_target * 4.0))
+
     # Resolve target and race details
     goal_type = req.goal_type or "race_prep"
     target_race_name = req.target_race_name or "目标赛事"
@@ -1398,7 +1427,10 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
 {json.dumps(history_18m.get('recent_long_runs', [])[:5], ensure_ascii=False, indent=2)}
 - 山地越野/爬坡活动: {len(history_18m.get('trail_climbing_runs', []))} 次
 
-训练目标设定：
+训练目标设定与自定跑量基准：
+- 跑者自定周跑量目标 (Weekly Target): {user_weekly_target} km/周
+- 跑者自定月跑量目标 (Monthly Target): {user_monthly_target} km/月
+- 目标对齐核心要求：课表的基准总跑量必须与跑者的自定周目标 ({user_weekly_target} km) 科学收敛对齐！第 1 周起始跑量收敛在 ±5%~10%（约 {round(user_weekly_target * 0.95, 1)} ~ {round(user_weekly_target * 1.05, 1)} km），减量周下浮至 70%~75%（约 {round(user_weekly_target * 0.72, 1)} km），其余常规训练周以波浪式渐进递增（周增幅 ≤ 10%）。
 - 目标类型: {'赛事备赛 (race_prep)' if goal_type == 'race_prep' else '非赛季体能进阶 (fitness_maintenance)'}
 - 目标赛事: {target_race_name} (类别: {race_category_name}, 目标成绩: {target_time_str})
 - 非赛期专项焦点: {maintenance_focus}
@@ -1406,7 +1438,7 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
 - 每周训练跑步天数: {days_per_week} 天 (其余天数为完全休息或交叉放松)
 - 长跑日偏好: {req.preferred_long_run_day or 'Sunday'}
 {scheduled_races_section}
-请根据以上跑者的真实生理承受力、历史表现与既定赛历，为跑者生成包含第 1 周到第 {weeks_count} 周的完整周度/日度训练课表。直接输出标准 JSON。
+请根据以上跑者的真实生理承受力、历史表现、自定目标与既定赛历，为跑者生成包含第 1 周到第 {weeks_count} 周的完整周度/日度训练课表。直接输出标准 JSON。
 """
 
     messages = [
@@ -1447,7 +1479,8 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
             pb_marathon_sec=marathon_pb,
             max_long_run_18m_km=history_18m.get("max_single_distance_km") or 25.0,
             age=age,
-            scheduled_races=active_scheduled_races
+            scheduled_races=active_scheduled_races,
+            user_weekly_target=user_weekly_target
         )
 
     # Deterministic safety-net integration for any active scheduled races
@@ -1459,7 +1492,12 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
             vdot=vo2max
         )
 
-    # Attach fitness snapshot to schedule
+    # Attach fitness snapshot and user goal alignment to schedule
+    schedule_data["user_goal_alignment"] = {
+        "weekly_target": user_weekly_target,
+        "monthly_target": user_monthly_target,
+        "aligned": True
+    }
     schedule_data["current_fitness_snapshot"] = {
         "ctl": ctl,
         "atl": atl,
@@ -1518,25 +1556,114 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
 def get_user_training_plan(uid: str):
     """
     Returns the active training plan for the specified user,
-    plus history of archived plans.
+    plus history of archived plans, along with user's current goal targets for alignment.
     """
-    plan = LocalStore.get_user_active_training_plan(uid)
-    past_plans = LocalStore.get_user_training_plans(uid, limit=5)
+    canonical_uid = LocalStore.resolve_user_id(uid)
+    plan = LocalStore.get_user_active_training_plan(canonical_uid)
+    past_plans = LocalStore.get_user_training_plans(canonical_uid, limit=5)
+    user_goal = LocalStore.get_goal(canonical_uid)
     return {
         "active_plan": plan,
-        "past_plans": past_plans
+        "past_plans": past_plans,
+        "user_goal": user_goal
     }
 
 
 @router.get("/plan/{plan_id}")
 def get_training_plan_detail(plan_id: str):
     """
-    Returns specific training plan details by plan_id.
+    Returns specific training plan details by plan_id, along with user's goal targets for alignment.
     """
     plan = LocalStore.get_training_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="训练计划不存在")
-    return {"plan": plan}
+    user_goal = LocalStore.get_goal(plan.get("user_id"))
+    return {"plan": plan, "user_goal": user_goal}
+
+
+@router.post("/plan/{plan_id}/sync-to-goals")
+def sync_training_plan_to_user_goals(plan_id: str, req: Optional[SyncPlanToGoalsRequest] = None):
+    """
+    Synchronizes the periodized training plan's weekly and monthly mileage back to the runner's goals table.
+    Updates weekly_target, target_distance (monthly), and monthly_targets for affected calendar months.
+    """
+    plan = LocalStore.get_training_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="训练计划不存在")
+    
+    uid = (req.user_id if req and req.user_id else None) or plan.get("user_id")
+    canonical_uid = LocalStore.resolve_user_id(uid)
+
+    schedule_data = plan.get("schedule_data") or {}
+    weeks = schedule_data.get("weeks") or []
+    if not weeks:
+        raise HTTPException(status_code=400, detail="该训练计划无有效周课表数据")
+
+    # 1. Weekly mileage calculation
+    # Exclude extreme race weeks (where mileage is massive like 50k ultra) when computing standard weekly target
+    regular_weeks_km = [
+        float(w.get("weekly_mileage_km", 0.0))
+        for w in weeks
+        if "比赛周" not in str(w.get("phase", "")) and "巅峰之战" not in str(w.get("week_title", ""))
+    ]
+    if not regular_weeks_km:
+        regular_weeks_km = [float(w.get("weekly_mileage_km", 0.0)) for w in weeks]
+    
+    avg_weekly_km = round(sum(regular_weeks_km) / max(len(regular_weeks_km), 1), 1)
+
+    # Current week mileage if sync_mode is current_week
+    sync_mode = req.sync_mode if req else "average"
+    new_weekly_target = avg_weekly_km
+
+    if sync_mode == "current_week":
+        today_iso = date.today().isoformat()
+        for w in weeks:
+            for d in w.get("days", []):
+                if d.get("date") == today_iso:
+                    new_weekly_target = float(w.get("weekly_mileage_km", avg_weekly_km))
+                    break
+
+    # 2. Monthly mileage calculation
+    month_km_map: Dict[int, float] = {}
+    for w in weeks:
+        for d in w.get("days", []):
+            d_date = str(d.get("date") or "")
+            d_km = float(d.get("distance_km") or 0.0)
+            if len(d_date) >= 7 and d_km > 0:
+                try:
+                    m_idx = int(d_date[5:7])  # 1..12
+                    month_km_map[m_idx] = month_km_map.get(m_idx, 0.0) + d_km
+                except Exception:
+                    pass
+
+    existing_goal = LocalStore.get_goal(canonical_uid)
+    monthly_targets = list(existing_goal.get("monthly_targets") or [round(new_weekly_target * 4.0, 1)] * 12)
+    while len(monthly_targets) < 12:
+        monthly_targets.append(round(new_weekly_target * 4.0, 1))
+
+    # Update affected months in monthly_targets
+    for m_idx, planned_km in month_km_map.items():
+        if 1 <= m_idx <= 12 and planned_km > 0:
+            monthly_targets[m_idx - 1] = round(max(planned_km, new_weekly_target * 3.5), 1)
+
+    new_monthly_target = round(new_weekly_target * 4.0, 1)
+
+    updated_goal_data = {
+        "user_id": canonical_uid,
+        "target_distance": new_monthly_target,
+        "weekly_target": new_weekly_target,
+        "period_type": "monthly",
+        "monthly_targets": monthly_targets
+    }
+    LocalStore.upsert_goal(canonical_uid, updated_goal_data)
+
+    return {
+        "success": True,
+        "message": f"成功将训练计划同步为个人跑量目标！自定周目标已更新为 {new_weekly_target} km/周，月度基准设为 {new_monthly_target} km/月。",
+        "weekly_target": new_weekly_target,
+        "monthly_target": new_monthly_target,
+        "monthly_targets": monthly_targets
+    }
 
 
 @router.put("/plan/{plan_id}")

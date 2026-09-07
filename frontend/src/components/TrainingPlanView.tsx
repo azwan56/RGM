@@ -44,6 +44,9 @@ export default function TrainingPlanView({
   const [plan, setPlan] = useState<any>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [selectedWeekIdx, setSelectedWeekIdx] = useState(1);
+  const [userGoal, setUserGoal] = useState<any>(null);
+  const [syncingGoal, setSyncingGoal] = useState(false);
+  const [syncSuccessMsg, setSyncSuccessMsg] = useState("");
 
   // Goal configuration form state
   const [goalType, setGoalType] = useState<"race_prep" | "fitness_maintenance">("race_prep");
@@ -86,11 +89,39 @@ export default function TrainingPlanView({
       } else {
         setShowConfig(true);
       }
+      if (res.data?.user_goal) {
+        setUserGoal(res.data.user_goal);
+      }
     } catch (err) {
       console.error("Failed to load user plan:", err);
       setShowConfig(true);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSyncToGoals() {
+    if (!plan?.id) return;
+    setSyncingGoal(true);
+    try {
+      const res = await apiClient.post(`/api/coach/plan/${plan.id}/sync-to-goals`, {
+        user_id: user.id
+      });
+      if (res.data?.success) {
+        setSyncSuccessMsg(res.data.message || "课表跑量目标已成功同步为个人目标！");
+        setUserGoal((prev: any) => ({
+          ...prev,
+          weekly_target: res.data.weekly_target,
+          target_distance: res.data.monthly_target,
+          monthly_targets: res.data.monthly_targets
+        }));
+        setTimeout(() => setSyncSuccessMsg(""), 6000);
+      }
+    } catch (err: any) {
+      console.error("Sync goals error:", err);
+      alert(err.response?.data?.detail || "同步失败，请稍后重试");
+    } finally {
+      setSyncingGoal(false);
     }
   }
 
@@ -112,6 +143,9 @@ export default function TrainingPlanView({
       };
       if (targetDate) {
         payload.target_date = targetDate;
+      }
+      if (userGoal?.weekly_target) {
+        payload.user_weekly_target = Number(userGoal.weekly_target);
       }
 
       const res = await apiClient.post("/api/coach/plan/generate", payload);
@@ -501,6 +535,17 @@ export default function TrainingPlanView({
             </div>
           </div>
 
+          {/* Goal Alignment Hint */}
+          <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center justify-between text-xs text-purple-300">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-purple-400 shrink-0" />
+              <span>
+                自定周跑量基准：<strong className="text-white">{userGoal?.weekly_target || 50} km/周</strong> (系统将自动以此为基准，波浪式规划各周负荷)
+              </span>
+            </div>
+            <span className="text-[11px] text-purple-400/80 bg-purple-500/20 px-2 py-0.5 rounded-full font-bold">已自动锚定</span>
+          </div>
+
           <div className="pt-2 flex items-center justify-end gap-3">
             {plan && (
               <button
@@ -643,35 +688,110 @@ export default function TrainingPlanView({
           {activeWeek && (
             <div className="space-y-4">
               {/* Week Header Card */}
-              <div className="bg-[#121215] border border-white/[0.08] p-5 sm:p-6 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-black text-white">
-                      {activeWeek.week_title || `第 ${activeWeek.week_index} 周`}
-                    </h3>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      {activeWeek.phase || "专项训练"}
-                    </span>
+              <div className="bg-[#121215] border border-white/[0.08] p-5 sm:p-6 rounded-3xl space-y-3.5">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-base font-black text-white">
+                        {activeWeek.week_title || `第 ${activeWeek.week_index} 周`}
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        {activeWeek.phase || "专项训练"}
+                      </span>
+
+                      {/* Goal Alignment Capsule */}
+                      {(() => {
+                        const wTarget = Number(userGoal?.weekly_target) || 50;
+                        const wPlan = Number(activeWeek.weekly_mileage_km) || 0;
+                        const ratio = Math.round((wPlan / wTarget) * 100);
+                        const hasRace = (activeWeek.days || []).some((d: any) => d.workout_type === "race");
+                        const isDownWeek = (activeWeek.phase || "").includes("减量") || (activeWeek.week_title || "").includes("减量");
+
+                        if (hasRace) {
+                          return (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1.5">
+                              <span>🏁 实战周</span>
+                              <span className="font-normal text-[10px] text-rose-300/80">计划 {wPlan}k / 目标 {wTarget}k</span>
+                            </span>
+                          );
+                        }
+                        if (isDownWeek) {
+                          return (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1.5">
+                              <span>🌊 减量超量恢复</span>
+                              <span className="font-normal text-[10px] text-sky-300/80">计划 {wPlan}k / 目标 {wTarget}k ({ratio}%)</span>
+                            </span>
+                          );
+                        }
+                        if (ratio >= 88 && ratio <= 112) {
+                          return (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                              <span>🎯 科学对齐</span>
+                              <span className="font-normal text-[10px] text-emerald-300/80">计划 {wPlan}k / 目标 {wTarget}k ({ratio}%)</span>
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
+                            <span>⚡ 渐进爬坡</span>
+                            <span className="font-normal text-[10px] text-amber-300/80">计划 {wPlan}k / 目标 {wTarget}k ({ratio}%)</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5">
+                      <span>🎯 本周核心重点：</span>
+                      <span className="text-zinc-200">{activeWeek.key_focus}</span>
+                    </p>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5">
-                    <span>🎯 本周核心重点：</span>
-                    <span className="text-zinc-200">{activeWeek.key_focus}</span>
-                  </p>
+
+                  <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                    <div className="flex items-center gap-3.5 bg-[#18181c] px-3.5 py-2 rounded-2xl border border-white/5 shrink-0">
+                      <div className="text-right">
+                        <span className="text-[10px] text-zinc-500 block font-bold">本周总跑量</span>
+                        <span className="text-sm font-black text-white">{activeWeek.weekly_mileage_km || 0} km</span>
+                      </div>
+                      <div className="w-px h-6 bg-white/10" />
+                      <div className="text-right">
+                        <span className="text-[10px] text-zinc-500 block font-bold">自定周目标</span>
+                        <span className="text-sm font-black text-emerald-400">
+                          {userGoal?.weekly_target || 50} km
+                        </span>
+                      </div>
+                      <div className="w-px h-6 bg-white/10" />
+                      <div className="text-right">
+                        <span className="text-[10px] text-zinc-500 block font-bold">训练天数</span>
+                        <span className="text-sm font-black text-purple-400">
+                          {(activeWeek.days || []).filter((d: any) => d.workout_type !== "rest").length} 天
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Sync to Goals Button */}
+                    <button
+                      onClick={handleSyncToGoals}
+                      disabled={syncingGoal}
+                      title="将当前训练计划的平均跑量与各月跑量同步为我的个人周/月目标"
+                      className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 border border-purple-500/30 text-purple-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${syncingGoal ? "animate-spin" : ""}`} />
+                      <span>{syncingGoal ? "同步中..." : "同步至我的目标"}</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-4 bg-[#18181c] px-4 py-2.5 rounded-2xl border border-white/5 shrink-0">
-                  <div className="text-right">
-                    <span className="text-[10px] text-zinc-500 block font-bold">本周总跑量</span>
-                    <span className="text-sm font-black text-white">{activeWeek.weekly_mileage_km || 0} km</span>
+                {/* Sync Success Notification */}
+                {syncSuccessMsg && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between gap-2 text-emerald-300 text-xs animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{syncSuccessMsg}</span>
+                    </div>
+                    <button onClick={() => setSyncSuccessMsg("")} className="text-emerald-400/60 hover:text-emerald-200">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <div className="w-px h-6 bg-white/10" />
-                  <div className="text-right">
-                    <span className="text-[10px] text-zinc-500 block font-bold">训练天数</span>
-                    <span className="text-sm font-black text-purple-400">
-                      {(activeWeek.days || []).filter((d: any) => d.workout_type !== "rest").length} 天
-                    </span>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Daily 7-day Workout Grid */}

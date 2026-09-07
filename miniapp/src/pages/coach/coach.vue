@@ -155,6 +155,12 @@
           </view>
         </view>
 
+        <!-- Goal Anchor Hint in Miniapp -->
+        <view class="goal-anchor-box">
+          <text class="anchor-icon">🎯</text>
+          <text class="anchor-text">当前自定周目标：{{ userGoal?.weekly_target || 50 }} km/周 (系统将自动以此为基准)</text>
+        </view>
+
         <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
           <text class="btn-text">{{ generatingPlan ? 'AI 耐力推演生成中...' : '生成科学定制训练课表' }}</text>
         </button>
@@ -221,6 +227,18 @@
             <text class="mileage-val">{{ activeMiniWeek.weekly_mileage_km || 0 }} km</text>
             <text class="mileage-label">本周总跑量</text>
           </view>
+        </view>
+
+        <!-- Week Alignment & Sync Bar in Miniapp -->
+        <view v-if="activeMiniWeek" class="week-alignment-bar">
+          <view class="align-pill" :class="getAlignmentPillClass(activeMiniWeek)">
+            <text class="align-icon">{{ getAlignmentIcon(activeMiniWeek) }}</text>
+            <text class="align-status-title">{{ getAlignmentLabel(activeMiniWeek) }}</text>
+            <text class="align-status-detail">课表 {{ activeMiniWeek.weekly_mileage_km || 0 }}k / 目标 {{ userGoal?.weekly_target || 50 }}k ({{ getAlignmentRatio(activeMiniWeek) }}%)</text>
+          </view>
+          <button class="sync-goal-mini-btn" :loading="syncingGoal" @click="handleSyncToGoals">
+            <text class="sync-mini-btn-text">同步至目标</text>
+          </button>
         </view>
 
         <!-- 7 Daily Workout Cards -->
@@ -706,6 +724,44 @@ const planTargetTime = ref("3:09:30");
 const planMaintenanceFocus = ref("aerobic_base");
 const planWeeksCount = ref(8);
 const planDaysPerWeek = ref(4);
+const userGoal = ref<any>(null);
+const syncingGoal = ref(false);
+
+function getAlignmentRatio(week: any): number {
+  const target = Number(userGoal.value?.weekly_target) || 50;
+  const planned = Number(week?.weekly_mileage_km) || 0;
+  return target > 0 ? Math.round((planned / target) * 100) : 100;
+}
+
+function getAlignmentPillClass(week: any): string {
+  const hasRace = (week?.days || []).some((d: any) => d.workout_type === "race");
+  if (hasRace) return "align-race";
+  const isDownWeek = (week?.phase || "").includes("减量") || (week?.week_title || "").includes("减量");
+  if (isDownWeek) return "align-down";
+  const ratio = getAlignmentRatio(week);
+  if (ratio >= 88 && ratio <= 112) return "align-good";
+  return "align-climb";
+}
+
+function getAlignmentIcon(week: any): string {
+  const hasRace = (week?.days || []).some((d: any) => d.workout_type === "race");
+  if (hasRace) return "🏁";
+  const isDownWeek = (week?.phase || "").includes("减量") || (week?.week_title || "").includes("减量");
+  if (isDownWeek) return "🌊";
+  const ratio = getAlignmentRatio(week);
+  if (ratio >= 88 && ratio <= 112) return "🎯";
+  return "⚡";
+}
+
+function getAlignmentLabel(week: any): string {
+  const hasRace = (week?.days || []).some((d: any) => d.workout_type === "race");
+  if (hasRace) return "实战周";
+  const isDownWeek = (week?.phase || "").includes("减量") || (week?.week_title || "").includes("减量");
+  if (isDownWeek) return "减量恢复";
+  const ratio = getAlignmentRatio(week);
+  if (ratio >= 88 && ratio <= 112) return "科学对齐";
+  return "渐进爬坡";
+}
 
 const maintenanceList = [
   { id: "aerobic_base", name: "🏃 基础有氧耐力扩容", desc: "Zone 2 低心率 · 慢肌毛细血管网" },
@@ -759,7 +815,7 @@ function getWorkoutBadgeClass(type: string): string {
     race: "badge-race",
     rest: "badge-rest"
   };
-  return map[type] || "badge-easy";
+  return map[type] || "badge-rest";
 }
 
 function getWorkoutBorderClass(type: string): string {
@@ -791,11 +847,58 @@ async function loadUserPlan() {
     } else {
       showPlanConfig.value = true;
     }
+    if (res?.user_goal) {
+      userGoal.value = res.user_goal;
+    }
   } catch (err) {
     console.warn("Load plan error:", err);
   } finally {
     planLoading.value = false;
   }
+}
+
+async function handleSyncToGoals() {
+  user.value = getStoredUser();
+  if (!user.value || !user.value.id || !plan.value?.id) return;
+
+  uni.showModal({
+    title: "同步课表至个人目标",
+    content: "确定将当前周期课表的周跑量与月度目标同步为您的个人目标吗？首页打卡进度环将直接跟踪该计划。",
+    confirmText: "立即同步",
+    confirmColor: "#af52de",
+    success: async (mRes) => {
+      if (!mRes.confirm) return;
+      syncingGoal.value = true;
+      try {
+        const res = await request(`/api/coach/plan/${plan.value.id}/sync-to-goals`, "POST", {
+          user_id: user.value.id
+        });
+        if (res?.success) {
+          if (userGoal.value) {
+            userGoal.value.weekly_target = res.weekly_target;
+            userGoal.value.target_distance = res.monthly_target;
+            userGoal.value.monthly_targets = res.monthly_targets;
+          } else {
+            userGoal.value = {
+              weekly_target: res.weekly_target,
+              target_distance: res.monthly_target,
+              monthly_targets: res.monthly_targets
+            };
+          }
+          uni.showToast({
+            title: `已同步！周目标: ${res.weekly_target}k`,
+            icon: "success",
+            duration: 2500
+          });
+        }
+      } catch (err) {
+        console.error("Sync goals error:", err);
+        uni.showToast({ title: "同步失败，请稍后重试", icon: "none" });
+      } finally {
+        syncingGoal.value = false;
+      }
+    }
+  });
 }
 
 async function handleGeneratePlan() {
@@ -814,7 +917,8 @@ async function handleGeneratePlan() {
       maintenance_focus: planMaintenanceFocus.value,
       weeks_count: planWeeksCount.value,
       days_per_week: planDaysPerWeek.value,
-      operator_uid: user.value.id
+      operator_uid: user.value.id,
+      user_weekly_target: userGoal.value?.weekly_target ? Number(userGoal.value.weekly_target) : undefined
     };
     const res = await request("/api/coach/plan/generate", "POST", payload);
     if (res?.success && res?.plan) {
@@ -2790,5 +2894,102 @@ onPullDownRefresh(async () => {
   border-radius: 18rpx;
   height: 72rpx;
   line-height: 72rpx;
+}
+
+/* ── GOAL ALIGNMENT & SYNC STYLES ── */
+.goal-anchor-box {
+  background: rgba(175, 82, 222, 0.1);
+  border: 1rpx solid rgba(175, 82, 222, 0.25);
+  border-radius: 20rpx;
+  padding: 16rpx 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 24rpx;
+}
+.anchor-icon {
+  font-size: 28rpx;
+}
+.anchor-text {
+  font-size: 22rpx;
+  color: #e9d5ff;
+  line-height: 1.4;
+}
+
+.week-alignment-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14rpx;
+  margin-bottom: 20rpx;
+  gap: 16rpx;
+}
+
+.align-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 10rpx 16rpx;
+  border-radius: 20rpx;
+  font-size: 20rpx;
+  border-width: 1rpx;
+  border-style: solid;
+}
+
+.align-good {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.align-down {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.3);
+  color: #7dd3fc;
+}
+
+.align-race {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+}
+
+.align-climb {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+.align-icon {
+  font-size: 22rpx;
+}
+
+.align-status-title {
+  font-weight: bold;
+}
+
+.align-status-detail {
+  font-size: 18rpx;
+  opacity: 0.85;
+}
+
+.sync-goal-mini-btn {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(79, 70, 229, 0.3));
+  border: 1rpx solid rgba(168, 85, 247, 0.4);
+  border-radius: 20rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  padding: 0 18rpx;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-mini-btn-text {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #d8b4fe;
 }
 </style>

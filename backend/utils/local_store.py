@@ -614,6 +614,7 @@ class LocalStore:
 
     @staticmethod
     def get_weekly_stats(uid: str, target_km: Optional[float] = None) -> Dict[str, Any]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             today = date.today()
@@ -626,7 +627,7 @@ class LocalStore:
 
             # 1. Resolve weekly target distance
             if target_km is None or target_km <= 0:
-                cursor.execute("SELECT weekly_target, target_distance FROM goals WHERE user_id = ?", (uid,))
+                cursor.execute("SELECT weekly_target, target_distance FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
                 grow = cursor.fetchone()
                 if grow and grow[0] is not None and float(grow[0]) > 0:
                     target_km = float(grow[0])
@@ -639,8 +640,8 @@ class LocalStore:
             cursor.execute("""
                 SELECT SUM(distance_meters), COUNT(id)
                 FROM activities
-                WHERE user_id = ? AND start_time >= ? AND start_time < ?
-            """, (uid, monday_iso, next_monday_iso))
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+            """, (canonical_uid, uid, monday_iso, next_monday_iso))
             res = cursor.fetchone()
             week_m = float(res[0]) if res and res[0] is not None else 0.0
             week_runs = int(res[1]) if res and res[1] is not None else 0
@@ -656,9 +657,9 @@ class LocalStore:
             cursor.execute("""
                 SELECT substr(start_time, 1, 10) as act_date, SUM(distance_meters), COUNT(id)
                 FROM activities
-                WHERE user_id = ? AND start_time >= ? AND start_time < ?
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
                 GROUP BY substr(start_time, 1, 10)
-            """, (uid, monday_iso, next_monday_iso))
+            """, (canonical_uid, uid, monday_iso, next_monday_iso))
             daily_map = { row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in cursor.fetchall() }
 
             daily_breakdown = []
@@ -946,10 +947,11 @@ class LocalStore:
 
     @staticmethod
     def get_goal(uid: str) -> Dict[str, Any]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM goals WHERE user_id = ?", (uid,))
+            cursor.execute("SELECT * FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
             row = cursor.fetchone()
             if row:
                 d = dict(row)
@@ -973,6 +975,7 @@ class LocalStore:
 
     @staticmethod
     def upsert_goal(uid: str, data: Dict[str, Any]):
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             targets_json = json.dumps(data.get("monthly_targets") or [200.0] * 12)
@@ -987,7 +990,7 @@ class LocalStore:
                     monthly_targets = excluded.monthly_targets,
                     weekly_target = excluded.weekly_target
             """, (
-                uid,
+                canonical_uid,
                 target_dist,
                 data.get("period_type", "monthly"),
                 targets_json,
