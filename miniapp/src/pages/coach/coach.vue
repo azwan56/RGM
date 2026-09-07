@@ -15,8 +15,279 @@
       </button>
     </view>
 
-    <!-- ── ATHLETE PROFILE & TSB FORM CARD ── -->
-    <view class="profile-card">
+    <!-- ── TAB BAR: PLAN VS ANALYSIS ── -->
+    <view class="coach-tab-bar">
+      <view
+        class="coach-tab-item"
+        :class="{ active: activeTab === 'plan' }"
+        @click="activeTab = 'plan'"
+      >
+        <text class="tab-icon">📅</text>
+        <text class="tab-title">科学周期课表</text>
+      </view>
+      <view
+        class="coach-tab-item"
+        :class="{ active: activeTab === 'analysis' }"
+        @click="activeTab = 'analysis'"
+      >
+        <text class="tab-icon">⚡</text>
+        <text class="tab-title">AI 专项诊断</text>
+      </view>
+    </view>
+
+    <!-- ── PLAN TAB CONTENT ── -->
+    <view v-if="activeTab === 'plan'" class="plan-tab-section">
+      <!-- Top Bar -->
+      <view class="plan-top-bar">
+        <view class="plan-title-box">
+          <text class="plan-main-title">{{ plan ? plan.title : '个人科学周期训练课表' }}</text>
+          <text v-if="plan" class="plan-status-pill">执行中 · {{ plan.weeks_count }}周周期</text>
+        </view>
+        <button class="plan-config-toggle-btn" @click="showPlanConfig = !showPlanConfig">
+          <text class="btn-text">{{ showPlanConfig ? '收起定制' : (plan ? '重新制定计划' : '制定训练计划') }}</text>
+        </button>
+      </view>
+
+      <!-- Plan Setup Panel -->
+      <view v-if="showPlanConfig || !plan" class="plan-setup-card">
+        <view class="card-title-row">
+          <text class="section-icon">🎯</text>
+          <text class="card-title">设定训练目标与周期参数</text>
+        </view>
+        <text class="setup-hint">系统将结合您的周岁年龄、TSB状态与近 18 个月比赛表现科学推演</text>
+
+        <!-- Goal Type Toggle -->
+        <view class="goal-type-toggle-row">
+          <view
+            class="goal-type-btn"
+            :class="{ active: planGoalType === 'race_prep' }"
+            @click="planGoalType = 'race_prep'"
+          >
+            <text class="goal-btn-title">🏅 赛事突破备战</text>
+            <text class="goal-btn-sub">全马/半马/越野倒排周期</text>
+          </view>
+          <view
+            class="goal-type-btn"
+            :class="{ active: planGoalType === 'fitness_maintenance' }"
+            @click="planGoalType = 'fitness_maintenance'"
+          >
+            <text class="goal-btn-title">🏔️ 非赛期体能进阶</text>
+            <text class="goal-btn-sub">有氧/门槛/速度/爬坡强化</text>
+          </view>
+        </view>
+
+        <!-- If Race: Quick Select & Inputs -->
+        <view v-if="planGoalType === 'race_prep'" class="race-setup-inputs">
+          <view v-if="userRaces.length" class="registered-races-row">
+            <text class="registered-label">🚩 点击已登记赛历快速套用：</text>
+            <view class="registered-chips">
+              <view
+                v-for="r in userRaces"
+                :key="r.id || r.name"
+                class="reg-chip"
+                :class="{ active: planRaceName === r.name }"
+                @click="planRaceName = r.name; if(r.target_time) planTargetTime = r.target_time;"
+              >
+                <text class="reg-chip-name">{{ r.name }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="inputs-row">
+            <view class="input-col flex-2">
+              <text class="input-label">目标赛事</text>
+              <input v-model="planRaceName" placeholder="如: 上海马拉松" class="setup-input" />
+            </view>
+            <view class="input-col flex-1">
+              <text class="input-label">目标成绩</text>
+              <input v-model="planTargetTime" placeholder="3:09:30" class="setup-input" />
+            </view>
+          </view>
+        </view>
+
+        <!-- If Non-Race: Focus Options -->
+        <view v-else class="maintenance-options-row">
+          <text class="input-label">选择当前周期专项强化方向：</text>
+          <view class="maint-chips-grid">
+            <view
+              v-for="m in maintenanceList"
+              :key="m.id"
+              class="maint-chip"
+              :class="{ active: planMaintenanceFocus === m.id }"
+              @click="planMaintenanceFocus = m.id"
+            >
+              <text class="maint-name">{{ m.name }}</text>
+              <text class="maint-desc">{{ m.desc }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- Weeks & Days Selectors -->
+        <view class="picker-row">
+          <view class="picker-col">
+            <text class="input-label">周期总周数：</text>
+            <view class="options-pills">
+              <view
+                v-for="w in [4, 6, 8, 12]"
+                :key="w"
+                class="opt-pill"
+                :class="{ active: planWeeksCount === w }"
+                @click="planWeeksCount = w"
+              >
+                <text class="pill-text">{{ w }}周</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="picker-col">
+            <text class="input-label">每周跑步天数：</text>
+            <view class="options-pills">
+              <view
+                v-for="d in [3, 4, 5, 6]"
+                :key="d"
+                class="opt-pill"
+                :class="{ active: planDaysPerWeek === d }"
+                @click="planDaysPerWeek = d"
+              >
+                <text class="pill-text">{{ d }}天/周</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
+          <text class="btn-text">{{ generatingPlan ? 'AI 耐力推演生成中...' : '生成科学定制训练课表' }}</text>
+        </button>
+      </view>
+
+      <!-- Active Plan Details -->
+      <view v-if="plan && plan.schedule_data" class="plan-body">
+        <!-- Baseline Snapshot Card -->
+        <view v-if="plan.schedule_data.current_fitness_snapshot" class="snapshot-card">
+          <view class="snap-item">
+            <text class="snap-label">跑者周岁</text>
+            <text class="snap-val">{{ plan.schedule_data.current_fitness_snapshot.age ? `${plan.schedule_data.current_fitness_snapshot.age} 岁` : '—' }}</text>
+            <text class="snap-sub">{{ plan.schedule_data.current_fitness_snapshot.age >= 50 ? '72-96h 恢复律' : '正常' }}</text>
+          </view>
+          <view class="snap-item">
+            <text class="snap-label">VO2Max</text>
+            <text class="snap-val text-purple">{{ plan.schedule_data.current_fitness_snapshot.vo2max || '—' }}</text>
+            <text class="snap-sub">VDOT基准</text>
+          </view>
+          <view class="snap-item">
+            <text class="snap-label">CTL / TSB</text>
+            <text class="snap-val text-cyan">{{ plan.schedule_data.current_fitness_snapshot.ctl || 0 }} / {{ plan.schedule_data.current_fitness_snapshot.tsb || 0 }}</text>
+            <text class="snap-sub">即时负荷</text>
+          </view>
+          <view class="snap-item">
+            <text class="snap-label">18m最长跑</text>
+            <text class="snap-val text-amber">{{ plan.schedule_data.current_fitness_snapshot.max_long_run_18m_km || '—' }} km</text>
+            <text class="snap-sub">实战上限</text>
+          </view>
+        </view>
+
+        <!-- Canova Overview Quote -->
+        <view v-if="plan.overview_summary" class="overview-box">
+          <text class="overview-icon">🎯</text>
+          <text class="overview-text">{{ plan.overview_summary }}</text>
+        </view>
+
+        <!-- Horizontal Week Scroll -->
+        <scroll-view scroll-x class="week-scroll-view" show-scrollbar="false">
+          <view class="week-chips-row">
+            <view
+              v-for="w in (plan.schedule_data.weeks || [])"
+              :key="w.week_index"
+              class="week-chip"
+              :class="{ active: selectedWeekIdx === w.week_index }"
+              @click="selectedWeekIdx = w.week_index"
+            >
+              <text class="week-chip-title">第 {{ w.week_index }} 周</text>
+              <text class="week-chip-sub">{{ w.weekly_mileage_km || 0 }}km · {{ (w.phase || '训练').split(' ')[0] }}</text>
+            </view>
+          </view>
+        </scroll-view>
+
+        <!-- Active Week Card Header -->
+        <view v-if="activeMiniWeek" class="active-week-header">
+          <view class="active-week-left">
+            <view class="active-week-title-row">
+              <text class="active-week-title">{{ activeMiniWeek.week_title || `第 ${activeMiniWeek.week_index} 周` }}</text>
+              <text class="phase-tag">{{ activeMiniWeek.phase }}</text>
+            </view>
+            <text class="focus-text">重点：{{ activeMiniWeek.key_focus }}</text>
+          </view>
+          <view class="active-week-right">
+            <text class="mileage-val">{{ activeMiniWeek.weekly_mileage_km || 0 }} km</text>
+            <text class="mileage-label">本周总跑量</text>
+          </view>
+        </view>
+
+        <!-- 7 Daily Workout Cards -->
+        <view v-if="activeMiniWeek" class="daily-cards-list">
+          <view
+            v-for="(day, dIdx) in (activeMiniWeek.days || [])"
+            :key="dIdx"
+            class="daily-card"
+            :class="[getWorkoutBorderClass(day.workout_type), { 'is-completed': day.completed }]"
+          >
+            <view class="daily-card-top">
+              <view class="day-date-box">
+                <text class="day-name">{{ day.day_of_week }}</text>
+                <text class="day-date">{{ day.date ? day.date.substring(5) : '' }}</text>
+              </view>
+              <text class="type-badge" :class="getWorkoutBadgeClass(day.workout_type)">
+                {{ getWorkoutTypeLabel(day.workout_type) }}
+              </text>
+            </view>
+
+            <view class="daily-card-body">
+              <text class="workout-title">{{ day.title }}</text>
+              <view v-if="day.workout_type !== 'rest'" class="dist-row">
+                <text class="dist-val">{{ day.distance_km || 0 }}</text>
+                <text class="dist-unit">km</text>
+              </view>
+
+              <!-- Pace & Heart Rate -->
+              <view v-if="day.workout_type !== 'rest' && (day.target_pace || day.target_hr_zone)" class="metrics-row">
+                <text v-if="day.target_pace && day.target_pace !== '—'" class="metric-pill">⏱️ {{ day.target_pace }}</text>
+                <text v-if="day.target_hr_zone && day.target_hr_zone !== '—'" class="metric-pill hr-pill">❤️ {{ day.target_hr_zone }}</text>
+              </view>
+
+              <text class="workout-desc">{{ day.description }}</text>
+
+              <!-- Coach Notes -->
+              <view v-if="day.coach_notes" class="coach-notes-box">
+                <text class="coach-notes-title">👨‍🏫 跑团教练批注：</text>
+                <text class="coach-notes-content">{{ day.coach_notes }}</text>
+              </view>
+            </view>
+
+            <!-- Card Bottom Actions -->
+            <view class="daily-card-actions">
+              <button
+                class="action-complete-btn"
+                :class="{ completed: day.completed }"
+                @click="handleToggleComplete(activeMiniWeek.week_index, dIdx, day)"
+              >
+                <text class="btn-text">{{ day.completed ? '✅ 已打卡' : '打卡' }}</text>
+              </button>
+              <button
+                class="action-edit-btn"
+                @click="openEditWorkoutModal(activeMiniWeek.week_index, dIdx, day)"
+              >
+                <text class="btn-text">微调/批注</text>
+              </button>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── ANALYSIS TAB CONTENT ── -->
+    <view v-else class="analysis-tab-section">
+      <!-- ── ATHLETE PROFILE & TSB FORM CARD ── -->
+      <view class="profile-card">
       <view class="profile-top">
         <view class="profile-name-box">
           <text class="profile-name">{{ athleteInfo.name || "跑者" }}</text>
@@ -358,6 +629,60 @@
       <text class="empty-desc">配置您的目标赛事，点击下方按钮，AI 教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。</text>
       <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成最新训练诊断</button>
     </view>
+    </view>
+
+    <!-- ── EDIT WORKOUT MODAL ── -->
+    <view v-if="editModalOpen" class="modal-mask">
+      <view class="modal-card">
+        <view class="modal-header">
+          <text class="modal-title">微调训练课目与教练指导</text>
+          <text class="modal-close" @click="editModalOpen = false">✕</text>
+        </view>
+
+        <scroll-view scroll-y class="modal-scroll-body">
+          <view class="modal-input-group">
+            <text class="modal-label">课目标题</text>
+            <input v-model="editTitle" class="modal-input" placeholder="输入课目标题" />
+          </view>
+
+          <view class="modal-row">
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">计划跑量 (km)</text>
+              <input v-model="editDistanceKm" type="digit" class="modal-input" />
+            </view>
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">目标配速</text>
+              <input v-model="editTargetPace" class="modal-input" placeholder="如 5:15 - 5:25 /km" />
+            </view>
+          </view>
+
+          <view class="modal-input-group">
+            <text class="modal-label">目标心率区间</text>
+            <input v-model="editTargetHrZone" class="modal-input" placeholder="如 135-145 bpm" />
+          </view>
+
+          <view class="modal-input-group">
+            <text class="modal-label">课表安排与热身冷身说明</text>
+            <textarea v-model="editDescription" class="modal-textarea" maxlength="300" />
+          </view>
+
+          <view class="modal-input-group coach-notes-group">
+            <text class="modal-label text-amber">👨‍🏫 跑团教练寄语与指导批注 (Coach Notes)</text>
+            <textarea
+              v-model="editCoachNotes"
+              class="modal-textarea coach-textarea"
+              placeholder="在此输入教练微调说明或鼓励指导..."
+              maxlength="200"
+            />
+          </view>
+        </scroll-view>
+
+        <view class="modal-footer">
+          <button class="modal-cancel-btn" @click="editModalOpen = false">取消</button>
+          <button class="modal-save-btn" :loading="savingWorkout" @click="handleSaveWorkout">保存修改</button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -365,6 +690,207 @@
 import { ref, computed } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
+
+const activeTab = ref<"plan" | "analysis">("plan");
+
+// Training Plan State
+const plan = ref<any>(null);
+const planLoading = ref(false);
+const generatingPlan = ref(false);
+const showPlanConfig = ref(false);
+const selectedWeekIdx = ref(1);
+
+const planGoalType = ref<"race_prep" | "fitness_maintenance">("race_prep");
+const planRaceName = ref("上海马拉松");
+const planTargetTime = ref("3:09:30");
+const planMaintenanceFocus = ref("aerobic_base");
+const planWeeksCount = ref(8);
+const planDaysPerWeek = ref(4);
+
+const maintenanceList = [
+  { id: "aerobic_base", name: "🏃 基础有氧耐力扩容", desc: "Zone 2 低心率 · 慢肌毛细血管网" },
+  { id: "lactate_threshold", name: "⚡ 乳酸阈值耐力提升", desc: "LT2 巡航间歇 · 提高抗乳酸稳态" },
+  { id: "vo2max_speed", name: "🚀 VO2Max 速度储备", desc: "800~1500m 间歇 · 步频神经刚性" },
+  { id: "trail_climbing", name: "🏔️ 山地越野爬坡抗阻", desc: "手杖爬升 D+ · 股四头肌离心耐受" },
+  { id: "general_maintenance", name: "🛡️ 综合体能维持", desc: "平衡跑量 · 核心稳定与防伤" }
+];
+
+const activeMiniWeek = computed(() => {
+  const weeks = plan.value?.schedule_data?.weeks || [];
+  return weeks.find((w: any) => w.week_index === selectedWeekIdx.value) || weeks[0];
+});
+
+// Edit modal state
+const editModalOpen = ref(false);
+const editWeekIdx = ref(1);
+const editDayIdx = ref(0);
+const editWorkoutType = ref("easy_run");
+const editTitle = ref("");
+const editDistanceKm = ref<number | string>(0);
+const editTargetPace = ref("");
+const editTargetHrZone = ref("");
+const editDescription = ref("");
+const editCompleted = ref(false);
+const editCoachNotes = ref("");
+const savingWorkout = ref(false);
+
+function getWorkoutTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    easy_run: "轻松跑",
+    tempo: "门槛跑",
+    interval: "间歇跑",
+    long_run: "长距离",
+    trail_climb: "越野爬坡",
+    cross_training: "交叉力量",
+    rest: "休息日"
+  };
+  return map[type] || "跑步";
+}
+
+function getWorkoutBadgeClass(type: string): string {
+  const map: Record<string, string> = {
+    easy_run: "badge-easy",
+    tempo: "badge-tempo",
+    interval: "badge-interval",
+    long_run: "badge-long",
+    trail_climb: "badge-trail",
+    cross_training: "badge-cross",
+    rest: "badge-rest"
+  };
+  return map[type] || "badge-easy";
+}
+
+function getWorkoutBorderClass(type: string): string {
+  const map: Record<string, string> = {
+    easy_run: "border-easy",
+    tempo: "border-tempo",
+    interval: "border-interval",
+    long_run: "border-long",
+    trail_climb: "border-trail",
+    cross_training: "border-cross",
+    rest: "border-rest"
+  };
+  return map[type] || "border-rest";
+}
+
+async function loadUserPlan() {
+  user.value = getStoredUser();
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value || !user.value.id) return;
+  planLoading.value = true;
+  try {
+    const res = await request(`/api/coach/plan/user/${user.value.id}`);
+    if (res?.active_plan) {
+      plan.value = res.active_plan;
+      showPlanConfig.value = false;
+    } else {
+      showPlanConfig.value = true;
+    }
+  } catch (err) {
+    console.warn("Load plan error:", err);
+  } finally {
+    planLoading.value = false;
+  }
+}
+
+async function handleGeneratePlan() {
+  user.value = getStoredUser();
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value || !user.value.id) return;
+  generatingPlan.value = true;
+  try {
+    const payload = {
+      athlete_uid: user.value.id,
+      goal_type: planGoalType.value,
+      target_race_name: planRaceName.value,
+      target_time: planTargetTime.value,
+      maintenance_focus: planMaintenanceFocus.value,
+      weeks_count: planWeeksCount.value,
+      days_per_week: planDaysPerWeek.value,
+      operator_uid: user.value.id
+    };
+    const res = await request("/api/coach/plan/generate", "POST", payload);
+    if (res?.success && res?.plan) {
+      plan.value = res.plan;
+      selectedWeekIdx.value = 1;
+      showPlanConfig.value = false;
+      uni.showToast({ title: "课表生成成功！", icon: "success" });
+    }
+  } catch (err) {
+    console.error("Generate plan error:", err);
+    uni.showToast({ title: "生成课表失败", icon: "none" });
+  } finally {
+    generatingPlan.value = false;
+  }
+}
+
+function openEditWorkoutModal(wIdx: number, dIdx: number, day: any) {
+  editWeekIdx.value = wIdx;
+  editDayIdx.value = dIdx;
+  editWorkoutType.value = day.workout_type || "easy_run";
+  editTitle.value = day.title || "";
+  editDistanceKm.value = day.distance_km || 0;
+  editTargetPace.value = day.target_pace || "";
+  editTargetHrZone.value = day.target_hr_zone || "";
+  editDescription.value = day.description || "";
+  editCompleted.value = Boolean(day.completed);
+  editCoachNotes.value = day.coach_notes || "";
+  editModalOpen.value = true;
+}
+
+async function handleSaveWorkout() {
+  if (!plan.value?.id || !user.value?.id) return;
+  savingWorkout.value = true;
+  try {
+    const payload = {
+      week_index: editWeekIdx.value,
+      day_index: editDayIdx.value,
+      workout_type: editWorkoutType.value,
+      title: editTitle.value,
+      distance_km: parseFloat(String(editDistanceKm.value)) || 0,
+      target_pace: editTargetPace.value,
+      target_hr_zone: editTargetHrZone.value,
+      description: editDescription.value,
+      completed: editCompleted.value,
+      coach_notes: editCoachNotes.value,
+      operator_uid: user.value.id
+    };
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    if (res?.success && res?.plan) {
+      plan.value = res.plan;
+      editModalOpen.value = false;
+      uni.showToast({ title: "课表已保存", icon: "success" });
+    }
+  } catch (err) {
+    console.error("Save workout error:", err);
+    uni.showToast({ title: "保存失败", icon: "none" });
+  } finally {
+    savingWorkout.value = false;
+  }
+}
+
+async function handleToggleComplete(wIdx: number, dIdx: number, day: any) {
+  if (!plan.value?.id || !user.value?.id) return;
+  try {
+    const newCompleted = !day.completed;
+    const payload = {
+      week_index: wIdx,
+      day_index: dIdx,
+      completed: newCompleted,
+      operator_uid: user.value.id
+    };
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    if (res?.success && res?.plan) {
+      plan.value = res.plan;
+    }
+  } catch (err) {
+    console.error("Toggle complete error:", err);
+  }
+}
 
 const racePresets = [
   { label: "🏔️ 武功山 50K", race: "武功山 50K", time: "8:00:00", type: "trail" },
@@ -652,14 +1178,15 @@ function formatAdvice(w: any): string {
 
 onShow(() => {
   loadLatestReport();
+  loadUserPlan();
 });
 
 onPullDownRefresh(async () => {
   try {
-    await loadLatestReport();
+    await Promise.all([loadLatestReport(), loadUserPlan()]);
     uni.showToast({ title: "数据已刷新", icon: "success" });
   } catch (e) {
-    uni.showToast({ title: "已是最新报告", icon: "none" });
+    uni.showToast({ title: "已是最新状态", icon: "none" });
   } finally {
     uni.stopPullDownRefresh();
   }
@@ -1593,5 +2120,669 @@ onPullDownRefresh(async () => {
   border-radius: 24rpx;
   height: 80rpx;
   line-height: 80rpx;
+}
+
+/* ── TAB BAR ── */
+.coach-tab-bar {
+  display: flex;
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 8rpx;
+  margin-bottom: 24rpx;
+}
+
+.coach-tab-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 16rpx 0;
+  border-radius: 16rpx;
+  transition: all 0.2s ease;
+}
+
+.coach-tab-item.active {
+  background-color: #af52de;
+}
+
+.coach-tab-item .tab-icon {
+  font-size: 28rpx;
+}
+
+.coach-tab-item .tab-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #8e8e93;
+}
+
+.coach-tab-item.active .tab-title {
+  color: #ffffff;
+}
+
+/* ── PLAN TOP BAR ── */
+.plan-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+  gap: 16rpx;
+}
+
+.plan-title-box {
+  flex: 1;
+}
+
+.plan-main-title {
+  font-size: 30rpx;
+  font-weight: bold;
+  color: #ffffff;
+  display: block;
+}
+
+.plan-status-pill {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #30d158;
+  background-color: rgba(48, 209, 88, 0.15);
+  border: 1rpx solid rgba(48, 209, 88, 0.3);
+  border-radius: 12rpx;
+  padding: 2rpx 10rpx;
+  margin-top: 6rpx;
+  display: inline-block;
+}
+
+.plan-config-toggle-btn {
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 18rpx;
+  padding: 0 20rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  font-size: 22rpx;
+  color: #d1d1d6;
+}
+
+/* ── PLAN SETUP CARD ── */
+.plan-setup-card {
+  background-color: #121215;
+  border: 1rpx solid rgba(175, 82, 222, 0.3);
+  border-radius: 28rpx;
+  padding: 24rpx;
+  margin-bottom: 30rpx;
+}
+
+.setup-hint {
+  font-size: 22rpx;
+  color: #af52de;
+  margin-bottom: 20rpx;
+  display: block;
+}
+
+.goal-type-toggle-row {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 20rpx;
+}
+
+.goal-type-btn {
+  flex: 1;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 18rpx 14rpx;
+  text-align: center;
+}
+
+.goal-type-btn.active {
+  border-color: #af52de;
+  background-color: rgba(175, 82, 222, 0.15);
+}
+
+.goal-btn-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  display: block;
+}
+
+.goal-btn-sub {
+  font-size: 20rpx;
+  color: #8e8e93;
+  margin-top: 4rpx;
+  display: block;
+}
+
+.maint-chips-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 10rpx;
+  margin-bottom: 20rpx;
+}
+
+.maint-chip {
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  padding: 16rpx;
+}
+
+.maint-chip.active {
+  background-color: rgba(48, 209, 88, 0.15);
+  border-color: #30d158;
+}
+
+.maint-name {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  display: block;
+}
+
+.maint-desc {
+  font-size: 22rpx;
+  color: #8e8e93;
+  margin-top: 4rpx;
+  display: block;
+}
+
+.picker-row {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.picker-col {
+  flex: 1;
+}
+
+.options-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 8rpx;
+}
+
+.opt-pill {
+  padding: 8rpx 18rpx;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+}
+
+.opt-pill.active {
+  background-color: #af52de;
+  border-color: #af52de;
+}
+
+.opt-pill .pill-text {
+  font-size: 22rpx;
+  color: #ffffff;
+}
+
+/* ── SNAPSHOT CARD ── */
+.snapshot-card {
+  display: flex;
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+  justify-content: space-between;
+}
+
+.snap-item {
+  flex: 1;
+  text-align: center;
+}
+
+.snap-label {
+  font-size: 20rpx;
+  color: #8e8e93;
+  display: block;
+}
+
+.snap-val {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin: 4rpx 0;
+  display: block;
+}
+
+.snap-sub {
+  font-size: 18rpx;
+  color: #636366;
+  display: block;
+}
+
+.overview-box {
+  background-color: rgba(175, 82, 222, 0.08);
+  border: 1rpx solid rgba(175, 82, 222, 0.2);
+  border-radius: 20rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  gap: 10rpx;
+}
+
+.overview-icon {
+  font-size: 28rpx;
+}
+
+.overview-text {
+  font-size: 22rpx;
+  color: #d1d1d6;
+  line-height: 1.5;
+  flex: 1;
+}
+
+/* ── WEEK SCROLL VIEW ── */
+.week-scroll-view {
+  white-space: nowrap;
+  margin-bottom: 20rpx;
+}
+
+.week-chips-row {
+  display: inline-flex;
+  gap: 14rpx;
+}
+
+.week-chip {
+  display: inline-flex;
+  flex-direction: column;
+  padding: 16rpx 22rpx;
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  min-width: 160rpx;
+  box-sizing: border-box;
+}
+
+.week-chip.active {
+  background-color: #af52de;
+  border-color: #af52de;
+}
+
+.week-chip-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.week-chip-sub {
+  font-size: 20rpx;
+  color: #8e8e93;
+  margin-top: 4rpx;
+}
+
+.week-chip.active .week-chip-sub {
+  color: #e5c5f8;
+}
+
+/* ── ACTIVE WEEK HEADER ── */
+.active-week-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.active-week-left {
+  flex: 1;
+}
+
+.active-week-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.active-week-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.phase-tag {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #af52de;
+  background-color: rgba(175, 82, 222, 0.15);
+  border: 1rpx solid rgba(175, 82, 222, 0.3);
+  border-radius: 10rpx;
+  padding: 2rpx 8rpx;
+}
+
+.focus-text {
+  font-size: 22rpx;
+  color: #aeaeb2;
+  margin-top: 6rpx;
+  display: block;
+}
+
+.active-week-right {
+  text-align: right;
+}
+
+.mileage-val {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #ffffff;
+  display: block;
+}
+
+.mileage-label {
+  font-size: 18rpx;
+  color: #8e8e93;
+  display: block;
+}
+
+/* ── DAILY CARDS LIST ── */
+.daily-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.daily-card {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 20rpx;
+}
+
+.daily-card.is-completed {
+  border-color: rgba(48, 209, 88, 0.4);
+  background-color: rgba(48, 209, 88, 0.03);
+}
+
+.daily-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.day-date-box {
+  display: flex;
+  align-items: baseline;
+  gap: 10rpx;
+}
+
+.day-name {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.day-date {
+  font-size: 20rpx;
+  color: #8e8e93;
+}
+
+.type-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 4rpx 14rpx;
+  border-radius: 12rpx;
+}
+
+.badge-easy { background: rgba(48, 209, 88, 0.15); color: #30d158; }
+.badge-tempo { background: rgba(10, 132, 255, 0.15); color: #0a84ff; }
+.badge-interval { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
+.badge-long { background: rgba(175, 82, 222, 0.15); color: #af52de; }
+.badge-trail { background: rgba(94, 92, 230, 0.15); color: #5e5ce6; }
+.badge-cross { background: rgba(255, 55, 95, 0.15); color: #ff375f; }
+.badge-rest { background: rgba(142, 142, 147, 0.15); color: #8e8e93; }
+
+.workout-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #e5e5ea;
+  margin-bottom: 8rpx;
+  display: block;
+}
+
+.dist-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4rpx;
+  margin-bottom: 10rpx;
+}
+
+.dist-val {
+  font-size: 36rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.dist-unit {
+  font-size: 22rpx;
+  color: #8e8e93;
+}
+
+.metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+}
+
+.metric-pill {
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #af52de;
+  background-color: #1c1c1e;
+  padding: 4rpx 12rpx;
+  border-radius: 10rpx;
+}
+
+.metric-pill.hr-pill {
+  color: #30d158;
+}
+
+.workout-desc {
+  font-size: 22rpx;
+  color: #aeaeb2;
+  line-height: 1.4;
+  margin-bottom: 14rpx;
+  display: block;
+}
+
+.coach-notes-box {
+  background-color: rgba(255, 159, 10, 0.1);
+  border: 1rpx solid rgba(255, 159, 10, 0.25);
+  border-radius: 16rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 14rpx;
+}
+
+.coach-notes-title {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #ff9f0a;
+  display: block;
+  margin-bottom: 4rpx;
+}
+
+.coach-notes-content {
+  font-size: 20rpx;
+  color: #ffe0b2;
+  line-height: 1.3;
+  display: block;
+}
+
+.daily-card-actions {
+  display: flex;
+  gap: 12rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.05);
+  padding-top: 14rpx;
+}
+
+.action-complete-btn {
+  flex: 1;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 14rpx;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  font-size: 22rpx;
+  color: #8e8e93;
+}
+
+.action-complete-btn.completed {
+  background-color: rgba(48, 209, 88, 0.2);
+  border-color: #30d158;
+  color: #30d158;
+  font-weight: bold;
+}
+
+.action-edit-btn {
+  height: 56rpx;
+  line-height: 56rpx;
+  padding: 0 24rpx;
+  border-radius: 14rpx;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  font-size: 22rpx;
+  color: #af52de;
+}
+
+/* ── MODAL MASK & CARD ── */
+.modal-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 30rpx;
+  box-sizing: border-box;
+}
+
+.modal-card {
+  background-color: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 32rpx;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 30rpx;
+  box-sizing: border-box;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 16rpx;
+  margin-bottom: 20rpx;
+}
+
+.modal-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.modal-close {
+  font-size: 32rpx;
+  color: #8e8e93;
+  padding: 0 10rpx;
+}
+
+.modal-scroll-body {
+  max-height: 55vh;
+  margin-bottom: 20rpx;
+}
+
+.modal-input-group {
+  margin-bottom: 18rpx;
+}
+
+.modal-label {
+  font-size: 22rpx;
+  color: #8e8e93;
+  margin-bottom: 8rpx;
+  display: block;
+}
+
+.modal-input {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 16rpx;
+  height: 64rpx;
+  padding: 0 18rpx;
+  font-size: 24rpx;
+  color: #ffffff;
+}
+
+.modal-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.modal-textarea {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 16rpx;
+  width: 100%;
+  height: 120rpx;
+  padding: 14rpx 18rpx;
+  font-size: 22rpx;
+  color: #ffffff;
+  box-sizing: border-box;
+}
+
+.coach-notes-group {
+  background-color: rgba(255, 159, 10, 0.06);
+  border: 1rpx solid rgba(255, 159, 10, 0.2);
+  border-radius: 20rpx;
+  padding: 16rpx;
+}
+
+.coach-textarea {
+  color: #ffe0b2;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 16rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  padding-top: 20rpx;
+}
+
+.modal-cancel-btn {
+  flex: 1;
+  background-color: #1c1c1e;
+  color: #8e8e93;
+  font-size: 26rpx;
+  border-radius: 18rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+}
+
+.modal-save-btn {
+  flex: 2;
+  background-color: #af52de;
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: bold;
+  border-radius: 18rpx;
+  height: 72rpx;
+  line-height: 72rpx;
 }
 </style>

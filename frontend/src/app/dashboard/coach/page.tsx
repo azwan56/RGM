@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import TrainingPlanView from "@/components/TrainingPlanView";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import {
@@ -27,6 +28,7 @@ export default function CoachPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"plan" | "report">("plan");
   const [analysis, setAnalysis] = useState<any>(null);
   const [targetRace, setTargetRace] = useState("武功山 50K");
   const [targetTime, setTargetTime] = useState("8:00:00");
@@ -188,19 +190,56 @@ export default function CoachPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleGenerateAnalysis}
-              disabled={loading}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 active:scale-95 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              {loading ? "AI 深度推理中..." : "启动 AI 专项推理"}
-            </button>
+            {activeTab === "report" && (
+              <button
+                onClick={handleGenerateAnalysis}
+                disabled={loading}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+                {loading ? "AI 深度推理中..." : "启动 AI 专项推理"}
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Top Control Bar: Athlete Profile & Race Setup */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Tab Switcher: Training Plan vs AI Diagnostics */}
+        <div className="flex items-center gap-2 p-1.5 bg-[#121215] border border-white/[0.08] rounded-2xl w-fit">
+          <button
+            onClick={() => setActiveTab("plan")}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition ${
+              activeTab === "plan"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            科学周期训练计划 (Training Plan)
+          </button>
+          <button
+            onClick={() => setActiveTab("report")}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition ${
+              activeTab === "report"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Zap className="w-4 h-4" />
+            AI 专项诊断与宏观赛历 (Diagnostics)
+          </button>
+        </div>
+
+        {activeTab === "plan" ? (
+          <TrainingPlanView
+            user={user}
+            userRaces={userRaces}
+            initialTargetRace={targetRace}
+            initialTargetTime={targetTime}
+          />
+        ) : (
+          <>
+            {/* Top Control Bar: Athlete Profile & Race Setup */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Athlete Profile & Physiological Form */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between">
@@ -696,6 +735,8 @@ export default function CoachPage() {
               生成最新训练诊断
             </button>
           </div>
+        )}
+        </>
         )}
       </main>
     </div>

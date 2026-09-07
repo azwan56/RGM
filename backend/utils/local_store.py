@@ -228,6 +228,33 @@ def init_db():
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS training_plans (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                club_id TEXT,
+                title TEXT NOT NULL,
+                goal_type TEXT NOT NULL,
+                maintenance_focus TEXT,
+                target_race_id TEXT,
+                target_race_name TEXT,
+                target_date TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                weeks_count INTEGER DEFAULT 8,
+                days_per_week INTEGER DEFAULT 4,
+                preferred_long_run_day TEXT DEFAULT 'Sunday',
+                status TEXT DEFAULT 'active',
+                overview_summary TEXT,
+                schedule_data TEXT,
+                creator_id TEXT NOT NULL,
+                last_modified_by TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES profiles(id)
+            )
+        """)
+
         # Dynamic migration for existing profiles table
         cursor.execute("PRAGMA table_info(profiles)")
         existing_cols = {row[1] for row in cursor.fetchall()}
@@ -1819,4 +1846,301 @@ class LocalStore:
             """)
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+
+    # ── Scientific Training Plans (Race Prep & Fitness Maintenance) ──
+
+    @staticmethod
+    def upsert_training_plan(plan_data: Dict[str, Any]) -> Dict[str, Any]:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            now_iso = datetime.utcnow().isoformat() + "Z"
+            plan_id = plan_data.get("id") or f"plan_{int(datetime.utcnow().timestamp()*1000)}"
+
+            # If new plan is active, optionally archive other active plans for this user
+            if plan_data.get("status") == "active":
+                cursor.execute("""
+                    UPDATE training_plans 
+                    SET status = 'archived', updated_at = ? 
+                    WHERE user_id = ? AND status = 'active' AND id != ?
+                """, (now_iso, plan_data["user_id"], plan_id))
+
+            sched = plan_data.get("schedule_data")
+            if isinstance(sched, (dict, list)):
+                sched_str = json.dumps(sched, ensure_ascii=False)
+            else:
+                sched_str = sched or "{}"
+
+            created_at = plan_data.get("created_at") or now_iso
+            updated_at = now_iso
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO training_plans (
+                    id, user_id, club_id, title, goal_type, maintenance_focus,
+                    target_race_id, target_race_name, target_date, start_date, end_date,
+                    weeks_count, days_per_week, preferred_long_run_day, status,
+                    overview_summary, schedule_data, creator_id, last_modified_by,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                plan_id,
+                plan_data.get("user_id"),
+                plan_data.get("club_id"),
+                plan_data.get("title", "个性化周期训练计划"),
+                plan_data.get("goal_type", "race_prep"),
+                plan_data.get("maintenance_focus"),
+                plan_data.get("target_race_id"),
+                plan_data.get("target_race_name"),
+                plan_data.get("target_date"),
+                plan_data.get("start_date"),
+                plan_data.get("end_date"),
+                plan_data.get("weeks_count", 8),
+                plan_data.get("days_per_week", 4),
+                plan_data.get("preferred_long_run_day", "Sunday"),
+                plan_data.get("status", "active"),
+                plan_data.get("overview_summary", ""),
+                sched_str,
+                plan_data.get("creator_id", plan_data.get("user_id")),
+                plan_data.get("last_modified_by", plan_data.get("user_id")),
+                created_at,
+                updated_at
+            ))
+            conn.commit()
+
+        return LocalStore.get_training_plan(plan_id) or plan_data
+
+    @staticmethod
+    def get_training_plan(plan_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM training_plans WHERE id = ?", (plan_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            if res.get("schedule_data"):
+                try:
+                    res["schedule_data"] = json.loads(res["schedule_data"])
+                except Exception:
+                    pass
+            return res
+
+    @staticmethod
+    def get_user_active_training_plan(user_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM training_plans 
+                WHERE user_id = ? AND status = 'active'
+                ORDER BY updated_at DESC LIMIT 1
+            """, (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                # Fallback to latest plan
+                cursor.execute("""
+                    SELECT * FROM training_plans 
+                    WHERE user_id = ?
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (user_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+            res = dict(row)
+            if res.get("schedule_data"):
+                try:
+                    res["schedule_data"] = json.loads(res["schedule_data"])
+                except Exception:
+                    pass
+            return res
+
+    @staticmethod
+    def get_user_training_plans(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, club_id, title, goal_type, maintenance_focus,
+                       target_race_name, target_date, start_date, end_date,
+                       weeks_count, days_per_week, preferred_long_run_day, status,
+                       overview_summary, creator_id, last_modified_by, created_at, updated_at
+                FROM training_plans 
+                WHERE user_id = ?
+                ORDER BY updated_at DESC LIMIT ?
+            """, (user_id, limit))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def update_training_plan_workout(
+        plan_id: str, 
+        week_index: int, 
+        day_index: int, 
+        workout_update: Dict[str, Any], 
+        operator_uid: str
+    ) -> Optional[Dict[str, Any]]:
+        plan = LocalStore.get_training_plan(plan_id)
+        if not plan:
+            return None
+
+        sched = plan.get("schedule_data") or {}
+        weeks = sched.get("weeks") or []
+        target_week = None
+        for w in weeks:
+            if w.get("week_index") == week_index:
+                target_week = w
+                break
+        
+        if not target_week and 0 <= week_index - 1 < len(weeks):
+            target_week = weeks[week_index - 1]
+
+        if not target_week:
+            return None
+
+        days = target_week.get("days") or []
+        target_day = None
+        if 0 <= day_index < len(days):
+            target_day = days[day_index]
+        else:
+            # Match by date if passed
+            up_date = workout_update.get("date")
+            if up_date:
+                for d in days:
+                    if d.get("date") == up_date:
+                        target_day = d
+                        break
+
+        if not target_day:
+            return None
+
+        # Apply updates
+        for key in ["workout_type", "title", "distance_km", "target_pace", "target_hr_zone", "description", "completed", "coach_notes"]:
+            if key in workout_update:
+                target_day[key] = workout_update[key]
+
+        target_day["last_modified_by"] = operator_uid
+        target_day["last_modified_at"] = datetime.utcnow().isoformat() + "Z"
+
+        # Recalculate weekly mileage
+        try:
+            total_km = sum(float(d.get("distance_km") or 0.0) for d in days)
+            target_week["weekly_mileage_km"] = round(total_km, 1)
+        except Exception:
+            pass
+
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE training_plans 
+                SET schedule_data = ?, last_modified_by = ?, updated_at = ?
+                WHERE id = ?
+            """, (json.dumps(sched, ensure_ascii=False), operator_uid, now_iso, plan_id))
+            conn.commit()
+
+        return LocalStore.get_training_plan(plan_id)
+
+    @staticmethod
+    def delete_training_plan(plan_id: str) -> bool:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM training_plans WHERE id = ?", (plan_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def extract_runner_race_history(user_id: str, days: int = 540) -> Dict[str, Any]:
+        """
+        Extracts real race performances, trials, and long runs from activities over the last 12-18 months (default 540 days).
+        """
+        cutoff_date = (date.today() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
+                       elapsed_time_seconds, avg_pace_str, elevation_gain_meters, 
+                       average_heartrate, max_heartrate, trimp
+                FROM activities
+                WHERE user_id = ? AND start_time >= ?
+                ORDER BY start_time DESC
+            """, (user_id, cutoff_date))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT id, name, race_type, race_date, target_time, priority
+                FROM race_plans
+                WHERE user_id = ?
+                ORDER BY race_date DESC
+            """, (user_id,))
+            registered_races = [dict(r) for r in cursor.fetchall()]
+
+        from utils.running_metrics import format_duration
+        total_activities = len(rows)
+        total_distance_km = round(sum(float(r["distance_meters"] or 0) for r in rows) / 1000.0, 1)
+
+        long_runs = []
+        max_dist_m = 0.0
+        races_detected = []
+        trail_runs = []
+
+        race_keywords = ["马拉松", "半马", "全马", "越野", "比赛", "race", "marathon", "50k", "100k", "pb", "团赛", "选拔", "戈壁", "戈1", "戈2"]
+        trail_keywords = ["越野", "trail", "山", "坡", "攀", "50k", "100k"]
+
+        for r in rows:
+            dist_m = float(r["distance_meters"] or 0)
+            if dist_m > max_dist_m:
+                max_dist_m = dist_m
+
+            name_lower = (r["name"] or "").lower()
+            elev = float(r["elevation_gain_meters"] or 0)
+
+            # Long run classification (>=14.5km)
+            if dist_m >= 14500:
+                long_runs.append({
+                    "date": str(r["start_time"])[:10],
+                    "name": r["name"],
+                    "distance_km": round(dist_m / 1000.0, 1),
+                    "moving_time": format_duration(r["moving_time_seconds"]),
+                    "avg_pace": r["avg_pace_str"],
+                    "avg_hr": r["average_heartrate"],
+                    "elevation_gain_m": round(elev, 1)
+                })
+
+            # Race or competitive test detection
+            is_race = any(k in name_lower for k in race_keywords) or dist_m >= 40000 or (dist_m >= 20000 and "测" in name_lower)
+            if is_race:
+                races_detected.append({
+                    "date": str(r["start_time"])[:10],
+                    "name": r["name"],
+                    "distance_km": round(dist_m / 1000.0, 1),
+                    "moving_time": format_duration(r["moving_time_seconds"]),
+                    "avg_pace": r["avg_pace_str"],
+                    "avg_hr": r["average_heartrate"],
+                    "elevation_gain_m": round(elev, 1)
+                })
+
+            # Trail / climbing run
+            if any(k in name_lower for k in trail_keywords) or elev >= 200:
+                trail_runs.append({
+                    "date": str(r["start_time"])[:10],
+                    "name": r["name"],
+                    "distance_km": round(dist_m / 1000.0, 1),
+                    "avg_pace": r["avg_pace_str"],
+                    "avg_hr": r["average_heartrate"],
+                    "elevation_gain_m": round(elev, 1)
+                })
+
+        return {
+            "period_days": days,
+            "total_activities_count": total_activities,
+            "total_distance_km": total_distance_km,
+            "max_single_distance_km": round(max_dist_m / 1000.0, 1),
+            "long_runs_count": len(long_runs),
+            "recent_races": races_detected[:10],
+            "recent_long_runs": long_runs[:10],
+            "trail_climbing_runs": trail_runs[:8],
+            "registered_race_targets": registered_races
+        }
 

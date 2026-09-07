@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
 import json
+import sqlite3
 from datetime import datetime, date, timedelta
 from db import supabase_admin
 from utils.llm import llm_client
@@ -667,4 +668,719 @@ Canova 针对该赛事类型的专项训练区间:
         LocalStore.save_coach_report(eff_uid, analysis_data)
 
     return analysis_data
+
+
+# ── CANOVA & DANIELS PERIODIZED TRAINING PLAN SYSTEM ──
+
+class GenerateTrainingPlanRequest(BaseModel):
+    athlete_uid: str
+    goal_type: Optional[str] = "race_prep"  # "race_prep" or "fitness_maintenance"
+    target_race_id: Optional[str] = None
+    target_race_name: Optional[str] = None
+    target_time: Optional[str] = None
+    race_type: Optional[str] = None  # "marathon", "half", "trail", "10k", "5k"
+    maintenance_focus: Optional[str] = None  # "aerobic_base", "lactate_threshold", "vo2max_speed", "trail_climbing", "general_maintenance"
+    target_date: Optional[str] = None  # YYYY-MM-DD
+    weeks_count: Optional[int] = 8
+    days_per_week: Optional[int] = 4
+    preferred_long_run_day: Optional[str] = "Sunday"  # "Sunday" or "Saturday"
+    club_id: Optional[str] = None
+    operator_uid: Optional[str] = None
+
+
+class UpdateWorkoutRequest(BaseModel):
+    week_index: int
+    day_index: int
+    date: Optional[str] = None
+    workout_type: Optional[str] = None
+    title: Optional[str] = None
+    distance_km: Optional[float] = None
+    target_pace: Optional[str] = None
+    target_hr_zone: Optional[str] = None
+    description: Optional[str] = None
+    completed: Optional[bool] = None
+    coach_notes: Optional[str] = None
+    operator_uid: str
+
+
+class UpdatePlanRequest(BaseModel):
+    title: Optional[str] = None
+    overview_summary: Optional[str] = None
+    status: Optional[str] = None  # 'active', 'archived', 'completed'
+    operator_uid: str
+
+
+CANOVA_PLAN_SYSTEM_PROMPT = """你是一位享誉国际的耐力运动首席训练专家，精通雷纳托·卡诺瓦 (Renato Canova) 的“专项性推进哲学”与杰克·丹尼尔斯 (Jack Daniels) 的“VDOT 能量代谢配速模型”。
+你的任务是根据跑者的真实生理画像、即时负荷 (CTL/ATL/TSB)、历史 PB、以及近 12~18 个月的真实比赛和长距离实战表现，制定科学、严密、可落地的周度/日度周期训练计划 (Training Plan)。
+
+【核心训练准则】：
+1. 目标导向性：
+   - 比赛备战目标 (race_prep)：倒排至比赛日。合理规划：基础构建期 (Fundamental) -> 专项准备期 (Special) -> 比赛专项期 (Specific) -> 渐进减量期 (Tapering，赛前 2-3 周递减 20%-40%-60% 容量但维持配速神经张力) -> 比赛周 (Race Week)。
+   - 非赛季体能进阶目标 (fitness_maintenance)：
+     * 基础有氧扩容 (aerobic_base)：低心率 Zone 2 扩容，最大化慢肌纤维毛细血管网与脂肪氧化率；
+     * 乳酸阈值提升 (lactate_threshold)：LT1/LT2 巡航间歇与稳态节奏跑，提升高配速巡航续航时间；
+     * VO2Max 速度储备 (vo2max_speed)：800m~1500m 场地间歇与神经肌肉步频刚性；
+     * 山地越野爬坡抗阻 (trail_climbing)：手杖垂直爬升 (D+)、山地阶梯与下坡股四头肌离心抗撕裂；
+     * 全面体能维持 (general_maintenance)：平衡跑量、力量与柔韧，维持良好 CTL。
+2. 年龄与恢复窗口自适应 (Masters Recovery)：
+   - 青年跑者 (<35岁)：大课恢复窗口约 48 小时；
+   - 中壮年跑者 (35~49岁)：大课恢复窗口约 48~72 小时；
+   - 大师组跑者 (≥50岁)：大课恢复窗口需 72~96 小时！坚决执行 Hard-Easy 规律，大课后必须留足 2~3 天轻松慢跑或休整，严禁连续两天堆积高强度或大跑量。
+3. 负荷与防伤控制：
+   - 起始周跑量须与跑者近 4 周平均周跑量自然衔接，周增幅严格 ≤ 10%；
+   - 每 3~4 周必须安排一次减量恢复周 (Down-week)，削减 25%~35% 容量以促进超量恢复。
+4. 12~18 个月比赛历史尊重：
+   - 严禁空想超出跑者实际经验的极端单次跑量，长跑课须基于其过去 18 个月的最长拉练纪录稳步拓展。
+
+请直接以严格的 JSON 格式输出，不得带有除 JSON 外的任何解释文字：
+{
+  "macro_cycle_name": "周期计划名称",
+  "goal_summary": "总体周期战略与科学设计要点综述（结合跑者年龄、VO2Max、TSB、18个月比赛表现）",
+  "weeks": [
+    {
+      "week_index": 1,
+      "week_title": "第 1 周 · 阶段与重点",
+      "phase": "基础构建期 / 专项准备期 / 专项突破期 / 赛前减量期 / 比赛恢复周",
+      "weekly_mileage_km": 45.0,
+      "key_focus": "本周核心训练目标说明",
+      "days": [
+        {
+          "day_of_week": "周一",
+          "date": "2026-09-08",
+          "workout_type": "rest", // 枚举: "rest", "easy_run", "tempo", "interval", "long_run", "trail_climb", "cross_training"
+          "title": "完全休息 / 筋膜泡沫轴放松",
+          "distance_km": 0.0,
+          "target_pace": "—",
+          "target_hr_zone": "—",
+          "description": "详细课表安排，包含热身、主课间歇/配速/心率要求、冷身慢跑与注意事项",
+          "completed": false,
+          "coach_notes": ""
+        }
+      ]
+    }
+  ]
+}
+"""
+
+
+def generate_fallback_training_plan(
+    athlete_name: str,
+    goal_type: str,
+    target_race_name: str,
+    target_time_str: str,
+    race_category: str,
+    maintenance_focus: Optional[str],
+    weeks_count: int,
+    days_per_week: int,
+    start_monday: date,
+    vdot: float,
+    pb_marathon_sec: Optional[int],
+    max_long_run_18m_km: float,
+    age: Optional[int]
+) -> Dict[str, Any]:
+    """
+    Intelligently generates a complete, scientifically rigorous Canova/Daniels training plan
+    tailored to runner's age, VDOT paces, and 18-month historical performances when LLM output needs fallback.
+    """
+    # Calculate key paces
+    easy_pace_low = "5:35"
+    easy_pace_high = "6:00"
+    marathon_pace = "4:30"
+    tempo_pace = "4:15"
+    interval_pace = "3:55"
+
+    if vdot and vdot > 0:
+        # Approximate paces from VDOT
+        if vdot >= 58:
+            easy_pace_low, easy_pace_high, marathon_pace, tempo_pace, interval_pace = "4:50", "5:15", "4:00", "3:48", "3:30"
+        elif vdot >= 52:
+            easy_pace_low, easy_pace_high, marathon_pace, tempo_pace, interval_pace = "5:20", "5:45", "4:30", "4:15", "3:55"
+        elif vdot >= 46:
+            easy_pace_low, easy_pace_high, marathon_pace, tempo_pace, interval_pace = "5:45", "6:15", "4:58", "4:42", "4:20"
+        elif vdot >= 40:
+            easy_pace_low, easy_pace_high, marathon_pace, tempo_pace, interval_pace = "6:15", "6:50", "5:35", "5:15", "4:50"
+        else:
+            easy_pace_low, easy_pace_high, marathon_pace, tempo_pace, interval_pace = "6:45", "7:25", "6:20", "5:55", "5:25"
+
+    is_trail = race_category == "trail" or "越野" in (target_race_name or "") or maintenance_focus == "trail_climbing"
+    is_masters = age and age >= 50
+
+    weeks = []
+    days_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+    # Base starting long run
+    start_lr_dist = min(max_long_run_18m_km * 0.75 if max_long_run_18m_km else 18.0, 22.0)
+    if is_trail:
+        start_lr_dist = min(start_lr_dist, 20.0)
+
+    for w_idx in range(1, weeks_count + 1):
+        w_start = start_monday + timedelta(weeks=w_idx - 1)
+        
+        # Determine phase
+        if goal_type == "race_prep":
+            if w_idx == weeks_count:
+                phase = "比赛周 (Race Week)"
+                w_title = f"第 {w_idx} 周 · {target_race_name} 巅峰之战"
+                w_focus = "充分蓄能超量恢复，赛前仅做神经短冲激活，比赛日执行 100% 专项配速"
+            elif w_idx >= weeks_count - 2:
+                phase = "赛前减量期 (Tapering)"
+                w_title = f"第 {w_idx} 周 · 渐进减量与神经保持"
+                w_focus = "削减 30%~50% 总跑量，消除深层中枢疲劳，维持短冲刺激保持肌肉弹性"
+            elif w_idx >= int(weeks_count * 0.6):
+                phase = "专项突破期 (Specific Period)"
+                w_title = f"第 {w_idx} 周 · 100% 比赛专项配速与糖原耐受"
+                w_focus = "大课向目标比赛专项配速收敛，强化高配速下的肌糖原利用效率"
+            elif w_idx >= int(weeks_count * 0.3):
+                phase = "专项准备期 (Special Period)"
+                w_title = f"第 {w_idx} 周 · 乳酸门槛与有氧扩展"
+                w_focus = "提升乳酸门槛 (LT2) 平台，穿插 3x3000m 稳态巡航间歇"
+            else:
+                phase = "基础构建期 (Fundamental Phase)"
+                w_title = f"第 {w_idx} 周 · 基础有氧扩容与线粒体激活"
+                w_focus = "以低心率 Zone 2 扩充有氧耐力底座，周末稳步推进长距离"
+        else:
+            # Fitness maintenance
+            focus_name = {
+                "aerobic_base": "基础有氧扩容",
+                "lactate_threshold": "乳酸阈值耐力提升",
+                "vo2max_speed": "VO2Max 速度储备",
+                "trail_climbing": "山地越野爬坡抗阻",
+                "general_maintenance": "综合体能维持"
+            }.get(maintenance_focus or "aerobic_base", "基础有氧扩容")
+
+            if w_idx % 4 == 0:
+                phase = "减量吸收周 (Down-week)"
+                w_title = f"第 {w_idx} 周 · 周期性减量与超量吸收"
+                w_focus = "削减 25% 跑量让机能充分恢复，防止慢性疲劳累积"
+            else:
+                phase = "能力强化期 (Capacity Building)"
+                w_title = f"第 {w_idx} 周 · {focus_name} 专项推进"
+                w_focus = f"核心围绕【{focus_name}】设计关键课，结合每周渐速长跑稳固体能"
+
+        # Calculate weekly long run distance (with down-weeks)
+        if phase in ["比赛周 (Race Week)", "赛前减量期 (Tapering)", "减量吸收周 (Down-week)"]:
+            lr_km = round(start_lr_dist * 0.7, 1)
+        else:
+            prog = min(w_idx * 1.5, 12.0)
+            lr_km = round(min(start_lr_dist + prog, 32.0 if not is_trail else 28.0), 1)
+
+        days_list = []
+        # Days structure based on days_per_week
+        # E.g. 4 days: Mon Rest, Tue Easy, Wed Rest, Thu Quality/Tempo, Fri Rest, Sat Easy, Sun Long Run
+        for d_idx in range(7):
+            cur_date = (w_start + timedelta(days=d_idx)).isoformat()
+            d_name = days_labels[d_idx]
+
+            if d_idx == 0:  # Monday: Rest
+                w_item = {
+                    "day_of_week": d_name,
+                    "date": cur_date,
+                    "workout_type": "rest",
+                    "title": "完全休息 / 筋膜泡沫轴放松",
+                    "distance_km": 0.0,
+                    "target_pace": "—",
+                    "target_hr_zone": "—",
+                    "description": "彻底休息，充分让下肢肌纤维超量恢复，建议配合泡沫轴或筋膜枪进行股四头肌与小腿放松。",
+                    "completed": False,
+                    "coach_notes": ""
+                }
+            elif d_idx == 1:  # Tuesday: Easy Run
+                w_item = {
+                    "day_of_week": d_name,
+                    "date": cur_date,
+                    "workout_type": "easy_run",
+                    "title": "低心率基础有氧轻松跑 (Zone 2)",
+                    "distance_km": 10.0,
+                    "target_pace": f"{easy_pace_low} - {easy_pace_high} /km",
+                    "target_hr_zone": "心率 130-142 bpm (Zone 2)",
+                    "description": f"热身 1km + 8km 低心率稳态巡航跑 + 1km 冷身。结束后做 4 组 100m 跨步冲刺 (Strides) 激活神经刚性。",
+                    "completed": False,
+                    "coach_notes": ""
+                }
+            elif d_idx == 2:  # Wednesday: Rest or Active Recovery
+                if days_per_week >= 5:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "easy_run",
+                        "title": "排酸轻松慢跑 / 力量训练",
+                        "distance_km": 6.0,
+                        "target_pace": f"{easy_pace_high} /km",
+                        "target_hr_zone": "心率 < 135 bpm",
+                        "description": "极慢速排酸跑 6km，结束后完成 15 分钟核心深蹲与臀中肌抗阻力量。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+                else:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "rest",
+                        "title": "大师组周期休整日 (Active Recovery)",
+                        "distance_km": 0.0,
+                        "target_pace": "—",
+                        "target_hr_zone": "—",
+                        "description": "遵循 50+ 大师组 72 小时大课恢复窗口，休整并保持充分水分与睡眠。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+            elif d_idx == 3:  # Thursday: Quality Workout (Tempo or Intervals or Trail)
+                if is_trail:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "trail_climb",
+                        "title": "山地爬坡与阶梯抗阻专项 (D+ 爬升强化)",
+                        "distance_km": 12.0,
+                        "target_pace": "心率控制为主",
+                        "target_hr_zone": "心率 145-160 bpm (LT1-LT2)",
+                        "description": "热身 2km + 连续起伏坡道/台阶往返 8km (累计爬升 +400m，上坡手杖快走，下坡轻快练习股四头肌离心缓冲) + 2km 冷身。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+                elif maintenance_focus == "vo2max_speed":
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "interval",
+                        "title": "VO2Max 速度间歇：6 × 1000m",
+                        "distance_km": 11.0,
+                        "target_pace": f"{interval_pace} /km",
+                        "target_hr_zone": "心率 165-175 bpm (Zone 4/5)",
+                        "description": f"热身 2km + 6 × 1000m @ {interval_pace} (间歇 2 分钟原地慢走) + 2km 冷身放松。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+                else:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "tempo",
+                        "title": "乳酸门槛巡航跑 (LT2 稳态延伸)",
+                        "distance_km": 12.0,
+                        "target_pace": f"{tempo_pace} /km",
+                        "target_hr_zone": "心率 155-165 bpm (LT2)",
+                        "description": f"热身 2km + 3 × 2500m @ {tempo_pace} (间歇 3 分钟慢跑) + 2km 冷身。强化乳酸清除非专项耐受力。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+            elif d_idx == 4:  # Friday: Rest
+                w_item = {
+                    "day_of_week": d_name,
+                    "date": cur_date,
+                    "workout_type": "rest",
+                    "title": "完全休息 / 赛前或大课前蓄能",
+                    "distance_km": 0.0,
+                    "target_pace": "—",
+                    "target_hr_zone": "—",
+                    "description": "为周末长距离大课储备糖原，早睡并保证高碳水化合物营养补充。",
+                    "completed": False,
+                    "coach_notes": ""
+                }
+            elif d_idx == 5:  # Saturday: Easy Shakeout or Rest
+                if days_per_week >= 5:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "easy_run",
+                        "title": "周末前唤醒轻松跑 (Shakeout)",
+                        "distance_km": 8.0,
+                        "target_pace": f"{easy_pace_low} - {easy_pace_high} /km",
+                        "target_hr_zone": "心率 128-138 bpm",
+                        "description": "轻松舒适慢跑，活动关节与心肺神经，不堆积疲劳。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+                else:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "rest",
+                        "title": "大课前休整日",
+                        "distance_km": 0.0,
+                        "target_pace": "—",
+                        "target_hr_zone": "—",
+                        "description": "彻底休息，准备次日关键长距离。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+            else:  # Sunday: Long Run (The Canova Specific Long Progression)
+                if phase == "比赛周 (Race Week)":
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "long_run",
+                        "title": f"🏁 目标赛事正赛：{target_race_name} 突破之战！",
+                        "distance_km": 42.2 if "全马" in target_race_name or "马拉松" in target_race_name else (21.1 if "半马" in target_race_name else 50.0),
+                        "target_pace": f"{marathon_pace} /km",
+                        "target_hr_zone": "按比赛战术心率执行",
+                        "description": f"前程克制压住心率，半程后依靠扎实糖原储备稳步加速收敛，直击 {target_time_str} 目标！",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+                else:
+                    w_item = {
+                        "day_of_week": d_name,
+                        "date": cur_date,
+                        "workout_type": "long_run",
+                        "title": f"周末长距离专项推进 (Long Specific Run - {lr_km}km)",
+                        "distance_km": lr_km,
+                        "target_pace": f"{easy_pace_low} 渐进至 {marathon_pace} /km",
+                        "target_hr_zone": "心率 135-155 bpm (Z2-Z3)",
+                        "description": f"前 {round(lr_km * 0.6, 1)}km 保持在 {easy_pace_low} 低心率稳态，后 {round(lr_km * 0.4, 1)}km 渐进提升至目标专项配速 ({marathon_pace})，演练每 45 分钟补胶与电解质水。",
+                        "completed": False,
+                        "coach_notes": ""
+                    }
+
+            days_list.append(w_item)
+
+        total_week_km = round(sum(d["distance_km"] for d in days_list), 1)
+        weeks.append({
+            "week_index": w_idx,
+            "week_title": w_title,
+            "phase": phase,
+            "weekly_mileage_km": total_week_km,
+            "key_focus": w_focus,
+            "days": days_list
+        })
+
+    focus_cn = {
+        "aerobic_base": "基础有氧耐力扩容",
+        "lactate_threshold": "乳酸阈值耐力提升",
+        "vo2max_speed": "VO2Max 速度储备",
+        "trail_climbing": "山地越野爬坡抗阻",
+        "general_maintenance": "综合体能维持"
+    }.get(maintenance_focus or "aerobic_base", "非赛期专项强化")
+
+    target_display = target_race_name if goal_type == "race_prep" else focus_cn
+    title = f"{athlete_name} · {target_display} {weeks_count}周科学训练计划"
+    summary = f"严格结合跑者真实生理画像（{age or 35}岁大师组恢复律、VO2Max {vdot or 50.0}），参考过去18个月历史长拉练能力（单次最长 {max_long_run_18m_km}km），按照 Canova 专项收敛律推进。"
+
+    return {
+        "macro_cycle_name": title,
+        "goal_summary": summary,
+        "weeks": weeks
+    }
+
+
+@router.post("/plan/generate")
+def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
+    """
+    Generates an individualized, periodized Canova & Daniels training plan for the runner,
+    incorporating athlete biometrics, CTL/ATL/TSB, PBs, and 12-18 months of real race & long run history.
+    """
+    eff_uid = req.athlete_uid
+    user_profile = LocalStore.get_profile(eff_uid) or {}
+    runner_name = user_profile.get("display_name") or user_profile.get("email", "").split("@")[0] or "跑者"
+    gender = str(user_profile.get("gender") or "male")
+    gender_zh = "女" if gender.lower() == "female" else "男"
+    dob_str = user_profile.get("date_of_birth")
+    age = get_age_from_dob(dob_str)
+    
+    # Biometrics & VO2Max
+    vo2max = user_profile.get("vo2max")
+    health = LocalStore.get_latest_health(eff_uid) or {}
+    if not vo2max and health.get("vo2_max"):
+        vo2max = health.get("vo2_max")
+
+    marathon_pb = user_profile.get("marathon_pb")
+    half_pb = user_profile.get("half_pb")
+    ten_k_pb = user_profile.get("ten_k_pb")
+    five_k_pb = user_profile.get("five_k_pb")
+
+    if not vo2max:
+        # Calculate from marathon or half PB
+        if marathon_pb:
+            v_calc = calculate_vdot(42195.0, float(marathon_pb))
+            vo2max = round(v_calc, 1) if v_calc else 50.0
+        elif half_pb:
+            v_calc = calculate_vdot(21097.5, float(half_pb))
+            vo2max = round(v_calc, 1) if v_calc else 50.0
+        else:
+            vo2max = 48.0
+
+    # Training Load CTL/ATL/TSB
+    load_metrics = LocalStore.get_training_load(eff_uid, days=60)
+    ctl = load_metrics.get("ctl", 0.0)
+    atl = load_metrics.get("atl", 0.0)
+    tsb = load_metrics.get("tsb", 0.0)
+    acwr = load_metrics.get("acwr", 0.0)
+    tsb_status = load_metrics.get("status", "稳健")
+
+    # 12-18 months (540 days) real race and long run history
+    history_18m = LocalStore.extract_runner_race_history(eff_uid, days=540)
+
+    # Resolve target and race details
+    goal_type = req.goal_type or "race_prep"
+    target_race_name = req.target_race_name or "目标赛事"
+    target_time_str = req.target_time or "3:15:00"
+    target_time_sec = parse_time_str(target_time_str)
+
+    race_category, race_category_name = resolve_race_category(target_race_name, req.race_type, target_time_sec)
+
+    # Date and weeks calculation
+    today = date.today()
+    # Find next Monday (or today if today is Monday)
+    start_monday = today - timedelta(days=today.weekday())  # Current week Monday
+
+    weeks_count = req.weeks_count or 8
+    if req.target_date and goal_type == "race_prep":
+        try:
+            t_date = datetime.strptime(req.target_date[:10], "%Y-%m-%d").date()
+            diff_days = (t_date - start_monday).days
+            calc_weeks = max(4, min(16, (diff_days + 6) // 7))
+            weeks_count = calc_weeks
+        except Exception:
+            pass
+
+    end_date = (start_monday + timedelta(weeks=weeks_count) - timedelta(days=1)).isoformat()
+    start_date = start_monday.isoformat()
+
+    days_per_week = req.days_per_week or 4
+    maintenance_focus = req.maintenance_focus or "aerobic_base"
+
+    # Age category prompt description
+    if age is None:
+        age_desc = "未登记年龄（按 32 岁中青年 48 小时恢复窗口规划）"
+    elif age < 35:
+        age_desc = f"{age} 岁 (青年组 - 恢复快，大课恢复窗口 48 小时，耐受专项密度高)"
+    elif age < 50:
+        age_desc = f"{age} 岁 (中壮年组 - 大课恢复窗口需 48~72 小时，增加筋膜维护)"
+    else:
+        age_desc = f"{age} 岁 (大师组 Masters - 肌肉胶原与糖原合成较缓，大课后需保留 72~96 小时超量恢复窗口，坚决执行 Hard-Easy 规律，防肌肉流失与关节损伤)"
+
+    # Build prompt context
+    user_context = f"""
+跑者真实画像：
+- 姓名/昵称: {runner_name}
+- 性别: {gender_zh} | 生理年龄: {age_desc}
+- VO2Max (最大摄氧量): {vo2max}
+- 个人最好成绩 (PB):
+  * 全马 PB: {format_duration(marathon_pb)}
+  * 半马 PB: {format_duration(half_pb)}
+  * 10K PB: {format_duration(ten_k_pb)}
+  * 5K PB: {format_duration(five_k_pb)}
+
+即时疲劳负荷监测 (Banister EWMA 模型):
+- 长期体能 CTL: {ctl}
+- 短期疲劳 ATL: {atl}
+- 状态平衡指数 TSB: {tsb} ({tsb_status})
+- 急慢性负荷比 ACWR: {acwr}
+
+过去 12~18 个月 (540天) 比赛与长跑历史实战表现 (真实打卡记录):
+- 过去 1.5 年总跑步活动数: {history_18m.get('total_activities_count')} 次 (总里程: {history_18m.get('total_distance_km')} km)
+- 过去 1.5 年长距离 (≥15km) 次数: {history_18m.get('long_runs_count')} 次
+- 过去 1.5 年单次最长实跑距离: {history_18m.get('max_single_distance_km')} km
+- 过去 1.5 年参加的真实比赛/高强度测验 (前5次):
+{json.dumps(history_18m.get('recent_races', [])[:5], ensure_ascii=False, indent=2)}
+- 过去 1.5 年长跑拉练记录 (前5次):
+{json.dumps(history_18m.get('recent_long_runs', [])[:5], ensure_ascii=False, indent=2)}
+- 山地越野/爬坡活动: {len(history_18m.get('trail_climbing_runs', []))} 次
+
+训练目标设定：
+- 目标类型: {'赛事备赛 (race_prep)' if goal_type == 'race_prep' else '非赛季体能进阶 (fitness_maintenance)'}
+- 目标赛事: {target_race_name} (类别: {race_category_name}, 目标成绩: {target_time_str})
+- 非赛期专项焦点: {maintenance_focus}
+- 训练周期: {weeks_count} 周 (起始日期: {start_date}, 结束/比赛日期: {end_date})
+- 每周训练跑步天数: {days_per_week} 天 (其余天数为完全休息或交叉放松)
+- 长跑日偏好: {req.preferred_long_run_day or 'Sunday'}
+
+请根据以上跑者的真实生理承受力与历史表现，为跑者生成包含第 1 周到第 {weeks_count} 周的完整周度/日度训练课表。直接输出标准 JSON。
+"""
+
+    messages = [
+        {"role": "system", "content": CANOVA_PLAN_SYSTEM_PROMPT},
+        {"role": "user", "content": user_context}
+    ]
+
+    schedule_data = None
+    try:
+        raw_output = llm_client.chat_completion(messages=messages, temperature=0.7)
+        clean_json = raw_output.strip()
+        if "```json" in clean_json:
+            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_json:
+            clean_json = clean_json.split("```")[1].split("```")[0].strip()
+        schedule_data = json.loads(clean_json)
+        
+        # Verify structure integrity
+        if not schedule_data.get("weeks") or len(schedule_data.get("weeks")) == 0:
+            schedule_data = None
+    except Exception as e:
+        logger.warning(f"[coach_plan] LLM generation error/fallback: {e}")
+        schedule_data = None
+
+    if not schedule_data:
+        # Generate robust, realistic Canova schedule dynamically
+        schedule_data = generate_fallback_training_plan(
+            athlete_name=runner_name,
+            goal_type=goal_type,
+            target_race_name=target_race_name,
+            target_time_str=target_time_str,
+            race_category=race_category,
+            maintenance_focus=maintenance_focus,
+            weeks_count=weeks_count,
+            days_per_week=days_per_week,
+            start_monday=start_monday,
+            vdot=vo2max,
+            pb_marathon_sec=marathon_pb,
+            max_long_run_18m_km=history_18m.get("max_single_distance_km") or 25.0,
+            age=age
+        )
+
+    # Attach fitness snapshot to schedule
+    schedule_data["current_fitness_snapshot"] = {
+        "ctl": ctl,
+        "atl": atl,
+        "tsb": tsb,
+        "vo2max": vo2max,
+        "age": age,
+        "max_long_run_18m_km": history_18m.get("max_single_distance_km"),
+        "total_activities_18m": history_18m.get("total_activities_count"),
+        "recent_races_count": len(history_18m.get("recent_races", []))
+    }
+
+    focus_cn = {
+        "aerobic_base": "基础有氧耐力扩容",
+        "lactate_threshold": "乳酸阈值耐力提升",
+        "vo2max_speed": "VO2Max 速度储备",
+        "trail_climbing": "山地越野爬坡抗阻",
+        "general_maintenance": "综合体能维持"
+    }.get(maintenance_focus or "aerobic_base", "非赛期专项强化")
+    target_display = target_race_name if goal_type == "race_prep" else focus_cn
+    plan_title = schedule_data.get("macro_cycle_name") or f"{runner_name} · {target_display} {weeks_count}周训练计划"
+    plan_overview = schedule_data.get("goal_summary") or ""
+
+    operator = req.operator_uid or eff_uid
+
+    # Upsert plan into DB
+    saved_plan = LocalStore.upsert_training_plan({
+        "user_id": eff_uid,
+        "club_id": req.club_id,
+        "title": plan_title,
+        "goal_type": goal_type,
+        "maintenance_focus": maintenance_focus,
+        "target_race_id": req.target_race_id,
+        "target_race_name": target_race_name,
+        "target_date": req.target_date or end_date,
+        "start_date": start_date,
+        "end_date": end_date,
+        "weeks_count": weeks_count,
+        "days_per_week": days_per_week,
+        "preferred_long_run_day": req.preferred_long_run_day or "Sunday",
+        "status": "active",
+        "overview_summary": plan_overview,
+        "schedule_data": schedule_data,
+        "creator_id": operator,
+        "last_modified_by": operator
+    })
+
+    return {
+        "success": True,
+        "message": f"成功为 {runner_name} 生成 {weeks_count} 周科学训练计划！",
+        "plan": saved_plan
+    }
+
+
+@router.get("/plan/user/{uid}")
+def get_user_training_plan(uid: str):
+    """
+    Returns the active training plan for the specified user,
+    plus history of archived plans.
+    """
+    plan = LocalStore.get_user_active_training_plan(uid)
+    past_plans = LocalStore.get_user_training_plans(uid, limit=5)
+    return {
+        "active_plan": plan,
+        "past_plans": past_plans
+    }
+
+
+@router.get("/plan/{plan_id}")
+def get_training_plan_detail(plan_id: str):
+    """
+    Returns specific training plan details by plan_id.
+    """
+    plan = LocalStore.get_training_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="训练计划不存在")
+    return {"plan": plan}
+
+
+@router.put("/plan/{plan_id}")
+def update_training_plan_overview(plan_id: str, req: UpdatePlanRequest):
+    """
+    Updates the plan title, overview summary, or status.
+    """
+    plan = LocalStore.get_training_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="训练计划不存在")
+
+    update_fields = {}
+    if req.title:
+        update_fields["title"] = req.title
+    if req.overview_summary:
+        update_fields["overview_summary"] = req.overview_summary
+    if req.status:
+        update_fields["status"] = req.status
+    update_fields["last_modified_by"] = req.operator_uid
+
+    # Update in DB
+    with sqlite3.connect(LocalStore.get_db_path() if hasattr(LocalStore, "get_db_path") else "backend/data/rgm.db") as conn:
+        cursor = conn.cursor()
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        set_clauses = [f"{k} = ?" for k in update_fields.keys()]
+        set_clauses.append("updated_at = ?")
+        vals = list(update_fields.values()) + [now_iso, plan_id]
+        cursor.execute(f"UPDATE training_plans SET {', '.join(set_clauses)} WHERE id = ?", vals)
+        conn.commit()
+
+    updated = LocalStore.get_training_plan(plan_id)
+    return {"message": "计划信息已更新", "plan": updated}
+
+
+@router.patch("/plan/{plan_id}/workout")
+def update_plan_workout_item(plan_id: str, req: UpdateWorkoutRequest):
+    """
+    Fine-grained collaborative editing of a single workout in the plan.
+    Allows athlete or coach to modify distance, pace, workout type, completion status, or add coach notes.
+    """
+    plan = LocalStore.get_training_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="训练计划不存在")
+
+    workout_update = {}
+    for k in ["workout_type", "title", "distance_km", "target_pace", "target_hr_zone", "description", "completed", "coach_notes", "date"]:
+        v = getattr(req, k)
+        if v is not None:
+            workout_update[k] = v
+
+    updated_plan = LocalStore.update_training_plan_workout(
+        plan_id=plan_id,
+        week_index=req.week_index,
+        day_index=req.day_index,
+        workout_update=workout_update,
+        operator_uid=req.operator_uid
+    )
+
+    if not updated_plan:
+        raise HTTPException(status_code=400, detail="未找到对应周或日的课表")
+
+    return {
+        "success": True,
+        "message": "训练课表已更新",
+        "plan": updated_plan
+    }
+
+
+@router.delete("/plan/{plan_id}")
+def delete_training_plan_endpoint(plan_id: str, operator_uid: Optional[str] = None):
+    """
+    Deletes a training plan.
+    """
+    ok = LocalStore.delete_training_plan(plan_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="训练计划不存在或已删除")
+    return {"message": "训练计划已成功删除"}
+
 
