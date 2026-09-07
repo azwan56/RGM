@@ -234,6 +234,7 @@ export default function TrainingPlanView({
     long_run: { label: "长距离", badge: "bg-purple-500/10 text-purple-300 border-purple-500/20", border: "border-purple-500/20" },
     trail_climb: { label: "越野爬坡", badge: "bg-teal-500/10 text-teal-300 border-teal-500/20", border: "border-teal-500/20" },
     cross_training: { label: "交叉力量", badge: "bg-pink-500/10 text-pink-300 border-pink-500/20", border: "border-pink-500/20" },
+    race: { label: "🏁 比赛日", badge: "bg-rose-500/20 text-rose-300 border-rose-500/40 font-black shadow-sm shadow-rose-500/20", border: "border-rose-500/40 bg-rose-950/10" },
     rest: { label: "休息日", badge: "bg-zinc-800 text-zinc-400 border-white/5", border: "border-white/5" }
   };
 
@@ -608,18 +609,28 @@ export default function TrainingPlanView({
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
               {currentWeeks.map((w: any) => {
                 const isActive = w.week_index === selectedWeekIdx;
+                const hasRace = (w.days || []).some((d: any) => d.workout_type === "race");
                 return (
                   <button
                     key={w.week_index}
                     onClick={() => setSelectedWeekIdx(w.week_index)}
-                    className={`shrink-0 px-4 py-2.5 rounded-2xl border text-xs font-bold transition flex flex-col items-start min-w-[110px] ${
+                    className={`shrink-0 px-4 py-2.5 rounded-2xl border text-xs font-bold transition flex flex-col items-start min-w-[110px] relative ${
                       isActive
                         ? "bg-purple-600 text-white border-purple-500 shadow-lg shadow-purple-600/30"
+                        : hasRace
+                        ? "bg-rose-950/20 border-rose-500/30 text-rose-200 hover:border-rose-500/50"
                         : "bg-[#18181c] border-white/5 text-zinc-400 hover:text-white hover:border-white/15"
                     }`}
                   >
-                    <span>第 {w.week_index} 周</span>
-                    <span className={`text-[10px] font-normal mt-0.5 ${isActive ? "text-purple-100" : "text-zinc-500"}`}>
+                    <div className="flex items-center gap-1.5 w-full justify-between">
+                      <span>第 {w.week_index} 周</span>
+                      {hasRace && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          🏁 实战
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-[10px] font-normal mt-0.5 ${isActive ? "text-purple-100" : hasRace ? "text-rose-300/80" : "text-zinc-500"}`}>
                       {w.weekly_mileage_km || 0} km · {w.phase ? w.phase.split(" ")[0] : "训练"}
                     </span>
                   </button>
@@ -807,6 +818,7 @@ export default function TrainingPlanView({
                     <option value="long_run">长距离 (Long Progression)</option>
                     <option value="trail_climb">越野爬坡抗阻 (Trail D+)</option>
                     <option value="cross_training">交叉力量 (Cross Training)</option>
+                    <option value="race">🏁 实战比赛日 (Race Day)</option>
                     <option value="rest">完全休息 (Rest)</option>
                   </select>
                 </div>

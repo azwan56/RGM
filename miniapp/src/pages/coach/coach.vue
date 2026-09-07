@@ -742,6 +742,7 @@ function getWorkoutTypeLabel(type: string): string {
     long_run: "长距离",
     trail_climb: "越野爬坡",
     cross_training: "交叉力量",
+    race: "🏁 比赛日",
     rest: "休息日"
   };
   return map[type] || "跑步";
@@ -755,6 +756,7 @@ function getWorkoutBadgeClass(type: string): string {
     long_run: "badge-long",
     trail_climb: "badge-trail",
     cross_training: "badge-cross",
+    race: "badge-race",
     rest: "badge-rest"
   };
   return map[type] || "badge-easy";
@@ -768,6 +770,7 @@ function getWorkoutBorderClass(type: string): string {
     long_run: "border-long",
     trail_climb: "border-trail",
     cross_training: "border-cross",
+    race: "border-race",
     rest: "border-rest"
   };
   return map[type] || "border-rest";
@@ -2540,7 +2543,10 @@ onPullDownRefresh(async () => {
 .badge-long { background: rgba(175, 82, 222, 0.15); color: #af52de; }
 .badge-trail { background: rgba(94, 92, 230, 0.15); color: #5e5ce6; }
 .badge-cross { background: rgba(255, 55, 95, 0.15); color: #ff375f; }
+.badge-race { background: rgba(255, 45, 85, 0.25); color: #ff375f; border: 1rpx solid rgba(255, 45, 85, 0.4); font-weight: bold; }
 .badge-rest { background: rgba(142, 142, 147, 0.15); color: #8e8e93; }
+
+.border-race { border-color: rgba(255, 45, 85, 0.45); background: linear-gradient(180deg, rgba(255, 45, 85, 0.12) 0%, rgba(26, 26, 30, 0.95) 100%); }
 
 .workout-title {
   font-size: 26rpx;

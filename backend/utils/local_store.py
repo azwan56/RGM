@@ -326,11 +326,24 @@ init_db()
 
 class LocalStore:
     @staticmethod
+    def resolve_user_id(uid: str) -> str:
+        """Resolves canonical user_id from profiles table if uid is email or display_name."""
+        if not uid:
+            return uid
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (uid, uid, uid))
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+        return uid
+
+    @staticmethod
     def get_profile(uid: str) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM profiles WHERE id = ?", (uid,))
+            cursor.execute("SELECT * FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (uid, uid, uid))
             row = cursor.fetchone()
             if row:
                 d = dict(row)
@@ -496,6 +509,7 @@ class LocalStore:
         - ACWR (Acute:Chronic Workload Ratio)
         - Physiological status & injury risk warnings
         """
+        canonical_uid = LocalStore.resolve_user_id(uid)
         start_date = date.today() - timedelta(days=days)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -503,9 +517,9 @@ class LocalStore:
             cursor.execute("""
                 SELECT start_time, distance_meters, moving_time_seconds, average_heartrate, trimp
                 FROM activities
-                WHERE user_id = ? AND start_time >= ?
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
                 ORDER BY start_time ASC
-            """, (uid, start_date.isoformat()))
+            """, (canonical_uid, uid, start_date.isoformat()))
             rows = [dict(r) for r in cursor.fetchall()]
 
         profile = LocalStore.get_profile(uid) or {}
@@ -983,15 +997,20 @@ class LocalStore:
 
     @staticmethod
     def get_race_plans(uid: str) -> List[Dict[str, Any]]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM race_plans WHERE user_id = ? ORDER BY race_date ASC", (uid,))
+            cursor.execute("SELECT * FROM race_plans WHERE user_id = ? OR user_id = ? ORDER BY race_date ASC", (canonical_uid, uid))
             rows = cursor.fetchall()
             plans = []
+            seen = set()
             today = date.today()
             for r in rows:
                 p = dict(r)
+                if p.get("id") in seen:
+                    continue
+                seen.add(p.get("id"))
                 if p.get("race_date"):
                     try:
                         r_date = datetime.strptime(p["race_date"][:10], "%Y-%m-%d").date()
@@ -1927,22 +1946,23 @@ class LocalStore:
 
     @staticmethod
     def get_user_active_training_plan(user_id: str) -> Optional[Dict[str, Any]]:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM training_plans 
-                WHERE user_id = ? AND status = 'active'
+                WHERE (user_id = ? OR user_id = ?) AND status = 'active'
                 ORDER BY updated_at DESC LIMIT 1
-            """, (user_id,))
+            """, (canonical_uid, user_id))
             row = cursor.fetchone()
             if not row:
                 # Fallback to latest plan
                 cursor.execute("""
                     SELECT * FROM training_plans 
-                    WHERE user_id = ?
+                    WHERE user_id = ? OR user_id = ?
                     ORDER BY updated_at DESC LIMIT 1
-                """, (user_id,))
+                """, (canonical_uid, user_id))
                 row = cursor.fetchone()
                 if not row:
                     return None
@@ -1957,6 +1977,7 @@ class LocalStore:
 
     @staticmethod
     def get_user_training_plans(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1966,9 +1987,9 @@ class LocalStore:
                        weeks_count, days_per_week, preferred_long_run_day, status,
                        overview_summary, creator_id, last_modified_by, created_at, updated_at
                 FROM training_plans 
-                WHERE user_id = ?
+                WHERE user_id = ? OR user_id = ?
                 ORDER BY updated_at DESC LIMIT ?
-            """, (user_id, limit))
+            """, (canonical_uid, user_id, limit))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 
@@ -2054,6 +2075,7 @@ class LocalStore:
         """
         Extracts real race performances, trials, and long runs from activities over the last 12-18 months (default 540 days).
         """
+        canonical_uid = LocalStore.resolve_user_id(user_id)
         cutoff_date = (date.today() - timedelta(days=days)).isoformat()
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -2063,17 +2085,17 @@ class LocalStore:
                        elapsed_time_seconds, avg_pace_str, elevation_gain_meters, 
                        average_heartrate, max_heartrate, trimp
                 FROM activities
-                WHERE user_id = ? AND start_time >= ?
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
                 ORDER BY start_time DESC
-            """, (user_id, cutoff_date))
+            """, (canonical_uid, user_id, cutoff_date))
             rows = [dict(r) for r in cursor.fetchall()]
 
             cursor.execute("""
                 SELECT id, name, race_type, race_date, target_time, priority
                 FROM race_plans
-                WHERE user_id = ?
+                WHERE user_id = ? OR user_id = ?
                 ORDER BY race_date DESC
-            """, (user_id,))
+            """, (canonical_uid, user_id))
             registered_races = [dict(r) for r in cursor.fetchall()]
 
         from utils.running_metrics import format_duration

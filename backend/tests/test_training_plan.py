@@ -36,6 +36,7 @@ def setup_test_runner():
         # Clean previous test activities
         cursor.execute("DELETE FROM activities WHERE user_id = ?", (uid,))
         cursor.execute("DELETE FROM training_plans WHERE user_id = ?", (uid,))
+        cursor.execute("DELETE FROM race_plans WHERE user_id = ?", (uid,))
         
         # Insert a long run 30km from 3 months ago
         d1 = (today - timedelta(days=90)).isoformat()
@@ -179,3 +180,56 @@ def test_collaborative_workout_editing(setup_test_runner):
     day_retrieved = active_plan["schedule_data"]["weeks"][0]["days"][1]
     assert day_retrieved["distance_km"] == 12.5
     assert day_retrieved["completed"] is True
+
+
+def test_integrate_scheduled_race_into_plan(setup_test_runner):
+    uid = setup_test_runner
+
+    # 1. Register a race on Saturday of current week (e.g. 武功山 50K C 类模拟拉练赛)
+    today = date.today()
+    start_monday = today - timedelta(days=today.weekday())
+    sat_date = (start_monday + timedelta(days=5)).isoformat()
+    sun_date = (start_monday + timedelta(days=6)).isoformat()
+
+    LocalStore.upsert_race_plan(uid, {
+        "name": "武功山 50K",
+        "race_type": "越野跑 50K",
+        "race_date": sat_date,
+        "priority": 3,
+        "target_time": "9:00:00"
+    })
+
+    # 2. Generate training plan
+    req = GenerateTrainingPlanRequest(
+        athlete_uid=uid,
+        goal_type="fitness_maintenance",
+        maintenance_focus="trail_climbing",
+        weeks_count=4,
+        days_per_week=4,
+        operator_uid=uid
+    )
+    res = generate_scientific_training_plan(req)
+    assert res["success"] is True
+    plan = res["plan"]
+    sched = plan["schedule_data"]
+
+    # 3. Check Week 1 Saturday (Race Day)
+    w1 = sched["weeks"][0]
+    sat_workout = w1["days"][5]
+    assert sat_workout["date"] == sat_date
+    assert sat_workout["workout_type"] == "race"
+    assert "武功山" in sat_workout["title"]
+    assert "C 标" in sat_workout["title"]
+    assert sat_workout["distance_km"] == 50.0
+
+    # 4. Check Week 1 Sunday (Post-race day: MUST be rest, NOT 21km long run!)
+    sun_workout = w1["days"][6]
+    assert sun_workout["date"] == sun_date
+    assert sun_workout["workout_type"] == "rest"
+    assert sun_workout["distance_km"] == 0.0
+    assert "超量恢复" in sun_workout["title"] or "休整" in sun_workout["title"]
+
+    # 5. Check Week 1 Title and Phase
+    assert "武功山" in w1["week_title"]
+    assert "实战比赛周" in w1["phase"]
+
