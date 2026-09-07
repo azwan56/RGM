@@ -200,6 +200,25 @@ def get_race_specific_zones(
         else:
             base_seconds = 1164  # 19:24
 
+    # Sanity protection against mismatched distance vs target time:
+    # 1. If user passed a Full Marathon time (>= 2h30m / 9000s) with Half Marathon distance:
+    #    e.g. 3:09:30 (11370s) for half marathon yields 8:59/km (walking speed), but 4:29/km for full marathon!
+    if dist_km == 21.0975 and base_seconds and base_seconds >= 9000:
+        half_pace = base_seconds / 21.0975
+        full_pace = base_seconds / 42.195
+        if half_pace > 420 and 200 <= full_pace <= 450:
+            dist_km = 42.195
+            r_type = "marathon"
+
+    # 2. If user passed a Half Marathon time (<= 2h10m / 7800s) with Full Marathon distance:
+    #    e.g. 1:30:00 (5400s) for full marathon yields 2:07/km (impossible), but 4:16/km for half marathon!
+    elif dist_km == 42.195 and base_seconds and base_seconds <= 7800:
+        full_pace = base_seconds / 42.195
+        half_pace = base_seconds / 21.0975
+        if full_pace < 185 and 200 <= half_pace <= 450:
+            dist_km = 21.0975
+            r_type = "half"
+
     rp_sec_per_km = base_seconds / dist_km
 
     def fmt_pace(sec_km: float) -> str:

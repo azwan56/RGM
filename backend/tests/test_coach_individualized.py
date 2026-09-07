@@ -60,6 +60,10 @@ def test_resolve_race_category():
     cat5, name5 = resolve_race_category("10公里场地突破")
     assert cat5 == "10k"
 
+    # Crucial test: "上海马拉松" even if race_type is mistakenly passed as "half"
+    cat6, name6 = resolve_race_category("上海马拉松", race_type="half", target_time_seconds=11370)
+    assert cat6 == "marathon", "上海马拉松 without 半 must resolve to marathon even if race_type is half"
+
 def test_get_race_specific_zones():
     # Trail zones use HRR and climbing/downhill descriptions
     trail_zones = get_race_specific_zones("trail", max_hr=190, rest_hr=56)
@@ -78,6 +82,14 @@ def test_get_race_specific_zones():
     # Marathon zones use MP
     marathon_zones = get_race_specific_zones("marathon", target_time_seconds=11370)
     assert "specific" in marathon_zones
+    # 3:09:30 marathon pace is 4:29/km, range should be ~4:29 - 4:17
+    assert "4:29" in marathon_zones["specific"]["range"] or "4:17" in marathon_zones["specific"]["range"]
+
+    # Crucial test: Mismatched time (3:09:30 passed with half marathon)
+    # Must auto-correct to marathon distance so pace is ~4:29/km, NOT 8:59/km!
+    mismatch_zones = get_race_specific_zones("half", target_time_seconds=11370)
+    assert "4:29" in mismatch_zones["specific"]["range"] or "4:17" in mismatch_zones["specific"]["range"]
+    assert "11:31" not in mismatch_zones["recovery"]["range"], "Pace must not be 11:31 /km for a 3:09 runner"
     assert "/km" in marathon_zones["specific"]["range"]
 
 def test_training_load_tsb_decay():

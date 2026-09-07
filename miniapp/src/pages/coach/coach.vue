@@ -99,17 +99,53 @@
           <text class="input-label">目标赛事</text>
           <input
             v-model="targetRace"
-            placeholder="如: 武功山 50K"
+            placeholder="如: 上海马拉松 / 武功山 50K"
             class="setup-input"
+            @input="onRaceNameInput"
           />
         </view>
         <view class="input-col flex-1">
           <text class="input-label">目标时间</text>
           <input
             v-model="targetTime"
-            placeholder="8:00:00"
+            placeholder="3:15:00"
             class="setup-input"
           />
+        </view>
+      </view>
+
+      <!-- Race Category Pills -->
+      <view class="race-type-pills-row">
+        <text class="input-label">专项分类：</text>
+        <view class="type-pills">
+          <view
+            class="type-pill"
+            :class="{ active: raceType === 'marathon' }"
+            @click="setCategory('marathon')"
+          >
+            <text class="pill-text">🏅 全马</text>
+          </view>
+          <view
+            class="type-pill"
+            :class="{ active: raceType === 'half' }"
+            @click="setCategory('half')"
+          >
+            <text class="pill-text">⚡ 半马</text>
+          </view>
+          <view
+            class="type-pill"
+            :class="{ active: raceType === 'trail' }"
+            @click="setCategory('trail')"
+          >
+            <text class="pill-text">🏔️ 越野</text>
+          </view>
+          <view
+            class="type-pill"
+            :class="{ active: raceType === '10k' || raceType === '5k' }"
+            @click="setCategory('10k')"
+          >
+            <text class="pill-text">🏃 10K</text>
+          </view>
         </view>
       </view>
     </view>
@@ -340,6 +376,33 @@ const racePresets = [
 const targetRace = ref("武功山 50K");
 const targetTime = ref("8:00:00");
 const raceType = ref("trail");
+
+function autoDetectRaceType(name: string): string | null {
+  const lower = (name || "").toLowerCase();
+  if (lower.includes("越野") || lower.includes("trail") || lower.includes("ultra") || lower.includes("50k") || lower.includes("100k") || lower.includes("武功山") || lower.includes("崇礼") || lower.includes("柴古") || lower.includes("utmb") || lower.includes("160")) {
+    return "trail";
+  } else if (lower.includes("半马") || lower.includes("半程") || lower.includes("half")) {
+    return "half";
+  } else if (lower.includes("10k") || lower.includes("10公里")) {
+    return "10k";
+  } else if (lower.includes("5k") || lower.includes("5公里")) {
+    return "5k";
+  } else if (lower.includes("马拉松") || lower.includes("全马") || lower.includes("全程") || lower.includes("marathon")) {
+    return "marathon";
+  }
+  return null;
+}
+
+function onRaceNameInput() {
+  const detected = autoDetectRaceType(targetRace.value);
+  if (detected) {
+    raceType.value = detected;
+  }
+}
+
+function setCategory(type: string) {
+  raceType.value = type;
+}
 
 function applyPreset(p: any) {
   targetRace.value = p.race;
@@ -935,6 +998,45 @@ onPullDownRefresh(async () => {
   padding: 0 16rpx;
   font-size: 24rpx;
   color: #ffffff;
+}
+
+.race-type-pills-row {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.type-pills {
+  display: flex;
+  gap: 10rpx;
+  flex: 1;
+}
+
+.type-pill {
+  flex: 1;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+  padding: 10rpx 0;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.type-pill.active {
+  background-color: rgba(175, 82, 222, 0.25);
+  border-color: #af52de;
+}
+
+.type-pill .pill-text {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  font-weight: 500;
+}
+
+.type-pill.active .pill-text {
+  color: #ffffff;
+  font-weight: bold;
 }
 
 /* ── ZONES LIST ── */

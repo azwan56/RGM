@@ -351,8 +351,23 @@ export default function CoachPage() {
                 <input
                   type="text"
                   value={targetRace}
-                  onChange={(e) => setTargetRace(e.target.value)}
-                  placeholder="例如: 武功山 50K / 无锡马拉松"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTargetRace(val);
+                    const lower = val.toLowerCase();
+                    if (lower.includes("越野") || lower.includes("trail") || lower.includes("ultra") || lower.includes("50k") || lower.includes("100k") || lower.includes("武功山") || lower.includes("崇礼") || lower.includes("柴古") || lower.includes("utmb") || lower.includes("160")) {
+                      setRaceType("trail");
+                    } else if (lower.includes("半马") || lower.includes("半程") || lower.includes("half")) {
+                      setRaceType("half");
+                    } else if (lower.includes("10k") || lower.includes("10公里")) {
+                      setRaceType("10k");
+                    } else if (lower.includes("5k") || lower.includes("5公里")) {
+                      setRaceType("5k");
+                    } else if (lower.includes("马拉松") || lower.includes("全马") || lower.includes("全程") || lower.includes("marathon")) {
+                      setRaceType("marathon");
+                    }
+                  }}
+                  placeholder="例如: 武功山 50K / 无锡马拉松 / 上海马拉松"
                   className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
                 />
               </div>

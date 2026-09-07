@@ -91,19 +91,63 @@ def parse_time_str(t_str: Optional[str]) -> Optional[int]:
         return None
     return None
 
-def resolve_race_category(race_name: str, race_type: Optional[str] = None) -> tuple[str, str]:
-    """Returns (race_key, race_display_name)."""
-    combined = f"{race_name} {race_type or ''}".lower()
-    if any(k in combined for k in ["越野", "trail", "ultra", "50k", "100k", "武功山", "崇礼", "柴古", "utmb"]):
+def resolve_race_category(
+    race_name: str,
+    race_type: Optional[str] = None,
+    target_time_seconds: Optional[int] = None
+) -> tuple[str, str]:
+    """
+    Intelligently resolves (race_key, race_display_name).
+    Prioritizes explicit naming in race_name, cross-validates with race_type and target_time.
+    """
+    r_name = (race_name or "").strip().lower()
+    r_type = (race_type or "").strip().lower()
+
+    # 1. Trail / Ultra detection (keywords in name take top priority)
+    trail_keywords = ["越野", "trail", "ultra", "50k", "100k", "160", "武功山", "崇礼", "柴古", "utmb", "江南百英里", "四姑娘山", "高黎贡"]
+    if any(k in r_name for k in trail_keywords):
         return "trail", "越野超马 / 山地耐力赛 (Trail & Ultra)"
-    elif any(k in combined for k in ["半马", "半程", "half"]):
+
+    # 2. Half marathon explicit check in race_name
+    half_keywords = ["半马", "半程", "half"]
+    is_name_half = any(k in r_name for k in half_keywords)
+
+    # 3. Full marathon explicit check in race_name
+    # Note: "上海马拉松", "北京马拉松", "全马", "全程马拉松" contain "马拉松" but NOT "半马"/"半程"
+    is_name_marathon = (any(k in r_name for k in ["全马", "全程", "马拉松", "marathon"]) and not is_name_half)
+
+    if is_name_half:
         return "half", "半程马拉松 (Half Marathon)"
-    elif any(k in combined for k in ["10k", "10公里"]):
-        return "10k", "10公里场地/路跑 (10K Road/Track)"
-    elif any(k in combined for k in ["5k", "5公里"]):
-        return "5k", "5公里场地/路跑 (5K Road/Track)"
-    else:
+    if is_name_marathon:
         return "marathon", "全程马拉松 (Full Marathon)"
+
+    # 4. 10K / 5K check in race_name
+    if any(k in r_name for k in ["10k", "10公里", "十公里"]):
+        return "10k", "10公里场地/路跑 (10K Road/Track)"
+    if any(k in r_name for k in ["5k", "5公里", "五公里"]):
+        return "5k", "5公里场地/路跑 (5K Road/Track)"
+
+    # 5. If race_name doesn't explicitly declare distance, inspect race_type with target_time cross-validation
+    if any(k in r_type for k in ["trail", "越野", "ultra"]):
+        return "trail", "越野超马 / 山地耐力赛 (Trail & Ultra)"
+
+    if any(k in r_type for k in ["half", "半"]):
+        # Sanity check: If target_time is > 2h30m (9000s) and target_time/21.0975 > 420 (slower than 7:00/km),
+        # but target_time/42.195 is between 200 and 450 (3:20 - 7:30/km): it was almost certainly a full marathon!
+        if target_time_seconds and target_time_seconds >= 9000:
+            half_pace = target_time_seconds / 21.0975
+            full_pace = target_time_seconds / 42.195
+            if half_pace > 420 and 200 <= full_pace <= 450:
+                return "marathon", "全程马拉松 (Full Marathon)"
+        return "half", "半程马拉松 (Half Marathon)"
+
+    if any(k in r_type for k in ["10k", "10"]):
+        return "10k", "10公里场地/路跑 (10K Road/Track)"
+    if any(k in r_type for k in ["5k", "5"]):
+        return "5k", "5公里场地/路跑 (5K Road/Track)"
+
+    return "marathon", "全程马拉松 (Full Marathon)"
+
 
 
 def generate_fallback_multi_race_strategy(multi_analysis: Dict[str, Any], target_race: str, race_category: str) -> Dict[str, Any]:
@@ -384,8 +428,8 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
     # 3. Race Type Resolution & Specificity Zones
     target_race = request.target_race or "目标赛事"
     target_time_str = request.target_time or "—"
-    race_category, race_category_name = resolve_race_category(target_race, request.race_type)
     target_time_sec = parse_time_str(target_time_str)
+    race_category, race_category_name = resolve_race_category(target_race, request.race_type, target_time_sec)
 
     max_hr = int(user_profile.get("max_heart_rate") or 190)
     health = LocalStore.get_latest_health(eff_uid) or {}
@@ -435,7 +479,14 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
         if not request.target_time or request.target_time == "—":
             target_time_str = matched_race.get("target_time") or target_time_str
         if not request.race_type:
-            race_category, race_category_name = resolve_race_category(target_race, matched_race.get("race_type"))
+            race_category, race_category_name = resolve_race_category(target_race, matched_race.get("race_type"), target_time_sec)
+            zones = get_race_specific_zones(
+                race_type=race_category,
+                target_time_seconds=target_time_sec,
+                pb_seconds=marathon_pb if race_category == "marathon" else (half_pb or marathon_pb),
+                max_hr=max_hr,
+                rest_hr=rest_hr
+            )
     elif not eval_races and target_race:
         # ONLY add synthetic race when user has ZERO registered races in DB!
         eval_races.append({
