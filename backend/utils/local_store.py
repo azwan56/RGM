@@ -941,7 +941,7 @@ class LocalStore:
             cursor.execute("""
                 SELECT * FROM daily_health 
                 WHERE user_id = ? 
-                  AND (resting_heart_rate IS NOT NULL OR sleep_score IS NOT NULL OR hrv_last_night_avg IS NOT NULL OR body_battery_max IS NOT NULL)
+                  AND (resting_heart_rate IS NOT NULL OR sleep_score IS NOT NULL OR hrv_last_night_avg IS NOT NULL OR body_battery_max IS NOT NULL OR vo2_max IS NOT NULL)
                 ORDER BY date DESC LIMIT 1
             """, (uid,))
             row = cursor.fetchone()

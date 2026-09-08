@@ -147,7 +147,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         d = (date.today() - timedelta(days=i)).isoformat()
                         try:
                             h_metrics = coros_adapter.fetch_daily_health_metrics(d)
-                            if h_metrics and any(h_metrics.get(k) is not None for k in ["resting_heart_rate", "sleep_score"]):
+                            if h_metrics and any(h_metrics.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "vo2_max"]):
                                 LocalStore.upsert_daily_health(uid, h_metrics)
                                 synced_health = True
                         except Exception as he:

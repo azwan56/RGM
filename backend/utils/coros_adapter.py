@@ -434,4 +434,12 @@ class CorosAdapter:
             "date": date_str,
             "source": f"coros_{'cn' if self.is_cn else 'global'}",
         }
+        try:
+            profile_info = self.fetch_user_profile_info()
+            if profile_info.get("resting_heart_rate"):
+                metrics["resting_heart_rate"] = profile_info["resting_heart_rate"]
+            if profile_info.get("vo2max"):
+                metrics["vo2_max"] = profile_info["vo2max"]
+        except Exception as e:
+            logger.warning(f"[coros] Error fetching profile metrics for daily health: {e}")
         return metrics

@@ -85,15 +85,19 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             })
 
         # 5. Today's Health Snapshot (4-grid card data)
+        is_coros = bool(profile.get("coros_connected")) and not bool(profile.get("garmin_connected"))
+        device_brand = "coros" if is_coros else ("garmin" if profile.get("garmin_connected") else "none")
+
         health_data = LocalStore.get_latest_health(eff_uid)
         if health_data:
             sleep_hours = health_data.get("sleep_duration_hours")
             sleep_sec = health_data.get("sleep_duration_seconds")
             sleep_score = health_data.get("sleep_score")
-            rhr = health_data.get("resting_heart_rate")
+            rhr = health_data.get("resting_heart_rate") or profile.get("resting_heart_rate")
             body_battery = health_data.get("body_battery_max")
             hrv_val = health_data.get("hrv_last_night_avg")
             hrv_weekly = health_data.get("hrv_weekly_avg")
+            vo2 = health_data.get("vo2_max") or profile.get("vo2max")
 
             sleep_text = None
             if sleep_sec and sleep_sec > 0:
@@ -107,6 +111,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
 
             today_health = {
                 "date": health_data.get("date") or today.isoformat(),
+                "device_brand": device_brand,
                 "sleep_score": sleep_score,
                 "sleep_duration_hours": sleep_hours,
                 "sleep_duration_seconds": sleep_sec,
@@ -116,10 +121,23 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "hrv_ms": int(hrv_val) if hrv_val is not None else None,
                 "hrv_weekly_avg": int(hrv_weekly) if hrv_weekly is not None else None,
                 "hrv_status": health_data.get("hrv_status") or "BALANCED",
-                "vo2_max": health_data.get("vo2_max")
+                "vo2_max": vo2
             }
         else:
-            today_health = None
+            today_health = {
+                "date": today.isoformat(),
+                "device_brand": device_brand,
+                "sleep_score": None,
+                "sleep_duration_hours": None,
+                "sleep_duration_seconds": None,
+                "sleep_duration_text": None,
+                "resting_heart_rate": profile.get("resting_heart_rate"),
+                "body_battery_max": None,
+                "hrv_ms": None,
+                "hrv_weekly_avg": None,
+                "hrv_status": "BALANCED",
+                "vo2_max": profile.get("vo2max")
+            }
 
         # 6. Compute Fitness & Form (CTL, ATL, TSB) - 90 days EWMA
         fitness_form = {
@@ -184,6 +202,9 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "coros_account": profile.get("coros_account"),
                 "coros_domain": profile.get("coros_domain") or "teamcnapi.coros.com",
                 "coros_last_sync_at": profile.get("coros_last_sync_at"),
+                "resting_heart_rate": profile.get("resting_heart_rate"),
+                "max_heart_rate": profile.get("max_heart_rate"),
+                "vo2max": profile.get("vo2max"),
             },
             "fitness_form": fitness_form,
             "progress": {
@@ -218,6 +239,9 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "coros_account": None,
                 "coros_domain": "teamcnapi.coros.com",
                 "coros_last_sync_at": None,
+                "resting_heart_rate": None,
+                "max_heart_rate": None,
+                "vo2max": None,
             },
             "progress": {
                 "current_month_km": 0.0,

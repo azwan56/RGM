@@ -21,6 +21,7 @@ export interface UserProfile {
   coros_domain?: string;
   max_heart_rate?: number;
   resting_heart_rate?: number;
+  vo2max?: number;
   marathon_pb?: number;
 }
 

@@ -9,9 +9,9 @@
           <text class="user-name">{{ dashboardData?.user?.display_name || user?.display_name || "跑者" }}</text>
         </view>
       </view>
-      <view class="garmin-badge" :class="{ active: dashboardData?.user?.garmin_connected }">
+      <view class="garmin-badge" :class="{ active: isDeviceConnected }">
         <view class="pulse-dot" />
-        <text class="badge-text">{{ dashboardData?.user?.garmin_connected ? "佳明已连接" : "未连接佳明" }}</text>
+        <text class="badge-text">{{ deviceConnectedText }}</text>
       </view>
     </view>
 
@@ -229,11 +229,11 @@
         </view>
       </view>
 
-      <!-- Garmin Instant Sync Action Button -->
+      <!-- Instant Sync Action Button (Garmin / COROS) -->
       <view class="sync-action-box">
         <button class="sync-btn" :loading="syncing" :disabled="syncing" @click="handleInstantSync">
           <text class="btn-icon">⚡</text>
-          <text>{{ syncing ? "正在从 Garmin 同步..." : "一键同步 Garmin 数据" }}</text>
+          <text>{{ syncing ? ("正在从 " + syncDeviceName + " 同步...") : ("一键同步 " + syncDeviceName + " 数据") }}</text>
         </button>
       </view>
     </view>
@@ -325,10 +325,10 @@
       </view>
     </view>
 
-    <!-- ── CARD 1: Garmin 生理与恢复 4 格卡片 ── -->
+    <!-- ── CARD 1: 生理与恢复 4 格卡片 (Garmin / COROS 自适应) ── -->
     <view class="section-container">
       <view class="section-header-row">
-        <text class="section-title">Garmin 生理与恢复指标</text>
+        <text class="section-title">{{ healthCardTitle }}</text>
         <text class="sub-date">更新于: {{ dashboardData?.today_health?.date || "今日" }}</text>
       </view>
 
@@ -343,7 +343,7 @@
             <text class="tile-main-val">{{ dashboardData?.today_health?.sleep_score != null ? dashboardData.today_health.sleep_score : '—' }}</text>
             <text class="tile-unit" v-if="dashboardData?.today_health?.sleep_score != null">分</text>
           </view>
-          <text class="tile-sub">{{ dashboardData?.today_health?.sleep_duration_text ? ('时长 ' + dashboardData.today_health.sleep_duration_text) : '未同步睡眠' }}</text>
+          <text class="tile-sub">{{ dashboardData?.today_health?.sleep_duration_text ? ('时长 ' + dashboardData.today_health.sleep_duration_text) : (isCorosOnly ? '需高驰App端查看' : '未同步睡眠') }}</text>
         </view>
 
         <!-- 2. 静息心率 -->
@@ -353,14 +353,14 @@
             <text class="tile-name">静息心率 (RHR)</text>
           </view>
           <view class="tile-val-row">
-            <text class="tile-main-val text-rose">{{ dashboardData?.today_health?.resting_heart_rate != null ? dashboardData.today_health.resting_heart_rate : '—' }}</text>
-            <text class="tile-unit" v-if="dashboardData?.today_health?.resting_heart_rate != null">bpm</text>
+            <text class="tile-main-val text-rose">{{ currentRestingHr != null ? currentRestingHr : '—' }}</text>
+            <text class="tile-unit" v-if="currentRestingHr != null">bpm</text>
           </view>
-          <text class="tile-sub">清晨生理基线</text>
+          <text class="tile-sub">{{ isCorosOnly ? '高驰清晨生理基线' : '清晨生理基线' }}</text>
         </view>
 
-        <!-- 3. 身体电量 -->
-        <view class="health-tile">
+        <!-- 3. 身体电量 (Garmin) 或 体能储备 (COROS / Banister TSB) -->
+        <view class="health-tile" v-if="!isCorosOnly">
           <view class="tile-top">
             <text class="tile-icon">⚡</text>
             <text class="tile-name">身体电量</text>
@@ -376,9 +376,21 @@
           </view>
           <text class="tile-sub" v-else>电量监控</text>
         </view>
+        <view class="health-tile" v-else>
+          <view class="tile-top">
+            <text class="tile-icon">⚡</text>
+            <text class="tile-name">体能储备 (TSB)</text>
+          </view>
+          <view class="tile-val-row">
+            <text class="tile-main-val" :style="{ color: dashboardData?.fitness_form?.status_color || '#22c55e' }">
+              {{ dashboardData?.fitness_form?.tsb != null ? ((dashboardData.fitness_form.tsb > 0 ? '+' : '') + dashboardData.fitness_form.tsb.toFixed(1)) : '—' }}
+            </text>
+          </view>
+          <text class="tile-sub">{{ dashboardData?.fitness_form?.status_label ? ('状态: ' + dashboardData.fitness_form.status_label) : 'Banister 状态平衡' }}</text>
+        </view>
 
-        <!-- 4. 夜间 HRV -->
-        <view class="health-tile">
+        <!-- 4. 夜间 HRV 或 VO2Max (COROS) -->
+        <view class="health-tile" v-if="!isCorosOnly || (dashboardData?.today_health?.hrv_ms != null)">
           <view class="tile-top">
             <text class="tile-icon">🫀</text>
             <text class="tile-name">夜间 HRV</text>
@@ -388,6 +400,17 @@
             <text class="tile-unit" v-if="dashboardData?.today_health?.hrv_ms != null">ms</text>
           </view>
           <text class="tile-sub">{{ dashboardData?.today_health?.hrv_weekly_avg != null ? ('周均: ' + dashboardData.today_health.hrv_weekly_avg + ' ms') : '夜间自主神经' }}</text>
+        </view>
+        <view class="health-tile" v-else>
+          <view class="tile-top">
+            <text class="tile-icon">🫁</text>
+            <text class="tile-name">最大摄氧量</text>
+          </view>
+          <view class="tile-val-row">
+            <text class="tile-main-val text-cyan">{{ currentVo2Max != null ? currentVo2Max : '—' }}</text>
+            <text class="tile-unit" v-if="currentVo2Max != null">ml/kg</text>
+          </view>
+          <text class="tile-sub">EvoLab 耐力潜能</text>
         </view>
       </view>
     </view>
@@ -757,7 +780,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
 import {
   request,
@@ -791,6 +814,10 @@ const emptyData = {
   user: {
     display_name: "微信跑者",
     garmin_connected: false,
+    coros_connected: false,
+    resting_heart_rate: null,
+    max_heart_rate: null,
+    vo2max: null,
   },
   fitness_form: {
     ctl: 0.0,
@@ -900,6 +927,57 @@ const showWeeklyGoalModal = ref(false);
 const editWeeklyTarget = ref(50);
 const savingWeeklyModal = ref(false);
 const togglingWorkout = ref(false);
+
+const isCorosOnly = computed(() => {
+  const u = dashboardData.value?.user || user.value;
+  return !!u?.coros_connected && !u?.garmin_connected;
+});
+
+const isDeviceConnected = computed(() => {
+  const u = dashboardData.value?.user || user.value;
+  return !!(u?.garmin_connected || u?.coros_connected);
+});
+
+const deviceConnectedText = computed(() => {
+  const u = dashboardData.value?.user || user.value;
+  if (u?.garmin_connected && u?.coros_connected) return "佳明/高驰已连接";
+  if (u?.coros_connected) return "高驰已连接";
+  if (u?.garmin_connected) return "佳明已连接";
+  return "未绑定手表";
+});
+
+const syncDeviceName = computed(() => {
+  const u = dashboardData.value?.user || user.value;
+  if (u?.garmin_connected && u?.coros_connected) return "佳明与高驰";
+  if (u?.coros_connected) return "高驰 (COROS)";
+  if (u?.garmin_connected) return "Garmin";
+  return "运动手表";
+});
+
+const healthCardTitle = computed(() => {
+  if (isCorosOnly.value) return "高驰 COROS 生理与状态指标";
+  const u = dashboardData.value?.user || user.value;
+  if (u?.garmin_connected && u?.coros_connected) return "佳明 & 高驰 生理与状态指标";
+  return "Garmin 生理与恢复指标";
+});
+
+const currentRestingHr = computed(() => {
+  return (
+    dashboardData.value?.today_health?.resting_heart_rate ??
+    dashboardData.value?.user?.resting_heart_rate ??
+    user.value?.resting_heart_rate ??
+    null
+  );
+});
+
+const currentVo2Max = computed(() => {
+  return (
+    dashboardData.value?.today_health?.vo2_max ??
+    dashboardData.value?.user?.vo2max ??
+    user.value?.vo2max ??
+    null
+  );
+});
 
 function goToCoachPage() {
   uni.switchTab({
@@ -1346,10 +1424,14 @@ async function loadDashboard() {
     const data = await request(`/api/miniapp/dashboard/${uid}`);
     if (data && data.progress) {
       dashboardData.value = data;
-      if (data.user?.avatar_url || data.user?.display_name) {
+      if (data.user) {
         if (!user.value) user.value = {} as any;
         if (data.user.avatar_url) user.value.avatar_url = data.user.avatar_url;
         if (data.user.display_name) user.value.display_name = data.user.display_name;
+        if (data.user.coros_connected !== undefined) user.value.coros_connected = data.user.coros_connected;
+        if (data.user.garmin_connected !== undefined) user.value.garmin_connected = data.user.garmin_connected;
+        if (data.user.resting_heart_rate !== undefined) user.value.resting_heart_rate = data.user.resting_heart_rate;
+        if (data.user.vo2max !== undefined) user.value.vo2max = data.user.vo2max;
         uni.setStorageSync("rgm_user", user.value);
       }
       nextTick(() => {
@@ -1368,14 +1450,14 @@ async function handleInstantSync() {
     return;
   }
   syncing.value = true;
-  uni.showLoading({ title: "同步 Garmin 中..." });
+  uni.showLoading({ title: `同步 ${syncDeviceName.value} 中...` });
   try {
     const res = await request("/api/sync/trigger", "POST", { uid });
     uni.hideLoading();
     if (res?.success === false) {
       uni.showModal({
         title: "同步提示",
-        content: res?.error || "佳明连接中，请稍后刷新重试",
+        content: res?.error || `${syncDeviceName.value}连接中，请稍后刷新重试`,
         showCancel: false,
       });
     } else {
