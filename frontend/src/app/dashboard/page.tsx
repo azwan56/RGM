@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
@@ -20,6 +21,8 @@ import {
   Flame,
   Calendar,
   Compass,
+  Target,
+  Check,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -97,10 +100,36 @@ export default function DashboardPage() {
     }
   }
 
+  const [togglingWorkout, setTogglingWorkout] = useState(false);
+
+  async function handleToggleTodayWorkout() {
+    const tw = todayWorkout;
+    if (!tw || !tw.plan_id || !user?.id) return;
+    setTogglingWorkout(true);
+    try {
+      const newCompleted = !tw.completed;
+      const res = await apiClient.patch(`/api/coach/plan/${tw.plan_id}/workout`, {
+        week_index: tw.week_index,
+        day_index: tw.day_index,
+        completed: newCompleted,
+        operator_uid: user.id
+      });
+      if (res.data?.success) {
+        await loadDashboardData(user.id);
+      }
+    } catch (err) {
+      console.error("Failed to toggle today workout:", err);
+    } finally {
+      setTogglingWorkout(false);
+    }
+  }
+
   const ctlHistory = scienceData?.ctl_atl_tsb_history || [];
   const monthlyTrend = dashboardData?.monthly_trend?.trend || [];
   const yearlyStats = dashboardData?.yearly_stats || {};
   const todayHealth = dashboardData?.today_health || {};
+  const weeklyProgress = dashboardData?.weekly_progress || {};
+  const todayWorkout = dashboardData?.today_workout || weeklyProgress?.today_workout;
 
   return (
     <div className="min-h-screen bg-[#070708] text-white">
@@ -155,6 +184,206 @@ export default function DashboardPage() {
               <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin text-[#FC4C02]" : ""}`} />
               {syncing ? "正在从手表同步..." : "一键同步数据"}
             </button>
+          </div>
+        </div>
+
+        {/* ── CARD 0: 本周跑量进度与今日训练计划 (在周跑量进度下面) ── */}
+        <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          {/* Top: Weekly Mileage Progress Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                <Target className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">
+                    本周跑量进度
+                  </h2>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-black">
+                    {weeklyProgress.progress_pct ?? 0}%
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {weeklyProgress.week_label || "本周周期"} · 目标 {weeklyProgress.target_week_km ?? 50} km
+                </p>
+              </div>
+            </div>
+
+            {/* Quick stats on the right */}
+            <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
+              <div className="bg-[#18181c] border border-white/5 px-3.5 py-2 rounded-2xl text-center min-w-[68px]">
+                <span className="text-[10px] text-zinc-500 font-bold block">已跑</span>
+                <span className="text-base font-black text-emerald-400">{weeklyProgress.current_week_km ?? 0} <span className="text-[10px] font-normal text-zinc-400">km</span></span>
+              </div>
+              <div className="bg-[#18181c] border border-white/5 px-3.5 py-2 rounded-2xl text-center min-w-[68px]">
+                <span className="text-[10px] text-zinc-500 font-bold block">目标</span>
+                <span className="text-base font-black text-white">{weeklyProgress.target_week_km ?? 50} <span className="text-[10px] font-normal text-zinc-400">km</span></span>
+              </div>
+              <div className="bg-[#18181c] border border-white/5 px-3.5 py-2 rounded-2xl text-center min-w-[68px]">
+                <span className="text-[10px] text-zinc-500 font-bold block">剩余</span>
+                <span className="text-base font-black text-zinc-300">{weeklyProgress.remaining_km ?? 0} <span className="text-[10px] font-normal text-zinc-400">km</span></span>
+              </div>
+              <div className="bg-[#18181c] border border-white/5 px-3.5 py-2 rounded-2xl text-center min-w-[68px]">
+                <span className="text-[10px] text-zinc-500 font-bold block">日均需跑</span>
+                <span className="text-base font-black text-amber-400">{weeklyProgress.daily_required_km ?? 0} <span className="text-[10px] font-normal text-zinc-400">km</span></span>
+              </div>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full h-2.5 bg-zinc-800/80 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(100, weeklyProgress.progress_pct ?? 0)}%` }}
+            />
+          </div>
+
+          {/* 7-Day Strip */}
+          <div className="grid grid-cols-7 gap-2">
+            {(weeklyProgress.daily_breakdown || []).map((day: any, idx: number) => (
+              <div
+                key={idx}
+                className={`py-2.5 px-1 rounded-2xl border flex flex-col items-center justify-between text-center transition ${
+                  day.is_today
+                    ? "bg-emerald-500/10 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                    : "bg-[#18181c] border-white/5"
+                }`}
+              >
+                <span className={`text-[11px] font-semibold ${day.is_today ? "text-emerald-400 font-black" : "text-zinc-400"}`}>
+                  {day.day_name}
+                </span>
+                <span className="text-[9px] text-zinc-500 mt-0.5">{day.date}</span>
+                <div className={`mt-2 px-1.5 py-0.5 rounded-lg text-[10px] font-black ${
+                  day.distance_km > 0
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    : day.is_past
+                    ? "text-zinc-600"
+                    : "text-zinc-500"
+                }`}>
+                  {day.distance_km > 0 ? `${day.distance_km}k` : (day.is_past ? "—" : "0")}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── TODAY'S SCHEDULED WORKOUT CARD (在周跑量进度正下方) ── */}
+          <div className="pt-2 border-t border-white/5">
+            {todayWorkout ? (
+              <div className={`p-5 rounded-2xl border transition ${
+                todayWorkout.completed
+                  ? "bg-emerald-950/10 border-emerald-500/30"
+                  : todayWorkout.workout_type === "race"
+                  ? "bg-rose-950/15 border-rose-500/40"
+                  : "bg-[#18181c] border-white/10"
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-base">📅</span>
+                    <span className="text-sm font-bold text-white">今日训练课目</span>
+                    <span className="text-xs text-zinc-400">({todayWorkout.date} {todayWorkout.day_of_week})</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-purple-500/30 bg-purple-500/10 text-purple-300">
+                      {todayWorkout.workout_type === "race" ? "🏁 比赛日" : todayWorkout.workout_type === "rest" ? "☕ 休息日" : "科学课表"}
+                    </span>
+                    {todayWorkout.completed && todayWorkout.actual_distance_km && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                        实跑 {todayWorkout.actual_distance_km}km
+                      </span>
+                    )}
+                  </div>
+                  <Link
+                    href="/dashboard/coach"
+                    className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium transition"
+                  >
+                    <span>查看完整周期课表</span>
+                    <span>→</span>
+                  </Link>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="text-base font-black text-white">{todayWorkout.title}</h3>
+                    {todayWorkout.workout_type !== "rest" && (
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-white">{todayWorkout.distance_km || 0}</span>
+                        <span className="text-xs text-zinc-400">km</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {(todayWorkout.target_pace || todayWorkout.target_hr_zone) && todayWorkout.workout_type !== "rest" && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {todayWorkout.target_pace && todayWorkout.target_pace !== "—" && (
+                        <div className="px-2.5 py-1 rounded-lg bg-[#121215] border border-white/5 text-purple-300 font-medium">
+                          ⏱️ 配速: {todayWorkout.target_pace}
+                        </div>
+                      )}
+                      {todayWorkout.target_hr_zone && todayWorkout.target_hr_zone !== "—" && (
+                        <div className="px-2.5 py-1 rounded-lg bg-[#121215] border border-white/5 text-emerald-300 font-medium">
+                          ❤️ 心率: {todayWorkout.target_hr_zone}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {todayWorkout.description && (
+                    <p className="text-xs text-zinc-300 leading-relaxed font-light">
+                      {todayWorkout.description}
+                    </p>
+                  )}
+
+                  {todayWorkout.coach_notes && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-xs text-amber-200">
+                      <span className="font-bold text-amber-300">👨‍🏫 跑团教练批注：</span>
+                      <span className="ml-1">{todayWorkout.coach_notes}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Toggle Button */}
+                <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
+                  <button
+                    onClick={handleToggleTodayWorkout}
+                    disabled={togglingWorkout}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold border transition ${
+                      todayWorkout.completed
+                        ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 hover:bg-emerald-500/30"
+                        : "bg-[#1a1a20] border-white/10 text-white hover:border-purple-500/50 hover:bg-purple-950/20"
+                    }`}
+                  >
+                    <Check className={`w-3.5 h-3.5 ${todayWorkout.completed ? "text-emerald-400" : "text-zinc-400"}`} />
+                    <span>
+                      {todayWorkout.completed
+                        ? (todayWorkout.actual_distance_km ? `已打卡 ${todayWorkout.actual_distance_km}km` : "今日课表已完成")
+                        : "今日打卡"}
+                    </span>
+                  </button>
+
+                  <Link
+                    href="/dashboard/coach"
+                    className="text-xs text-zinc-400 hover:text-white transition"
+                  >
+                    所属计划: {todayWorkout.plan_title || "科学训练计划"}
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-[#18181c] border border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">💡</span>
+                  <div>
+                    <div className="text-xs font-bold text-zinc-200">今日暂无专属计划课表</div>
+                    <div className="text-[11px] text-zinc-500 mt-0.5">前往 AI 智能教练，根据您的目标赛事或体能维持一键生成定制计划</div>
+                  </div>
+                </div>
+                <Link
+                  href="/dashboard/coach"
+                  className="text-xs px-3 py-1.5 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:bg-purple-600/30 transition font-bold"
+                >
+                  去制定课表 ›
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 

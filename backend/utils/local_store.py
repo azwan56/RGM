@@ -690,6 +690,7 @@ class LocalStore:
                 })
 
             iso_year, iso_week, _ = today.isocalendar()
+            today_workout = LocalStore.get_today_workout(uid)
             return {
                 "week_number": iso_week,
                 "week_label": f"第{iso_week}周 ({monday.strftime('%m/%d')}~{sunday.strftime('%m/%d')})",
@@ -702,8 +703,58 @@ class LocalStore:
                 "remaining_km": remaining_km,
                 "days_left_in_week": days_left,
                 "daily_required_km": daily_req,
-                "daily_breakdown": daily_breakdown
+                "daily_breakdown": daily_breakdown,
+                "today_workout": today_workout
             }
+
+    @staticmethod
+    def get_today_workout(uid: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves today's scheduled workout from the runner's active periodized training plan.
+        """
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        plan = LocalStore.get_user_active_training_plan(canonical_uid)
+        if not plan:
+            return None
+
+        sched = plan.get("schedule_data") or {}
+        weeks = sched.get("weeks") or []
+        if not weeks:
+            return None
+
+        now_beijing = datetime.utcnow() + timedelta(hours=8)
+        today_iso = now_beijing.strftime("%Y-%m-%d")
+
+        for w in weeks:
+            days = w.get("days") or []
+            for d_idx, day in enumerate(days):
+                if str(day.get("date") or "") == today_iso:
+                    return {
+                        "plan_id": plan.get("id"),
+                        "plan_title": plan.get("title"),
+                        "goal_type": plan.get("goal_type"),
+                        "target_race_name": plan.get("target_race_name"),
+                        "week_index": w.get("week_index"),
+                        "week_title": w.get("week_title"),
+                        "phase": w.get("phase"),
+                        "day_index": d_idx,
+                        "date": day.get("date"),
+                        "day_of_week": day.get("day_of_week"),
+                        "workout_type": day.get("workout_type") or "easy_run",
+                        "title": day.get("title") or "训练课目",
+                        "distance_km": float(day.get("distance_km") or 0.0),
+                        "target_pace": day.get("target_pace"),
+                        "target_hr_zone": day.get("target_hr_zone"),
+                        "description": day.get("description"),
+                        "coach_notes": day.get("coach_notes"),
+                        "completed": bool(day.get("completed")),
+                        "auto_matched": bool(day.get("auto_matched")),
+                        "actual_distance_km": day.get("actual_distance_km"),
+                        "actual_pace": day.get("actual_pace"),
+                        "actual_heartrate": day.get("actual_heartrate"),
+                        "is_missed": bool(day.get("is_missed"))
+                    }
+        return None
 
     @staticmethod
     def get_monthly_trend(uid: str, num_months: int = 6) -> Dict[str, Any]:

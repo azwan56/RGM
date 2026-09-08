@@ -103,6 +103,91 @@
             </view>
           </view>
         </view>
+
+        <!-- ── 今日训练课目 (Today's Scheduled Workout) ── -->
+        <view class="today-workout-container">
+          <view
+            v-if="dashboardData?.today_workout"
+            class="today-workout-card"
+            :class="[getTodayWorkoutBorderClass(dashboardData.today_workout.workout_type), { 'is-completed': dashboardData.today_workout.completed }]"
+          >
+            <view class="tw-header">
+              <view class="tw-header-left">
+                <text class="tw-icon">📅</text>
+                <text class="tw-section-title">今日训练课目</text>
+                <text class="tw-badge" :class="getWorkoutBadgeClass(dashboardData.today_workout.workout_type)">
+                  {{ getWorkoutTypeLabel(dashboardData.today_workout.workout_type) }}
+                </text>
+              </view>
+              <view class="tw-header-right" @click="goToCoachPage">
+                <text v-if="dashboardData.today_workout.completed && dashboardData.today_workout.actual_distance_km" class="tw-actual-badge">
+                  实跑 {{ dashboardData.today_workout.actual_distance_km }}k
+                </text>
+                <text class="tw-link">完整课表 ›</text>
+              </view>
+            </view>
+
+            <view class="tw-body">
+              <view class="tw-title-row">
+                <text class="tw-title">{{ dashboardData.today_workout.title }}</text>
+                <view v-if="dashboardData.today_workout.workout_type !== 'rest'" class="tw-dist">
+                  <text class="tw-dist-num">{{ dashboardData.today_workout.distance_km || 0 }}</text>
+                  <text class="tw-dist-unit">km</text>
+                </view>
+              </view>
+
+              <!-- Target Pace & HR Zone -->
+              <view
+                v-if="dashboardData.today_workout.workout_type !== 'rest' && (dashboardData.today_workout.target_pace || dashboardData.today_workout.target_hr_zone)"
+                class="tw-metrics"
+              >
+                <text v-if="dashboardData.today_workout.target_pace && dashboardData.today_workout.target_pace !== '—'" class="tw-metric-tag pace-tag">
+                  ⏱️ {{ dashboardData.today_workout.target_pace }}
+                </text>
+                <text v-if="dashboardData.today_workout.target_hr_zone && dashboardData.today_workout.target_hr_zone !== '—'" class="tw-metric-tag hr-tag">
+                  ❤️ {{ dashboardData.today_workout.target_hr_zone }}
+                </text>
+              </view>
+
+              <!-- Description -->
+              <text class="tw-desc">{{ dashboardData.today_workout.description }}</text>
+
+              <!-- Coach Notes -->
+              <view v-if="dashboardData.today_workout.coach_notes" class="tw-coach-notes">
+                <text class="tw-coach-title">👨‍🏫 教练批注：</text>
+                <text class="tw-coach-text">{{ dashboardData.today_workout.coach_notes }}</text>
+              </view>
+            </view>
+
+            <!-- Bottom Actions -->
+            <view class="tw-actions">
+              <button
+                class="tw-complete-btn"
+                :class="{ completed: dashboardData.today_workout.completed }"
+                :loading="togglingWorkout"
+                @click="handleTodayWorkoutToggle"
+              >
+                <text class="btn-text">
+                  {{ dashboardData.today_workout.completed ? (dashboardData.today_workout.actual_distance_km ? `✅ 今日已打卡 ${dashboardData.today_workout.actual_distance_km}km` : '✅ 今日课表已完成') : '今日打卡' }}
+                </text>
+              </button>
+              <button class="tw-detail-btn" @click="goToCoachPage">
+                <text class="btn-text">查看 12 周课表</text>
+              </button>
+            </view>
+          </view>
+
+          <!-- Fallback when no active plan is scheduled for today -->
+          <view v-else class="today-workout-card empty-card" @click="goToCoachPage">
+            <view class="empty-tw-content">
+              <text class="empty-tw-icon">💡</text>
+              <view class="empty-tw-texts">
+                <text class="empty-tw-title">今日暂无专属计划课表</text>
+                <text class="empty-tw-sub">点击前往「AI教练」，定制科学周期训练课表 ›</text>
+              </view>
+            </view>
+          </view>
+        </view>
       </view>
 
       <!-- Month View -->
@@ -814,6 +899,79 @@ const selectedYearMonth = ref<any>(null);
 const showWeeklyGoalModal = ref(false);
 const editWeeklyTarget = ref(50);
 const savingWeeklyModal = ref(false);
+const togglingWorkout = ref(false);
+
+function goToCoachPage() {
+  uni.switchTab({
+    url: "/pages/coach/coach",
+    fail: () => {
+      uni.navigateTo({ url: "/pages/coach/coach" });
+    }
+  });
+}
+
+function getWorkoutTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    easy_run: "轻松跑",
+    tempo: "门槛跑",
+    interval: "间歇跑",
+    long_run: "长距离",
+    trail_climb: "越野爬坡",
+    cross_training: "交叉力量",
+    race: "🏁 比赛日",
+    rest: "☕ 休息日"
+  };
+  return map[type] || "跑步";
+}
+
+function getWorkoutBadgeClass(type: string): string {
+  const map: Record<string, string> = {
+    easy_run: "tw-badge-easy",
+    tempo: "tw-badge-tempo",
+    interval: "tw-badge-interval",
+    long_run: "tw-badge-long",
+    trail_climb: "tw-badge-trail",
+    cross_training: "tw-badge-cross",
+    race: "tw-badge-race",
+    rest: "tw-badge-rest"
+  };
+  return map[type] || "tw-badge-rest";
+}
+
+function getTodayWorkoutBorderClass(type: string): string {
+  if (type === "race") return "tw-border-race";
+  return "";
+}
+
+async function handleTodayWorkoutToggle() {
+  const tw = dashboardData.value?.today_workout;
+  if (!tw || !tw.plan_id) return;
+  togglingWorkout.value = true;
+  try {
+    const newCompleted = !tw.completed;
+    const res = await request(`/api/coach/plan/${tw.plan_id}/workout`, "PATCH", {
+      week_index: tw.week_index,
+      day_index: tw.day_index,
+      completed: newCompleted,
+      operator_uid: user.value?.id || getStoredUser()?.id || "athlete"
+    });
+    if (res?.success) {
+      tw.completed = newCompleted;
+      if (newCompleted) {
+        uni.showToast({ title: "今日已打卡！", icon: "success" });
+      } else {
+        uni.showToast({ title: "已取消打卡", icon: "none" });
+      }
+      // Refresh dashboard to sync weekly mileage progress
+      await loadDashboard();
+    }
+  } catch (e: any) {
+    console.error("Toggle workout error:", e);
+    uni.showToast({ title: e?.message || "打卡失败，请重试", icon: "none" });
+  } finally {
+    togglingWorkout.value = false;
+  }
+}
 
 function openWeeklyGoalModal() {
   editWeeklyTarget.value = dashboardData.value?.weekly_progress?.target_week_km || 50;
@@ -1693,6 +1851,249 @@ onPullDownRefresh(async () => {
 .d-km-dash {
   font-size: 16rpx;
   color: #52525b;
+}
+
+/* ── TODAY'S WORKOUT PLAN CARD (IN WEEK VIEW) ── */
+.today-workout-container {
+  margin-top: 10rpx;
+  margin-bottom: 20rpx;
+}
+
+.today-workout-card {
+  background-color: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 24rpx 20rpx;
+  transition: all 0.2s ease;
+}
+
+.today-workout-card.is-completed {
+  border-color: rgba(48, 209, 88, 0.4);
+  background-color: rgba(48, 209, 88, 0.03);
+}
+
+.today-workout-card.tw-border-race {
+  border-color: rgba(255, 45, 85, 0.45);
+  background: linear-gradient(180deg, rgba(255, 45, 85, 0.08) 0%, rgba(26, 26, 30, 0.95) 100%);
+}
+
+.tw-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14rpx;
+}
+
+.tw-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.tw-icon {
+  font-size: 26rpx;
+}
+
+.tw-section-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.tw-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 4rpx 12rpx;
+  border-radius: 10rpx;
+}
+
+.tw-badge-easy { background: rgba(48, 209, 88, 0.15); color: #30d158; }
+.tw-badge-tempo { background: rgba(10, 132, 255, 0.15); color: #0a84ff; }
+.tw-badge-interval { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
+.tw-badge-long { background: rgba(175, 82, 222, 0.15); color: #af52de; }
+.tw-badge-trail { background: rgba(94, 92, 230, 0.15); color: #5e5ce6; }
+.tw-badge-cross { background: rgba(255, 55, 95, 0.15); color: #ff375f; }
+.tw-badge-race { background: rgba(255, 45, 85, 0.25); color: #ff375f; border: 1rpx solid rgba(255, 45, 85, 0.4); font-weight: bold; }
+.tw-badge-rest { background: rgba(142, 142, 147, 0.15); color: #8e8e93; }
+
+.tw-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.tw-actual-badge {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  background: rgba(48, 209, 88, 0.15);
+  color: #30d158;
+  border: 1rpx solid rgba(48, 209, 88, 0.3);
+}
+
+.tw-link {
+  font-size: 22rpx;
+  color: #a1a1aa;
+}
+
+.tw-body {
+  margin-bottom: 16rpx;
+}
+
+.tw-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+
+.tw-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #f4f4f5;
+  flex: 1;
+}
+
+.tw-dist {
+  display: flex;
+  align-items: baseline;
+  gap: 4rpx;
+}
+
+.tw-dist-num {
+  font-size: 38rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.tw-dist-unit {
+  font-size: 22rpx;
+  color: #a1a1aa;
+}
+
+.tw-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+}
+
+.tw-metric-tag {
+  font-size: 20rpx;
+  font-weight: 500;
+  padding: 4rpx 14rpx;
+  border-radius: 10rpx;
+}
+
+.tw-metric-tag.pace-tag {
+  background-color: #1c1c1e;
+  color: #af52de;
+}
+
+.tw-metric-tag.hr-tag {
+  background-color: #1c1c1e;
+  color: #30d158;
+}
+
+.tw-desc {
+  font-size: 22rpx;
+  color: #a1a1aa;
+  line-height: 1.45;
+  display: block;
+  margin-bottom: 12rpx;
+}
+
+.tw-coach-notes {
+  background-color: rgba(255, 159, 10, 0.1);
+  border: 1rpx solid rgba(255, 159, 10, 0.25);
+  border-radius: 16rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 12rpx;
+}
+
+.tw-coach-title {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #ff9f0a;
+  display: block;
+  margin-bottom: 4rpx;
+}
+
+.tw-coach-text {
+  font-size: 20rpx;
+  color: #ffe0b2;
+  line-height: 1.35;
+  display: block;
+}
+
+.tw-actions {
+  display: flex;
+  gap: 14rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.05);
+  padding-top: 16rpx;
+}
+
+.tw-complete-btn {
+  flex: 1;
+  height: 60rpx;
+  line-height: 60rpx;
+  border-radius: 14rpx;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  font-size: 24rpx;
+  color: #e4e4e7;
+  font-weight: 600;
+}
+
+.tw-complete-btn.completed {
+  background-color: rgba(48, 209, 88, 0.2);
+  border-color: #30d158;
+  color: #30d158;
+  font-weight: bold;
+}
+
+.tw-detail-btn {
+  height: 60rpx;
+  line-height: 60rpx;
+  padding: 0 24rpx;
+  border-radius: 14rpx;
+  background-color: #1c1c1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  font-size: 22rpx;
+  color: #af52de;
+}
+
+.today-workout-card.empty-card {
+  padding: 24rpx 20rpx;
+}
+
+.empty-tw-content {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.empty-tw-icon {
+  font-size: 34rpx;
+}
+
+.empty-tw-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.empty-tw-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #e4e4e7;
+}
+
+.empty-tw-sub {
+  font-size: 22rpx;
+  color: #71717a;
+  margin-top: 4rpx;
 }
 
 .stats-grid {

@@ -1569,6 +1569,16 @@ def get_user_training_plan(uid: str):
     }
 
 
+@router.get("/plan/user/{uid}/today")
+def get_user_today_workout(uid: str):
+    """
+    Returns today's specific workout from the athlete's active training plan.
+    """
+    canonical_uid = LocalStore.resolve_user_id(uid)
+    today_workout = LocalStore.get_today_workout(canonical_uid)
+    return {"today_workout": today_workout}
+
+
 @router.get("/plan/{plan_id}")
 def get_training_plan_detail(plan_id: str):
     """

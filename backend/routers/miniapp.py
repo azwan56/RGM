@@ -195,6 +195,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "daily_required_km": daily_req,
             },
             "weekly_progress": weekly_progress,
+            "today_workout": weekly_progress.get("today_workout") if weekly_progress else None,
             "monthly_trend": monthly_trend,
             "yearly_stats": yearly_stats,
             "recent_activities": recent_activities,
