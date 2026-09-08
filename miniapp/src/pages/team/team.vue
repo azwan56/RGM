@@ -1,5 +1,17 @@
 <template>
   <view class="team-page">
+    <!-- ── 顶部导航栏 / 跑团与榜单快速切换胶囊 ── -->
+    <view class="top-nav-capsule">
+      <view class="nav-segment active">
+        <text class="nav-icon">🏃</text>
+        <text class="nav-text">跑团大本营</text>
+      </view>
+      <view class="nav-segment" @click="goToRankPage">
+        <text class="nav-icon">🥇</text>
+        <text class="nav-text">英雄榜与动态 ›</text>
+      </view>
+    </view>
+
     <!-- If user belongs to a club -->
     <view v-if="currentClub">
       <!-- ── Header: Club Hero ── -->
@@ -20,6 +32,21 @@
               <text class="copy-hint"> (点击复制)</text>
             </view>
           </view>
+        </view>
+      </view>
+
+      <!-- ── 跑团英雄榜与打卡动态直通卡 ── -->
+      <view class="rank-banner-card" @click="goToRankPage">
+        <view class="banner-left">
+          <view class="banner-badge-row">
+            <text class="banner-badge">🥇 英雄风云榜</text>
+            <text class="banner-hint-pill">独立专页 ›</text>
+          </view>
+          <text class="banner-title">本月跑团英雄榜 · 打卡动态与 AI 点评</text>
+          <text class="banner-desc">查看全团队员跑量排名、达标进度与 Canova AI 动态互动</text>
+        </view>
+        <view class="banner-arrow-box">
+          <text class="banner-arrow">→</text>
         </view>
       </view>
 
@@ -127,110 +154,6 @@
       </view>
       <view v-else class="empty-box">
         <text class="empty-text">暂无进行中的跑团活动</text>
-      </view>
-    </view>
-
-    <!-- ── CARD 4: 跑团月度英雄榜 ── -->
-    <view class="section-card">
-      <view class="card-header-row">
-        <view class="title-with-icon">
-          <text class="icon">🥇</text>
-          <text class="card-title">本月跑团英雄榜</text>
-        </view>
-        <text class="sub-tip">按当月跑量排名</text>
-      </view>
-
-      <view v-if="leaderboard.length" class="leaderboard-list">
-        <view
-          v-for="item in leaderboard"
-          :key="item.user_id"
-          class="rank-item"
-          :class="{ 'top-three': item.rank <= 3 }"
-        >
-          <view class="rank-left">
-            <text class="rank-num" :class="'rank-' + item.rank">
-              {{ item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank }}
-            </text>
-            <image class="user-avatar" :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
-            <view class="user-info">
-              <view class="name-badge-row">
-                <text class="user-name">{{ item.display_name }}</text>
-                <text v-if="item.role === 'owner'" class="mini-role-tag owner">团长</text>
-                <text v-else-if="item.role === 'coach'" class="mini-role-tag coach">教练</text>
-              </view>
-              <text class="progress-sub">完成度 {{ item.progress_pct }}% · 目标 {{ item.target_km }}km</text>
-            </view>
-          </view>
-
-          <view class="rank-right">
-            <text class="km-val">{{ item.distance_km }} <text class="unit">km</text></text>
-            <view class="progress-bar-bg">
-              <view class="progress-bar-fill" :style="{ width: Math.min(100, item.progress_pct) + '%' }" />
-            </view>
-          </view>
-        </view>
-      </view>
-      <view v-else class="empty-box">
-        <text class="empty-text">暂无成员打卡数据</text>
-      </view>
-    </view>
-
-    <!-- ── CARD 5: 跑团打卡动态 · AI点评与跑友互动 ── -->
-    <view class="section-card">
-      <view class="card-header-row">
-        <view class="title-with-icon">
-          <text class="icon">🔥</text>
-          <text class="card-title">跑团打卡动态 · AI点评与跑友互动</text>
-        </view>
-      </view>
-
-      <view v-if="feed.length" class="feed-list">
-        <view v-for="act in feed" :key="act.id" class="feed-card">
-          <!-- Member & Run Header -->
-          <view class="feed-header">
-            <image class="feed-avatar" :src="act.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
-            <view class="feed-user-meta">
-              <text class="feed-author">{{ act.display_name }}</text>
-              <text class="feed-act-name">{{ act.name }} · 配速 {{ act.avg_pace_str }} · 心率 {{ act.average_heartrate || '—' }} bpm · TRIMP {{ act.trimp || 50 }}</text>
-            </view>
-            <view class="feed-distance">
-              <text class="feed-km">{{ (act.distance_meters / 1000).toFixed(1) }}</text>
-              <text class="feed-unit">km</text>
-            </view>
-          </view>
-
-          <!-- AI Coach Critique Bubble -->
-          <view class="coach-bubble">
-            <view class="coach-badge-row">
-              <text class="coach-robot-icon">🤖</text>
-              <text class="coach-badge-title">Renato Canova AI 教练专属点评</text>
-            </view>
-            <text class="coach-comment-text">{{ act.ai_journal || "基于 Canova 耐力生理模型生成中..." }}</text>
-          </view>
-
-          <!-- Social Actions (Like & Comment buttons) -->
-          <view class="social-bar">
-            <view class="like-btn" :class="{ liked: act.has_liked }" @click="handleToggleLike(act)">
-              <text class="heart-icon">{{ act.has_liked ? '❤️' : '🤍' }}</text>
-              <text class="like-text">{{ act.has_liked ? '已点赞' : '点赞' }} ({{ act.likes_count || 0 }})</text>
-            </view>
-            <view class="comment-trigger-btn" @click="handleOpenCommentModal(act)">
-              <text class="cmt-icon">💬</text>
-              <text class="cmt-text">留言 ({{ act.comments?.length || 0 }})</text>
-            </view>
-          </view>
-
-          <!-- Comments List -->
-          <view v-if="act.comments && act.comments.length > 0" class="comments-box">
-            <view v-for="c in act.comments" :key="c.id" class="cmt-item">
-              <text class="cmt-author">{{ c.author_name }}: </text>
-              <text class="cmt-content">{{ c.content }}</text>
-            </view>
-          </view>
-        </view>
-      </view>
-      <view v-else class="empty-box">
-        <text class="empty-text">暂无队员近期打卡，快去完成今日跑步吧！</text>
       </view>
     </view>
     </view>
@@ -397,27 +320,6 @@
       </view>
     </view>
 
-    <!-- ── Comment Modal (跑友留言输入弹窗) ── -->
-    <view v-if="showCommentModal" class="modal-mask" @click="showCommentModal = false" @touchmove.stop.prevent>
-      <view class="modal-content" @click.stop>
-        <view class="modal-header">
-          <text class="modal-title">发表跑友留言</text>
-          <text class="close-btn" @click="showCommentModal = false">✕</text>
-        </view>
-
-        <view class="modal-body">
-          <text class="input-hint">在 AI 教练评语后给队友鼓励或写句评语：</text>
-          <textarea
-            class="textarea-input"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="太棒了，配速和心率控制非常稳！..."
-            v-model="commentTextInput"
-          />
-          <button class="submit-btn" :loading="submittingComment" @click="handleSendComment">发送留言</button>
-        </view>
-      </view>
-    </view>
 
     <!-- ── Join Club Modal (加入跑团弹窗) ── -->
     <view v-if="showJoinModal" class="modal-mask" @click="showJoinModal = false" @touchmove.stop.prevent>
@@ -492,16 +394,13 @@ const currentClub = ref<any>(null);
 const currentRole = ref("member");
 
 const events = ref<any[]>([]);
-const leaderboard = ref<any[]>([]);
 const members = ref<any[]>([]);
 const coachCockpit = ref<any>(null);
-const feed = ref<any[]>([]);
 
 const showMembersModal = ref(false);
 const memberSearchQuery = ref("");
 
 const showEventModal = ref(false);
-const showCommentModal = ref(false);
 const showJoinModal = ref(false);
 const showCreateModal = ref(false);
 
@@ -516,11 +415,13 @@ const eventTitle = ref("");
 const eventTargetKm = ref<number | string>(200);
 const eventRules = ref("");
 
-const activeCommentActivityId = ref<string | null>(null);
-const commentTextInput = ref("");
-
 const savingEvent = ref(false);
-const submittingComment = ref(false);
+
+function goToRankPage() {
+  uni.navigateTo({
+    url: "/pages/team/rank"
+  });
+}
 
 const isOwnerOrDev = computed(() => {
   if (!user.value || !currentClub.value) return false;
@@ -556,28 +457,22 @@ async function loadClubData() {
       currentRole.value = clubs[0].role || "member";
       const clubId = clubs[0].id;
 
-      // Load events, leaderboard, members, coach cockpit, feed
-      const [evtRes, lbRes, memRes, coachRes, feedRes] = await Promise.all([
+      // Load events, members, coach cockpit
+      const [evtRes, memRes, coachRes] = await Promise.all([
         request(`/api/team/${clubId}/events`),
-        request(`/api/team/${clubId}/leaderboard`),
         request(`/api/team/${clubId}/members`),
         request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`),
-        request(`/api/team/${clubId}/feed?uid=${uid}`),
       ]);
 
       events.value = evtRes?.events || [];
-      leaderboard.value = lbRes?.leaderboard || [];
       members.value = memRes?.members || [];
       coachCockpit.value = coachRes || null;
-      feed.value = feedRes?.feed || [];
     } else {
       currentClub.value = null;
       currentRole.value = "member";
       events.value = [];
-      leaderboard.value = [];
       members.value = [];
       coachCockpit.value = null;
-      feed.value = [];
     }
   } catch (e) {
     console.warn("Load club data error:", e);
@@ -706,52 +601,6 @@ async function handleRemoveMember(targetUid: string, displayName: string) {
   });
 }
 
-async function handleToggleLike(act: any) {
-  const uid = user.value?.id;
-  if (!uid) return;
-  try {
-    const res = await request(`/api/team/activities/${act.id}/like`, "POST", {
-      user_id: uid,
-    });
-    act.has_liked = res.liked;
-    act.likes_count = res.likes_count;
-  } catch (e: any) {
-    uni.showToast({ title: "点赞失败", icon: "none" });
-  }
-}
-
-function handleOpenCommentModal(act: any) {
-  activeCommentActivityId.value = act.id;
-  commentTextInput.value = "";
-  showCommentModal.value = true;
-}
-
-async function handleSendComment() {
-  if (!commentTextInput.value.trim() || !activeCommentActivityId.value) return;
-  const uid = user.value?.id;
-  if (!uid) return;
-  submittingComment.value = true;
-  try {
-    const res = await request(`/api/team/activities/${activeCommentActivityId.value}/comments`, "POST", {
-      user_id: uid,
-      content: commentTextInput.value.trim(),
-      author_name: user.value?.display_name || user.value?.email?.split("@")[0] || "跑友",
-      author_avatar: user.value?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",
-    });
-
-    const targetAct = feed.value.find((a) => a.id === activeCommentActivityId.value);
-    if (targetAct) {
-      if (!targetAct.comments) targetAct.comments = [];
-      targetAct.comments.push(res.comment);
-    }
-    showCommentModal.value = false;
-    uni.showToast({ title: "评论成功！", icon: "success" });
-  } catch (e: any) {
-    uni.showToast({ title: "评论失败", icon: "none" });
-  } finally {
-    submittingComment.value = false;
-  }
-}
 
 function handleOpenCreateEvent() {
   editingEventId.value = null;
@@ -845,6 +694,127 @@ onPullDownRefresh(async () => {
   background-color: #0b0b0d;
   padding: 30rpx 30rpx 60rpx 30rpx;
   box-sizing: border-box;
+}
+
+/* ── 顶部导航胶囊切换条 ── */
+.top-nav-capsule {
+  display: flex;
+  background-color: #16161a;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 40rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+}
+
+.nav-segment {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 16rpx 0;
+  border-radius: 34rpx;
+  transition: all 0.25s ease;
+}
+
+.nav-segment.active {
+  background: linear-gradient(135deg, #fc4c02 0%, #ff7300 100%);
+  box-shadow: 0 4rpx 16rpx rgba(252, 76, 2, 0.35);
+}
+
+.nav-icon {
+  font-size: 26rpx;
+}
+
+.nav-text {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #a1a1aa;
+}
+
+.nav-segment.active .nav-text {
+  color: #ffffff;
+}
+
+/* ── 跑团英雄榜与动态直通卡 ── */
+.rank-banner-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.15) 0%, rgba(255, 159, 10, 0.08) 100%);
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+  border-radius: 28rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.12);
+  transition: all 0.2s ease;
+}
+
+.rank-banner-card:active {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+
+.banner-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.banner-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background-color: rgba(252, 76, 2, 0.18);
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.banner-hint-pill {
+  font-size: 18rpx;
+  color: #ff9f0a;
+  background-color: rgba(255, 159, 10, 0.15);
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.banner-title {
+  font-size: 28rpx;
+  font-weight: 900;
+  color: #ffffff;
+  display: block;
+  margin-bottom: 4rpx;
+}
+
+.banner-desc {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  display: block;
+  line-height: 1.4;
+}
+
+.banner-arrow-box {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 28rpx;
+  background-color: rgba(252, 76, 2, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 16rpx;
+}
+
+.banner-arrow {
+  font-size: 32rpx;
+  color: #fc4c02;
+  font-weight: bold;
 }
 
 .club-hero-card {

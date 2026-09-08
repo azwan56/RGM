@@ -33,7 +33,17 @@
     {
       "path": "pages/team/team",
       "style": {
-        "navigationBarTitleText": "跑团与榜单",
+        "navigationBarTitleText": "跑团大本营",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/team/rank",
+      "style": {
+        "navigationBarTitleText": "跑团英雄榜与动态",
         "navigationBarBackgroundColor": "#0b0b0d",
         "navigationBarTextStyle": "white",
         "backgroundColor": "#0b0b0d",
