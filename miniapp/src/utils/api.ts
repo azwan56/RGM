@@ -340,14 +340,39 @@ export async function getAvailableUsers(): Promise<any[]> {
   return [];
 }
 
+export async function switchAccount(_targetUid: string): Promise<UserProfile> {
+  throw new Error("安全保护：已禁止任意切换账号");
+}
+
 /**
- * Switches to an existing runner account, binds the current device/WeChat OpenID to it,
- * and sets up authenticated session with newly issued JWT.
+ * Log in / recover account via Garmin or COROS credentials.
  */
-export async function switchAccount(targetUid: string): Promise<UserProfile> {
+export async function deviceLogin(params: {
+  brand: string;
+  account: string;
+  password: string;
+  domain?: string;
+  mfa_code?: string;
+}): Promise<UserProfile> {
   let clientUuid = uni.getStorageSync("rgm_client_uuid");
-  const data = await request("/api/auth/wechat/switch-account", "POST", {
-    target_uid: targetUid,
+  let code = "";
+  try {
+    const loginRes: any = await new Promise((resolve) => {
+      uni.login({
+        provider: "weixin",
+        timeout: 5000,
+        success: resolve,
+        fail: () => resolve(null),
+      });
+    });
+    if (loginRes && loginRes.code) {
+      code = loginRes.code;
+    }
+  } catch (e) {}
+
+  const data = await request("/api/auth/device-login", "POST", {
+    ...params,
+    code: code,
     client_uuid: clientUuid,
   });
   const profile: UserProfile = {

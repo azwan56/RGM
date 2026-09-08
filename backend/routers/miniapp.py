@@ -29,7 +29,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     7. AI Coach Tip of the Day
     """
     try:
-        eff_uid = uid
+        eff_uid = LocalStore.resolve_user_id(uid)
         profile = LocalStore.get_profile(eff_uid) or {}
         if not profile:
             profile = {

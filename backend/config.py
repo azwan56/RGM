@@ -1,7 +1,11 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -23,8 +27,8 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "") or os.getenv("DASHSCOPE_API_KEY", "")
 
     # WeChat Mini Program
-    WECHAT_APP_ID: str = os.getenv("WECHAT_APP_ID", "")
-    WECHAT_APP_SECRET: str = os.getenv("WECHAT_APP_SECRET", "")
+    WECHAT_APP_ID: str = os.getenv("WECHAT_APP_ID") or "wxdfff48d6d0506130"
+    WECHAT_APP_SECRET: str = os.getenv("WECHAT_APP_SECRET") or "6d35e4fbedf55e9cb1596a21ed2d67fa"
 
     # Aliyun SMS
     ALIYUN_ACCESS_KEY_ID: str = os.getenv("ALIYUN_ACCESS_KEY_ID", "")

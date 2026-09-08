@@ -32,7 +32,7 @@
         </view>
         <text class="user-id">{{ user?.id }} · 点击修改昵称与头像 ›</text>
       </view>
-      <button class="switch-user-btn" @click.stop="handleLogout">退出切换</button>
+      <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出登录</button>
     </view>
 
     <!-- ── CARD 1: 我的跑团与管理 (Running Club Card) ── -->
@@ -526,11 +526,11 @@
 
     <!-- 底部退出登录（仅登录后显示） -->
     <view v-if="user" class="logout-box">
-      <button class="logout-btn" @click="handleLogout">退出登录 / 切换微信账号</button>
+      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
     </view>
 
     <!-- ── 微信授权登录专属弹窗 (Pure WeChat Login Modal) ── -->
-    <view v-if="showAuthModal" class="modal-mask" @click="closeAuthModal" @touchmove.stop.prevent>
+    <view v-if="showAuthModal" class="modal-mask auth-modal-mask" @click="closeAuthModal">
       <view class="modal-content auth-modal-content" @click.stop="noop">
         <view class="modal-header">
           <text class="modal-title">{{ user ? "微信跑者账号管理" : "微信一键授权登录" }}</text>
@@ -539,121 +539,199 @@
           </view>
         </view>
 
-        <view class="modal-body">
+        <scroll-view scroll-y class="auth-scroll-body">
+          <view class="modal-body">
           <view class="wx-brand-hero">
             <text class="wx-hero-icon">🏃</text>
             <text class="wx-hero-title">RGM 跑团助手</text>
-            <text class="wx-hero-desc">科学耐力训练 · Garmin 数据直连 · 先锋跑团</text>
+            <text class="wx-hero-desc">科学耐力训练 · Garmin / COROS 手表直连</text>
           </view>
 
-          <!-- Current account status if logged in -->
+          <!-- 1. 当前已登录会话简况 -->
           <view v-if="user" class="wx-account-status-card">
-            <text class="status-title">当前微信跑者会话：</text>
-            <view class="status-row">
-              <text class="status-label">账号 UID: </text>
-              <text class="status-val">{{ user.id }}</text>
+            <view class="status-top-row">
+              <view class="status-user-info">
+                <text class="status-title">当前登录跑者：</text>
+                <text class="status-val bold">{{ profile?.display_name || user.display_name || "微信跑者" }}</text>
+                <text class="status-sub">({{ user.id }})</text>
+              </view>
+              <button class="status-logout-btn" @click="handleConfirmLogout">退出登录</button>
             </view>
-            <view class="status-row">
-              <text class="status-label">跑者昵称: </text>
-              <text class="status-val">{{ profile?.display_name || user.display_name || "微信跑者" }}</text>
-            </view>
-            <view class="status-row">
-              <text class="status-label">佳明连接: </text>
-              <text class="status-val text-green" v-if="garminConnected">已绑定 ({{ garminEmail || '佳明账号' }})</text>
-              <text class="status-val text-muted" v-else>未连接佳明设备</text>
+            <view class="status-row" style="margin-top: 16rpx;">
+              <text class="status-label">手表连接: </text>
+              <text class="status-val text-green" v-if="garminConnected">佳明已绑定 ({{ garminEmail || '账号' }})</text>
+              <text class="status-val text-green" v-else-if="corosConnected">高驰已绑定 ({{ corosAccount || '账号' }})</text>
+              <text class="status-val text-muted" v-else>未绑定运动设备</text>
             </view>
           </view>
 
-          <view v-else class="auth-flow-box">
-            <view class="auth-intro-box">
-              <text class="auth-intro-title">🛡️ 微信授权安全登录</text>
-              <text class="auth-intro-desc">
-                系统将使用您当前的微信账号建立专属独立跑者档案。每个微信号独立隔离，绝不混淆他人数据。
-              </text>
+          <!-- 未登录状态：展示登录切换 Tab 与登录表单 -->
+          <view v-else>
+            <!-- 登录模式切换 Tab -->
+            <view class="auth-tab-row">
+              <view
+                class="auth-tab-item"
+                :class="{ active: authTab === 'wechat' }"
+                @click="authTab = 'wechat'"
+              >
+                <text>新跑者微信授权</text>
+              </view>
+              <view
+                class="auth-tab-item"
+                :class="{ active: authTab === 'device' }"
+                @click="authTab = 'device'"
+              >
+                <text>🔐 已有手表账号登录</text>
+              </view>
             </view>
 
-            <!-- 1. 本机多账号快速切换 (如果本机曾登录过 1 个或多个账号) -->
-            <view v-if="recentAccounts && recentAccounts.length > 0" class="recent-accounts-section">
-              <text class="recent-title">👥 本机已存跑者账号 (点击直接切换)</text>
-              <view class="recent-accounts-list">
-                <view
-                  v-for="acc in recentAccounts"
-                  :key="acc.id"
-                  class="recent-acc-card"
-                  @click="selectRecentAccount(acc)"
-                >
-                  <image
-                    class="recent-acc-avatar"
-                    :src="acc.avatar_url || defaultAvatar"
-                    mode="aspectFill"
-                  />
-                  <view class="recent-acc-info">
-                    <text class="recent-acc-name">{{ acc.display_name }}</text>
-                    <text class="recent-acc-meta" v-if="acc.garmin_connected">佳明直连 ({{ acc.garmin_email || '已绑定' }})</text>
-                    <text class="recent-acc-meta" v-else>未绑定佳明</text>
+            <!-- 模式 1: 微信独立授权登录 -->
+            <view v-if="authTab === 'wechat'" class="auth-flow-box">
+              <view class="auth-intro-box">
+                <text class="auth-intro-title">🛡️ 微信独立授权登录</text>
+                <text class="auth-intro-desc">
+                  系统将使用您当前的微信账号建立专属独立跑者档案。每个微信号独立隔离，绝不混淆他人数据。
+                </text>
+              </view>
+
+              <!-- 微信原生头像与微信昵称快捷获取 -->
+              <view class="custom-user-form">
+                <view class="avatar-nickname-flex">
+                  <button
+                    class="wx-avatar-btn"
+                    open-type="chooseAvatar"
+                    @chooseavatar="onChooseAvatar"
+                  >
+                    <image
+                      class="wx-avatar-preview"
+                      :src="runnerAvatar || defaultAvatar"
+                      mode="aspectFill"
+                    />
+                    <text class="avatar-badge-tip">选微信头像</text>
+                  </button>
+
+                  <view class="nickname-input-box">
+                    <text class="field-label">微信昵称 (点击下方键盘可一键填入)</text>
+                    <input
+                      type="nickname"
+                      class="large-input nickname-input"
+                      :value="runnerNickName"
+                      placeholder="点击此处，从键盘快捷填入"
+                      placeholder-class="placeholder-style"
+                      @blur="onNicknameBlur"
+                      @input="onNicknameInput"
+                    />
                   </view>
-                  <text class="recent-acc-action">一键进入 ›</text>
                 </view>
               </view>
-              <view class="divider-line-row">
-                <view class="divider-line" />
-                <text class="divider-text">或以新微信身份授权登录</text>
-                <view class="divider-line" />
+
+              <!-- 用户协议与隐私条款勾选 (必须勾选) -->
+              <view class="terms-check-row" @click="agreedTerms = !agreedTerms">
+                <text class="checkbox-icon">{{ agreedTerms ? '☑️' : '⬜' }}</text>
+                <view class="terms-text-wrap">
+                  <text class="terms-text">我已阅读并同意 </text>
+                  <text class="terms-link" @click.stop="showTermsModal">《用户服务条款》</text>
+                  <text class="terms-text"> 与 </text>
+                  <text class="terms-link" @click.stop="showPrivacyModal">《隐私政策》</text>
+                </view>
               </view>
+
+              <!-- 确认登录大按钮 -->
+              <button
+                class="confirm-auth-btn"
+                :loading="confirmingLogin"
+                @click="doConfirmLogin"
+              >
+                🟢 授权并创建新跑者身份
+              </button>
             </view>
 
-            <!-- 2. 微信原生头像与微信昵称快捷获取 -->
-            <view class="custom-user-form">
-              <view class="avatar-nickname-flex">
-                <button
-                  class="wx-avatar-btn"
-                  open-type="chooseAvatar"
-                  @chooseavatar="onChooseAvatar"
+            <!-- 模式 2: 已有手表账号验证登录 / 档案恢复 -->
+            <view v-else class="auth-flow-box device-login-box">
+              <view class="auth-intro-box">
+                <text class="auth-intro-title">🔐 运动手表安全验证登录</text>
+                <text class="auth-intro-desc">
+                  已在平台拥有训练数据的跑者，可直接输入绑定的佳明或高驰手表账号密码。官方验证通过后，将自动恢复您的独立跑者档案。
+                </text>
+              </view>
+
+              <!-- 品牌切换 -->
+              <view class="brand-tab-group">
+                <view
+                  class="brand-tab-btn"
+                  :class="{ active: deviceBrand === 'garmin' }"
+                  @click="deviceBrand = 'garmin'"
                 >
-                  <image
-                    class="wx-avatar-preview"
-                    :src="runnerAvatar || defaultAvatar"
-                    mode="aspectFill"
-                  />
-                  <text class="avatar-badge-tip">选微信头像</text>
-                </button>
+                  <text> Garmin 佳明</text>
+                </view>
+                <view
+                  class="brand-tab-btn"
+                  :class="{ active: deviceBrand === 'coros' }"
+                  @click="deviceBrand = 'coros'"
+                >
+                  <text> COROS 高驰</text>
+                </view>
+              </view>
 
-                <view class="nickname-input-box">
-                  <text class="field-label">微信昵称 (点击下方键盘可一键填入)</text>
+              <!-- Garmin 区域选择 -->
+              <view v-if="deviceBrand === 'garmin'" class="domain-select-box">
+                <text class="domain-label">佳明账号服务器：</text>
+                <view class="domain-btn-wrap">
+                  <view
+                    class="domain-chip"
+                    :class="{ active: deviceDomain === 'garmin.com' }"
+                    @click="deviceDomain = 'garmin.com'"
+                  >
+                    <text>国际区 (.com)</text>
+                  </view>
+                  <view
+                    class="domain-chip"
+                    :class="{ active: deviceDomain === 'garmin.cn' }"
+                    @click="deviceDomain = 'garmin.cn'"
+                  >
+                    <text>中国区 (.cn)</text>
+                  </view>
+                </view>
+              </view>
+
+              <!-- 账号密码表单 -->
+              <view class="device-form">
+                <view class="device-form-item">
+                  <text class="field-label">{{ deviceBrand === 'garmin' ? '佳明注册邮箱' : '高驰账号 / 手机号' }}</text>
                   <input
-                    type="nickname"
-                    class="large-input nickname-input"
-                    :value="runnerNickName"
-                    placeholder="点击此处，从键盘快捷填入"
+                    class="large-input"
+                    :value="deviceAccount"
+                    :placeholder="deviceBrand === 'garmin' ? '例如 azwan56@hotmail.com' : '请输入高驰账号'"
                     placeholder-class="placeholder-style"
-                    @blur="onNicknameBlur"
-                    @input="onNicknameInput"
+                    @input="deviceAccount = $event.detail.value"
+                  />
+                </view>
+
+                <view class="device-form-item">
+                  <text class="field-label">密码</text>
+                  <input
+                    type="password"
+                    class="large-input"
+                    :value="devicePassword"
+                    placeholder="请输入手表账号密码"
+                    placeholder-class="placeholder-style"
+                    @input="devicePassword = $event.detail.value"
                   />
                 </view>
               </view>
-            </view>
 
-            <!-- 用户协议与隐私条款勾选 (必须勾选) -->
-            <view class="terms-check-row" @click="agreedTerms = !agreedTerms">
-              <text class="checkbox-icon">{{ agreedTerms ? '☑️' : '⬜' }}</text>
-              <view class="terms-text-wrap">
-                <text class="terms-text">我已阅读并同意 </text>
-                <text class="terms-link" @click.stop="showTermsModal">《用户服务条款》</text>
-                <text class="terms-text"> 与 </text>
-                <text class="terms-link" @click.stop="showPrivacyModal">《隐私政策》</text>
-              </view>
+              <!-- 登录按钮 -->
+              <button
+                class="confirm-auth-btn device-confirm-btn"
+                :loading="deviceLoggingIn"
+                @click="doDeviceLogin"
+              >
+                🔐 验证账号并恢复跑者档案
+              </button>
             </view>
-
-            <!-- 确认登录大按钮 -->
-            <button
-              class="confirm-auth-btn"
-              :loading="confirmingLogin"
-              @click="doConfirmLogin"
-            >
-              🟢 微信一键授权安全登录
-            </button>
           </view>
         </view>
+        </scroll-view>
       </view>
     </view>
 
@@ -914,7 +992,7 @@ import {
   getStoredUser,
   clearSession,
   authenticateWechatUser,
-  switchAccount,
+  deviceLogin,
   uploadAvatarFile,
   API_BASE_URL,
   UserProfile,
@@ -968,6 +1046,12 @@ const unbindingCoros = ref(false);
 const loggingIn = ref(false);
 
 const showAuthModal = ref(false);
+const authTab = ref<"wechat" | "device">("wechat");
+const deviceBrand = ref<"garmin" | "coros">("garmin");
+const deviceAccount = ref("");
+const devicePassword = ref("");
+const deviceDomain = ref("garmin.com");
+const deviceLoggingIn = ref(false);
 const runnerNickName = ref("");
 const runnerAvatar = ref("");
 const recentAccounts = ref<any[]>([]);
@@ -1192,24 +1276,7 @@ function onNicknameInput(e: any) {
 }
 
 function openAuthModal() {
-  loadRecentAccounts();
   showAuthModal.value = true;
-}
-
-async function selectRecentAccount(acc: any) {
-  try {
-    uni.showLoading({ title: "正在切换...", mask: true });
-    const u = await switchAccount(acc.id);
-    user.value = u;
-    recordRecentUser(u);
-    showAuthModal.value = false;
-    uni.hideLoading();
-    uni.showToast({ title: `已切换至 ${u.display_name}`, icon: "success" });
-    await loadProfileData();
-  } catch (err: any) {
-    uni.hideLoading();
-    uni.showToast({ title: err?.message || "切换失败", icon: "none" });
-  }
 }
 
 function closeAuthModal() {
@@ -1280,7 +1347,46 @@ async function doConfirmLogin() {
   }
 }
 
+async function doDeviceLogin() {
+  const acc = deviceAccount.value.trim();
+  const pwd = devicePassword.value.trim();
+  if (!acc || !pwd) {
+    uni.showToast({ title: "请输入手表账号和密码", icon: "none" });
+    return;
+  }
+  deviceLoggingIn.value = true;
+  uni.showLoading({ title: "正在验证手表账号...", mask: true });
+  try {
+    const domain = deviceBrand.value === "garmin" ? deviceDomain.value : "teamcnapi.coros.com";
+    const logged = await deviceLogin({
+      brand: deviceBrand.value,
+      account: acc,
+      password: pwd,
+      domain: domain,
+    });
+    user.value = logged;
+    recordRecentUser(logged);
+    showAuthModal.value = false;
+    uni.hideLoading();
+    uni.showToast({ title: `欢迎回来，${logged.display_name}！`, icon: "success", duration: 2500 });
+    await loadProfileData();
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showModal({
+      title: "登录失败",
+      content: err?.message || "账号或密码错误，请核对后重试",
+      showCancel: false,
+    });
+  } finally {
+    deviceLoggingIn.value = false;
+  }
+}
+
 function handleLogout() {
+  openAuthModal();
+}
+
+function handleConfirmLogout() {
   uni.showModal({
     title: "退出登录",
     content: "确定要退出当前微信跑者账号吗？",
@@ -1292,7 +1398,6 @@ function handleLogout() {
         garminConnected.value = false;
         userClub.value = null;
         races.value = [];
-        showAuthModal.value = true;
         uni.showToast({ title: "已退出登录", icon: "none" });
       }
     }
@@ -1309,9 +1414,17 @@ function formatSecs(secs?: number): string {
 }
 
 async function loadProfileData() {
-  // Only restore from already-stored session; do NOT auto-login silently.
-  // Users must tap the login button themselves.
   user.value = getStoredUser();
+  if (!user.value || !user.value.id) {
+    try {
+      const logged = await authenticateWechatUser();
+      if (logged && logged.id) {
+        user.value = logged;
+      }
+    } catch (e) {
+      console.warn("Silent login fallback in profile:", e);
+    }
+  }
   if (!user.value || !user.value.id) return;
   const uid = user.value.id;
 
@@ -3122,6 +3235,115 @@ onShow(() => {
   color: #8e8e93;
 }
 
+.recent-acc-card.current-acc {
+  border-color: rgba(16, 185, 129, 0.4);
+  background-color: rgba(16, 185, 129, 0.08);
+}
+
+.acc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.acc-badge {
+  font-size: 18rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.acc-badge.owner {
+  background-color: rgba(255, 179, 0, 0.2);
+  color: #ffb300;
+}
+
+.acc-badge.coach {
+  background-color: rgba(0, 210, 190, 0.2);
+  color: #00d2be;
+}
+
+.current-acc-tag {
+  font-size: 22rpx;
+  color: #10b981;
+  font-weight: bold;
+}
+
+.status-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-user-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8rpx;
+  flex-wrap: wrap;
+}
+
+.status-sub {
+  font-size: 20rpx;
+  color: #8e8e93;
+}
+
+.status-logout-btn {
+  font-size: 22rpx;
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.12);
+  border: 1rpx solid rgba(255, 69, 58, 0.3);
+  border-radius: 12rpx;
+  padding: 6rpx 16rpx;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.recover-acc-box {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 18rpx 20rpx;
+  margin-top: 16rpx;
+  margin-bottom: 8rpx;
+}
+
+.recover-title {
+  font-size: 22rpx;
+  color: #aeaeb2;
+  display: block;
+  margin-bottom: 12rpx;
+  font-weight: 500;
+}
+
+.recover-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.recover-input {
+  flex: 1;
+  height: 68rpx;
+  background-color: #1a1a1f;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  border-radius: 14rpx;
+  padding: 0 16rpx;
+  font-size: 24rpx;
+  color: #ffffff;
+}
+
+.recover-btn {
+  height: 68rpx;
+  line-height: 68rpx;
+  padding: 0 24rpx;
+  font-size: 24rpx;
+  color: #ffffff;
+  background-color: #00d2be;
+  border-radius: 14rpx;
+  font-weight: bold;
+  margin: 0;
+}
+
 .recent-acc-action {
   font-size: 22rpx;
   color: #00d2be;
@@ -3437,5 +3659,134 @@ onShow(() => {
 .save-profile-btn {
   margin-top: 10rpx;
   background-color: #fc4c02;
+}
+
+/* Auth Modal Tabs & Device Login */
+.auth-tab-row {
+  display: flex;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 16rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+  gap: 8rpx;
+}
+
+.auth-tab-item {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #8e8e93;
+  border-radius: 12rpx;
+  transition: all 0.2s;
+}
+
+.auth-tab-item.active {
+  background: #1c1c1e;
+  color: #00d2be;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.3);
+}
+
+.brand-tab-group {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 20rpx;
+}
+
+.brand-tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 24rpx;
+  font-weight: bold;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #aeaeb2;
+  border-radius: 14rpx;
+}
+
+.brand-tab-btn.active {
+  border-color: #00d2be;
+  background: rgba(0, 210, 190, 0.12);
+  color: #00d2be;
+}
+
+.domain-select-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+}
+
+.domain-label {
+  font-size: 22rpx;
+  color: #8e8e93;
+}
+
+.domain-btn-wrap {
+  display: flex;
+  gap: 12rpx;
+}
+
+.domain-chip {
+  padding: 8rpx 18rpx;
+  font-size: 22rpx;
+  border-radius: 10rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: #8e8e93;
+}
+
+.domain-chip.active {
+  background: rgba(0, 210, 190, 0.15);
+  border-color: #00d2be;
+  color: #00d2be;
+  font-weight: bold;
+}
+
+.device-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.device-form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.device-confirm-btn {
+  background: linear-gradient(135deg, #00d2be, #00a896) !important;
+  margin-top: 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.modal-mask.auth-modal-mask {
+  padding-top: 0;
+  align-items: center;
+}
+
+.modal-content.auth-modal-content {
+  width: 670rpx;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+
+.auth-scroll-body {
+  max-height: calc(86vh - 120rpx);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.auth-modal-content .modal-body {
+  padding: 24rpx 36rpx 48rpx;
+  box-sizing: border-box;
 }
 </style>

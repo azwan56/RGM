@@ -30,9 +30,23 @@ def decrypt_string(encrypted_b64: str) -> str:
             return ""
         nonce = payload[:12]
         ciphertext = payload[12:]
-        key = _get_key()
-        aesgcm = AESGCM(key)
-        decrypted = aesgcm.decrypt(nonce, ciphertext, None)
-        return decrypted.decode("utf-8")
+
+        candidate_keys = [
+            settings.SECRET_KEY,
+            "rgm-cn-secret-encryption-key-for-garmin-pwd-32!",
+            "rgm-cn-secret-encryption-key-must-be-32-chars-long!!",
+            "rgm-cn-secret-encryption-key-32ch!",
+        ]
+        for candidate in candidate_keys:
+            if not candidate:
+                continue
+            try:
+                key = hashlib.sha256(candidate.encode()).digest()
+                aesgcm = AESGCM(key)
+                decrypted = aesgcm.decrypt(nonce, ciphertext, None)
+                return decrypted.decode("utf-8")
+            except Exception:
+                continue
+        return ""
     except Exception as e:
         return ""

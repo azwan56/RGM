@@ -44,7 +44,7 @@ class GarminAdapter:
         safe_email = self.email.replace("@", "_at_").replace(".", "_")
         self.token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if self.is_cn else 'global'}.json")
 
-    def login(self) -> bool:
+    def login(self, use_token: bool = True) -> bool:
         """Logs into Garmin Connect with MFA awareness, automatic region fallback & OAuth token caching."""
         if not HAS_GARMINCONNECT:
             self.last_error = "garminconnect 依赖未安装"
@@ -52,9 +52,10 @@ class GarminAdapter:
 
         # Attempt 1: with user's selected domain & token persistence
         try:
-            logger.info(f"[garmin] Attempting login {self.email} (is_cn={self.is_cn}, token_path={self.token_path})...")
+            active_tokenstore = self.token_path if use_token else None
+            logger.info(f"[garmin] Attempting login {self.email} (is_cn={self.is_cn}, tokenstore={active_tokenstore})...")
             self.client = Garmin(self.email, self.password, is_cn=self.is_cn, return_on_mfa=True)
-            mfa_status, _ = self.client.login(tokenstore=self.token_path)
+            mfa_status, _ = self.client.login(tokenstore=active_tokenstore)
             if mfa_status == "needs_mfa":
                 logger.info(f"[garmin] MFA Required for {self.email} on is_cn={self.is_cn}")
                 self.needs_mfa = True
@@ -81,7 +82,8 @@ class GarminAdapter:
             try:
                 logger.info(f"[garmin] Attempting alternate region fallback (is_cn={alt_is_cn})...")
                 alt_client = Garmin(self.email, self.password, is_cn=alt_is_cn, return_on_mfa=True)
-                mfa_status, _ = alt_client.login(tokenstore=alt_token_path)
+                alt_tokenstore = alt_token_path if use_token else None
+                mfa_status, _ = alt_client.login(tokenstore=alt_tokenstore)
                 if mfa_status == "needs_mfa":
                     logger.info(f"[garmin] MFA Required for {self.email} on alternate is_cn={alt_is_cn}")
                     self.client = alt_client

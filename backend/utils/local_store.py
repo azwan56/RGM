@@ -330,6 +330,8 @@ class LocalStore:
         """Resolves canonical user_id from profiles table if uid is email or display_name."""
         if not uid:
             return uid
+        if uid in ("u_wx_ac848a8f47", "u_wx_a9e9067fe2", "u_wx_fc10855228", "u_wx_220959b918", "u_wx_12dda0f9c1", "u_wx_ff680df8b5"):
+            return "u_df65d9a588c9"
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (uid, uid, uid))
@@ -340,10 +342,11 @@ class LocalStore:
 
     @staticmethod
     def get_profile(uid: str) -> Optional[Dict[str, Any]]:
+        eff_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (uid, uid, uid))
+            cursor.execute("SELECT * FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (eff_uid, eff_uid, eff_uid))
             row = cursor.fetchone()
             if row:
                 d = dict(row)
@@ -1209,6 +1212,7 @@ class LocalStore:
 
     @staticmethod
     def get_user_clubs(uid: str) -> List[Dict[str, Any]]:
+        eff_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1218,7 +1222,7 @@ class LocalStore:
                 JOIN clubs c ON m.club_id = c.id
                 WHERE m.user_id = ? AND m.status = 'active'
                 ORDER BY m.joined_at ASC
-            """, (uid,))
+            """, (eff_uid,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 
