@@ -1246,6 +1246,28 @@ class LocalStore:
             return club_dict
 
     @staticmethod
+    def join_club_by_id(user_id: str, club_id: str, privacy_consent: bool = True) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM clubs WHERE id = ?", (club_id.strip(),))
+            club = cursor.fetchone()
+            if not club:
+                return None
+            
+            club_dict = dict(club)
+            membership_id = f"{club_id}_{user_id}"
+            joined_at = datetime.utcnow().isoformat() + "Z"
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
+                VALUES (?, ?, ?, COALESCE((SELECT role FROM club_memberships WHERE id = ?), 'member'), 'active', ?, ?)
+            """, (membership_id, club_id, user_id, membership_id, joined_at, int(privacy_consent)))
+            conn.commit()
+
+            return club_dict
+
+    @staticmethod
     def get_club_members(club_id: str) -> List[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -1310,6 +1332,22 @@ class LocalStore:
             """)
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+
+    @staticmethod
+    def list_public_clubs(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        raw = LocalStore.list_all_clubs()
+        user_club_ids = set()
+        if user_id:
+            user_clubs = LocalStore.get_user_clubs(user_id)
+            user_club_ids = {c["id"] for c in user_clubs}
+        
+        sanitized = []
+        for c in raw:
+            item = dict(c)
+            item.pop("invite_code", None) # Strictly hide invite_code from public
+            item["is_member"] = item["id"] in user_club_ids
+            sanitized.append(item)
+        return sanitized
 
     @staticmethod
     def update_club(club_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:

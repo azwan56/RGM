@@ -26,10 +26,8 @@
               </text>
             </view>
             <text class="club-desc">{{ currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
-            <view v-if="currentClub.invite_code" class="invite-row" @click="handleCopyInvite">
-              <text class="invite-label">跑团邀请码: </text>
-              <text class="invite-val">{{ currentClub.invite_code }}</text>
-              <text class="copy-hint"> (点击复制)</text>
+            <view class="browse-all-btn" @click="showAllClubsModal = true">
+              <text class="browse-text">🔍 浏览 / 切换跑团 ({{ allClubs.length }}) ›</text>
             </view>
           </view>
         </view>
@@ -158,19 +156,52 @@
     </view>
     </view>
 
-    <!-- ── Unjoined Empty State (未加入任何跑团) ── -->
+    <!-- ── Unjoined State: List all created clubs for user to choose & join ── -->
     <view v-else class="unjoined-club-view">
       <view class="unjoined-hero-box">
         <view class="unjoined-badge">🏃 跑团中心</view>
-        <text class="unjoined-hero-title">尚未加入跑团</text>
-        <text class="unjoined-hero-sub">加入跑团与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控；或者立即创建属于您的专属跑团！</text>
+        <text class="unjoined-hero-title">欢迎加入跑团</text>
+        <text class="unjoined-hero-sub">请在下方浏览平台所有已创建跑团并选择加入，与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控！</text>
         <view class="unjoined-btn-row">
-          <button class="unjoined-action-btn primary-join" @click="showJoinModal = true">
-            ➕ 输入邀请码加入
+          <button class="unjoined-action-btn secondary-invite" @click="showJoinModal = true">
+            🔑 输入邀请码加入
           </button>
-          <button class="unjoined-action-btn secondary-create" @click="showCreateModal = true">
-            🏆 创建新跑团
-          </button>
+        </view>
+      </view>
+
+      <!-- All Created Clubs List -->
+      <view class="section-card all-clubs-sec">
+        <view class="sec-title-row">
+          <view class="title-left">
+            <text class="sec-title">🏆 平台跑团列表</text>
+            <text class="count-tag">{{ allClubs.length }} 个跑团</text>
+          </view>
+          <text class="sec-hint">选择心仪跑团一键加入</text>
+        </view>
+
+        <view v-if="allClubs.length === 0" class="empty-clubs-text">
+          平台暂无已创建跑团，请联系平台管理员创建！
+        </view>
+
+        <view v-else class="clubs-list-wrap">
+          <view v-for="club in allClubs" :key="club.id" class="club-select-card">
+            <image class="csc-logo" :src="club.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+            <view class="csc-body">
+              <view class="csc-title-row">
+                <text class="csc-name">{{ club.name }}</text>
+                <text class="csc-city">📍 {{ club.city || "上海" }}</text>
+              </view>
+              <text class="csc-desc">{{ club.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
+              <view class="csc-meta-row">
+                <text class="csc-meta">团长: {{ club.owner_name || "平台指定" }}</text>
+                <text class="csc-dot">·</text>
+                <text class="csc-meta highlight">{{ club.member_count || 1 }} 位成员</text>
+              </view>
+            </view>
+            <button class="csc-join-btn" :loading="joiningClubId === club.id" @click="handleJoinClubDirect(club.id)">
+              加入
+            </button>
+          </view>
         </view>
       </view>
 
@@ -347,37 +378,61 @@
       </view>
     </view>
 
-    <!-- ── Create Club Modal (创建新跑团弹窗) ── -->
-    <view v-if="showCreateModal" class="modal-mask" @click="showCreateModal = false" @touchmove.stop.prevent>
-      <view class="modal-content" @click.stop>
+    <!-- ── All Clubs Modal (浏览与切换全部跑团) ── -->
+    <view v-if="showAllClubsModal" class="modal-mask" @click="showAllClubsModal = false" @touchmove.stop.prevent>
+      <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">创建新跑团</text>
-          <text class="close-btn" @click="showCreateModal = false">✕</text>
+          <view class="title-with-pill">
+            <text class="modal-title">平台全部跑团</text>
+            <text class="count-pill">{{ allClubs.length }}个</text>
+          </view>
+          <text class="close-btn" @click="showAllClubsModal = false">✕</text>
         </view>
 
-        <view class="modal-body">
-          <text class="input-label">跑团名称</text>
-          <input
-            class="text-input"
-            type="text"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="例如: 世纪公园破风战队"
-            v-model="newClubName"
-          />
-
-          <text class="input-label">跑团口号与简介</text>
-          <textarea
-            class="textarea-input"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="科学备赛，快乐奔跑..."
-            v-model="newClubDesc"
-          />
-
-          <button class="submit-btn" :loading="creatingClub" @click="handleCreateClub">
-            立即创建跑团
-          </button>
+        <view class="modal-body modal-scroll">
+          <view v-if="allClubs.length === 0" class="empty-clubs-text">
+            暂无已创建跑团，请联系管理员
+          </view>
+          <view v-else class="modal-clubs-list">
+            <view
+              v-for="c in allClubs"
+              :key="c.id"
+              class="modal-club-card"
+              :class="{ 'is-current': currentClub?.id === c.id }"
+            >
+              <image class="mcc-logo" :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <view class="mcc-info">
+                <view class="mcc-name-row">
+                  <text class="mcc-name">{{ c.name }}</text>
+                  <text class="mcc-city">📍 {{ c.city || '上海' }}</text>
+                </view>
+                <text class="mcc-desc">{{ c.description || '精英跑者联盟，追求 PB 突破与健康长久奔跑。' }}</text>
+                <view class="mcc-meta">
+                  <text>团长: {{ c.owner_name || '平台指定' }}</text>
+                  <text class="mcc-dot">·</text>
+                  <text class="highlight">{{ c.member_count || 1 }} 位成员</text>
+                </view>
+              </view>
+              <view class="mcc-action">
+                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前</text>
+                <button
+                  v-else-if="c.is_member"
+                  class="mcc-switch-btn"
+                  @click="handleSwitchClub(c)"
+                >
+                  进入
+                </button>
+                <button
+                  v-else
+                  class="mcc-join-btn"
+                  :loading="joiningClubId === c.id"
+                  @click="handleJoinClubDirect(c.id)"
+                >
+                  + 加入
+                </button>
+              </view>
+            </view>
+          </view>
         </view>
       </view>
     </view>
@@ -402,13 +457,14 @@ const memberSearchQuery = ref("");
 
 const showEventModal = ref(false);
 const showJoinModal = ref(false);
-const showCreateModal = ref(false);
+const showAllClubsModal = ref(false);
 
 const inviteCodeInput = ref("");
-const newClubName = ref("");
-const newClubDesc = ref("");
 const joiningClub = ref(false);
-const creatingClub = ref(false);
+const joiningClubId = ref<string | null>(null);
+
+const allClubs = ref<any[]>([]);
+const userClubs = ref<any[]>([]);
 
 const editingEventId = ref<string | null>(null);
 const eventTitle = ref("");
@@ -441,7 +497,7 @@ const filteredMembers = computed(() => {
   );
 });
 
-async function loadClubData() {
+async function loadClubData(preferredClubId?: string) {
   user.value = getStoredUser();
   if (!user.value) {
     user.value = await checkAndAutoLogin();
@@ -450,12 +506,27 @@ async function loadClubData() {
   const uid = user.value.id;
 
   try {
-    const res = await request(`/api/team/my-clubs/${uid}`);
-    const clubs = res?.clubs || [];
+    const [myRes, allRes] = await Promise.all([
+      request(`/api/team/my-clubs/${uid}`),
+      request(`/api/team/all-clubs?user_id=${uid}`)
+    ]);
+
+    const clubs = myRes?.clubs || [];
+    userClubs.value = clubs;
+    allClubs.value = allRes?.clubs || [];
+
     if (clubs.length > 0) {
-      currentClub.value = clubs[0];
-      currentRole.value = clubs[0].role || "member";
-      const clubId = clubs[0].id;
+      let targetClub = clubs[0];
+      if (preferredClubId) {
+        const found = clubs.find((c: any) => c.id === preferredClubId);
+        if (found) targetClub = found;
+      } else if (currentClub.value?.id) {
+        const found = clubs.find((c: any) => c.id === currentClub.value.id);
+        if (found) targetClub = found;
+      }
+      currentClub.value = targetClub;
+      currentRole.value = targetClub.role || "member";
+      const clubId = targetClub.id;
 
       // Load events, members, coach cockpit
       const [evtRes, memRes, coachRes] = await Promise.all([
@@ -476,6 +547,33 @@ async function loadClubData() {
     }
   } catch (e) {
     console.warn("Load club data error:", e);
+  }
+}
+
+function handleSwitchClub(club: any) {
+  showAllClubsModal.value = false;
+  loadClubData(club.id);
+}
+
+async function handleJoinClubDirect(clubId: string) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  joiningClubId.value = clubId;
+  try {
+    const res = await request("/api/team/join-club", "POST", {
+      user_id: uid,
+      club_id: clubId,
+    });
+    uni.showToast({ title: res?.message || "加入跑团成功！", icon: "success" });
+    showAllClubsModal.value = false;
+    await loadClubData(clubId);
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "加入失败", icon: "none" });
+  } finally {
+    joiningClubId.value = null;
   }
 }
 
@@ -504,46 +602,6 @@ async function handleJoinClub() {
   } finally {
     joiningClub.value = false;
   }
-}
-
-async function handleCreateClub() {
-  if (!newClubName.value.trim()) {
-    uni.showToast({ title: "请输入跑团名称", icon: "none" });
-    return;
-  }
-  const uid = user.value?.id;
-  if (!uid) {
-    uni.showToast({ title: "请先登录", icon: "none" });
-    return;
-  }
-  creatingClub.value = true;
-  try {
-    await request("/api/team/clubs", "POST", {
-      owner_id: uid,
-      name: newClubName.value.trim(),
-      description: newClubDesc.value.trim(),
-      city: "上海"
-    });
-    uni.showToast({ title: "跑团创建成功！", icon: "success" });
-    showCreateModal.value = false;
-    newClubName.value = "";
-    newClubDesc.value = "";
-    await loadClubData();
-  } catch (e: any) {
-    uni.showToast({ title: "创建失败", icon: "none" });
-  } finally {
-    creatingClub.value = false;
-  }
-}
-
-function handleCopyInvite() {
-  if (!currentClub.value?.invite_code) return;
-  uni.setClipboardData({
-    data: currentClub.value.invite_code,
-    success: () => {
-      uni.showToast({ title: "跑团邀请码已复制", icon: "success" });
-    }
-  });
 }
 
 function goToCockpitPage() {
@@ -1731,10 +1789,289 @@ onPullDownRefresh(async () => {
   box-shadow: 0 8rpx 20rpx rgba(252, 76, 2, 0.3);
 }
 
-.unjoined-action-btn.secondary-create {
+.unjoined-action-btn.secondary-invite {
   background: #242429;
   color: #ffffff;
   border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.browse-all-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 14rpx;
+  padding: 8rpx 18rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  border-radius: 20rpx;
+}
+
+.browse-text {
+  font-size: 22rpx;
+  color: #a1a1aa;
+  font-weight: 500;
+}
+
+/* 平台所有跑团列表 */
+.all-clubs-sec {
+  margin-top: 24rpx;
+}
+
+.sec-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+
+.title-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.count-tag {
+  font-size: 20rpx;
+  background: rgba(252, 76, 2, 0.15);
+  color: #fc4c02;
+  padding: 2rpx 12rpx;
+  border-radius: 12rpx;
+  font-weight: bold;
+}
+
+.sec-hint {
+  font-size: 22rpx;
+  color: #71717a;
+}
+
+.empty-clubs-text {
+  text-align: center;
+  padding: 40rpx 20rpx;
+  font-size: 24rpx;
+  color: #71717a;
+}
+
+.clubs-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.club-select-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.csc-logo {
+  width: 90rpx;
+  height: 90rpx;
+  border-radius: 18rpx;
+  flex-shrink: 0;
+}
+
+.csc-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.csc-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
+}
+
+.csc-name {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csc-city {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  flex-shrink: 0;
+}
+
+.csc-desc {
+  font-size: 22rpx;
+  color: #71717a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 8rpx;
+  display: block;
+}
+
+.csc-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.csc-meta {
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.csc-meta.highlight {
+  color: #fc4c02;
+  font-weight: bold;
+}
+
+.csc-dot {
+  font-size: 20rpx;
+  color: #52525b;
+}
+
+.csc-join-btn {
+  background: #fc4c02;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: bold;
+  padding: 0 28rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  border-radius: 14rpx;
+  border: none;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* 弹窗中的所有跑团列表 */
+.modal-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.modal-clubs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.modal-club-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.modal-club-card.is-current {
+  border-color: rgba(252, 76, 2, 0.4);
+  background: rgba(252, 76, 2, 0.06);
+}
+
+.mcc-logo {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+}
+
+.mcc-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcc-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4rpx;
+}
+
+.mcc-name {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcc-city {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  flex-shrink: 0;
+}
+
+.mcc-desc {
+  font-size: 20rpx;
+  color: #71717a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6rpx;
+  display: block;
+}
+
+.mcc-meta {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.mcc-meta .highlight {
+  color: #fc4c02;
+  font-weight: bold;
+}
+
+.mcc-dot {
+  font-size: 20rpx;
+  color: #52525b;
+}
+
+.mcc-action {
+  flex-shrink: 0;
+  margin-left: 12rpx;
+}
+
+.mcc-current-tag {
+  font-size: 22rpx;
+  color: #fc4c02;
+  font-weight: bold;
+  padding: 6rpx 16rpx;
+  background: rgba(252, 76, 2, 0.15);
+  border-radius: 12rpx;
+}
+
+.mcc-switch-btn {
+  background: #27272a;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 500;
+  padding: 0 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  margin: 0;
+}
+
+.mcc-join-btn {
+  background: #fc4c02;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: bold;
+  padding: 0 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 12rpx;
+  border: none;
+  margin: 0;
 }
 
 .unjoined-highlights {

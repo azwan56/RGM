@@ -59,26 +59,21 @@
             <text class="club-desc-text">{{ userClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
           </view>
         </view>
-        <view v-if="userClub.invite_code" class="invite-copy-row" @click="handleCopyClubInvite">
-          <text class="invite-lbl">跑团专属邀请码: </text>
-          <text class="invite-code">{{ userClub.invite_code }}</text>
-          <text class="copy-action"> (点击复制)</text>
-        </view>
       </view>
 
       <!-- Unjoined Empty State -->
       <view v-else class="joined-club-box empty-club-box" style="padding: 28rpx; text-align: center;">
         <text style="font-size: 26rpx; color: #ffffff; font-weight: bold; display: block; margin-bottom: 8rpx;">尚未加入任何跑团</text>
-        <text style="font-size: 22rpx; color: #8e8e93; display: block; line-height: 1.5;">输入邀请码加入队友所在跑团，或一键创建属于您的全新跑团。</text>
+        <text style="font-size: 22rpx; color: #8e8e93; display: block; line-height: 1.5;">前往跑团大本营浏览平台跑团并选择加入，与队友共同训练打卡！</text>
       </view>
 
       <!-- Club Action Buttons -->
       <view class="club-btn-grid">
-        <button class="club-act-btn join-btn" @click="showJoinModal = true">
-          {{ userClub ? '➕ 加入其他跑团' : '➕ 输入邀请码加入' }}
+        <button class="club-act-btn join-btn" @click="goToTeamPage">
+          {{ userClub ? '🏃 查看与切换跑团' : '🏃 浏览与加入跑团' }}
         </button>
-        <button class="club-act-btn create-btn" @click="showCreateModal = true">
-          🏆 创建新跑团
+        <button class="club-act-btn create-btn" @click="showJoinModal = true">
+          🔑 邀请码加入
         </button>
       </view>
     </view>
@@ -842,44 +837,6 @@
       </view>
     </view>
 
-    <!-- ── Create Club Modal ── -->
-    <view v-if="showCreateModal" class="modal-mask" @click="showCreateModal = false" @touchmove.stop.prevent>
-      <view class="modal-content" @click.stop>
-        <view class="modal-header">
-          <text class="modal-title">创建新跑团</text>
-          <view class="close-hit" @click="showCreateModal = false">
-            <text class="close-btn">✕</text>
-          </view>
-        </view>
-
-        <view class="modal-body">
-          <text class="field-label">跑团名称</text>
-          <input
-            class="large-input"
-            type="text"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="例如: 世纪公园破风战队"
-            placeholder-class="placeholder-style"
-            v-model="newClubName"
-          />
-
-          <text class="field-label">跑团口号与简介</text>
-          <textarea
-            class="large-textarea"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="科学备赛，快乐奔跑..."
-            placeholder-class="placeholder-style"
-            v-model="newClubDesc"
-          />
-
-          <button class="large-primary-btn" :loading="creatingClub" @click="handleCreateClub">
-            立即创建跑团
-          </button>
-        </view>
-      </view>
-    </view>
 
     <!-- ── Edit Profile Modal (修改昵称与头像) ── -->
     <view v-if="showEditProfileModal" class="modal-mask" @click="showEditProfileModal = false" @touchmove.stop.prevent>
@@ -1125,12 +1082,8 @@ const unbinding = ref(false);
 const importingGarmin = ref(false);
 
 const showJoinModal = ref(false);
-const showCreateModal = ref(false);
 const inviteCodeInput = ref("");
-const newClubName = ref("");
-const newClubDesc = ref("");
 const joiningClub = ref(false);
-const creatingClub = ref(false);
 
 const targetDistance = ref(200);
 const weeklyTarget = ref(50);
@@ -1424,13 +1377,9 @@ async function handleUpdateRacePriority(raceIdOrName: string, priority: number) 
   }
 }
 
-function handleCopyClubInvite() {
-  if (!userClub.value?.invite_code) return;
-  uni.setClipboardData({
-    data: userClub.value.invite_code,
-    success: () => {
-      uni.showToast({ title: "跑团邀请码已复制", icon: "success" });
-    }
+function goToTeamPage() {
+  uni.switchTab({
+    url: "/pages/team/team",
   });
 }
 
@@ -1455,33 +1404,6 @@ async function handleJoinClub() {
     uni.showToast({ title: e.message || "加入失败，请核对邀请码", icon: "none" });
   } finally {
     joiningClub.value = false;
-  }
-}
-
-async function handleCreateClub() {
-  if (!newClubName.value.trim()) return;
-  const uid = user.value?.id;
-  if (!uid) {
-    uni.showToast({ title: "请先登录", icon: "none" });
-    return;
-  }
-  creatingClub.value = true;
-  try {
-    await request("/api/team/clubs", "POST", {
-      owner_id: uid,
-      name: newClubName.value.trim(),
-      description: newClubDesc.value.trim(),
-      city: "上海"
-    });
-    uni.showToast({ title: "跑团创建成功！", icon: "success" });
-    showCreateModal.value = false;
-    newClubName.value = "";
-    newClubDesc.value = "";
-    await loadProfileData();
-  } catch (e: any) {
-    uni.showToast({ title: "创建失败", icon: "none" });
-  } finally {
-    creatingClub.value = false;
   }
 }
 

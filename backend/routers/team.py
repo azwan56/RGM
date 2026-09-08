@@ -21,6 +21,11 @@ class JoinClubRequest(BaseModel):
     invite_code: str
     privacy_consent: Optional[bool] = True
 
+class JoinClubByIdRequest(BaseModel):
+    user_id: str
+    club_id: str
+    privacy_consent: Optional[bool] = True
+
 class UpdateMemberRoleRequest(BaseModel):
     operator_uid: str
     target_uid: str
@@ -37,22 +42,43 @@ class CreateClubEventRequest(BaseModel):
 
 @router.get("/my-clubs/{uid}")
 def get_user_clubs(uid: str):
-    """Returns all running clubs the user has joined."""
+    """Returns all running clubs the user has joined (invite_code hidden)."""
     clubs = LocalStore.get_user_clubs(uid)
+    for c in clubs:
+        c.pop("invite_code", None)
+    return {"clubs": clubs}
+
+
+@router.get("/all-clubs")
+def get_all_public_clubs(user_id: Optional[str] = None):
+    """Returns all available clubs in the platform for runners to browse and join."""
+    clubs = LocalStore.list_public_clubs(user_id=user_id)
     return {"clubs": clubs}
 
 
 @router.post("/clubs")
 def create_club(req: CreateClubRequest):
-    """Creates a new running club and assigns the creator as the Owner/President."""
-    club = LocalStore.create_club(
-        owner_id=req.owner_id,
-        name=req.name,
-        description=req.description,
-        city=req.city or "上海",
-        logo_url=req.logo_url
+    """Restricts club creation to Super Admin only."""
+    raise HTTPException(
+        status_code=403,
+        detail="创建跑团功能已交由平台超级管理员统一管理与审核，普通跑者请联系超级管理员创建并指定团长！"
     )
-    return {"message": f"恭喜！跑团【{req.name}】创建成功！", "club": club}
+
+
+@router.post("/join-club")
+def join_club_by_id(req: JoinClubByIdRequest):
+    """Allows runner to select and join an existing club directly by club_id."""
+    club = LocalStore.join_club_by_id(
+        user_id=req.user_id,
+        club_id=req.club_id,
+        privacy_consent=req.privacy_consent if req.privacy_consent is not None else True
+    )
+    if not club:
+        raise HTTPException(status_code=404, detail="所选跑团不存在或已解散！")
+
+    sanitized = dict(club)
+    sanitized.pop("invite_code", None)
+    return {"message": f"成功加入跑团【{sanitized['name']}】！", "club": sanitized}
 
 
 @router.post("/join")
@@ -66,7 +92,9 @@ def join_club_by_invite(req: JoinClubRequest):
     if not club:
         raise HTTPException(status_code=404, detail="无效的邀请码，请向团长核对后重新输入！")
 
-    return {"message": f"成功加入跑团【{club['name']}】！", "club": club}
+    sanitized = dict(club)
+    sanitized.pop("invite_code", None)
+    return {"message": f"成功加入跑团【{sanitized['name']}】！", "club": sanitized}
 
 
 @router.get("/{club_id}/dashboard")
@@ -75,6 +103,9 @@ def get_club_dashboard(club_id: str):
     club = LocalStore.get_club(club_id)
     if not club:
         raise HTTPException(status_code=404, detail="跑团不存在")
+
+    club = dict(club)
+    club.pop("invite_code", None)
 
     members = LocalStore.get_club_members(club_id)
     events = LocalStore.get_club_events(club_id)

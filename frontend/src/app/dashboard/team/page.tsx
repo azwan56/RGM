@@ -60,21 +60,21 @@ export default function TeamPage() {
 
   // Modals & form states
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [showCreateClubModal, setShowCreateClubModal] = useState(false);
+  const [showAllClubsModal, setShowAllClubsModal] = useState(false);
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
   const [selectedStudentForReport, setSelectedStudentForReport] = useState<any | null>(null);
 
+  const [allClubs, setAllClubs] = useState<any[]>([]);
+  const [loadingAllClubs, setLoadingAllClubs] = useState(false);
+  const [joiningClubId, setJoiningClubId] = useState<string | null>(null);
+
   const [inviteCodeInput, setInviteCodeInput] = useState("");
-  const [newClubName, setNewClubName] = useState("");
-  const [newClubDesc, setNewClubDesc] = useState("");
-  const [newClubCity, setNewClubCity] = useState("上海");
 
   const [eventTitle, setEventTitle] = useState("");
   const [eventTargetKm, setEventTargetKm] = useState(200);
   const [eventRules, setEventRules] = useState("");
 
-  const [copiedCode, setCopiedCode] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -83,11 +83,46 @@ export default function TeamPage() {
       if (u) {
         setUser(u);
         loadUserClubs(u.id);
+        loadAllClubs(u.id);
       } else {
         router.push("/login");
       }
     });
   }, [router]);
+
+  async function loadAllClubs(uid?: string) {
+    const effUid = uid || user?.id;
+    setLoadingAllClubs(true);
+    try {
+      const res = await apiClient.get(`/api/team/all-clubs${effUid ? `?user_id=${effUid}` : ""}`);
+      setAllClubs(res.data?.clubs || []);
+    } catch (e) {
+      console.error("Fetch all clubs error:", e);
+    } finally {
+      setLoadingAllClubs(false);
+    }
+  }
+
+  async function handleJoinClubDirect(clubId: string) {
+    if (!user?.id) return;
+    setJoiningClubId(clubId);
+    try {
+      const res = await apiClient.post("/api/team/join-club", {
+        user_id: user.id,
+        club_id: clubId,
+        privacy_consent: true,
+      });
+      alert(res.data?.message || "成功加入跑团！");
+      setShowAllClubsModal(false);
+      setShowJoinModal(false);
+      await loadUserClubs(user.id);
+      await loadAllClubs(user.id);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "加入跑团失败，请重试！");
+    } finally {
+      setJoiningClubId(null);
+    }
+  }
 
   async function loadUserClubs(uid: string) {
     setLoading(true);
@@ -146,13 +181,6 @@ export default function TeamPage() {
     setCurrentClub(club);
     setCurrentRole(club.role || "member");
     loadClubDetails(club.id);
-  }
-
-  function handleCopyInviteCode() {
-    if (!currentClub?.invite_code) return;
-    navigator.clipboard.writeText(currentClub.invite_code);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
   }
 
   async function handleToggleLike(activityId: string) {
@@ -237,33 +265,15 @@ export default function TeamPage() {
       const res = await apiClient.post("/api/team/join", {
         user_id: user.id,
         invite_code: inviteCodeInput.trim().toUpperCase(),
+        privacy_consent: true,
       });
-      alert(res.data.message || "加入成功！");
+      alert(res.data.message || "加入跑团成功！");
       setShowJoinModal(false);
       setInviteCodeInput("");
-      loadUserClubs(user.id);
+      await loadUserClubs(user.id);
+      await loadAllClubs(user.id);
     } catch (err: any) {
       alert(err.response?.data?.detail || "加入失败，请核对邀请码！");
-    }
-  }
-
-  async function handleCreateClub(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newClubName.trim() || !user?.id) return;
-    try {
-      const res = await apiClient.post("/api/team/clubs", {
-        owner_id: user.id,
-        name: newClubName.trim(),
-        description: newClubDesc.trim(),
-        city: newClubCity.trim(),
-      });
-      alert(res.data.message || "跑团创建成功！");
-      setShowCreateClubModal(false);
-      setNewClubName("");
-      setNewClubDesc("");
-      loadUserClubs(user.id);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || "创建失败");
     }
   }
 
@@ -381,33 +391,100 @@ export default function TeamPage() {
           <p>跑团数据加载中...</p>
         </div>
       ) : !currentClub ? (
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-8">
-          <div className="bg-gradient-to-b from-[#18181c] to-[#121215] border border-white/10 rounded-3xl p-8 sm:p-12 text-center shadow-2xl">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 text-3xl mb-6">
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
+          <div className="bg-gradient-to-b from-[#18181c] to-[#121215] border border-white/10 rounded-3xl p-8 sm:p-10 text-center shadow-2xl">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 text-3xl mb-4">
               🏃‍♂️
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white mb-3">
-              您尚未加入任何跑团
+            <h1 className="text-2xl sm:text-3xl font-black text-white mb-2">
+              欢迎来到跑团中心
             </h1>
-            <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed mb-8">
-              加入跑团与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控；或者立即创建属于您的专属跑团！
+            <p className="text-sm text-zinc-400 max-w-xl mx-auto leading-relaxed mb-6">
+              请在下方浏览平台所有已创建跑团并选择加入，与队友共同参加月度跑量挑战、查看英雄榜与教练负荷监控！
             </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="flex items-center justify-center">
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-[#FC4C02]/25"
+                className="inline-flex items-center gap-2 px-5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition"
               >
-                <UserPlus className="w-4 h-4" />
-                输入邀请码加入跑团
-              </button>
-              <button
-                onClick={() => setShowCreateClubModal(true)}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-sm font-bold transition"
-              >
-                <Plus className="w-4 h-4" />
-                创建全新跑团
+                <UserPlus className="w-3.5 h-3.5 text-[#FC4C02]" />
+                已有邀请码？点此输入邀请码加入
               </button>
             </div>
+          </div>
+
+          {/* All Created Clubs Section */}
+          <div className="space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <span className="text-lg font-black text-white">🏆 平台所有跑团</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
+                  {allClubs.length} 个跑团
+                </span>
+              </div>
+              <span className="text-xs text-zinc-400">选择您感兴趣的跑团，点击即可一键加入开启训练</span>
+            </div>
+
+            {loadingAllClubs ? (
+              <div className="py-12 text-center text-xs text-zinc-500">正在加载跑团列表...</div>
+            ) : allClubs.length === 0 ? (
+              <div className="bg-[#141416] border border-white/5 rounded-3xl p-12 text-center text-zinc-400">
+                平台暂无已创建跑团，请联系平台超级管理员创建！
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {allClubs.map((club) => (
+                  <div
+                    key={club.id}
+                    className="bg-[#141416] hover:bg-[#18181c] border border-white/10 hover:border-[#FC4C02]/40 rounded-3xl p-6 transition flex flex-col justify-between shadow-xl"
+                  >
+                    <div>
+                      <div className="flex items-start gap-4 mb-4">
+                        <img
+                          src={club.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                          alt={club.name}
+                          className="w-16 h-16 rounded-2xl object-cover border-2 border-[#FC4C02]/30 shrink-0 shadow-md"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-lg font-black text-white truncate">{club.name}</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
+                              📍 {club.city || "上海"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-400 mt-1.5 line-clamp-2 leading-relaxed">
+                            {club.description || "科学耐力训练 · PB 突破与健康长久奔跑。"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 py-3 px-3.5 bg-black/30 rounded-2xl border border-white/5 text-xs text-zinc-400 mb-5">
+                        <div>
+                          <span className="text-zinc-500">团长: </span>
+                          <span className="text-white font-semibold">{club.owner_name || "平台指定"}</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div>
+                          <span className="text-zinc-500">成员: </span>
+                          <span className="text-[#FC4C02] font-bold">{club.member_count || 1} 人</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        onClick={() => handleJoinClubDirect(club.id)}
+                        disabled={joiningClubId === club.id}
+                        className="w-full py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20 flex items-center justify-center gap-2"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        {joiningClubId === club.id ? "正在加入..." : "选择参加此跑团"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Feature Highlights Grid */}
@@ -485,18 +562,6 @@ export default function TeamPage() {
                 </p>
                 <div className="flex items-center gap-3 mt-2">
                   <span className="text-[11px] text-zinc-500">📍 {currentClub.city || "上海"}</span>
-                  {currentClub.invite_code && (
-                    <>
-                      <span className="text-[11px] text-zinc-500">·</span>
-                      <button
-                        onClick={handleCopyInviteCode}
-                        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-0.5 rounded-lg transition"
-                      >
-                        专属邀请码: <span className="text-[#FC4C02] font-mono font-bold">{currentClub.invite_code}</span>
-                        {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-400" />}
-                      </button>
-                    </>
-                  )}
                 </div>
               </div>
             </div>
@@ -504,18 +569,18 @@ export default function TeamPage() {
             {/* Quick Action Buttons */}
             <div className="flex items-center gap-3 flex-wrap">
               <button
+                onClick={() => setShowAllClubsModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20"
+              >
+                <Users className="w-4 h-4" />
+                浏览全部跑团 ({allClubs.length})
+              </button>
+              <button
                 onClick={() => setShowJoinModal(true)}
                 className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition shadow-sm"
               >
                 <UserPlus className="w-4 h-4 text-[#FC4C02]" />
-                加入跑团
-              </button>
-              <button
-                onClick={() => setShowCreateClubModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20"
-              >
-                <Plus className="w-4 h-4" />
-                创建跑团
+                输入邀请码
               </button>
             </div>
           </div>
@@ -1472,59 +1537,98 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* Create Club Modal */}
-      {showCreateClubModal && (
+      {/* All Clubs Modal (Browse and Select/Join) */}
+      {showAllClubsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#151518] border border-white/10 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-black text-white">创建新跑团</h3>
-            <form onSubmit={handleCreateClub} className="space-y-3">
+          <div className="bg-[#151518] border border-white/10 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div>
-                <label className="text-xs text-zinc-400 block mb-1">跑团名称</label>
-                <input
-                  type="text"
-                  required
-                  value={newClubName}
-                  onChange={(e) => setNewClubName(e.target.value)}
-                  placeholder="例如: 世纪公园破风战队"
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#FC4C02]"
-                />
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  🏆 平台所有跑团 ({allClubs.length})
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">浏览平台已创建跑团，点击即可切换查看或加入新跑团</p>
               </div>
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1">所在城市</label>
-                <input
-                  type="text"
-                  value={newClubCity}
-                  onChange={(e) => setNewClubCity(e.target.value)}
-                  placeholder="上海"
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1">跑团口号与简介</label>
-                <textarea
-                  rows={3}
-                  value={newClubDesc}
-                  onChange={(e) => setNewClubDesc(e.target.value)}
-                  placeholder="科学备赛，快乐奔跑..."
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2 text-xs text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateClubModal(false)}
-                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl text-xs font-bold transition"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20"
-                >
-                  创建跑团
-                </button>
-              </div>
-            </form>
+              <button
+                onClick={() => setShowAllClubsModal(false)}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-3.5 pr-1 flex-1">
+              {allClubs.map((club) => {
+                const isCurrent = currentClub?.id === club.id;
+                const isMember = clubs.some((c) => c.id === club.id) || club.is_member;
+
+                return (
+                  <div
+                    key={club.id}
+                    className={`border rounded-2xl p-4 flex items-center justify-between gap-4 transition ${
+                      isCurrent
+                        ? "bg-[#FC4C02]/10 border-[#FC4C02]/40"
+                        : "bg-[#1c1c20] border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <img
+                        src={club.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                        alt={club.name}
+                        className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-white truncate">{club.name}</h4>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
+                            {club.city || "上海"}
+                          </span>
+                          {isCurrent && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FC4C02] text-white">
+                              当前查看
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-400 truncate mt-0.5 max-w-md">
+                          {club.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
+                        </p>
+                        <div className="flex items-center gap-3 text-[11px] text-zinc-500 mt-1">
+                          <span>团长: {club.owner_name || "平台指定"}</span>
+                          <span>·</span>
+                          <span className="text-zinc-400">{club.member_count || 1} 位跑者</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <span className="text-xs text-[#FC4C02] font-bold px-3 py-1.5 bg-[#FC4C02]/10 rounded-xl">
+                          正在查看
+                        </span>
+                      ) : isMember ? (
+                        <button
+                          onClick={() => {
+                            const target = clubs.find((c) => c.id === club.id) || club;
+                            handleSwitchClub(target);
+                            setShowAllClubsModal(false);
+                          }}
+                          className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition"
+                        >
+                          切换查看
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleJoinClubDirect(club.id)}
+                          disabled={joiningClubId === club.id}
+                          className="px-4 py-2 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-xl text-xs font-bold transition shadow-md shadow-[#FC4C02]/20"
+                        >
+                          {joiningClubId === club.id ? "加入中..." : "+ 参加此跑团"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
