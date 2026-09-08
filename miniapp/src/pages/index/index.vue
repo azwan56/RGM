@@ -333,32 +333,27 @@
       </view>
 
       <view class="health-grid-4">
-        <!-- 1. 睡眠恢复 (Garmin) 或 睡眠与HRV (COROS) -->
+        <!-- 1. 睡眠恢复 (Garmin) 或 夜间睡眠 HRV (COROS) -->
         <view class="health-tile">
           <view class="tile-top">
-            <text class="tile-icon">🛏️</text>
-            <text class="tile-name">{{ (isCorosOnly && dashboardData?.today_health?.sleep_score == null && dashboardData?.today_health?.hrv_ms != null) ? '睡眠 / 夜间HRV' : '睡眠恢复' }}</text>
+            <text class="tile-icon">{{ isCorosOnly ? '🫀' : '🛏️' }}</text>
+            <text class="tile-name">{{ isCorosOnly ? '夜间睡眠 HRV' : '睡眠恢复' }}</text>
           </view>
           <view class="tile-val-row">
-            <template v-if="dashboardData?.today_health?.sleep_score != null">
-              <text class="tile-main-val">{{ dashboardData.today_health.sleep_score }}</text>
-              <text class="tile-unit">分</text>
-            </template>
-            <template v-else-if="isCorosOnly && dashboardData?.today_health?.hrv_ms != null">
-              <text class="tile-main-val text-cyan">{{ dashboardData.today_health.hrv_ms }}</text>
-              <text class="tile-unit">ms</text>
+            <template v-if="!isCorosOnly">
+              <text class="tile-main-val">{{ dashboardData?.today_health?.sleep_score != null ? dashboardData.today_health.sleep_score : '—' }}</text>
+              <text class="tile-unit" v-if="dashboardData?.today_health?.sleep_score != null">分</text>
             </template>
             <template v-else>
-              <text class="tile-main-val">—</text>
+              <text class="tile-main-val text-cyan">{{ dashboardData?.today_health?.hrv_ms != null ? dashboardData.today_health.hrv_ms : '—' }}</text>
+              <text class="tile-unit" v-if="dashboardData?.today_health?.hrv_ms != null">ms</text>
             </template>
           </view>
           <text class="tile-sub">
             {{
-              dashboardData?.today_health?.sleep_duration_text
-                ? ('时长 ' + dashboardData.today_health.sleep_duration_text)
-                : (isCorosOnly && dashboardData?.today_health?.hrv_ms != null)
-                  ? ('夜间睡眠HRV · 基线 ' + (dashboardData?.today_health?.hrv_weekly_avg || 66) + ' ms')
-                  : (isCorosOnly ? '需高驰App端查看' : '未同步睡眠')
+              !isCorosOnly
+                ? (dashboardData?.today_health?.sleep_duration_text ? ('时长 ' + dashboardData.today_health.sleep_duration_text) : '未同步睡眠')
+                : (dashboardData?.today_health?.hrv_ms != null ? corosSleepScoreText : '未测得夜间HRV')
             }}
           </text>
         </view>
@@ -421,7 +416,7 @@
         <view class="health-tile" v-else>
           <view class="tile-top">
             <text class="tile-icon">🫁</text>
-            <text class="tile-name">最大摄氧量</text>
+            <text class="tile-name">最大摄氧量 (VO2Max)</text>
           </view>
           <view class="tile-val-row">
             <text class="tile-main-val text-cyan">{{ currentVo2Max != null ? currentVo2Max : '—' }}</text>
@@ -1074,6 +1069,25 @@ const currentVo2Max = computed(() => {
     user.value?.vo2max ??
     null
   );
+});
+
+const corosSleepScore = computed(() => {
+  const hrv = Number(dashboardData.value?.today_health?.hrv_ms);
+  const base = Number(dashboardData.value?.today_health?.hrv_weekly_avg || 66);
+  if (!hrv || !base || base <= 0) return null;
+  const ratio = hrv / base;
+  let score = Math.round(85 * Math.pow(ratio, 0.7));
+  return Math.max(45, Math.min(99, score));
+});
+
+const corosSleepScoreText = computed(() => {
+  const score = corosSleepScore.value;
+  const base = dashboardData.value?.today_health?.hrv_weekly_avg || 66;
+  if (score === null) return `基线 ${base} ms · 夜间自主神经`;
+  if (score >= 88) return `基线 ${base}ms · 推算恢复 ${score}分 (优)`;
+  if (score >= 75) return `基线 ${base}ms · 推算恢复 ${score}分 (良)`;
+  if (score >= 60) return `基线 ${base}ms · 推算恢复 ${score}分 (平)`;
+  return `基线 ${base}ms · 推算恢复 ${score}分 (疲)`;
 });
 
 function goToCoachPage() {
