@@ -17,7 +17,9 @@ import {
   X,
   Building,
   AlertCircle,
-  Copy
+  Copy,
+  Upload,
+  Image as ImageIcon
 } from "lucide-react";
 
 export default function AdminPage() {
@@ -59,6 +61,52 @@ export default function AdminPage() {
   const [actionSuccessMsg, setActionSuccessMsg] = useState("");
   const [actionErrorMsg, setActionErrorMsg] = useState("");
   const [copiedCode, setCopiedCode] = useState("");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadLogoError, setUploadLogoError] = useState("");
+
+  async function handleFileUpload(file: File, isEdit: boolean) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("请选择有效的图片文件（JPG, PNG, WebP 等）");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("图片文件大小不能超过 10MB");
+      return;
+    }
+
+    setUploadingLogo(true);
+    setUploadLogoError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "multipart/form-data",
+      };
+      if (adminToken) {
+        headers["Authorization"] = `Bearer ${adminToken}`;
+      }
+
+      const res = await axios.post("/api/admin/upload-club-logo", formData, { headers });
+      const uploadedUrl = res.data?.logo_url || res.data?.url;
+      if (uploadedUrl) {
+        if (isEdit) {
+          setEditClubLogo(uploadedUrl);
+        } else {
+          setNewClubLogo(uploadedUrl);
+        }
+      }
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      const msg = err.response?.data?.detail || "上传图片失败，请稍后重试";
+      setUploadLogoError(msg);
+      alert(msg);
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
 
   useEffect(() => {
     const savedToken = localStorage.getItem("rgm_admin_token");
@@ -572,14 +620,68 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">跑团 Logo 图片链接 (选填)</label>
-                  <input
-                    type="url"
-                    value={newClubLogo}
-                    onChange={(e) => setNewClubLogo(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02]"
-                  />
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">跑团 Logo 图片</label>
+                  
+                  <div className="flex items-center gap-3.5 p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <div className="w-14 h-14 rounded-xl overflow-hidden bg-black/40 border border-white/10 flex-shrink-0 flex items-center justify-center">
+                      {newClubLogo ? (
+                        <img
+                          src={newClubLogo}
+                          alt="Logo Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-2xl">🏃</span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <label className="cursor-pointer px-3 py-1.5 bg-[#FC4C02] hover:bg-[#e04302] text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5">
+                          {uploadingLogo ? (
+                            <span>上传中...</span>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>本地上传图片</span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={uploadingLogo}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleFileUpload(file, false);
+                            }}
+                          />
+                        </label>
+                        {newClubLogo && (
+                          <button
+                            type="button"
+                            onClick={() => setNewClubLogo("")}
+                            className="px-2 py-1.5 text-xs text-zinc-400 hover:text-red-400 hover:bg-white/5 rounded-lg transition"
+                          >
+                            清除
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1.5">
+                        支持 JPG、PNG、WebP，本地一键上传
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <input
+                      type="url"
+                      value={newClubLogo}
+                      onChange={(e) => setNewClubLogo(e.target.value)}
+                      placeholder="或直接粘贴图片 URL (选填)"
+                      className="w-full px-3.5 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-3 pt-2">
@@ -666,13 +768,68 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Logo 图片 URL</label>
-                  <input
-                    type="url"
-                    value={editClubLogo}
-                    onChange={(e) => setNewClubLogo(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                  />
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">跑团 Logo 图片</label>
+                  
+                  <div className="flex items-center gap-3.5 p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <div className="w-14 h-14 rounded-xl overflow-hidden bg-black/40 border border-white/10 flex-shrink-0 flex items-center justify-center">
+                      {editClubLogo ? (
+                        <img
+                          src={editClubLogo}
+                          alt="Logo Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-2xl">🏃</span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <label className="cursor-pointer px-3 py-1.5 bg-[#FC4C02] hover:bg-[#e04302] text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5">
+                          {uploadingLogo ? (
+                            <span>上传中...</span>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>本地上传图片</span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={uploadingLogo}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleFileUpload(file, true);
+                            }}
+                          />
+                        </label>
+                        {editClubLogo && (
+                          <button
+                            type="button"
+                            onClick={() => setEditClubLogo("")}
+                            className="px-2 py-1.5 text-xs text-zinc-400 hover:text-red-400 hover:bg-white/5 rounded-lg transition"
+                          >
+                            清除
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1.5">
+                        支持从本地选择图片文件直接上传
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <input
+                      type="url"
+                      value={editClubLogo}
+                      onChange={(e) => setEditClubLogo(e.target.value)}
+                      placeholder="或直接粘贴图片 URL (选填)"
+                      className="w-full px-3.5 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-3 pt-2">

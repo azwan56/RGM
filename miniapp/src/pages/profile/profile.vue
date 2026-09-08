@@ -1499,7 +1499,7 @@ async function handleUpdateRacePriority(raceIdOrName: string, priority: number) 
 
 function goToTeamPage() {
   uni.switchTab({
-    url: "/pages/team/team",
+    url: "/pages/team/rank",
   });
 }
 

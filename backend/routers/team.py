@@ -1,7 +1,10 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
+import os
+import time
+import hashlib
 from datetime import datetime, date
 from db import supabase_admin
 from utils.local_store import LocalStore
@@ -294,3 +297,37 @@ def legacy_leaderboard(team_id: Optional[str] = None):
     club_id = team_id or "club_rgm_flagship"
     board = LocalStore.get_club_leaderboard(club_id, "month")
     return board
+
+
+@router.post("/upload-logo")
+async def upload_team_logo(file: UploadFile = File(...)):
+    """Uploads a club logo image and returns the public URL."""
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
+    orig_name = file.filename or "club_logo.jpg"
+    ext = os.path.splitext(orig_name)[1].lower()
+    if not ext or ext not in allowed_exts:
+        ext = ".jpg"
+
+    avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+
+    random_suffix = hashlib.md5(f"{time.time()}_{orig_name}".encode()).hexdigest()[:8]
+    filename = f"club_logo_{int(time.time())}_{random_suffix}{ext}"
+    filepath = os.path.join(avatars_dir, filename)
+
+    try:
+        contents = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"[team] Failed to save club logo: {e}")
+        raise HTTPException(status_code=500, detail="保存跑团Logo图片失败")
+
+    logo_url = f"https://rgm.vanpower.net/api/avatars/{filename}"
+    return {
+        "success": True,
+        "logo_url": logo_url,
+        "url": logo_url,
+        "message": "跑团 Logo 上传成功！"
+    }
+

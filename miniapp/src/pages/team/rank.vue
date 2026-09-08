@@ -2,13 +2,13 @@
   <view class="rank-page">
     <!-- ── 顶部导航栏 / 跑团与榜单快速切换胶囊 ── -->
     <view class="top-nav-capsule">
-      <view class="nav-segment" @click="goToTeamPage">
-        <text class="nav-icon">‹ 🏃</text>
-        <text class="nav-text">跑团大本营</text>
-      </view>
       <view class="nav-segment active">
         <text class="nav-icon">🥇</text>
         <text class="nav-text">英雄榜与动态</text>
+      </view>
+      <view class="nav-segment" @click="goToTeamPage">
+        <text class="nav-icon">🏃</text>
+        <text class="nav-text">跑团大本营 ›</text>
       </view>
     </view>
 
@@ -293,7 +293,7 @@ const commentTextInput = ref("");
 const submittingComment = ref(false);
 
 function goToTeamPage() {
-  uni.switchTab({
+  uni.navigateTo({
     url: "/pages/team/team",
   });
 }

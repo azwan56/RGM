@@ -2,7 +2,8 @@ import os
 import time
 import jwt
 import logging
-from fastapi import APIRouter, HTTPException, Header, Depends
+import hashlib
+from fastapi import APIRouter, HTTPException, Header, Depends, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from config import settings
@@ -165,3 +166,40 @@ def get_users_for_admin(admin_info: Dict[str, Any] = Depends(verify_super_admin)
     """Returns all registered users in the platform for designating club owners."""
     users = LocalStore.list_all_users_for_admin()
     return {"users": users}
+
+
+@router.post("/upload-club-logo")
+async def upload_club_logo(file: UploadFile = File(...)):
+    """
+    Uploads a club logo image from local disk, saves it to persistent static storage,
+    and returns the public URL.
+    """
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
+    orig_name = file.filename or "club_logo.jpg"
+    ext = os.path.splitext(orig_name)[1].lower()
+    if not ext or ext not in allowed_exts:
+        ext = ".jpg"
+
+    avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+
+    random_suffix = hashlib.md5(f"{time.time()}_{orig_name}".encode()).hexdigest()[:8]
+    filename = f"club_logo_{int(time.time())}_{random_suffix}{ext}"
+    filepath = os.path.join(avatars_dir, filename)
+
+    try:
+        contents = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"[admin] Failed to save club logo: {e}")
+        raise HTTPException(status_code=500, detail="保存跑团Logo图片失败")
+
+    logo_url = f"https://rgm.vanpower.net/api/avatars/{filename}"
+    return {
+        "success": True,
+        "logo_url": logo_url,
+        "url": logo_url,
+        "message": "跑团 Logo 上传成功！"
+    }
+
