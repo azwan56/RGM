@@ -2,13 +2,28 @@
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
 import { checkAndAutoLogin } from "./utils/api";
 
+function applyTabBarStyle() {
+  try {
+    uni.setTabBarStyle({
+      color: "#d4d4d8",
+      selectedColor: "#fc4c02",
+      backgroundColor: "#121214",
+      borderStyle: "black"
+    });
+  } catch (e) {
+    // Ignore if running in non-tabBar context
+  }
+}
+
 onLaunch(() => {
   console.log("RGM MiniApp Launched");
+  applyTabBarStyle();
   checkAndAutoLogin();
 });
 
 onShow(() => {
   console.log("App Show");
+  applyTabBarStyle();
 });
 
 onHide(() => {
