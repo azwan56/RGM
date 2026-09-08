@@ -185,3 +185,83 @@ def test_coros_auth_api_routes(monkeypatch):
     # Cleanup
     LocalStore.delete_profile(test_uid)
 
+
+def test_coros_fetch_profile_and_daily_health(monkeypatch):
+    adapter = CorosAdapter("test@coros.com", "pass")
+    adapter.access_token = "mock_token"
+    adapter.user_id = "468893544451424256"
+
+    mock_account_resp = {
+        "result": "0000",
+        "data": {
+            "nickname": "高九凯",
+            "headPic": "https://oss.coros.com/avatar.jpg",
+            "sex": 0,
+            "stature": 168.0,
+            "weight": 60.0,
+            "birthday": 19900622,
+            "rhr": 46,
+            "maxHr": 187,
+            "zoneData": {
+                "lthr": 168,
+                "ltsp": 236
+            }
+        }
+    }
+
+    mock_analyse_resp = {
+        "result": "0000",
+        "data": {
+            "dayList": [
+                {"happenDay": 20260906, "avgSleepHrv": 69, "sleepHrvBase": 66, "vo2max": 61, "tib": -22.0},
+                {"happenDay": 20260907, "avgSleepHrv": 48, "sleepHrvBase": 66, "tib": -1.0}
+            ],
+            "t7dayList": [
+                {"happenDay": 20260907, "avgSleepHrv": 48, "vo2max": 61}
+            ]
+        }
+    }
+
+    class MockResponse:
+        def __init__(self, json_data, status_code=200):
+            self._json = json_data
+            self.status_code = status_code
+            self.text = json.dumps(json_data)
+        def json(self):
+            return self._json
+
+    def mock_get(url, *args, **kwargs):
+        if "account/query" in url:
+            return MockResponse(mock_account_resp)
+        elif "analyse/query" in url:
+            return MockResponse(mock_analyse_resp)
+        return MockResponse({"result": "0000"})
+
+    import requests
+    monkeypatch.setattr(requests, "get", mock_get)
+
+    # Test profile info
+    info = adapter.fetch_user_profile_info()
+    assert info["display_name"] == "高九凯"
+    assert info["gender"] == "male"
+    assert info["height_cm"] == 168.0
+    assert info["weight_kg"] == 60.0
+    assert info["date_of_birth"] == "1990-06-22"
+    assert info["resting_heart_rate"] == 46
+    assert info["max_heart_rate"] == 187
+    assert info["vo2max"] == 61.0
+
+    # Test daily health metrics on 2026-09-07
+    h_07 = adapter.fetch_daily_health_metrics("2026-09-07")
+    assert h_07["resting_heart_rate"] == 46
+    assert h_07["hrv_last_night_avg"] == 48
+    assert h_07["hrv_weekly_avg"] == 66
+    assert h_07["vo2_max"] == 61.0
+
+    # Test daily health metrics on 2026-09-06
+    h_06 = adapter.fetch_daily_health_metrics("2026-09-06")
+    assert h_06["resting_heart_rate"] == 46
+    assert h_06["hrv_last_night_avg"] == 69
+    assert h_06["vo2_max"] == 61.0
+
+

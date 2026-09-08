@@ -120,19 +120,19 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                             profile_updates["avatar_url"] = c_info["avatar_url"]
                         if c_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
                             profile_updates["display_name"] = c_info["display_name"]
-                        if c_info.get("weight_kg") and not user.get("weight_kg") and not user.get("weight"):
+                        if c_info.get("weight_kg"):
                             profile_updates["weight_kg"] = c_info["weight_kg"]
-                        if c_info.get("height_cm") and not user.get("height_cm") and not user.get("height"):
+                        if c_info.get("height_cm"):
                             profile_updates["height_cm"] = c_info["height_cm"]
-                        if c_info.get("date_of_birth") and not user.get("date_of_birth"):
+                        if c_info.get("date_of_birth"):
                             profile_updates["date_of_birth"] = c_info["date_of_birth"]
-                        if c_info.get("gender") and not user.get("gender"):
+                        if c_info.get("gender"):
                             profile_updates["gender"] = c_info["gender"]
-                        if c_info.get("vo2max") and not user.get("vo2max"):
+                        if c_info.get("vo2max"):
                             profile_updates["vo2max"] = c_info["vo2max"]
-                        if c_info.get("max_heart_rate") and (not user.get("max_heart_rate") or user.get("max_heart_rate") == 190):
+                        if c_info.get("max_heart_rate"):
                             profile_updates["max_heart_rate"] = c_info["max_heart_rate"]
-                        if c_info.get("resting_heart_rate") and (not user.get("resting_heart_rate") or user.get("resting_heart_rate") == 56):
+                        if c_info.get("resting_heart_rate"):
                             profile_updates["resting_heart_rate"] = c_info["resting_heart_rate"]
                     except Exception as pe:
                         logger.warning(f"[sync] COROS profile fetch error: {pe}")
@@ -147,7 +147,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         d = (date.today() - timedelta(days=i)).isoformat()
                         try:
                             h_metrics = coros_adapter.fetch_daily_health_metrics(d)
-                            if h_metrics and any(h_metrics.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "vo2_max"]):
+                            if h_metrics and any(h_metrics.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "vo2_max", "hrv_last_night_avg"]):
                                 LocalStore.upsert_daily_health(uid, h_metrics)
                                 synced_health = True
                         except Exception as he:

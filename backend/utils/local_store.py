@@ -963,6 +963,22 @@ class LocalStore:
                         d["sleep_score"] = s_row["sleep_score"]
                         d["sleep_duration_seconds"] = s_row["sleep_duration_seconds"]
                         d["sleep_duration_hours"] = s_row["sleep_duration_hours"]
+
+                # If hrv_last_night_avg is missing in the latest row, fallback to most recent night HRV
+                if d.get("hrv_last_night_avg") is None:
+                    cursor.execute("""
+                        SELECT hrv_last_night_avg, hrv_weekly_avg, hrv_status
+                        FROM daily_health 
+                        WHERE user_id = ? AND hrv_last_night_avg IS NOT NULL 
+                        ORDER BY date DESC LIMIT 1
+                    """, (uid,))
+                    h_row = cursor.fetchone()
+                    if h_row:
+                        d["hrv_last_night_avg"] = h_row["hrv_last_night_avg"]
+                        if d.get("hrv_weekly_avg") is None:
+                            d["hrv_weekly_avg"] = h_row["hrv_weekly_avg"]
+                        if not d.get("hrv_status"):
+                            d["hrv_status"] = h_row["hrv_status"]
                 return d
             # 2. If all rows are empty, return the most recent row
             cursor.execute("SELECT * FROM daily_health WHERE user_id = ? ORDER BY date DESC LIMIT 1", (uid,))

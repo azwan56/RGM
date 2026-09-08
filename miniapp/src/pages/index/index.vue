@@ -333,17 +333,34 @@
       </view>
 
       <view class="health-grid-4">
-        <!-- 1. 睡眠恢复 -->
+        <!-- 1. 睡眠恢复 (Garmin) 或 睡眠与HRV (COROS) -->
         <view class="health-tile">
           <view class="tile-top">
             <text class="tile-icon">🛏️</text>
-            <text class="tile-name">睡眠恢复</text>
+            <text class="tile-name">{{ (isCorosOnly && dashboardData?.today_health?.sleep_score == null && dashboardData?.today_health?.hrv_ms != null) ? '睡眠 / 夜间HRV' : '睡眠恢复' }}</text>
           </view>
           <view class="tile-val-row">
-            <text class="tile-main-val">{{ dashboardData?.today_health?.sleep_score != null ? dashboardData.today_health.sleep_score : '—' }}</text>
-            <text class="tile-unit" v-if="dashboardData?.today_health?.sleep_score != null">分</text>
+            <template v-if="dashboardData?.today_health?.sleep_score != null">
+              <text class="tile-main-val">{{ dashboardData.today_health.sleep_score }}</text>
+              <text class="tile-unit">分</text>
+            </template>
+            <template v-else-if="isCorosOnly && dashboardData?.today_health?.hrv_ms != null">
+              <text class="tile-main-val text-cyan">{{ dashboardData.today_health.hrv_ms }}</text>
+              <text class="tile-unit">ms</text>
+            </template>
+            <template v-else>
+              <text class="tile-main-val">—</text>
+            </template>
           </view>
-          <text class="tile-sub">{{ dashboardData?.today_health?.sleep_duration_text ? ('时长 ' + dashboardData.today_health.sleep_duration_text) : (isCorosOnly ? '需高驰App端查看' : '未同步睡眠') }}</text>
+          <text class="tile-sub">
+            {{
+              dashboardData?.today_health?.sleep_duration_text
+                ? ('时长 ' + dashboardData.today_health.sleep_duration_text)
+                : (isCorosOnly && dashboardData?.today_health?.hrv_ms != null)
+                  ? ('夜间睡眠HRV · 基线 ' + (dashboardData?.today_health?.hrv_weekly_avg || 66) + ' ms')
+                  : (isCorosOnly ? '需高驰App端查看' : '未同步睡眠')
+            }}
+          </text>
         </view>
 
         <!-- 2. 静息心率 -->
@@ -389,8 +406,8 @@
           <text class="tile-sub">{{ dashboardData?.fitness_form?.status_label ? ('状态: ' + dashboardData.fitness_form.status_label) : 'Banister 状态平衡' }}</text>
         </view>
 
-        <!-- 4. 夜间 HRV 或 VO2Max (COROS) -->
-        <view class="health-tile" v-if="!isCorosOnly || (dashboardData?.today_health?.hrv_ms != null)">
+        <!-- 4. 夜间 HRV (Garmin) 或 最大摄氧量 VO2Max (COROS) -->
+        <view class="health-tile" v-if="!isCorosOnly">
           <view class="tile-top">
             <text class="tile-icon">🫀</text>
             <text class="tile-name">夜间 HRV</text>

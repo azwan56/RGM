@@ -40,6 +40,8 @@ class CorosAdapter:
         self.user_id: Optional[str] = None
         self.nick_name: Optional[str] = None
         self.avatar_url: Optional[str] = None
+        self._analyse_cache: Optional[Dict[str, Any]] = None
+        self._analyse_cache_time: float = 0
 
         os.makedirs(TOKEN_DIR, exist_ok=True)
         safe_acc = self.account.replace("@", "_at_").replace(".", "_").replace("+", "_")
@@ -167,6 +169,28 @@ class CorosAdapter:
             pass
         return False
 
+    def _get_analyse_data(self) -> Optional[Dict[str, Any]]:
+        """Queries or returns cached EvoLab analyse data."""
+        if not self.access_token and not self.login():
+            return None
+        now = time.time()
+        if self._analyse_cache and (now - self._analyse_cache_time < 300):
+            return self._analyse_cache
+        try:
+            url = f"{self.base_url}/analyse/query?userId={self.user_id}"
+            resp = requests.get(url, headers=self._get_headers(), timeout=12)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if str(res_json.get("result")) == "0000":
+                    self._analyse_cache = res_json.get("data") or {}
+                    self._analyse_cache_time = now
+                    return self._analyse_cache
+                else:
+                    logger.warning(f"[coros] /analyse/query non-0000 result: {res_json}")
+        except Exception as e:
+            logger.warning(f"[coros] _get_analyse_data error: {e}")
+        return None
+
     def fetch_user_profile_info(self) -> Dict[str, Any]:
         """Returns normalized user profile information (avatar, display name, gender, height, weight, birth date, vo2max)."""
         info: Dict[str, Any] = {
@@ -184,34 +208,38 @@ class CorosAdapter:
         if not self.access_token and not self.login():
             return info
 
-        # 1. Query private profile for biometrics
+        # 1. Query account for biometrics & personal info
         try:
-            url = f"{self.base_url}/profile/private/query"
-            resp = requests.post(url, json={}, headers=self._get_headers(), timeout=10)
+            url = f"{self.base_url}/account/query?userId={self.user_id}"
+            resp = requests.get(url, headers=self._get_headers(), timeout=10)
             if resp.status_code == 200:
                 res_json = resp.json()
                 if str(res_json.get("result")) == "0000":
                     p_data = res_json.get("data") or {}
-                    
-                    # Gender: 1=male, 2=female or string
-                    g = p_data.get("gender") or p_data.get("sex")
-                    if g in [1, "1", "male", "MALE", "m", "M"]:
+                    if p_data.get("nickname"):
+                        info["display_name"] = p_data["nickname"]
+                    if p_data.get("headPic"):
+                        info["avatar_url"] = p_data["headPic"]
+
+                    # Gender: 0=male, 1=female in COROS
+                    g = p_data.get("sex")
+                    if g in [0, "0", "male", "MALE", "m", "M"]:
                         info["gender"] = "male"
-                    elif g in [2, "2", "female", "FEMALE", "f", "F"]:
+                    elif g in [1, "1", "female", "FEMALE", "f", "F"]:
                         info["gender"] = "female"
-                    
-                    # Height (cm)
-                    h = p_data.get("height")
+
+                    # Height (cm): "stature": 168.0
+                    h = p_data.get("stature") or p_data.get("height")
                     if h:
                         info["height_cm"] = round(float(h), 1)
-                    
-                    # Weight (kg or grams)
+
+                    # Weight (kg): "weight": 60.0
                     w = p_data.get("weight")
                     if w:
                         w_val = float(w)
                         info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
-                    
-                    # Birth date / Birthday
+
+                    # Birth date (e.g. 19900622)
                     b = p_data.get("birthday") or p_data.get("birthDate") or p_data.get("birth_date")
                     if b:
                         b_str = str(b).strip()
@@ -223,29 +251,39 @@ class CorosAdapter:
                             ts = int(b_str[:10])
                             info["date_of_birth"] = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
-                    if p_data.get("maxHeartRate"):
-                        info["max_heart_rate"] = int(p_data["maxHeartRate"])
-                    if p_data.get("restHeartRate"):
-                        info["resting_heart_rate"] = int(p_data["restHeartRate"])
+                    if p_data.get("maxHr") or p_data.get("maxHeartRate"):
+                        info["max_heart_rate"] = int(p_data.get("maxHr") or p_data.get("maxHeartRate"))
+                    if p_data.get("rhr") or p_data.get("restHeartRate"):
+                        info["resting_heart_rate"] = int(p_data.get("rhr") or p_data.get("restHeartRate"))
+
+                    zone_data = p_data.get("zoneData") or {}
+                    if zone_data.get("lthr"):
+                        info["threshold_heart_rate"] = int(zone_data["lthr"])
+                    if zone_data.get("ltsp"):
+                        info["threshold_pace_sec"] = int(zone_data["ltsp"])
         except Exception as e:
-            logger.warning(f"[coros] fetch_user_profile_info /profile/private/query error: {e}")
+            logger.warning(f"[coros] fetch_user_profile_info /account/query error: {e}")
 
         # 2. Query EvoLab analysis for VO2Max
         try:
-            url = f"{self.base_url}/analyse/query"
-            resp = requests.post(url, json={}, headers=self._get_headers(), timeout=10)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                if str(res_json.get("result")) == "0000":
-                    a_data = res_json.get("data") or {}
-                    vo2 = a_data.get("vo2Max") or a_data.get("vo2max") or a_data.get("runningVo2Max")
-                    if vo2:
+            a_data = self._get_analyse_data()
+            if a_data:
+                day_list = a_data.get("dayList") or a_data.get("t7dayList") or []
+                for item in reversed(day_list):
+                    vo2 = item.get("vo2max") or item.get("vo2Max")
+                    if vo2 and float(vo2) > 0:
                         info["vo2max"] = round(float(vo2), 1)
+                        break
+                if not info["vo2max"]:
+                    top_vo2 = a_data.get("vo2Max") or a_data.get("vo2max") or a_data.get("runningVo2Max")
+                    if top_vo2:
+                        info["vo2max"] = round(float(top_vo2), 1)
         except Exception as e:
             logger.warning(f"[coros] fetch_user_profile_info /analyse/query error: {e}")
 
         logger.info(f"[coros] Resolved profile metrics: DOB={info['date_of_birth']}, gender={info['gender']}, "
-                    f"height={info['height_cm']}cm, weight={info['weight_kg']}kg, VO2Max={info['vo2max']}")
+                    f"height={info['height_cm']}cm, weight={info['weight_kg']}kg, VO2Max={info['vo2max']}, "
+                    f"RHR={info['resting_heart_rate']}, MaxHR={info['max_heart_rate']}")
         return info
 
     def fetch_recent_activities(self, limit: int = 30) -> List[Dict[str, Any]]:
@@ -428,7 +466,10 @@ class CorosAdapter:
         }
 
     def fetch_daily_health_metrics(self, target_date: Optional[str] = None) -> Dict[str, Any]:
-        """Fetches daily health metrics from COROS."""
+        """
+        Fetches daily health metrics from COROS.
+        Extracts resting HR, VO2Max, and night sleep HRV (avgSleepHrv & sleepHrvBase) from EvoLab.
+        """
         date_str = target_date or date.today().isoformat()
         metrics: Dict[str, Any] = {
             "date": date_str,
@@ -440,6 +481,34 @@ class CorosAdapter:
                 metrics["resting_heart_rate"] = profile_info["resting_heart_rate"]
             if profile_info.get("vo2max"):
                 metrics["vo2_max"] = profile_info["vo2max"]
+
+            a_data = self._get_analyse_data()
+            if a_data:
+                day_list = a_data.get("dayList") or a_data.get("t7dayList") or []
+                target_day_int = None
+                try:
+                    target_day_int = int(date_str.replace("-", "")[:8])
+                except Exception:
+                    pass
+
+                matched_item = None
+                if target_day_int:
+                    for item in day_list:
+                        if item.get("happenDay") == target_day_int:
+                            matched_item = item
+                            break
+
+                # Fallback to latest item if matching today and today's day record isn't generated yet
+                if not matched_item and day_list:
+                    matched_item = day_list[-1]
+
+                if matched_item:
+                    if matched_item.get("avgSleepHrv"):
+                        metrics["hrv_last_night_avg"] = int(matched_item["avgSleepHrv"])
+                    if matched_item.get("sleepHrvBase"):
+                        metrics["hrv_weekly_avg"] = int(matched_item["sleepHrvBase"])
+                    if matched_item.get("vo2max") and float(matched_item["vo2max"]) > 0:
+                        metrics["vo2_max"] = round(float(matched_item["vo2max"]), 1)
         except Exception as e:
             logger.warning(f"[coros] Error fetching profile metrics for daily health: {e}")
         return metrics
