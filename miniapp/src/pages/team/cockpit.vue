@@ -14,13 +14,21 @@
     <view v-else-if="!loading" class="cockpit-content">
       <!-- Top Club Header -->
       <view class="top-club-bar">
-        <view class="club-info">
-          <text class="club-title">{{ currentClub?.name || "RGM 巅峰先锋跑团" }}</text>
+        <view class="club-info" @click="userClubs.length > 1 ? (showSwitchModal = true) : null">
+          <view class="title-with-arrow">
+            <text class="club-title">{{ currentClub?.name || "跑团罗盘" }}</text>
+            <text v-if="userClubs.length > 1" class="switch-arrow">▾</text>
+          </view>
           <text class="sub-text">全队跑者生理负荷、疲劳与跑量监控罗盘</text>
         </view>
-        <text class="role-badge" :class="'role-' + userRole">
-          {{ userRole === 'owner' ? '👑 跑团主理人' : '🧢 认证教练' }}
-        </text>
+        <view class="top-right-group">
+          <text class="role-badge" :class="'role-' + userRole">
+            {{ userRole === 'owner' ? '👑 跑团主理人' : '🧢 认证教练' }}
+          </text>
+          <text v-if="userClubs.length > 1" class="switch-link-pill" @click="showSwitchModal = true">
+            ⇄ 切换
+          </text>
+        </view>
       </view>
 
       <!-- 4-Grid Status Overview -->
@@ -195,17 +203,71 @@
         </view>
       </view>
     </view>
+
+    <!-- ── Switch Club Modal (教练切换管理的跑团) ── -->
+    <view v-if="showSwitchModal" class="modal-mask" @click="showSwitchModal = false" @touchmove.stop.prevent>
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">切换体能罗盘跑团</text>
+            <text class="count-pill">{{ userClubs.length }} 个跑团</text>
+          </view>
+          <text class="close-btn" @click="showSwitchModal = false">✕</text>
+        </view>
+
+        <view class="modal-body modal-scroll">
+          <view class="modal-clubs-list">
+            <view
+              v-for="c in userClubs"
+              :key="c.id"
+              class="modal-club-card"
+              :class="{ 'is-current': currentClub?.id === c.id }"
+              @click="handleSwitchClub(c)"
+            >
+              <image class="mcc-logo" :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <view class="mcc-info">
+                <view class="mcc-name-row">
+                  <text class="mcc-name">{{ c.name }}</text>
+                  <text class="mcc-city">📍 {{ c.city || '上海' }}</text>
+                </view>
+                <view class="mcc-meta">
+                  <text class="mcc-role-tag" :class="'role-' + c.role">
+                    {{ c.role === 'owner' ? '👑 团长' : c.role === 'coach' ? '🧢 教练' : '🏃 团员' }}
+                  </text>
+                </view>
+              </view>
+              <view class="mcc-action">
+                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前罗盘 ✓</text>
+                <button v-else class="mcc-switch-btn" @click.stop="handleSwitchClub(c)">
+                  ⇄ 切换
+                </button>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
-import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
+import {
+  request,
+  getStoredUser,
+  checkAndAutoLogin,
+  UserProfile,
+  getActiveClubId,
+  setActiveClubId,
+  resolveActiveClub,
+} from "../../utils/api";
 
 const user = ref<UserProfile | null>(null);
 const currentClub = ref<any>(null);
 const userRole = ref("member");
+const userClubs = ref<any[]>([]);
+const showSwitchModal = ref(false);
 const loading = ref(true);
 
 const summary = ref<any>(null);
@@ -250,7 +312,7 @@ function goBack() {
   uni.navigateBack();
 }
 
-async function loadCockpitData() {
+async function loadCockpitData(preferredClubId?: string) {
   loading.value = true;
   user.value = getStoredUser();
   if (!user.value) {
@@ -265,20 +327,49 @@ async function loadCockpitData() {
   try {
     const clubRes = await request(`/api/team/my-clubs/${uid}`);
     const clubs = clubRes?.clubs || [];
+    userClubs.value = clubs;
+
     if (clubs.length > 0) {
-      currentClub.value = clubs[0];
-      userRole.value = clubs[0].role || "member";
-      const clubId = clubs[0].id;
+      let targetClub: any = null;
+      if (preferredClubId) {
+        targetClub = clubs.find((c: any) => c.id === preferredClubId);
+      }
+      if (!targetClub) {
+        targetClub = resolveActiveClub(clubs);
+      } else {
+        setActiveClubId(targetClub.id);
+      }
+
+      currentClub.value = targetClub;
+      userRole.value = targetClub.role || "member";
+      const clubId = targetClub.id;
 
       const res = await request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`);
       summary.value = res?.summary || null;
       students.value = res?.students || [];
+    } else {
+      setActiveClubId("");
+      currentClub.value = null;
+      userRole.value = "member";
+      summary.value = null;
+      students.value = [];
     }
   } catch (err) {
     console.error("Load cockpit error:", err);
   } finally {
     loading.value = false;
   }
+}
+
+function handleSwitchClub(club: any) {
+  if (!club || !club.id) return;
+  setActiveClubId(club.id);
+  showSwitchModal.value = false;
+  uni.showToast({
+    title: `已切换至【${club.name}】罗盘`,
+    icon: "success",
+  });
+  loadCockpitData(club.id);
 }
 
 async function handleAssignRole(targetUid: string, role: string) {
@@ -378,11 +469,211 @@ onPullDownRefresh(async () => {
   margin-bottom: 24rpx;
 }
 
+.title-with-arrow {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.switch-arrow {
+  font-size: 24rpx;
+  color: #bf5af2;
+}
+
+.top-right-group {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.switch-link-pill {
+  font-size: 20rpx;
+  color: #bf5af2;
+  font-weight: bold;
+  background: rgba(191, 90, 242, 0.15);
+  border: 1rpx solid rgba(191, 90, 242, 0.3);
+  padding: 6rpx 14rpx;
+  border-radius: 12rpx;
+}
+
 .club-title {
   font-size: 30rpx;
   font-weight: 900;
   color: #ffffff;
   display: block;
+}
+
+/* Modal styles for cockpit.vue */
+.modal-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: flex-end;
+  z-index: 999;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  width: 100%;
+  background-color: #161619;
+  border-radius: 36rpx 36rpx 0 0;
+  padding: 36rpx 30rpx 60rpx 30rpx;
+  box-sizing: border-box;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+
+.title-with-pill {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.modal-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.count-pill {
+  font-size: 20rpx;
+  color: #bf5af2;
+  background: rgba(191, 90, 242, 0.15);
+  padding: 4rpx 14rpx;
+  border-radius: 12rpx;
+  font-weight: bold;
+}
+
+.close-btn {
+  font-size: 36rpx;
+  color: #71717a;
+  padding: 10rpx;
+}
+
+.modal-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.modal-clubs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.modal-club-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.modal-club-card.is-current {
+  border-color: rgba(191, 90, 242, 0.4);
+  background: rgba(191, 90, 242, 0.06);
+}
+
+.mcc-logo {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+}
+
+.mcc-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcc-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
+}
+
+.mcc-name {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcc-city {
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.mcc-meta {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.mcc-role-tag {
+  font-size: 18rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.mcc-role-tag.role-owner {
+  background: rgba(255, 159, 10, 0.2);
+  color: #ff9f0a;
+}
+
+.mcc-role-tag.role-coach {
+  background: rgba(10, 132, 255, 0.2);
+  color: #0a84ff;
+}
+
+.mcc-role-tag.role-member {
+  background: rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+}
+
+.mcc-action {
+  flex-shrink: 0;
+  margin-left: 12rpx;
+}
+
+.mcc-current-tag {
+  font-size: 22rpx;
+  color: #bf5af2;
+  font-weight: bold;
+  padding: 6rpx 16rpx;
+  background: rgba(191, 90, 242, 0.15);
+  border-radius: 12rpx;
+}
+
+.mcc-switch-btn {
+  background: #27272a;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 500;
+  padding: 0 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  margin: 0;
 }
 
 .sub-text {

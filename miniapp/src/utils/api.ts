@@ -63,6 +63,42 @@ export function clearSession() {
 }
 
 /**
+ * Get the currently active running club ID from local storage.
+ */
+export function getActiveClubId(): string {
+  return uni.getStorageSync("rgm_active_club_id") || "";
+}
+
+/**
+ * Set the currently active running club ID to local storage.
+ */
+export function setActiveClubId(clubId: string) {
+  if (clubId) {
+    uni.setStorageSync("rgm_active_club_id", clubId);
+  } else {
+    uni.removeStorageSync("rgm_active_club_id");
+  }
+}
+
+/**
+ * Given a list of clubs, resolves which one is active based on storage or defaults to the first.
+ */
+export function resolveActiveClub(clubs: any[]): any | null {
+  if (!clubs || clubs.length === 0) {
+    setActiveClubId("");
+    return null;
+  }
+  const storedId = getActiveClubId();
+  if (storedId) {
+    const matched = clubs.find((c) => c.id === storedId);
+    if (matched) return matched;
+  }
+  const primary = clubs[0];
+  setActiveClubId(primary.id);
+  return primary;
+}
+
+/**
  * Universal Request Wrapper with Bearer Token Injection
  */
 export async function request<T = any>(

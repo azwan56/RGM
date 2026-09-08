@@ -12,6 +12,32 @@
       </view>
     </view>
 
+    <!-- ── 跑团快速切换横向标签栏 (仅在加入跑团后显示) ── -->
+    <view v-if="userClubs.length > 0" class="clubs-switcher-wrap">
+      <scroll-view scroll-x class="clubs-switcher-scroll" :show-scrollbar="false">
+        <view class="clubs-switcher-inner">
+          <view
+            v-for="c in userClubs"
+            :key="c.id"
+            class="club-tab-pill"
+            :class="{ active: currentClub?.id === c.id }"
+            @click="handleSwitchClub(c)"
+          >
+            <image
+              class="tab-club-logo"
+              :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'"
+              mode="aspectFill"
+            />
+            <text class="tab-club-name">{{ c.name }}</text>
+            <text v-if="currentClub?.id === c.id" class="tab-active-check">✓</text>
+          </view>
+          <view class="club-tab-pill tab-browse-btn" @click="openAllClubsModal">
+            <text class="tab-browse-icon">＋ 发现跑团</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
     <!-- If user belongs to a club -->
     <view v-if="currentClub">
       <!-- ── Header: Club Hero ── -->
@@ -26,8 +52,8 @@
               </text>
             </view>
             <text class="club-desc">{{ currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
-            <view class="browse-all-btn" @click="showAllClubsModal = true">
-              <text class="browse-text">🔍 浏览 / 切换跑团 ({{ allClubs.length }}) ›</text>
+            <view class="browse-all-btn" @click="openAllClubsModal">
+              <text class="browse-text">⇄ 切换跑团 ({{ userClubs.length }}) / 发现跑团 ›</text>
             </view>
           </view>
         </view>
@@ -383,22 +409,41 @@
       <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
-            <text class="modal-title">平台全部跑团</text>
-            <text class="count-pill">{{ allClubs.length }}个</text>
+            <text class="modal-title">跑团切换与浏览</text>
+            <text class="count-pill">{{ userClubs.length }} 个已加入</text>
           </view>
           <text class="close-btn" @click="showAllClubsModal = false">✕</text>
         </view>
 
+        <!-- Segmented Tab Switcher in Modal -->
+        <view class="modal-tab-row" v-if="userClubs.length > 0">
+          <view
+            class="modal-tab-segment"
+            :class="{ active: clubModalTab === 'joined' }"
+            @click="clubModalTab = 'joined'"
+          >
+            我的跑团 ({{ userClubs.length }})
+          </view>
+          <view
+            class="modal-tab-segment"
+            :class="{ active: clubModalTab === 'all' }"
+            @click="clubModalTab = 'all'"
+          >
+            平台全部 ({{ allClubs.length }})
+          </view>
+        </view>
+
         <view class="modal-body modal-scroll">
-          <view v-if="allClubs.length === 0" class="empty-clubs-text">
-            暂无已创建跑团，请联系管理员
+          <view v-if="displayedClubs.length === 0" class="empty-clubs-text">
+            {{ clubModalTab === 'joined' ? '您尚未加入任何跑团，请切换至“平台全部”选择加入！' : '平台暂无其他已创建跑团。' }}
           </view>
           <view v-else class="modal-clubs-list">
             <view
-              v-for="c in allClubs"
+              v-for="c in displayedClubs"
               :key="c.id"
               class="modal-club-card"
               :class="{ 'is-current': currentClub?.id === c.id }"
+              @click="c.is_member ? handleSwitchClub(c) : null"
             >
               <image class="mcc-logo" :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
               <view class="mcc-info">
@@ -411,16 +456,19 @@
                   <text>团长: {{ c.owner_name || '平台指定' }}</text>
                   <text class="mcc-dot">·</text>
                   <text class="highlight">{{ c.member_count || 1 }} 位成员</text>
+                  <text v-if="c.role" class="mcc-role-tag" :class="'role-' + c.role">
+                    {{ c.role === 'owner' ? '👑 团长' : c.role === 'coach' ? '🧢 教练' : '🏃 团员' }}
+                  </text>
                 </view>
               </view>
-              <view class="mcc-action">
-                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前</text>
+              <view class="mcc-action" @click.stop>
+                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前使用中 ✓</text>
                 <button
                   v-else-if="c.is_member"
                   class="mcc-switch-btn"
                   @click="handleSwitchClub(c)"
                 >
-                  进入
+                  ⇄ 切换
                 </button>
                 <button
                   v-else
@@ -442,7 +490,15 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
-import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
+import {
+  request,
+  getStoredUser,
+  checkAndAutoLogin,
+  UserProfile,
+  getActiveClubId,
+  setActiveClubId,
+  resolveActiveClub,
+} from "../../utils/api";
 
 const user = ref<UserProfile | null>(null);
 const currentClub = ref<any>(null);
@@ -465,6 +521,19 @@ const joiningClubId = ref<string | null>(null);
 
 const allClubs = ref<any[]>([]);
 const userClubs = ref<any[]>([]);
+const clubModalTab = ref<"joined" | "all">("joined");
+
+function openAllClubsModal() {
+  clubModalTab.value = userClubs.value.length > 0 ? "joined" : "all";
+  showAllClubsModal.value = true;
+}
+
+const displayedClubs = computed(() => {
+  if (clubModalTab.value === "joined") {
+    return allClubs.value.filter((c) => c.is_member);
+  }
+  return allClubs.value;
+});
 
 const editingEventId = ref<string | null>(null);
 const eventTitle = ref("");
@@ -516,14 +585,16 @@ async function loadClubData(preferredClubId?: string) {
     allClubs.value = allRes?.clubs || [];
 
     if (clubs.length > 0) {
-      let targetClub = clubs[0];
+      let targetClub: any = null;
       if (preferredClubId) {
-        const found = clubs.find((c: any) => c.id === preferredClubId);
-        if (found) targetClub = found;
-      } else if (currentClub.value?.id) {
-        const found = clubs.find((c: any) => c.id === currentClub.value.id);
-        if (found) targetClub = found;
+        targetClub = clubs.find((c: any) => c.id === preferredClubId);
       }
+      if (!targetClub) {
+        targetClub = resolveActiveClub(clubs);
+      } else {
+        setActiveClubId(targetClub.id);
+      }
+
       currentClub.value = targetClub;
       currentRole.value = targetClub.role || "member";
       const clubId = targetClub.id;
@@ -539,6 +610,7 @@ async function loadClubData(preferredClubId?: string) {
       members.value = memRes?.members || [];
       coachCockpit.value = coachRes || null;
     } else {
+      setActiveClubId("");
       currentClub.value = null;
       currentRole.value = "member";
       events.value = [];
@@ -551,7 +623,13 @@ async function loadClubData(preferredClubId?: string) {
 }
 
 function handleSwitchClub(club: any) {
+  if (!club || !club.id) return;
+  setActiveClubId(club.id);
   showAllClubsModal.value = false;
+  uni.showToast({
+    title: `已切换至【${club.name}】`,
+    icon: "success"
+  });
   loadClubData(club.id);
 }
 
@@ -567,8 +645,9 @@ async function handleJoinClubDirect(clubId: string) {
       user_id: uid,
       club_id: clubId,
     });
-    uni.showToast({ title: res?.message || "加入跑团成功！", icon: "success" });
+    setActiveClubId(clubId);
     showAllClubsModal.value = false;
+    uni.showToast({ title: res?.message || "加入跑团成功！", icon: "success" });
     await loadClubData(clubId);
   } catch (e: any) {
     uni.showToast({ title: e?.message || "加入失败", icon: "none" });
@@ -2072,6 +2151,126 @@ onPullDownRefresh(async () => {
   border-radius: 12rpx;
   border: none;
   margin: 0;
+}
+
+/* 顶部横向跑团切换条 */
+.clubs-switcher-wrap {
+  margin-bottom: 24rpx;
+}
+
+.clubs-switcher-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.clubs-switcher-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 4rpx 2rpx;
+}
+
+.club-tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 12rpx;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 10rpx 20rpx;
+  border-radius: 30rpx;
+  transition: all 0.2s ease;
+}
+
+.club-tab-pill.active {
+  background: rgba(252, 76, 2, 0.18);
+  border-color: #fc4c02;
+  box-shadow: 0 4rpx 14rpx rgba(252, 76, 2, 0.25);
+}
+
+.tab-club-logo {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+}
+
+.tab-club-name {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #d4d4d8;
+  max-width: 220rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.club-tab-pill.active .tab-club-name {
+  color: #ffffff;
+}
+
+.tab-active-check {
+  font-size: 22rpx;
+  color: #fc4c02;
+  font-weight: 900;
+}
+
+.club-tab-pill.tab-browse-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx dashed rgba(255, 255, 255, 0.2);
+}
+
+.tab-browse-icon {
+  font-size: 22rpx;
+  color: #a1a1aa;
+}
+
+/* 弹窗分栏标签 */
+.modal-tab-row {
+  display: flex;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 6rpx;
+  margin: 0 30rpx 20rpx 30rpx;
+  gap: 8rpx;
+}
+
+.modal-tab-segment {
+  flex: 1;
+  text-align: center;
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #a1a1aa;
+  padding: 12rpx 0;
+  border-radius: 16rpx;
+  transition: all 0.2s ease;
+}
+
+.modal-tab-segment.active {
+  background: #27272a;
+  color: #fc4c02;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.3);
+}
+
+.mcc-role-tag {
+  font-size: 18rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.mcc-role-tag.role-owner {
+  background: rgba(255, 159, 10, 0.2);
+  color: #ff9f0a;
+}
+
+.mcc-role-tag.role-coach {
+  background: rgba(10, 132, 255, 0.2);
+  color: #0a84ff;
+}
+
+.mcc-role-tag.role-member {
+  background: rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
 }
 
 .unjoined-highlights {

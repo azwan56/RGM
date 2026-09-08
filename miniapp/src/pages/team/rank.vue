@@ -14,14 +14,15 @@
 
     <!-- If user belongs to a club -->
     <view v-if="currentClub" class="rank-content">
-      <!-- ── 跑团简要上下文横幅 ── -->
-      <view class="club-context-bar" @click="goToTeamPage">
+      <!-- ── 跑团简要上下文横幅与切换 ── -->
+      <view class="club-context-bar">
         <image
           class="club-logo-mini"
           :src="currentClub.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'"
           mode="aspectFill"
+          @click="goToTeamPage"
         />
-        <view class="club-meta">
+        <view class="club-meta" @click="goToTeamPage">
           <view class="club-name-row">
             <text class="club-title">{{ currentClub.name }}</text>
             <text class="role-badge" :class="'role-' + currentRole">
@@ -30,7 +31,11 @@
           </view>
           <text class="club-subtitle">本月跑量风云榜 · 动态互动社区</text>
         </view>
-        <view class="enter-team-hint">
+        <view v-if="userClubs.length > 1" class="switch-club-pill" @click="showSwitchModal = true">
+          <text class="switch-icon">⇄</text>
+          <text class="switch-text">切换跑团</text>
+        </view>
+        <view v-else class="enter-team-hint" @click="goToTeamPage">
           <text class="hint-text">跑团主页</text>
           <text class="arrow">›</text>
         </view>
@@ -213,17 +218,71 @@
         </view>
       </view>
     </view>
+
+    <!-- ── Switch Club Modal (切换已加入的跑团) ── -->
+    <view v-if="showSwitchModal" class="modal-mask" @click="showSwitchModal = false" @touchmove.stop.prevent>
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">切换当前跑团榜单</text>
+            <text class="count-pill">{{ userClubs.length }} 个跑团</text>
+          </view>
+          <text class="close-btn" @click="showSwitchModal = false">✕</text>
+        </view>
+
+        <view class="modal-body modal-scroll">
+          <view class="modal-clubs-list">
+            <view
+              v-for="c in userClubs"
+              :key="c.id"
+              class="modal-club-card"
+              :class="{ 'is-current': currentClub?.id === c.id }"
+              @click="handleSwitchClub(c)"
+            >
+              <image class="mcc-logo" :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <view class="mcc-info">
+                <view class="mcc-name-row">
+                  <text class="mcc-name">{{ c.name }}</text>
+                  <text class="mcc-city">📍 {{ c.city || '上海' }}</text>
+                </view>
+                <view class="mcc-meta">
+                  <text class="mcc-role-tag" :class="'role-' + c.role">
+                    {{ c.role === 'owner' ? '👑 团长' : c.role === 'coach' ? '🧢 教练' : '🏃 团员' }}
+                  </text>
+                </view>
+              </view>
+              <view class="mcc-action">
+                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前榜单 ✓</text>
+                <button v-else class="mcc-switch-btn" @click.stop="handleSwitchClub(c)">
+                  ⇄ 切换
+                </button>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
-import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
+import {
+  request,
+  getStoredUser,
+  checkAndAutoLogin,
+  UserProfile,
+  getActiveClubId,
+  setActiveClubId,
+  resolveActiveClub,
+} from "../../utils/api";
 
 const user = ref<UserProfile | null>(null);
 const currentClub = ref<any>(null);
 const currentRole = ref("member");
+const userClubs = ref<any[]>([]);
+const showSwitchModal = ref(false);
 
 const leaderboard = ref<any[]>([]);
 const feed = ref<any[]>([]);
@@ -239,7 +298,7 @@ function goToTeamPage() {
   });
 }
 
-async function loadRankData() {
+async function loadRankData(preferredClubId?: string) {
   user.value = getStoredUser();
   if (!user.value) {
     user.value = await checkAndAutoLogin();
@@ -250,10 +309,22 @@ async function loadRankData() {
   try {
     const res = await request(`/api/team/my-clubs/${uid}`);
     const clubs = res?.clubs || [];
+    userClubs.value = clubs;
+
     if (clubs.length > 0) {
-      currentClub.value = clubs[0];
-      currentRole.value = clubs[0].role || "member";
-      const clubId = clubs[0].id;
+      let targetClub: any = null;
+      if (preferredClubId) {
+        targetClub = clubs.find((c: any) => c.id === preferredClubId);
+      }
+      if (!targetClub) {
+        targetClub = resolveActiveClub(clubs);
+      } else {
+        setActiveClubId(targetClub.id);
+      }
+
+      currentClub.value = targetClub;
+      currentRole.value = targetClub.role || "member";
+      const clubId = targetClub.id;
 
       // Only fetch leaderboard and feed for high performance
       const [lbRes, feedRes] = await Promise.all([
@@ -264,6 +335,7 @@ async function loadRankData() {
       leaderboard.value = lbRes?.leaderboard || [];
       feed.value = feedRes?.feed || [];
     } else {
+      setActiveClubId("");
       currentClub.value = null;
       currentRole.value = "member";
       leaderboard.value = [];
@@ -272,6 +344,17 @@ async function loadRankData() {
   } catch (e) {
     console.warn("Load rank data error:", e);
   }
+}
+
+function handleSwitchClub(club: any) {
+  if (!club || !club.id) return;
+  setActiveClubId(club.id);
+  showSwitchModal.value = false;
+  uni.showToast({
+    title: `已切换至【${club.name}】榜单`,
+    icon: "success",
+  });
+  loadRankData(club.id);
 }
 
 async function handleToggleLike(act: any) {
@@ -470,9 +553,146 @@ onPullDownRefresh(async () => {
 }
 
 .arrow {
-  font-size: 28rpx;
+  font-size: 26rpx;
   color: #fc4c02;
-  line-height: 1;
+  font-weight: bold;
+}
+
+.switch-club-pill {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  background: rgba(252, 76, 2, 0.15);
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+  padding: 10rpx 18rpx;
+  border-radius: 20rpx;
+}
+
+.switch-icon {
+  font-size: 24rpx;
+  color: #fc4c02;
+  font-weight: bold;
+}
+
+.switch-text {
+  font-size: 22rpx;
+  color: #fc4c02;
+  font-weight: bold;
+}
+
+/* Modal styles for club switching in rank.vue */
+.modal-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.modal-clubs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.modal-club-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.modal-club-card.is-current {
+  border-color: rgba(252, 76, 2, 0.4);
+  background: rgba(252, 76, 2, 0.06);
+}
+
+.mcc-logo {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+}
+
+.mcc-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcc-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
+}
+
+.mcc-name {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcc-city {
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.mcc-meta {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.mcc-role-tag {
+  font-size: 18rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.mcc-role-tag.role-owner {
+  background: rgba(255, 159, 10, 0.2);
+  color: #ff9f0a;
+}
+
+.mcc-role-tag.role-coach {
+  background: rgba(10, 132, 255, 0.2);
+  color: #0a84ff;
+}
+
+.mcc-role-tag.role-member {
+  background: rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+}
+
+.mcc-action {
+  flex-shrink: 0;
+  margin-left: 12rpx;
+}
+
+.mcc-current-tag {
+  font-size: 22rpx;
+  color: #fc4c02;
+  font-weight: bold;
+  padding: 6rpx 16rpx;
+  background: rgba(252, 76, 2, 0.15);
+  border-radius: 12rpx;
+}
+
+.mcc-switch-btn {
+  background: #27272a;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 500;
+  padding: 0 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  margin: 0;
 }
 
 /* ── 通用卡片容器 ── */

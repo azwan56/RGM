@@ -55,7 +55,10 @@
         <view class="club-mini-info">
           <image class="mini-logo" :src="userClub.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
           <view class="mini-texts">
-            <text class="club-title-text">{{ userClub.name }}</text>
+            <view class="club-title-row">
+              <text class="club-title-text">{{ userClub.name }}</text>
+              <text v-if="userClubs.length > 1" class="multi-club-badge">{{ userClubs.length }}个跑团</text>
+            </view>
             <text class="club-desc-text">{{ userClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
           </view>
         </view>
@@ -70,7 +73,7 @@
       <!-- Club Action Buttons -->
       <view class="club-btn-grid">
         <button class="club-act-btn join-btn" @click="goToTeamPage">
-          {{ userClub ? '🏃 查看与切换跑团' : '🏃 浏览与加入跑团' }}
+          {{ userClubs.length > 1 ? `⇄ 切换跑团 (${userClubs.length})` : userClub ? '🏃 查看当前跑团' : '🏃 浏览与加入跑团' }}
         </button>
         <button class="club-act-btn create-btn" @click="showJoinModal = true">
           🔑 邀请码加入
@@ -917,6 +920,8 @@ import {
   UserProfile,
   bindCoros,
   unbindCoros,
+  resolveActiveClub,
+  setActiveClubId,
 } from "../../utils/api";
 
 const defaultProfile = {
@@ -1084,6 +1089,7 @@ const importingGarmin = ref(false);
 const showJoinModal = ref(false);
 const inviteCodeInput = ref("");
 const joiningClub = ref(false);
+const userClubs = ref<any[]>([]);
 
 const targetDistance = ref(200);
 const weeklyTarget = ref(50);
@@ -1353,7 +1359,8 @@ async function loadProfileData() {
     }
 
     const clubs = clubRes?.clubs || [];
-    userClub.value = clubs.length > 0 ? clubs[0] : null;
+    userClubs.value = clubs;
+    userClub.value = resolveActiveClub(clubs);
   } catch (err) {
     console.error("Failed to load profile:", err);
   }
@@ -2067,6 +2074,23 @@ onShow(() => {
 
 .mini-texts {
   flex: 1;
+}
+
+.club-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 4rpx;
+}
+
+.multi-club-badge {
+  font-size: 18rpx;
+  color: #fc4c02;
+  background: rgba(252, 76, 2, 0.15);
+  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
 }
 
 .mini-club-name {

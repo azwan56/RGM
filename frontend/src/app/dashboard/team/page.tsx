@@ -113,6 +113,9 @@ export default function TeamPage() {
         privacy_consent: true,
       });
       alert(res.data?.message || "成功加入跑团！");
+      if (typeof window !== "undefined") {
+        localStorage.setItem("rgm_active_club_id", clubId);
+      }
       setShowAllClubsModal(false);
       setShowJoinModal(false);
       await loadUserClubs(user.id);
@@ -132,11 +135,22 @@ export default function TeamPage() {
       setClubs(clubList);
 
       if (clubList.length > 0) {
-        const primary = clubList[0];
+        let primary = clubList[0];
+        const savedClubId = typeof window !== "undefined" ? localStorage.getItem("rgm_active_club_id") : null;
+        if (savedClubId) {
+          const matched = clubList.find((c: any) => c.id === savedClubId);
+          if (matched) primary = matched;
+        }
         setCurrentClub(primary);
         setCurrentRole(primary.role || "member");
+        if (typeof window !== "undefined") {
+          localStorage.setItem("rgm_active_club_id", primary.id);
+        }
         loadClubDetails(primary.id, uid);
       } else {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("rgm_active_club_id");
+        }
         setCurrentClub(null);
         setCurrentRole("member");
         setDashboardMetrics(null);
@@ -180,6 +194,9 @@ export default function TeamPage() {
   function handleSwitchClub(club: any) {
     setCurrentClub(club);
     setCurrentRole(club.role || "member");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("rgm_active_club_id", club.id);
+    }
     loadClubDetails(club.id);
   }
 
@@ -563,6 +580,24 @@ export default function TeamPage() {
                 <div className="flex items-center gap-3 mt-2">
                   <span className="text-[11px] text-zinc-500">📍 {currentClub.city || "上海"}</span>
                 </div>
+                {clubs.length > 1 && (
+                  <div className="flex items-center gap-2 mt-3 flex-wrap">
+                    <span className="text-[11px] text-zinc-400 font-medium">切换跑团:</span>
+                    {clubs.map((c: any) => (
+                      <button
+                        key={c.id}
+                        onClick={() => handleSwitchClub(c)}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition ${
+                          currentClub.id === c.id
+                            ? "bg-[#FC4C02] text-white shadow-md shadow-[#FC4C02]/20 font-bold"
+                            : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5"
+                        }`}
+                      >
+                        {c.name} {currentClub.id === c.id && "✓"}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
