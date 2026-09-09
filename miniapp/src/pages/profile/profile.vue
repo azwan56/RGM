@@ -1175,7 +1175,7 @@
             maxlength="6"
             :adjust-position="false"
             :cursor-spacing="30"
-            placeholder="例如: RGM888"
+            placeholder="请输入 6 位跑团邀请码"
             placeholder-class="placeholder-style"
             v-model="inviteCodeInput"
           />

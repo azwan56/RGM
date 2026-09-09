@@ -1636,7 +1636,7 @@ export default function TeamPage() {
                 maxLength={6}
                 value={inviteCodeInput}
                 onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
-                placeholder="例如: RGM888"
+                placeholder="请输入专属邀请码"
                 className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-3 text-center text-xl font-mono font-bold tracking-widest text-white uppercase focus:outline-none focus:border-[#FC4C02]"
               />
               <div className="flex gap-3">

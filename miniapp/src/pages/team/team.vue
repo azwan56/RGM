@@ -40,10 +40,10 @@
     <view v-if="!currentOrg" class="grand-org-prompt-card">
       <view class="gop-badge-row">
         <text class="gop-badge">🏛️ 高校戈友 / 联盟大群体认证</text>
-        <text class="gop-code-pill">支持复旦戈 FDGOBI 及各大组织码</text>
+        <text class="gop-code-pill">凭组织专属码验证</text>
       </view>
-      <text class="gop-title">加入大群体架构（如复旦戈等）</text>
-      <text class="gop-desc">汇聚复旦戈（邀请码: FDGOBI）及各大高校戈友会跑者。凭邀请码实名登记姓名、班级与生日认证，解锁下属分队备战与花名册！（自由独立跑者可跳过）</text>
+      <text class="gop-title">加入高校戈友 / 商学院大群体架构</text>
+      <text class="gop-desc">汇聚各大高校戈友会及商学院跑者。请向您所属群体的管理员索取专属邀请码，凭码实名登记姓名、班级与生日完成认证，解锁下属分队备战与花名册！（自由独立跑者可跳过）</text>
       <button class="gop-join-btn" @click="openOrgJoinModal">
         🔑 凭专属邀请码实名认证加入 (选填)
       </button>
@@ -522,7 +522,7 @@
             maxlength="10"
             :adjust-position="false"
             :cursor-spacing="30"
-            placeholder="例如: RGM888"
+            placeholder="请输入跑团专属邀请码"
             v-model="inviteCodeInput"
           />
           <button class="submit-btn" :loading="joiningClub" @click="handleJoinClub">
@@ -623,20 +623,20 @@
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">加入大群体 · 戈友实名认证</text>
-            <text class="count-pill">复旦戈</text>
+            <text class="count-pill">凭专属码认证</text>
           </view>
           <text class="close-btn" @click="showOrgJoinModal = false">✕</text>
         </view>
 
         <view class="modal-body org-form-body">
-          <text class="modal-intro">💡 加入【复旦戈】大群体需登记真实姓名、性别、出生日期及班级，以便管理员核验并解锁下属分跑团。</text>
+          <text class="modal-intro">💡 加入大群体需登记真实姓名、性别、出生日期及班级等信息，以便管理员核验并解锁下属跑团。</text>
 
           <view class="form-group">
             <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
             <input
               class="text-input"
               type="text"
-              placeholder="请输入邀请码（默认: FDGOBI）"
+              placeholder="请输入大群体专属邀请码"
               v-model="orgJoinForm.invite_code"
             />
           </view>
@@ -922,7 +922,7 @@
             maxlength="6"
             :adjust-position="false"
             :cursor-spacing="30"
-            placeholder="例如: RGM888"
+            placeholder="请输入 6 位跑团邀请码"
             v-model="clubJoinCodeInput"
           />
 
@@ -990,7 +990,7 @@ const targetClubForCodeJoin = ref<any>(null);
 const clubJoinCodeInput = ref("");
 
 const orgJoinForm = ref({
-  invite_code: "FDGOBI",
+  invite_code: "",
   real_name: "",
   gender: "male",
   date_of_birth: "1988-08-08",
