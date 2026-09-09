@@ -469,8 +469,13 @@ export default function AdminPage() {
                         className="w-14 h-14 rounded-2xl object-cover border border-white/10 shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-base font-bold text-white truncate">{club.name}</h3>
+                          {club.org_name && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                              🏛️ {club.org_name}
+                            </span>
+                          )}
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-zinc-300 shrink-0">
                             {club.city || "全国"}
                           </span>

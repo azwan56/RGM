@@ -148,10 +148,48 @@ def init_db():
             )
         """)
 
+        # ── Grand Community / Organization Hierarchy Schema ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS organizations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                logo_url TEXT,
+                description TEXT,
+                city TEXT DEFAULT '上海',
+                invite_code TEXT UNIQUE NOT NULL,
+                owner_id TEXT,
+                created_at TEXT,
+                settings TEXT,
+                FOREIGN KEY(owner_id) REFERENCES profiles(id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS organization_members (
+                id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                real_name TEXT NOT NULL,
+                gender TEXT NOT NULL,
+                date_of_birth TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                phone TEXT,
+                role TEXT DEFAULT 'member', -- 'owner', 'admin', 'member'
+                status TEXT DEFAULT 'confirmed', -- 'confirmed', 'pending'
+                joined_at TEXT,
+                confirmed_at TEXT,
+                confirmed_by TEXT,
+                UNIQUE(org_id, user_id),
+                FOREIGN KEY(org_id) REFERENCES organizations(id),
+                FOREIGN KEY(user_id) REFERENCES profiles(id)
+            )
+        """)
+
         # ── Multi-Tenant Running Clubs Schema ──
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clubs (
                 id TEXT PRIMARY KEY,
+                org_id TEXT,
                 name TEXT NOT NULL,
                 logo_url TEXT,
                 description TEXT,
@@ -160,6 +198,7 @@ def init_db():
                 owner_id TEXT,
                 created_at TEXT,
                 settings TEXT,
+                FOREIGN KEY(org_id) REFERENCES organizations(id),
                 FOREIGN KEY(owner_id) REFERENCES profiles(id)
             )
         """)
@@ -278,6 +317,32 @@ def init_db():
             cursor.execute("ALTER TABLE profiles ADD COLUMN vo2max REAL")
         if "date_of_birth" not in existing_cols:
             cursor.execute("ALTER TABLE profiles ADD COLUMN date_of_birth TEXT")
+
+        # Dynamic migration for clubs table
+        cursor.execute("PRAGMA table_info(clubs)")
+        club_cols = {row[1] for row in cursor.fetchall()}
+        if "org_id" not in club_cols:
+            cursor.execute("ALTER TABLE clubs ADD COLUMN org_id TEXT")
+
+        # Seed default Fudan Gobi Organization if none exists
+        cursor.execute("SELECT COUNT(*) FROM organizations WHERE id = 'org_fudan_gobi'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT OR IGNORE INTO organizations (id, name, logo_url, description, city, invite_code, owner_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                "org_fudan_gobi",
+                "复旦戈",
+                "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=300&auto=format&fit=crop&q=80",
+                "复旦大学戈壁挑战赛大群体 · 汇聚商学院EMBA/MBA及泛复旦戈友，下设各个戈友跑团与训练营。",
+                "上海",
+                "FDGOBI",
+                "u_df65d9a588c9",
+                datetime.utcnow().isoformat() + "Z"
+            ))
+
+        # Associate any club named like '复旦戈' or '闵文' to org_fudan_gobi
+        cursor.execute("UPDATE clubs SET org_id = 'org_fudan_gobi' WHERE (name LIKE '%复旦戈%' OR name LIKE '%闵文%') AND (org_id IS NULL OR org_id = '')")
 
         # Seed default flagship club if none exists
         cursor.execute("SELECT COUNT(*) FROM clubs")
@@ -1219,7 +1284,7 @@ class LocalStore:
     # ── Multi-Tenant Running Clubs API Methods ──
 
     @staticmethod
-    def create_club(owner_id: str, name: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None) -> Dict[str, Any]:
+    def create_club(owner_id: str, name: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None, org_id: Optional[str] = None) -> Dict[str, Any]:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             club_id = f"club_{int(datetime.utcnow().timestamp()*1000)}"
@@ -1228,9 +1293,9 @@ class LocalStore:
             created_at = datetime.utcnow().isoformat() + "Z"
 
             cursor.execute("""
-                INSERT INTO clubs (id, name, logo_url, description, city, invite_code, owner_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (club_id, name, logo, description, city, code, owner_id, created_at))
+                INSERT INTO clubs (id, org_id, name, logo_url, description, city, invite_code, owner_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (club_id, org_id, name, logo, description, city, code, owner_id, created_at))
 
             cursor.execute("""
                 INSERT INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
@@ -1240,6 +1305,7 @@ class LocalStore:
             conn.commit()
             return {
                 "id": club_id,
+                "org_id": org_id,
                 "name": name,
                 "logo_url": logo,
                 "description": description,
@@ -1254,7 +1320,12 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM clubs WHERE id = ?", (club_id,))
+            cursor.execute("""
+                SELECT c.*, o.name as org_name
+                FROM clubs c
+                LEFT JOIN organizations o ON c.org_id = o.id
+                WHERE c.id = ?
+            """, (club_id,))
             row = cursor.fetchone()
             if row:
                 return dict(row)
@@ -1269,9 +1340,10 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT c.*, m.role, m.joined_at, m.privacy_consent
+                SELECT c.*, o.name as org_name, m.role, m.joined_at, m.privacy_consent
                 FROM club_memberships m
                 JOIN clubs c ON m.club_id = c.id
+                LEFT JOIN organizations o ON c.org_id = o.id
                 WHERE m.user_id = ? AND m.status = 'active'
                 ORDER BY m.joined_at ASC
             """, (eff_uid,))
@@ -1378,11 +1450,13 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT c.*, 
+                       o.name as org_name,
                        p.display_name as owner_name, 
                        p.avatar_url as owner_avatar,
                        p.email as owner_email,
                        (SELECT COUNT(*) FROM club_memberships m WHERE m.club_id = c.id AND m.status = 'active') as member_count
                 FROM clubs c
+                LEFT JOIN organizations o ON c.org_id = o.id
                 LEFT JOIN profiles p ON c.owner_id = p.id
                 ORDER BY c.created_at DESC
             """)
@@ -1410,7 +1484,7 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            allowed = ["name", "description", "city", "logo_url", "invite_code"]
+            allowed = ["name", "description", "city", "logo_url", "invite_code", "org_id"]
             set_clauses = []
             params = []
             for k in allowed:
@@ -2535,4 +2609,264 @@ class LocalStore:
             "trail_climbing_runs": trail_runs[:8],
             "registered_race_targets": registered_races
         }
+
+    # ── Grand Community / Organization Hierarchy Methods ──
+
+    @staticmethod
+    def get_organization(org_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organizations WHERE id = ?", (org_id,))
+            row = cursor.fetchone()
+            if row:
+                d = dict(row)
+                d.pop("invite_code", None)
+                return d
+            return None
+
+    @staticmethod
+    def get_organization_admin(org_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organizations WHERE id = ?", (org_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def get_organization_by_code(code: str) -> Optional[Dict[str, Any]]:
+        if not code:
+            return None
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organizations WHERE UPPER(invite_code) = ?", (code.strip().upper(),))
+            row = cursor.fetchone()
+            if row:
+                d = dict(row)
+                d.pop("invite_code", None)
+                return d
+            return None
+
+    @staticmethod
+    def join_organization(
+        user_id: str,
+        invite_code: str,
+        real_name: str,
+        gender: str,
+        date_of_birth: str,
+        class_name: str,
+        phone: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Validates invite code, registers member into organization_members with real name,
+        gender, date_of_birth, class_name, and synchronizes profile physiological basics.
+        """
+        clean_code = (invite_code or "").strip().upper()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organizations WHERE UPPER(invite_code) = ?", (clean_code,))
+            org = cursor.fetchone()
+            if not org:
+                raise ValueError("无效的大组织邀请码，请向组织管理员核实后重新输入！")
+
+            org_id = org["id"]
+            membership_id = f"{org_id}_{user_id}"
+            now = datetime.utcnow().isoformat() + "Z"
+
+            cursor.execute("SELECT * FROM organization_members WHERE id = ?", (membership_id,))
+            existing = cursor.fetchone()
+            role = existing["role"] if existing else "member"
+            status = "confirmed"
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO organization_members (
+                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at, confirmed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT joined_at FROM organization_members WHERE id = ?), ?), ?)
+            """, (
+                membership_id, org_id, user_id, real_name.strip(), gender, date_of_birth, class_name.strip(),
+                phone or "", role, status, membership_id, now, now
+            ))
+
+            # Sync real_name, gender, date_of_birth into profiles table
+            cursor.execute("SELECT display_name, gender, date_of_birth FROM profiles WHERE id = ?", (user_id,))
+            p_row = cursor.fetchone()
+            if p_row:
+                cur_name = p_row["display_name"]
+                new_name = cur_name if cur_name and cur_name not in ["跑者", "微信用户"] else real_name.strip()
+                cursor.execute("""
+                    UPDATE profiles 
+                    SET display_name = ?, gender = ?, date_of_birth = ?, phone = COALESCE(NULLIF(phone, ''), ?)
+                    WHERE id = ?
+                """, (new_name, gender, date_of_birth, phone or "", user_id))
+
+            conn.commit()
+
+            return {
+                "org_id": org_id,
+                "org_name": org["name"],
+                "org_logo": org["logo_url"],
+                "real_name": real_name.strip(),
+                "class_name": class_name.strip(),
+                "gender": gender,
+                "date_of_birth": date_of_birth,
+                "status": status,
+                "role": role
+            }
+
+    @staticmethod
+    def get_user_organizations(user_id: str) -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT o.id, o.name, o.logo_url, o.description, o.city,
+                       m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.role, m.status, m.joined_at, m.confirmed_at
+                FROM organization_members m
+                JOIN organizations o ON m.org_id = o.id
+                WHERE m.user_id = ?
+                ORDER BY m.joined_at ASC
+            """, (user_id,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_org_sub_clubs(org_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.*,
+                       p.display_name as owner_name,
+                       p.avatar_url as owner_avatar,
+                       (SELECT COUNT(*) FROM club_memberships m WHERE m.club_id = c.id AND m.status = 'active') as member_count
+                FROM clubs c
+                LEFT JOIN profiles p ON c.owner_id = p.id
+                WHERE c.org_id = ?
+                ORDER BY c.created_at ASC
+            """, (org_id,))
+            rows = cursor.fetchall()
+            
+            user_club_ids = set()
+            if user_id:
+                cursor.execute("SELECT club_id FROM club_memberships WHERE user_id = ? AND status = 'active'", (user_id,))
+                user_club_ids = {r[0] for r in cursor.fetchall()}
+
+            result = []
+            for r in rows:
+                d = dict(r)
+                d.pop("invite_code", None)
+                d["is_member"] = d["id"] in user_club_ids
+                result.append(d)
+            return result
+
+    @staticmethod
+    def get_org_members(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            query = """
+                SELECT m.id, m.org_id, m.user_id, m.real_name, m.gender, m.date_of_birth, m.class_name,
+                       m.phone, m.role, m.status, m.joined_at, m.confirmed_at,
+                       p.avatar_url, p.display_name, p.marathon_pb, p.half_pb
+                FROM organization_members m
+                LEFT JOIN profiles p ON m.user_id = p.id
+                WHERE m.org_id = ?
+            """
+            params = [org_id]
+            if search:
+                query += " AND (m.real_name LIKE ? OR m.class_name LIKE ? OR p.display_name LIKE ?)"
+                like_term = f"%{search.strip()}%"
+                params.extend([like_term, like_term, like_term])
+            if class_filter:
+                query += " AND m.class_name = ?"
+                params.append(class_filter.strip())
+
+            query += " ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, m.joined_at DESC"
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+            
+            result = []
+            for r in rows:
+                d = dict(r)
+                cursor.execute("""
+                    SELECT c.id, c.name 
+                    FROM club_memberships cm
+                    JOIN clubs c ON cm.club_id = c.id
+                    WHERE cm.user_id = ? AND c.org_id = ? AND cm.status = 'active'
+                """, (d["user_id"], org_id))
+                d["sub_clubs"] = [dict(sc) for sc in cursor.fetchall()]
+                result.append(d)
+            return result
+
+    @staticmethod
+    def confirm_org_member(org_id: str, target_uid: str, operator_uid: Optional[str] = None) -> bool:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat() + "Z"
+            cursor.execute("""
+                UPDATE organization_members 
+                SET status = 'confirmed', confirmed_at = ?, confirmed_by = ?
+                WHERE org_id = ? AND user_id = ?
+            """, (now, operator_uid or "admin", org_id, target_uid))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def list_all_organizations() -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT o.*,
+                       (SELECT COUNT(*) FROM organization_members m WHERE m.org_id = o.id) as member_count,
+                       (SELECT COUNT(*) FROM clubs c WHERE c.org_id = o.id) as sub_clubs_count
+                FROM organizations o
+                ORDER BY o.created_at ASC
+            """)
+            return [dict(r) for r in cursor.fetchall()]
+
+    @staticmethod
+    def create_organization(name: str, invite_code: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None, owner_id: Optional[str] = None) -> Dict[str, Any]:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            org_id = f"org_{int(datetime.utcnow().timestamp()*1000)}"
+            code = (invite_code or "").strip().upper()
+            logo = logo_url or "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=300&auto=format&fit=crop&q=80"
+            created_at = datetime.utcnow().isoformat() + "Z"
+            cursor.execute("""
+                INSERT INTO organizations (id, name, logo_url, description, city, invite_code, owner_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (org_id, name.strip(), logo, description, city, code, owner_id, created_at))
+            conn.commit()
+            return {
+                "id": org_id,
+                "name": name.strip(),
+                "invite_code": code,
+                "description": description,
+                "logo_url": logo,
+                "city": city,
+                "owner_id": owner_id,
+                "created_at": created_at
+            }
+
+    @staticmethod
+    def update_organization(org_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            allowed = ["name", "description", "city", "logo_url", "invite_code"]
+            set_clauses = []
+            params = []
+            for k in allowed:
+                if k in data and data[k] is not None:
+                    set_clauses.append(f"{k} = ?")
+                    params.append(data[k])
+            if not set_clauses:
+                return LocalStore.get_organization_admin(org_id)
+            params.append(org_id)
+            cursor.execute(f"UPDATE organizations SET {', '.join(set_clauses)} WHERE id = ?", tuple(params))
+            conn.commit()
+            return LocalStore.get_organization_admin(org_id)
 

@@ -566,10 +566,15 @@ export default function TeamPage() {
                 className="w-16 h-16 rounded-2xl object-cover border-2 border-[#FC4C02]/40 shadow-lg"
               />
               <div>
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <h1 className="text-xl sm:text-2xl font-black text-white">
                     {currentClub.name}
                   </h1>
+                  {currentClub.org_name && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      🏛️ {currentClub.org_name}
+                    </span>
+                  )}
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
                     {currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员"}
                   </span>
@@ -1612,8 +1617,13 @@ export default function TeamPage() {
                         className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0"
                       />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="text-sm font-bold text-white truncate">{club.name}</h4>
+                          {club.org_name && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              🏛️ {club.org_name}
+                            </span>
+                          )}
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
                             {club.city || "上海"}
                           </span>

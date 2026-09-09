@@ -12,6 +12,75 @@
       </view>
     </view>
 
+    <!-- ── 🏛️ 大群体组织铭牌 (若已认证加入复旦戈等大组织) ── -->
+    <view v-if="currentOrg" class="org-banner-card">
+      <view class="org-banner-top">
+        <view class="org-badge-box">
+          <text class="org-badge-icon">🏛️</text>
+          <text class="org-badge-title">{{ currentOrg.name }} 大群体</text>
+          <text class="org-auth-status" :class="currentOrg.status">
+            {{ currentOrg.status === 'confirmed' ? '✓ 戈友已认证' : '⏳ 待核对' }}
+          </text>
+        </view>
+        <view class="org-right-actions">
+          <view class="subclubs-tag-btn" @click="openSubClubsModal">
+            <text class="subclubs-tag-text">下属分队 ({{ orgSubClubs.length }}) ›</text>
+          </view>
+        </view>
+      </view>
+      <view class="org-meta-pill-row">
+        <text class="org-meta-pill">👤 {{ currentOrg.real_name || '已认证' }}</text>
+        <text class="org-meta-pill highlight">🎓 {{ currentOrg.class_name || '复旦商学院' }}</text>
+        <text class="org-meta-pill">🎂 {{ currentOrg.date_of_birth ? currentOrg.date_of_birth.substring(0, 4) + '年生' : '保密' }}</text>
+        <text class="org-meta-pill">🚻 {{ currentOrg.gender === 'female' ? '女' : '男' }}</text>
+      </view>
+    </view>
+
+    <!-- ── 🏛️ 未加入大组织认证入口 ── -->
+    <view v-if="!currentOrg" class="grand-org-prompt-card">
+      <view class="gop-badge-row">
+        <text class="gop-badge">🏛️ 大群体认证</text>
+        <text class="gop-code-pill">复旦戈专属码: FDGOBI</text>
+      </view>
+      <text class="gop-title">加入【复旦戈】大群体</text>
+      <text class="gop-desc">汇聚复旦上千戈友与商学院跑者。凭邀请码实名认证姓名、性别、生日与班级，解锁下属分跑团备战与打卡！</text>
+      <button class="gop-join-btn" @click="openOrgJoinModal">
+        🔑 凭复旦戈邀请码实名认证加入
+      </button>
+    </view>
+
+    <!-- ── 🚩 已加入大群体但未加入任何下属跑团时 ── -->
+    <view v-if="currentOrg && userClubs.length === 0" class="subclubs-entry-section">
+      <view class="section-card choose-subclub-card">
+        <view class="csc-header-row">
+          <view class="title-with-icon">
+            <text class="icon">🚩</text>
+            <text class="card-title">选择加入【{{ currentOrg.name }}】下属跑团</text>
+          </view>
+        </view>
+        <text class="csc-intro-text">您已成功认证为【{{ currentOrg.class_name }}】{{ currentOrg.real_name }}，请在下方选择加入所属分跑团：</text>
+        <view v-if="orgSubClubs.length === 0" class="empty-clubs-text">
+          大群体下暂无已创建分跑团，请联系管理员创建！
+        </view>
+        <view v-else class="subclubs-grid-list">
+          <view v-for="sc in orgSubClubs" :key="sc.id" class="subclub-item-box">
+            <image class="sc-logo-img" :src="sc.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+            <view class="sc-content-box">
+              <view class="sc-name-line">
+                <text class="sc-name-title">{{ sc.name }}</text>
+                <text class="sc-city-tag">📍 {{ sc.city || '上海' }}</text>
+              </view>
+              <text class="sc-desc-line">{{ sc.description || '戈友备战与日常训练打卡分跑团' }}</text>
+              <text class="sc-meta-line">团长: {{ sc.owner_name || '平台指定' }} · {{ sc.member_count || 1 }} 位队员</text>
+            </view>
+            <button class="sc-join-action-btn" :loading="joiningClubId === sc.id" @click="handleJoinClubDirect(sc.id)">
+              加入
+            </button>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- ── 跑团快速切换横向标签栏 (仅在加入跑团后显示) ── -->
     <view v-if="userClubs.length > 0" class="clubs-switcher-wrap">
       <scroll-view scroll-x class="clubs-switcher-scroll" :show-scrollbar="false">
@@ -103,6 +172,17 @@
           <view class="tool-content">
             <text class="tool-main-title">发起跑团挑战赛</text>
             <text class="tool-sub-desc">创建跑量挑战活动与奖励规则 ({{ events.length }}个进行中)</text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
+
+        <view v-if="currentOrg" class="owner-tool-item" @click="openOrgMembersModal">
+          <view class="tool-icon-box bg-blue">
+            <text class="tool-icon">🏛️</text>
+          </view>
+          <view class="tool-content">
+            <text class="tool-main-title">{{ currentOrg.name }} 大群体花名册</text>
+            <text class="tool-sub-desc">核对全体戈友班级、实名认证与归属 ({{ orgMembers.length }}人)</text>
           </view>
           <text class="arrow-right">›</text>
         </view>
@@ -484,6 +564,208 @@
         </view>
       </view>
     </view>
+
+    <!-- ── 1. Join Grand Organization Modal (大群体实名认证资料弹窗) ── -->
+    <view v-if="showOrgJoinModal" class="modal-mask" @click="showOrgJoinModal = false" @touchmove.stop.prevent>
+      <view class="modal-content large-modal" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">加入大群体 · 戈友实名认证</text>
+            <text class="count-pill">复旦戈</text>
+          </view>
+          <text class="close-btn" @click="showOrgJoinModal = false">✕</text>
+        </view>
+
+        <view class="modal-body org-form-body">
+          <text class="modal-intro">💡 加入【复旦戈】大群体需登记真实姓名、性别、出生日期及班级，以便管理员核验并解锁下属分跑团。</text>
+
+          <view class="form-group">
+            <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="请输入邀请码（默认: FDGOBI）"
+              v-model="orgJoinForm.invite_code"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">真实姓名 <text class="req-star">*</text></text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="请填写真实姓名以便管理员核实"
+              v-model="orgJoinForm.real_name"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">性别 <text class="req-star">*</text></text>
+            <view class="gender-segmented-row">
+              <view
+                class="gender-pill"
+                :class="{ active: orgJoinForm.gender === 'male' }"
+                @click="orgJoinForm.gender = 'male'"
+              >
+                🚹 男
+              </view>
+              <view
+                class="gender-pill"
+                :class="{ active: orgJoinForm.gender === 'female' }"
+                @click="orgJoinForm.gender = 'female'"
+              >
+                🚺 女
+              </view>
+            </view>
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">出生日期 <text class="req-star">*</text></text>
+            <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange">
+              <view class="picker-display-box">
+                <text class="picker-value">{{ orgJoinForm.date_of_birth || '请选择出生日期' }}</text>
+                <text class="picker-arrow">📅 选择 ›</text>
+              </view>
+            </picker>
+            <text class="field-hint">仅用于生理体能评估与大组织分组核实，对外展示将严格脱敏保护隐私</text>
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">所在班级 / 届别 <text class="req-star">*</text></text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="例如: EMBA 23春 / MBA 21级 / 复旦硕博"
+              v-model="orgJoinForm.class_name"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">联系手机 (选填)</text>
+            <input
+              class="text-input"
+              type="number"
+              maxlength="11"
+              placeholder="便于紧急联络与赛事活动通知"
+              v-model="orgJoinForm.phone"
+            />
+          </view>
+
+          <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
+            提交认证资料并加入大群体
+          </button>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── 2. Sub Clubs Modal (下属跑团列表弹窗) ── -->
+    <view v-if="showSubClubsModal" class="modal-mask" @click="showSubClubsModal = false" @touchmove.stop.prevent>
+      <view class="modal-content large-modal" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">【{{ currentOrg?.name || '大组织' }}】下属分跑团</text>
+            <text class="count-pill">{{ orgSubClubs.length }} 个分队</text>
+          </view>
+          <text class="close-btn" @click="showSubClubsModal = false">✕</text>
+        </view>
+
+        <view class="modal-body modal-scroll">
+          <view v-if="orgSubClubs.length === 0" class="empty-clubs-text">
+            该大群体下暂无分跑团，请联系平台管理员创建！
+          </view>
+          <view v-else class="modal-clubs-list">
+            <view
+              v-for="c in orgSubClubs"
+              :key="c.id"
+              class="modal-club-card"
+              :class="{ 'is-current': currentClub?.id === c.id }"
+              @click="c.is_member ? handleSwitchClub(c) : null"
+            >
+              <image class="mcc-logo" :src="c.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <view class="mcc-info">
+                <view class="mcc-name-row">
+                  <text class="mcc-name">{{ c.name }}</text>
+                  <text v-if="c.is_member" class="mcc-joined-badge">已加入</text>
+                </view>
+                <text class="mcc-desc">{{ c.description || '戈友备战与日常训练打卡分跑团' }}</text>
+                <text class="mcc-meta">团长: {{ c.owner_name || '平台指定' }} · {{ c.member_count || 1 }} 位成员</text>
+              </view>
+              <view class="mcc-action" @click.stop>
+                <text v-if="currentClub?.id === c.id" class="mcc-current-tag">当前使用中 ✓</text>
+                <button
+                  v-else-if="c.is_member"
+                  class="mcc-switch-btn"
+                  @click="handleSwitchClub(c)"
+                >
+                  ⇄ 切换
+                </button>
+                <button
+                  v-else
+                  class="mcc-join-btn"
+                  :loading="joiningClubId === c.id"
+                  @click="handleJoinClubDirect(c.id)"
+                >
+                  + 加入
+                </button>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── 3. Grand Community Roster Modal (大群体戈友花名册) ── -->
+    <view v-if="showOrgMembersModal" class="modal-mask" @click="showOrgMembersModal = false" @touchmove.stop.prevent>
+      <view class="modal-content large-modal" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">【{{ currentOrg?.name }}】戈友花名册</text>
+            <text class="count-pill">{{ orgMembers.length }} 人</text>
+          </view>
+          <text class="close-btn" @click="showOrgMembersModal = false">✕</text>
+        </view>
+
+        <text class="modal-intro">💡 汇总大组织全体戈友的实名、班级与认证状态，管理员可核对确认。</text>
+
+        <input
+          class="search-member-input"
+          type="text"
+          :adjust-position="false"
+          :cursor-spacing="30"
+          placeholder="🔍 搜索戈友姓名或班级..."
+          v-model="orgMemberSearch"
+        />
+
+        <scroll-view scroll-y class="members-scroll">
+          <view v-for="m in filteredOrgMembers" :key="m.user_id" class="member-row">
+            <view class="m-left">
+              <image class="m-avatar" :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <view class="m-info">
+                <view class="m-name-line">
+                  <text class="m-name">{{ m.real_name || m.display_name }}</text>
+                  <text class="m-class-tag">{{ m.class_name || '未设班级' }}</text>
+                  <text class="m-status-pill" :class="m.status">{{ m.status === 'confirmed' ? '已核验' : '待核对' }}</text>
+                </view>
+                <text class="m-sub-text">
+                  {{ m.gender === 'female' ? '女' : '男' }} · {{ m.date_of_birth ? m.date_of_birth.substring(0, 4) + '年生' : '' }} · 分队: {{ m.sub_clubs && m.sub_clubs.length ? m.sub_clubs.map((s: any) => s.name).join('、') : '暂未入队' }}
+                </text>
+              </view>
+            </view>
+
+            <view class="m-actions">
+              <button
+                v-if="m.status !== 'confirmed'"
+                class="act-pill coach-pill"
+                @click="handleConfirmOrgMember(m.user_id)"
+              >
+                ✓ 核对确认
+              </button>
+              <text v-else class="confirmed-label">✓ 已确认</text>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -518,6 +800,126 @@ const showAllClubsModal = ref(false);
 const inviteCodeInput = ref("");
 const joiningClub = ref(false);
 const joiningClubId = ref<string | null>(null);
+
+// ── Grand Community / Organization State ──
+const userOrgs = ref<any[]>([]);
+const currentOrg = ref<any>(null);
+const orgSubClubs = ref<any[]>([]);
+const orgMembers = ref<any[]>([]);
+
+const showOrgJoinModal = ref(false);
+const showOrgMembersModal = ref(false);
+const showSubClubsModal = ref(false);
+const orgMemberSearch = ref("");
+const joiningOrg = ref(false);
+
+const orgJoinForm = ref({
+  invite_code: "FDGOBI",
+  real_name: "",
+  gender: "male",
+  date_of_birth: "1988-08-08",
+  class_name: "",
+  phone: ""
+});
+
+function openOrgJoinModal() {
+  const u = user.value || getStoredUser();
+  if (u) {
+    orgJoinForm.value.real_name =
+      u.display_name && u.display_name !== "跑者" && u.display_name !== "微信用户"
+        ? u.display_name
+        : "";
+    orgJoinForm.value.gender = u.gender || "male";
+    orgJoinForm.value.date_of_birth = u.date_of_birth || "1988-08-08";
+    orgJoinForm.value.phone = u.phone || "";
+  }
+  showOrgJoinModal.value = true;
+}
+
+function onOrgDobChange(e: any) {
+  orgJoinForm.value.date_of_birth = e.detail.value;
+}
+
+async function submitOrgJoin() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!orgJoinForm.value.invite_code.trim()) {
+    uni.showToast({ title: "请输入邀请码", icon: "none" });
+    return;
+  }
+  if (!orgJoinForm.value.real_name.trim()) {
+    uni.showToast({ title: "请填写真实姓名", icon: "none" });
+    return;
+  }
+  if (!orgJoinForm.value.class_name.trim()) {
+    uni.showToast({ title: "请填写所在班级/届别", icon: "none" });
+    return;
+  }
+  if (!orgJoinForm.value.date_of_birth.trim()) {
+    uni.showToast({ title: "请选择出生日期", icon: "none" });
+    return;
+  }
+
+  joiningOrg.value = true;
+  try {
+    const res = await request("/api/org/join", "POST", {
+      user_id: uid,
+      invite_code: orgJoinForm.value.invite_code.trim().toUpperCase(),
+      real_name: orgJoinForm.value.real_name.trim(),
+      gender: orgJoinForm.value.gender,
+      date_of_birth: orgJoinForm.value.date_of_birth.trim(),
+      class_name: orgJoinForm.value.class_name.trim(),
+      phone: orgJoinForm.value.phone.trim()
+    });
+
+    uni.showToast({ title: res?.message || "加入大群体成功！", icon: "success" });
+    showOrgJoinModal.value = false;
+    await loadClubData();
+    if (orgSubClubs.value.length > 0 && userClubs.value.length === 0) {
+      showSubClubsModal.value = true;
+    }
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "认证加入失败，请核对邀请码", icon: "none" });
+  } finally {
+    joiningOrg.value = false;
+  }
+}
+
+function openSubClubsModal() {
+  showSubClubsModal.value = true;
+}
+
+function openOrgMembersModal() {
+  orgMemberSearch.value = "";
+  showOrgMembersModal.value = true;
+}
+
+async function handleConfirmOrgMember(targetUid: string) {
+  if (!currentOrg.value) return;
+  try {
+    await request(`/api/org/${currentOrg.value.id}/members/${targetUid}/confirm`, "POST", {
+      operator_uid: user.value?.id
+    });
+    uni.showToast({ title: "已确认该戈友资料", icon: "success" });
+    const memRes = await request(`/api/org/${currentOrg.value.id}/members`);
+    orgMembers.value = memRes?.members || [];
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "确认失败", icon: "none" });
+  }
+}
+
+const filteredOrgMembers = computed(() => {
+  if (!orgMemberSearch.value.trim()) return orgMembers.value;
+  const q = orgMemberSearch.value.trim().toLowerCase();
+  return orgMembers.value.filter((m: any) =>
+    (m.real_name || "").toLowerCase().includes(q) ||
+    (m.class_name || "").toLowerCase().includes(q) ||
+    (m.display_name || "").toLowerCase().includes(q)
+  );
+});
 
 const allClubs = ref<any[]>([]);
 const userClubs = ref<any[]>([]);
@@ -575,6 +977,25 @@ async function loadClubData(preferredClubId?: string) {
   const uid = user.value.id;
 
   try {
+    // 1. Fetch user organizations
+    try {
+      const orgRes = await request(`/api/org/my-orgs/${uid}`);
+      userOrgs.value = orgRes?.organizations || [];
+      if (userOrgs.value.length > 0) {
+        currentOrg.value = userOrgs.value[0];
+        const subRes = await request(`/api/org/${currentOrg.value.id}/sub-clubs?user_id=${uid}`);
+        orgSubClubs.value = subRes?.sub_clubs || [];
+        const memRes = await request(`/api/org/${currentOrg.value.id}/members`);
+        orgMembers.value = memRes?.members || [];
+      } else {
+        currentOrg.value = null;
+        orgSubClubs.value = [];
+        orgMembers.value = [];
+      }
+    } catch (err) {
+      console.warn("Failed to load organizations:", err);
+    }
+
     const [myRes, allRes] = await Promise.all([
       request(`/api/team/my-clubs/${uid}`),
       request(`/api/team/all-clubs?user_id=${uid}`)
@@ -2319,5 +2740,348 @@ onPullDownRefresh(async () => {
   color: #8e8e93;
   line-height: 1.5;
   display: block;
+}
+/* ── 🏛️ 大群体组织铭牌 ── */
+.org-banner-card {
+  background: linear-gradient(135deg, rgba(30, 27, 46, 0.95) 0%, rgba(20, 20, 28, 0.95) 100%);
+  border: 1rpx solid rgba(139, 92, 246, 0.3);
+  border-radius: 28rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.35);
+}
+
+.org-banner-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.org-badge-box {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.org-badge-icon {
+  font-size: 32rpx;
+}
+
+.org-badge-title {
+  font-size: 28rpx;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 0.5rpx;
+}
+
+.org-auth-status {
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.3);
+}
+
+.org-auth-status.pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.org-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.subclubs-tag-btn {
+  padding: 8rpx 18rpx;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1rpx solid rgba(139, 92, 246, 0.35);
+  border-radius: 20rpx;
+}
+
+.subclubs-tag-text {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #c4b5fd;
+}
+
+.org-meta-pill-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.org-meta-pill {
+  font-size: 22rpx;
+  color: #d1d5db;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 6rpx 16rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.org-meta-pill.highlight {
+  color: #ff9f0a;
+  background: rgba(255, 159, 10, 0.12);
+  border-color: rgba(255, 159, 10, 0.3);
+  font-weight: bold;
+}
+
+/* ── 🏛️ 未加入大组织提示卡片 ── */
+.grand-org-prompt-card {
+  background: linear-gradient(135deg, rgba(26, 26, 36, 0.95) 0%, rgba(18, 18, 22, 0.95) 100%);
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+  border-radius: 28rpx;
+  padding: 30rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 10rpx 30rpx rgba(252, 76, 2, 0.1);
+}
+
+.gop-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+}
+
+.gop-badge {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #fc4c02;
+  background: rgba(252, 76, 2, 0.12);
+  padding: 6rpx 16rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(252, 76, 2, 0.25);
+}
+
+.gop-code-pill {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 4rpx 14rpx;
+  border-radius: 14rpx;
+}
+
+.gop-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #ffffff;
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.gop-desc {
+  font-size: 23rpx;
+  color: #a1a1aa;
+  line-height: 1.6;
+  margin-bottom: 24rpx;
+  display: block;
+}
+
+.gop-join-btn {
+  background: linear-gradient(135deg, #fc4c02 0%, #ff6426 100%);
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: bold;
+  height: 76rpx;
+  line-height: 76rpx;
+  border-radius: 22rpx;
+  border: none;
+  box-shadow: 0 6rpx 20rpx rgba(252, 76, 2, 0.35);
+}
+
+/* ── 🚩 已加入大组织但未加入下属跑团 ── */
+.subclubs-entry-section {
+  margin-bottom: 24rpx;
+}
+
+.choose-subclub-card {
+  padding: 30rpx 28rpx;
+}
+
+.csc-intro-text {
+  font-size: 23rpx;
+  color: #9ca3af;
+  line-height: 1.5;
+  margin-bottom: 24rpx;
+  display: block;
+}
+
+.subclubs-grid-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.subclub-item-box {
+  display: flex;
+  align-items: center;
+  background: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 22rpx;
+  gap: 20rpx;
+}
+
+.sc-logo-img {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+}
+
+.sc-content-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.sc-name-line {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 6rpx;
+}
+
+.sc-name-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.sc-city-tag {
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.sc-desc-line {
+  font-size: 21rpx;
+  color: #71717a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6rpx;
+  display: block;
+}
+
+.sc-meta-line {
+  font-size: 20rpx;
+  color: #9ca3af;
+  display: block;
+}
+
+.sc-join-action-btn {
+  height: 60rpx;
+  line-height: 60rpx;
+  padding: 0 28rpx;
+  background: #fc4c02;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: bold;
+  border-radius: 18rpx;
+  border: none;
+  flex-shrink: 0;
+}
+
+/* ── Modal Form Enhancements ── */
+.req-star {
+  color: #ef4444;
+  margin-left: 6rpx;
+}
+
+.gender-segmented-row {
+  display: flex;
+  gap: 20rpx;
+}
+
+.gender-pill {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  background: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 18rpx;
+  color: #a1a1aa;
+  font-size: 26rpx;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.gender-pill.active {
+  background: rgba(252, 76, 2, 0.15);
+  border-color: #fc4c02;
+  color: #fc4c02;
+}
+
+.picker-display-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 18rpx;
+  padding: 20rpx 24rpx;
+}
+
+.picker-value {
+  font-size: 26rpx;
+  color: #ffffff;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.field-hint {
+  font-size: 20rpx;
+  color: #71717a;
+  margin-top: 8rpx;
+  display: block;
+}
+
+.org-submit-btn {
+  margin-top: 36rpx;
+  background: linear-gradient(135deg, #fc4c02 0%, #ff6426 100%);
+  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.35);
+}
+
+.m-class-tag {
+  font-size: 20rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 10rpx;
+  background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  font-weight: bold;
+}
+
+.m-status-pill {
+  font-size: 18rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.m-status-pill.pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.confirmed-label {
+  font-size: 22rpx;
+  color: #10b981;
+  font-weight: bold;
+}
+
+.bg-blue {
+  background: rgba(14, 165, 233, 0.15);
+  color: #0ea5e9;
+  border: 1rpx solid rgba(14, 165, 233, 0.3);
 }
 </style>

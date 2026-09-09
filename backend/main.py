@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from config import settings
 from middleware.auth import SupabaseAuthMiddleware
 
-from routers import auth, sync, coach, profile, science, team, miniapp, admin
+from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization
 from scheduler.tasks import start_scheduler
 
 @asynccontextmanager
@@ -50,6 +50,7 @@ app.include_router(coach.router,    prefix="/api/coach",    tags=["Canova教练"
 app.include_router(profile.router,  prefix="/api/profile",  tags=["跑者档案与目标"])
 app.include_router(science.router,  prefix="/api/science",  tags=["跑步生理学与分析"])
 app.include_router(team.router,     prefix="/api/team",     tags=["跑团与排行榜"])
+app.include_router(organization.router, prefix="/api/org",  tags=["大群体与组织管理"])
 app.include_router(miniapp.router,  prefix="/api/miniapp",  tags=["微信小程序专用接口"])
 app.include_router(admin.router,    prefix="/api/admin",    tags=["平台超级管理员"])
 
