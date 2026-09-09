@@ -1501,9 +1501,15 @@ class LocalStore:
             set_clauses = []
             params = []
             for k in allowed:
-                if k in data and data[k] is not None:
-                    set_clauses.append(f"{k} = ?")
-                    params.append(data[k])
+                if k in data:
+                    val = data[k]
+                    if k == "org_id":
+                        val = val if val else None
+                        set_clauses.append(f"{k} = ?")
+                        params.append(val)
+                    elif val is not None:
+                        set_clauses.append(f"{k} = ?")
+                        params.append(val)
             if not set_clauses:
                 return LocalStore.get_club(club_id)
             params.append(club_id)
@@ -2643,7 +2649,17 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM organizations WHERE id = ?", (org_id,))
+            cursor.execute("""
+                SELECT o.*,
+                       p.display_name as owner_name,
+                       p.avatar_url as owner_avatar,
+                       p.email as owner_email,
+                       (SELECT COUNT(*) FROM organization_members m WHERE m.org_id = o.id) as member_count,
+                       (SELECT COUNT(*) FROM clubs c WHERE c.org_id = o.id) as sub_clubs_count
+                FROM organizations o
+                LEFT JOIN profiles p ON o.owner_id = p.id
+                WHERE o.id = ?
+            """, (org_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
 
@@ -2834,9 +2850,13 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT o.*,
+                       p.display_name as owner_name,
+                       p.avatar_url as owner_avatar,
+                       p.email as owner_email,
                        (SELECT COUNT(*) FROM organization_members m WHERE m.org_id = o.id) as member_count,
                        (SELECT COUNT(*) FROM clubs c WHERE c.org_id = o.id) as sub_clubs_count
                 FROM organizations o
+                LEFT JOIN profiles p ON o.owner_id = p.id
                 ORDER BY o.created_at ASC
             """)
             return [dict(r) for r in cursor.fetchall()]
@@ -2869,13 +2889,18 @@ class LocalStore:
     def update_organization(org_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            allowed = ["name", "description", "city", "logo_url", "invite_code"]
+            allowed = ["name", "description", "city", "logo_url", "invite_code", "owner_id"]
             set_clauses = []
             params = []
             for k in allowed:
                 if k in data and data[k] is not None:
+                    val = data[k]
+                    if k == "invite_code":
+                        val = str(val).strip().upper()
+                    elif isinstance(val, str):
+                        val = val.strip()
                     set_clauses.append(f"{k} = ?")
-                    params.append(data[k])
+                    params.append(val)
             if not set_clauses:
                 return LocalStore.get_organization_admin(org_id)
             params.append(org_id)

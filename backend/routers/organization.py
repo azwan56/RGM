@@ -40,6 +40,12 @@ class UpdateOrgRequest(BaseModel):
     description: Optional[str] = None
     city: Optional[str] = None
     logo_url: Optional[str] = None
+    owner_id: Optional[str] = None
+
+class BindClubRequest(BaseModel):
+    club_id: str
+    action: str = "bind"  # "bind" or "unbind"
+
 
 
 @router.post("/verify-code")
@@ -176,6 +182,46 @@ def list_all_orgs_endpoint():
     return {"organizations": orgs}
 
 
+@router.get("/admin/all-list")
+def list_all_orgs_admin_endpoint():
+    """
+    Returns all organizations in the platform with invite_code retained for admin console.
+    """
+    orgs = LocalStore.list_all_organizations()
+    return {"organizations": orgs}
+
+
+@router.put("/{org_id}")
+def update_org_endpoint(org_id: str, req: UpdateOrgRequest):
+    """
+    Updates organization info (name, invite_code, description, city, logo_url, owner_id).
+    """
+    data = req.dict(exclude_unset=True)
+    updated = LocalStore.update_organization(org_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="组织不存在")
+    return {"success": True, "message": "大组织信息更新成功！", "organization": updated}
+
+
+@router.post("/{org_id}/bind-club")
+def bind_club_to_org_endpoint(org_id: str, req: BindClubRequest):
+    """
+    Binds or unbinds a running club to/from an organization.
+    """
+    club = LocalStore.get_club(req.club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+
+    target_org = org_id if req.action == "bind" else None
+    updated = LocalStore.update_club(req.club_id, {"org_id": target_org})
+    action_text = "挂靠至此大组织" if req.action == "bind" else "解除挂靠，设为独立自由跑团"
+    return {
+        "success": True,
+        "message": f"成功将跑团【{club['name']}】{action_text}！",
+        "club": updated
+    }
+
+
 @router.post("/create")
 def create_org_endpoint(req: CreateOrgRequest):
     """
@@ -199,3 +245,4 @@ def create_org_endpoint(req: CreateOrgRequest):
     except Exception as e:
         logger.error(f"[create_organization] failed: {e}")
         raise HTTPException(status_code=400, detail=f"创建组织失败（邀请码可能已存在）: {str(e)}")
+

@@ -36,18 +36,19 @@
       </view>
     </view>
 
-    <!-- ── 🏛️ 未加入大组织认证入口 ── -->
+    <!-- ── 🏛️ 未加入大组织认证入口 (选填，支持多大群体) ── -->
     <view v-if="!currentOrg" class="grand-org-prompt-card">
       <view class="gop-badge-row">
-        <text class="gop-badge">🏛️ 大群体认证</text>
-        <text class="gop-code-pill">复旦戈专属码: FDGOBI</text>
+        <text class="gop-badge">🏛️ 高校戈友 / 联盟大群体认证</text>
+        <text class="gop-code-pill">支持复旦戈 FDGOBI 及各大组织码</text>
       </view>
-      <text class="gop-title">加入【复旦戈】大群体</text>
-      <text class="gop-desc">汇聚复旦上千戈友与商学院跑者。凭邀请码实名认证姓名、性别、生日与班级，解锁下属分跑团备战与打卡！</text>
+      <text class="gop-title">加入大群体架构（如复旦戈等）</text>
+      <text class="gop-desc">汇聚复旦戈（邀请码: FDGOBI）及各大高校戈友会跑者。凭邀请码实名登记姓名、班级与生日认证，解锁下属分队备战与花名册！（自由独立跑者可跳过）</text>
       <button class="gop-join-btn" @click="openOrgJoinModal">
-        🔑 凭复旦戈邀请码实名认证加入
+        🔑 凭专属邀请码实名认证加入 (选填)
       </button>
     </view>
+
 
     <!-- ── 🚩 已加入大群体但未加入任何下属跑团时 ── -->
     <view v-if="currentOrg && userClubs.length === 0" class="subclubs-entry-section">
@@ -283,15 +284,36 @@
     </view>
     </view>
 
-    <!-- ── Unjoined State: List all created clubs for user to choose & join ── -->
+    <!-- ── Unjoined State: Free / Solo Runner View + Club Options ── -->
     <view v-else class="unjoined-club-view">
+      <!-- ── 🏃 自由跑者独立训练模式专属卡片 ── -->
+      <view class="solo-runner-card">
+        <view class="src-top-row">
+          <view class="src-badge-box">
+            <text class="src-badge-icon">🏃</text>
+            <text class="src-badge-text">自由跑者独立训练中</text>
+            <text class="src-status-pill">免入团畅享全功能</text>
+          </view>
+        </view>
+        <text class="src-title">无需入团，即可畅享科技跑步全功能</text>
+        <text class="src-desc">您当前处于自由独立训练模式。佳明与高驰手表运动直连同步、Canova AI 私教深度对话、CTL/ATL/TSB 负荷体能罗盘以及个人跑量与 PB 目标设定均对您 100% 开放，完全无门槛！</text>
+        <view class="src-actions-row">
+          <button class="src-btn outline" @click="goToIndexPage">
+            ⌚ 首页打卡与手表同步
+          </button>
+          <button class="src-btn primary" @click="goToCoachPage">
+            💬 咨询 Canova教练
+          </button>
+        </view>
+      </view>
+
       <view class="unjoined-hero-box">
-        <view class="unjoined-badge">🏃 跑团中心</view>
-        <text class="unjoined-hero-title">欢迎加入跑团</text>
-        <text class="unjoined-hero-sub">请在下方浏览平台所有已创建跑团并选择加入，与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控！</text>
+        <view class="unjoined-badge">🤝 寻找跑团与队友</view>
+        <text class="unjoined-hero-title">想要与队友合练备战？</text>
+        <text class="unjoined-hero-sub">在下方浏览平台跑团或输入专属码加入，与队友共同打卡月度挑战、查看团队英雄榜与教练负荷监控！（自由跑者选填）</text>
         <view class="unjoined-btn-row">
           <button class="unjoined-action-btn secondary-invite" @click="showJoinModal = true">
-            🔑 输入邀请码加入
+            🔑 输入跑团邀请码加入
           </button>
         </view>
       </view>
@@ -300,10 +322,10 @@
       <view class="section-card all-clubs-sec">
         <view class="sec-title-row">
           <view class="title-left">
-            <text class="sec-title">🏆 平台跑团列表</text>
+            <text class="sec-title">🏆 平台跑团列表 (选填)</text>
             <text class="count-tag">{{ allClubs.length }} 个跑团</text>
           </view>
-          <text class="sec-hint">选择心仪跑团一键加入</text>
+          <text class="sec-hint">自由入团或凭专属码入团</text>
         </view>
 
         <view v-if="allClubs.length === 0" class="empty-clubs-text">
@@ -316,6 +338,8 @@
             <view class="csc-body">
               <view class="csc-title-row">
                 <text class="csc-name">{{ club.name }}</text>
+                <text v-if="club.org_name" class="org-tag-pill">🏛️ {{ club.org_name }}</text>
+                <text v-else class="org-tag-pill free-tag">🍃 独立跑团</text>
                 <text class="mode-badge-pill" :class="club.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
                   {{ club.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
                 </text>
@@ -1101,6 +1125,19 @@ function goToRankPage() {
     url: "/pages/team/rank"
   });
 }
+
+function goToIndexPage() {
+  uni.switchTab({
+    url: "/pages/index/index"
+  });
+}
+
+function goToCoachPage() {
+  uni.switchTab({
+    url: "/pages/coach/coach"
+  });
+}
+
 
 const isOwnerOrDev = computed(() => {
   if (!user.value || !currentClub.value) return false;
@@ -3060,6 +3097,115 @@ onPullDownRefresh(async () => {
   background: rgba(255, 159, 10, 0.12);
   border-color: rgba(255, 159, 10, 0.3);
   font-weight: bold;
+}
+
+/* ── 🏃 自由跑者独立训练模式专属卡片 ── */
+.solo-runner-card {
+  background: linear-gradient(135deg, rgba(16, 36, 26, 0.95) 0%, rgba(14, 24, 20, 0.95) 100%);
+  border: 1rpx solid rgba(52, 199, 89, 0.35);
+  border-radius: 28rpx;
+  padding: 30rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 10rpx 30rpx rgba(52, 199, 89, 0.08);
+}
+
+.src-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+}
+
+.src-badge-box {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.src-badge-icon {
+  font-size: 26rpx;
+}
+
+.src-badge-text {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #34c759;
+  background: rgba(52, 199, 89, 0.12);
+  padding: 6rpx 16rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(52, 199, 89, 0.25);
+}
+
+.src-status-pill {
+  font-size: 20rpx;
+  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4rpx 14rpx;
+  border-radius: 14rpx;
+}
+
+.src-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #ffffff;
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.src-desc {
+  font-size: 23rpx;
+  color: #a1a1aa;
+  line-height: 1.6;
+  margin-bottom: 24rpx;
+  display: block;
+}
+
+.src-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.src-btn {
+  flex: 1;
+  font-size: 24rpx;
+  font-weight: bold;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+}
+
+.src-btn.primary {
+  background: linear-gradient(135deg, #34c759 0%, #30b74e 100%);
+  color: #ffffff;
+  box-shadow: 0 6rpx 20rpx rgba(52, 199, 89, 0.25);
+}
+
+.src-btn.outline {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4e4e7;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+}
+
+.org-tag-pill {
+  font-size: 20rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 10rpx;
+  background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  border: 1rpx solid rgba(255, 159, 10, 0.3);
+  font-weight: bold;
+}
+
+.org-tag-pill.free-tag {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+  border-color: rgba(52, 199, 89, 0.25);
 }
 
 /* ── 🏛️ 未加入大组织提示卡片 ── */
