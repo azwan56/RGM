@@ -203,12 +203,253 @@
               >C 标 (拉练)</button>
             </view>
           </view>
+
+          <!-- ── Race Intelligence Collapsible Panel ── -->
+          <view class="race-info-toggle-row" @click="toggleRaceInfo(race.id || race.name)">
+            <text class="race-info-toggle-label">
+              {{ hasRaceInfo(race) ? '📋 赛事情报已填写' : '📋 填写赛事情报' }}
+            </text>
+            <text class="race-info-toggle-arrow">{{ expandedRaceInfo[race.id || race.name] ? '▲' : '▼' }}</text>
+          </view>
+
+          <view v-if="expandedRaceInfo[race.id || race.name]" class="race-info-panel">
+            <!-- ── 越野赛专属字段 ── -->
+            <template v-if="isTrail(race.race_type)">
+              <text class="race-info-section-title">🏔️ 越野赛情报</text>
+
+              <view class="race-info-row">
+                <text class="race-info-label">报名赛程 (km)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 50 / 100"
+                  :value="getRaceInfoVal(race, 'race_distance_km')"
+                  @input="(e: any) => setRaceInfoVal(race, 'race_distance_km', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">累计爬升 D+ (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 2800"
+                  :value="getRaceInfoVal(race, 'elevation_gain_m')"
+                  @input="(e: any) => setRaceInfoVal(race, 'elevation_gain_m', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">累计下降 D- (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 2600"
+                  :value="getRaceInfoVal(race, 'elevation_loss_m')"
+                  @input="(e: any) => setRaceInfoVal(race, 'elevation_loss_m', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">最高海拔 (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 1918"
+                  :value="getRaceInfoVal(race, 'max_altitude_m')"
+                  @input="(e: any) => setRaceInfoVal(race, 'max_altitude_m', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">难度等级</text>
+                <picker
+                  mode="selector"
+                  :range="difficultyOptions"
+                  :value="difficultyOptions.indexOf(getRaceInfoVal(race, 'difficulty_level') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'difficulty_level', difficultyOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'difficulty_level') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">地形类型</text>
+                <picker
+                  mode="selector"
+                  :range="trailTerrainOptions"
+                  :value="trailTerrainOptions.indexOf(getRaceInfoVal(race, 'terrain_type') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'terrain_type', trailTerrainOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'terrain_type') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">气候带</text>
+                <picker
+                  mode="selector"
+                  :range="climateZoneOptions"
+                  :value="climateZoneOptions.indexOf(getRaceInfoVal(race, 'climate_zone') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'climate_zone', climateZoneOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'climate_zone') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">强制装备要求</text>
+                <input
+                  class="race-info-input"
+                  placeholder="如: 头灯、1.5L水、急救毯"
+                  :value="getRaceInfoVal(race, 'mandatory_gear')"
+                  @input="(e: any) => setRaceInfoVal(race, 'mandatory_gear', e.detail.value)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">关门时间说明</text>
+                <input
+                  class="race-info-input"
+                  placeholder="如: 总关门 20小时，中途补给站 4个"
+                  :value="getRaceInfoVal(race, 'cutoff_notes')"
+                  @input="(e: any) => setRaceInfoVal(race, 'cutoff_notes', e.detail.value)"
+                />
+              </view>
+            </template>
+
+            <!-- ── 公路赛通用字段（全马/半马/10K/5K）── -->
+            <template v-else>
+              <text class="race-info-section-title">🏅 赛事情报</text>
+
+              <view class="race-info-row">
+                <text class="race-info-label">赛事等级</text>
+                <picker
+                  mode="selector"
+                  :range="raceLevelOptions"
+                  :value="raceLevelOptions.indexOf(getRaceInfoVal(race, 'race_level') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'race_level', raceLevelOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'race_level') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">赛道特点</text>
+                <picker
+                  mode="selector"
+                  :range="courseProfileOptions"
+                  :value="courseProfileOptions.indexOf(getRaceInfoVal(race, 'course_profile') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'course_profile', courseProfileOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'course_profile') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">路面材质</text>
+                <picker
+                  mode="selector"
+                  :range="courseSurfaceOptions"
+                  :value="courseSurfaceOptions.indexOf(getRaceInfoVal(race, 'course_surface') || '')"
+                  @change="(e: any) => setRaceInfoVal(race, 'course_surface', courseSurfaceOptions[e.detail.value])"
+                >
+                  <view class="race-info-picker">
+                    <text>{{ getRaceInfoVal(race, 'course_surface') || '请选择' }}</text>
+                    <text class="picker-arrow-sm">▾</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="race-info-row">
+                <text class="race-info-label">赛道净爬升 (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 120"
+                  :value="getRaceInfoVal(race, 'net_elevation_gain_m')"
+                  @input="(e: any) => setRaceInfoVal(race, 'net_elevation_gain_m', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+            </template>
+
+            <!-- ── 通用天气与规模字段 ── -->
+            <text class="race-info-section-title" style="margin-top: 18rpx;">🌤️ 天气 & 规模</text>
+            <view class="race-info-row">
+              <text class="race-info-label">历史平均气温 (℃)</text>
+              <input
+                class="race-info-input"
+                type="digit"
+                placeholder="如 12"
+                :value="getRaceInfoVal(race, 'avg_temp_c')"
+                @input="(e: any) => setRaceInfoVal(race, 'avg_temp_c', parseFloat(e.detail.value) || null)"
+              />
+            </view>
+            <view v-if="!isTrail(race.race_type)" class="race-info-row">
+              <text class="race-info-label">历史平均湿度 (%)</text>
+              <input
+                class="race-info-input"
+                type="digit"
+                placeholder="如 65"
+                :value="getRaceInfoVal(race, 'humidity_pct')"
+                @input="(e: any) => setRaceInfoVal(race, 'humidity_pct', parseFloat(e.detail.value) || null)"
+              />
+            </view>
+            <view class="race-info-row">
+              <text class="race-info-label">天气情况备注</text>
+              <input
+                class="race-info-input"
+                placeholder="如: 秋季举办，通常干燥清凉"
+                :value="getRaceInfoVal(race, 'weather_notes')"
+                @input="(e: any) => setRaceInfoVal(race, 'weather_notes', e.detail.value)"
+              />
+            </view>
+            <view class="race-info-row">
+              <text class="race-info-label">大致参赛人数</text>
+              <input
+                class="race-info-input"
+                type="digit"
+                placeholder="如 10000"
+                :value="getRaceInfoVal(race, 'typical_participants')"
+                @input="(e: any) => setRaceInfoVal(race, 'typical_participants', parseInt(e.detail.value) || null)"
+              />
+            </view>
+            <view class="race-info-row">
+              <text class="race-info-label">其他备注</text>
+              <input
+                class="race-info-input"
+                placeholder="其他补充说明"
+                :value="getRaceInfoVal(race, 'custom_notes')"
+                @input="(e: any) => setRaceInfoVal(race, 'custom_notes', e.detail.value)"
+              />
+            </view>
+
+            <button
+              class="race-info-save-btn"
+              :loading="savingRaceInfo[race.id || race.name]"
+              :disabled="savingRaceInfo[race.id || race.name]"
+              @click="handleSaveRaceInfo(race)"
+            >保存赛事情报</button>
+          </view>
+          <!-- ── End Race Intelligence Panel ── -->
         </view>
       </view>
       <view v-else class="empty-race">
         <text class="desc-text">暂无比赛计划，可在网页端控制台添加赛事。</text>
       </view>
     </view>
+
 
     <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
     <view class="section-card">
@@ -1029,6 +1270,28 @@ const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
 
+// ── Race Intelligence Panel State ──
+const expandedRaceInfo = ref<Record<string, boolean>>({});
+const savingRaceInfo = ref<Record<string, boolean>>({});
+// Stores per-race draft edits before save: { [raceId]: { fieldKey: value } }
+const raceInfoDrafts = ref<Record<string, Record<string, any>>>({});
+
+// Picker options
+const raceLevelOptions = [
+  '世界白金标', '国际金标', 'IAAF 银标', 'IAAF 铜标', '国内 A 类认证', '普通大众认证', '品牌邀请赛'
+];
+const courseProfileOptions = [
+  '极速平坦 (破 PB 首选)', '轻微起伏', '中等坡度', '丘陵赛道', '多爬升挑战赛道'
+];
+const courseSurfaceOptions = ['柏油路', '石板路', '混合路面（柏油+石板）', '碎石路'];
+const difficultyOptions = ['入门级', '进阶级', '精英级', '极限级'];
+const trailTerrainOptions = [
+  '山地跑道', '高原草甸', '丛林密林', '岩石峭壁', '沙漠戈壁', '混合地形'
+];
+const climateZoneOptions = [
+  '温带大陆性', '亚热带季风', '高寒高原', '热带季风', '温带海洋性'
+];
+
 const garminConnected = ref(false);
 const garminEmail = ref("");
 const garminDomain = ref("garmin.cn");
@@ -1495,6 +1758,87 @@ async function handleUpdateRacePriority(raceIdOrName: string, priority: number) 
   } catch (e) {
     uni.hideLoading();
     uni.showToast({ title: "更新失败", icon: "none" });
+  }
+}
+
+// ── Race Intelligence Helper Functions ──
+
+function isTrail(raceType: string): boolean {
+  if (!raceType) return false;
+  const t = raceType.toLowerCase();
+  return t.includes("trail") || t.includes("越野") || t.includes("山地");
+}
+
+function hasRaceInfo(race: any): boolean {
+  const ri = race?.race_info || {};
+  return Object.values(ri).some((v) => v !== null && v !== undefined && v !== "");
+}
+
+function toggleRaceInfo(raceKey: string) {
+  expandedRaceInfo.value = {
+    ...expandedRaceInfo.value,
+    [raceKey]: !expandedRaceInfo.value[raceKey],
+  };
+}
+
+function getRaceInfoVal(race: any, field: string): any {
+  const raceKey = race.id || race.name;
+  // Draft takes precedence over saved data
+  if (raceInfoDrafts.value[raceKey] && field in raceInfoDrafts.value[raceKey]) {
+    const v = raceInfoDrafts.value[raceKey][field];
+    return v === null ? "" : v;
+  }
+  const v = (race?.race_info || {})[field];
+  return v === null || v === undefined ? "" : v;
+}
+
+function setRaceInfoVal(race: any, field: string, value: any) {
+  const raceKey = race.id || race.name;
+  if (!raceInfoDrafts.value[raceKey]) {
+    raceInfoDrafts.value[raceKey] = {};
+  }
+  raceInfoDrafts.value[raceKey][field] = value;
+}
+
+async function handleSaveRaceInfo(race: any) {
+  const uid = user.value?.id;
+  if (!uid) return;
+  const raceKey = race.id || race.name;
+  savingRaceInfo.value = { ...savingRaceInfo.value, [raceKey]: true };
+  try {
+    // Merge saved race_info with current drafts
+    const merged = {
+      ...(race.race_info || {}),
+      ...(raceInfoDrafts.value[raceKey] || {}),
+    };
+    // Remove null/empty values so we don't pollute the DB
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(merged)) {
+      if (v !== null && v !== undefined && v !== "") {
+        cleaned[k] = v;
+      }
+    }
+    const res = await request(
+      `/api/profile/${uid}/races/${encodeURIComponent(raceKey)}/info`,
+      "PATCH",
+      { race_info: cleaned }
+    );
+    // Update local races list with fresh data
+    if (res?.races) {
+      races.value = res.races;
+    } else {
+      // Optimistic update
+      const found = races.value.find((r: any) => (r.id || r.name) === raceKey);
+      if (found) found.race_info = cleaned;
+    }
+    // Clear draft for this race
+    const { [raceKey]: _, ...rest } = raceInfoDrafts.value;
+    raceInfoDrafts.value = rest;
+    uni.showToast({ title: "赛事情报已保存 ✓", icon: "success" });
+  } catch (e) {
+    uni.showToast({ title: "保存失败，请重试", icon: "none" });
+  } finally {
+    savingRaceInfo.value = { ...savingRaceInfo.value, [raceKey]: false };
   }
 }
 
@@ -2423,7 +2767,111 @@ onShow(() => {
   font-weight: bold;
 }
 
+/* ── Race Intelligence Panel ── */
+.race-info-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16rpx;
+  padding: 12rpx 16rpx;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.07);
+}
+
+.race-info-toggle-label {
+  font-size: 22rpx;
+  color: #a1a1aa;
+}
+
+.race-info-toggle-arrow {
+  font-size: 20rpx;
+  color: #636366;
+}
+
+.race-info-panel {
+  margin-top: 12rpx;
+  padding: 18rpx 16rpx;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.07);
+}
+
+.race-info-section-title {
+  display: block;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #a1a1aa;
+  margin-bottom: 12rpx;
+  letter-spacing: 0.5rpx;
+}
+
+.race-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+  gap: 12rpx;
+}
+
+.race-info-label {
+  font-size: 22rpx;
+  color: #8e8e93;
+  flex: 0 0 auto;
+  min-width: 180rpx;
+}
+
+.race-info-input {
+  flex: 1;
+  height: 56rpx;
+  line-height: 56rpx;
+  background-color: #1a1a1e;
+  border-radius: 10rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 0 16rpx;
+  font-size: 22rpx;
+  color: #e4e4e7;
+}
+
+.race-info-picker {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56rpx;
+  background-color: #1a1a1e;
+  border-radius: 10rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 0 16rpx;
+  font-size: 22rpx;
+  color: #e4e4e7;
+}
+
+.picker-arrow-sm {
+  color: #636366;
+  font-size: 20rpx;
+  margin-left: 8rpx;
+}
+
+.race-info-save-btn {
+  margin-top: 16rpx;
+  width: 100%;
+  height: 72rpx;
+  line-height: 72rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1c7ed6 0%, #339af0 100%);
+  border-radius: 16rpx;
+  border: none;
+}
+
+.race-info-save-btn::after {
+  border: none;
+}
+
 /* PB Grid */
+
 .pb-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

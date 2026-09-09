@@ -128,9 +128,15 @@ def init_db():
                 target_time TEXT,
                 priority INTEGER DEFAULT 1,
                 created_at TEXT,
+                race_info TEXT,
                 FOREIGN KEY(user_id) REFERENCES profiles(id)
             )
         """)
+        # Migration: add race_info column to existing databases
+        try:
+            cursor.execute("ALTER TABLE race_plans ADD COLUMN race_info TEXT")
+        except Exception:
+            pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS coach_reports (
@@ -1101,6 +1107,15 @@ class LocalStore:
                         p["days_left"] = max(0, days_left)
                     except Exception:
                         p["days_left"] = 0
+                # Deserialize race_info JSON
+                raw_ri = p.get("race_info")
+                if raw_ri:
+                    try:
+                        p["race_info"] = json.loads(raw_ri)
+                    except Exception:
+                        p["race_info"] = {}
+                else:
+                    p["race_info"] = {}
                 plans.append(p)
             
             return plans
@@ -1121,8 +1136,8 @@ class LocalStore:
                 pri = 1
 
             cursor.execute("""
-                INSERT OR REPLACE INTO race_plans (id, user_id, name, race_type, race_date, target_time, priority, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO race_plans (id, user_id, name, race_type, race_date, target_time, priority, created_at, race_info)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 plan_id,
                 uid,
@@ -1131,7 +1146,8 @@ class LocalStore:
                 plan_data.get("race_date") or date.today().isoformat(),
                 plan_data.get("target_time") or "3:30:00",
                 pri,
-                datetime.utcnow().isoformat() + "Z"
+                datetime.utcnow().isoformat() + "Z",
+                json.dumps(plan_data.get("race_info") or {}, ensure_ascii=False) if plan_data.get("race_info") is not None else None
             ))
             conn.commit()
             return plan_id
@@ -1154,6 +1170,19 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM race_plans WHERE id = ? AND user_id = ?", (race_id, uid))
             conn.commit()
+
+    @staticmethod
+    def update_race_info(uid: str, race_identifier: str, race_info: Dict[str, Any]) -> bool:
+        """Update only the race_info JSON blob for a specific race plan."""
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE race_plans
+                SET race_info = ?
+                WHERE user_id = ? AND (id = ? OR name = ?)
+            """, (json.dumps(race_info, ensure_ascii=False), uid, race_identifier, race_identifier))
+            conn.commit()
+            return cursor.rowcount > 0
 
     @staticmethod
     def get_coach_report(uid: str) -> Optional[Dict[str, Any]]:

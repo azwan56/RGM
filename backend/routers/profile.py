@@ -60,6 +60,7 @@ class RacePlanRequest(BaseModel):
     race_date: str
     target_time: str
     priority: Optional[Any] = 1
+    race_info: Optional[Dict[str, Any]] = None
 
 def parse_time_to_seconds(val: Any) -> Optional[int]:
     if val is None or val == "":
@@ -490,3 +491,16 @@ def update_race_priority(uid: str, race_id: str, req: RacePriorityUpdateRequest)
     pri_int = 1 if raw_pri in ["A", "1"] else (2 if raw_pri in ["B", "2"] else 3)
     LocalStore.update_race_plan_priority(uid, race_id, pri_int)
     return {"message": "赛事优先级已更新", "races": LocalStore.get_race_plans(uid)}
+
+
+class RaceInfoUpdateRequest(BaseModel):
+    race_info: Dict[str, Any]
+
+
+@router.patch("/{uid}/races/{race_id}/info")
+def update_race_info(uid: str, race_id: str, req: RaceInfoUpdateRequest):
+    """Updates the race intelligence fields (race_info) for a specific race plan."""
+    updated = LocalStore.update_race_info(uid, race_id, req.race_info)
+    if not updated:
+        raise HTTPException(status_code=404, detail="赛事未找到")
+    return {"message": "赛事情报已更新", "races": LocalStore.get_race_plans(uid)}

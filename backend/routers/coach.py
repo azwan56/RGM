@@ -501,6 +501,52 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 
     multi_race_analysis = analyze_multi_race_calendar(eval_races)
 
+    # ── Extract race intelligence (race_info) from matched race ──
+    race_info = (matched_race or {}).get("race_info") or {}
+    race_info_block = ""
+    if race_info:
+        lines = []
+        # Common fields
+        if race_info.get("race_level"):
+            lines.append(f"- 赛事等级: {race_info['race_level']}")
+        if race_info.get("course_profile"):
+            lines.append(f"- 赛道特点: {race_info['course_profile']}")
+        if race_info.get("net_elevation_gain_m") is not None:
+            lines.append(f"- 赛道累计爬升: {race_info['net_elevation_gain_m']} m")
+        if race_info.get("course_surface"):
+            lines.append(f"- 路面材质: {race_info['course_surface']}")
+        if race_info.get("avg_temp_c") is not None:
+            lines.append(f"- 历史参赛平均气温: {race_info['avg_temp_c']} ℃")
+        if race_info.get("humidity_pct") is not None:
+            lines.append(f"- 历史平均湿度: {race_info['humidity_pct']}%")
+        if race_info.get("weather_notes"):
+            lines.append(f"- 天气情况备注: {race_info['weather_notes']}")
+        if race_info.get("typical_participants"):
+            lines.append(f"- 大致参赛规模: {race_info['typical_participants']} 人")
+        # Trail-specific fields
+        if race_info.get("race_distance_km") is not None:
+            lines.append(f"- 报名赛程: {race_info['race_distance_km']} km")
+        if race_info.get("elevation_gain_m") is not None:
+            lines.append(f"- 累计爬升 (D+): {race_info['elevation_gain_m']} m")
+        if race_info.get("elevation_loss_m") is not None:
+            lines.append(f"- 累计下降 (D-): {race_info['elevation_loss_m']} m")
+        if race_info.get("max_altitude_m") is not None:
+            lines.append(f"- 最高点海拔: {race_info['max_altitude_m']} m")
+        if race_info.get("difficulty_level"):
+            lines.append(f"- 难度等级: {race_info['difficulty_level']}")
+        if race_info.get("terrain_type"):
+            lines.append(f"- 地形类型: {race_info['terrain_type']}")
+        if race_info.get("climate_zone"):
+            lines.append(f"- 气候带: {race_info['climate_zone']}")
+        if race_info.get("mandatory_gear"):
+            lines.append(f"- 强制装备要求: {race_info['mandatory_gear']}")
+        if race_info.get("cutoff_notes"):
+            lines.append(f"- 关门时间说明: {race_info['cutoff_notes']}")
+        if race_info.get("custom_notes"):
+            lines.append(f"- 其他备注: {race_info['custom_notes']}")
+        if lines:
+            race_info_block = "\n目标赛事客观情报 (Race Intelligence):\n" + "\n".join(lines)
+
     # Build prompt context
     user_context = f"""
 跑者真实生理画像：
@@ -527,7 +573,7 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 当前主要备赛目标:
 - 目标比赛: {target_race}
 - 赛事类型: {race_category_name}
-- 目标成绩: {target_time_str}
+- 目标成绩: {target_time_str}{race_info_block}
 
 多赛事赛历统筹评估 (Canova A/B/C Macrocycle):
 - 宏观赛历概括: {multi_race_analysis.get('macrocycle_summary')}
@@ -542,6 +588,7 @@ Canova 针对该赛事类型的专项训练区间:
 最近 15 次真实训练记录概览:
 {json.dumps(activities_summary, ensure_ascii=False, indent=2)}
 """
+
 
     messages = [
         {"role": "system", "content": CANOVA_SYSTEM_PROMPT},
