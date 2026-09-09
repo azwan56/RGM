@@ -29,7 +29,7 @@ export default function Navbar() {
   const navItems = [
     { label: "数据看板", href: "/dashboard", icon: Activity },
     { label: "跑者档案与目标", href: "/dashboard/profile", icon: User },
-    { label: "Canova AI 教练", href: "/dashboard/coach", icon: Zap },
+    { label: "Canova教练", href: "/dashboard/coach", icon: Zap },
     { label: "深度分析", href: "/dashboard/analysis", icon: LineChart },
     { label: "跑团与排行榜", href: "/dashboard/team", icon: Users },
     { label: "超级管理", href: "/dashboard/admin", icon: Shield },

@@ -45,7 +45,7 @@ class LLMClient:
         client = self._get_client()
         if not client:
             logger.warning("[llm] LLM client not configured (no API key). Returning fallback response.")
-            return "【AI 教练提示】AI 分析服务未配置 API Key，请在后端环境变量中设置 DASHSCOPE_API_KEY。"
+            return "【Canova教练提示】分析服务未配置 API Key，请在后端环境变量中设置 DASHSCOPE_API_KEY。"
 
         target_model = model or self.model
         try:

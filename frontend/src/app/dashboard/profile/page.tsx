@@ -538,7 +538,7 @@ export default function ProfilePage() {
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">跑者档案、比赛计划与目标</h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            完善生理指标、赛事周期倒计时与各距离 PB，驱动 Renato Canova AI 精准配速生成
+            完善生理指标、赛事周期倒计时与各距离 PB，驱动 Canova教练 精准配速生成
           </p>
         </div>
 

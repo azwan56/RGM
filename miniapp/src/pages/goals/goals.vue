@@ -2,7 +2,7 @@
   <view class="goals-page">
     <view class="page-title-box">
       <text class="title">目标设定与生理参数</text>
-      <text class="subtitle">科学量化训练负荷，为 AI 教练提供精准分析基准</text>
+      <text class="subtitle">科学量化训练负荷，为 Canova教练提供精准分析基准</text>
     </view>
 
     <!-- Monthly Target Card -->

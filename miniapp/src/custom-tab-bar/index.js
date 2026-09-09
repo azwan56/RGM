@@ -8,7 +8,7 @@ Component({
       },
       {
         pagePath: "/pages/coach/coach",
-        text: "AI教练"
+        text: "Canova教练"
       },
       {
         pagePath: "/pages/analysis/analysis",

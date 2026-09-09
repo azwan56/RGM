@@ -133,7 +133,7 @@
             <view class="coach-bubble">
               <view class="coach-badge-row">
                 <text class="coach-robot-icon">🤖</text>
-                <text class="coach-badge-title">Renato Canova AI 教练专属点评</text>
+                <text class="coach-badge-title">Canova教练专属点评</text>
               </view>
               <text class="coach-comment-text">
                 {{ act.ai_journal || "基于 Canova 耐力生理模型生成中..." }}
@@ -180,7 +180,7 @@
         <text class="unjoined-icon">🏅</text>
         <text class="unjoined-title">尚未加入跑团</text>
         <text class="unjoined-desc">
-          英雄榜与打卡互动仅对跑团队员开放。加入跑团后，即可与队友共同争夺月跑量排名、接收 Renato Canova AI 打卡点评并互相激励！
+          英雄榜与打卡互动仅对跑团队员开放。加入跑团后，即可与队友共同争夺月跑量排名、接收 Canova教练打卡点评并互相激励！
         </text>
         <button class="goto-team-btn" @click="goToTeamPage">
           前往跑团大本营加入跑团

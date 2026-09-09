@@ -781,7 +781,7 @@ export default function TeamPage() {
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-black text-white flex items-center gap-2">
                   <Flame className="w-5 h-5 text-[#FC4C02]" />
-                  跑团打卡动态墙 · AI教练点评与跑友互动
+                  跑团打卡动态墙 · Canova教练点评与跑友互动
                 </h2>
                 <span className="text-xs text-zinc-400">点击 ❤️ 点赞 / 💬 发表跑友评论</span>
               </div>
@@ -829,7 +829,7 @@ export default function TeamPage() {
                       <div className="bg-gradient-to-r from-purple-950/30 via-[#1e1b2e] to-indigo-950/30 border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
                         <div className="flex items-center gap-2 font-bold text-purple-300 mb-1.5">
                           <Bot className="w-4 h-4 text-purple-400" />
-                          <span>Renato Canova AI 教练专属点评</span>
+                          <span>Canova教练专属点评</span>
                           <span className="text-[10px] px-2 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
                             智能生成
                           </span>
@@ -905,7 +905,7 @@ export default function TeamPage() {
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handlePostComment(act.id);
                           }}
-                          placeholder="在 AI 教练评语后给队友鼓励或写句评语..."
+                          placeholder="在 Canova教练评语后给队友鼓励或写句评语..."
                           className="flex-1 bg-[#121214] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02]"
                         />
                         <button

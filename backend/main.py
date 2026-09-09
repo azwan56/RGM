@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RGM 国内版 (Running Community Manager API)",
-    description="基于阿里云 + Supabase + Garmin 直连 + 微信小程序的跑团管理与 AI 教练系统",
+    description="基于阿里云 + Supabase + Garmin 直连 + 微信小程序的跑团管理与 Canova教练 系统",
     version="2.0.0-cn",
     lifespan=lifespan
 )
@@ -46,7 +46,7 @@ app.mount("/api/avatars", StaticFiles(directory=avatars_dir), name="avatars")
 # 4. Include Routers
 app.include_router(auth.router,     prefix="/api/auth",     tags=["认证与佳明直连"])
 app.include_router(sync.router,     prefix="/api/sync",     tags=["Garmin 数据同步"])
-app.include_router(coach.router,    prefix="/api/coach",    tags=["Renato Canova AI 教练"])
+app.include_router(coach.router,    prefix="/api/coach",    tags=["Canova教练"])
 app.include_router(profile.router,  prefix="/api/profile",  tags=["跑者档案与目标"])
 app.include_router(science.router,  prefix="/api/science",  tags=["跑步生理学与分析"])
 app.include_router(team.router,     prefix="/api/team",     tags=["跑团与排行榜"])

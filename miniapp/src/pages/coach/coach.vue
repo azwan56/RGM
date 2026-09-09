@@ -5,13 +5,13 @@
       <view class="header-left">
         <view class="title-row">
           <text class="title-icon">⚡</text>
-          <text class="page-title">Canova AI 智能耐力教练</text>
+          <text class="page-title">Canova教练</text>
         </view>
-        <text class="page-subtitle">世界级专项化哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 与年龄自适应</text>
+        <text class="page-subtitle">世界级专项化哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 与个性化自适应</text>
       </view>
 
       <button class="re-analyze-btn" :loading="loading" :disabled="loading" @click="handleReAnalyze">
-        <text class="btn-text">{{ loading ? "AI 推理中..." : "启动专项推理" }}</text>
+        <text class="btn-text">{{ loading ? "Canova 推理中..." : "启动专项推理" }}</text>
       </button>
     </view>
 
@@ -31,7 +31,7 @@
         @click="activeTab = 'analysis'"
       >
         <text class="tab-icon">⚡</text>
-        <text class="tab-title">AI 专项诊断</text>
+        <text class="tab-title">Canova 专项诊断</text>
       </view>
     </view>
 
@@ -162,7 +162,7 @@
         </view>
 
         <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
-          <text class="btn-text">{{ generatingPlan ? 'AI 耐力推演生成中...' : '生成科学定制训练课表' }}</text>
+          <text class="btn-text">{{ generatingPlan ? 'Canova 计划推演中...' : '生成科学定制训练课表' }}</text>
         </button>
       </view>
 
@@ -171,9 +171,9 @@
         <!-- Baseline Snapshot Card -->
         <view v-if="plan.schedule_data.current_fitness_snapshot" class="snapshot-card">
           <view class="snap-item">
-            <text class="snap-label">跑者周岁</text>
-            <text class="snap-val">{{ plan.schedule_data.current_fitness_snapshot.age ? `${plan.schedule_data.current_fitness_snapshot.age} 岁` : '—' }}</text>
-            <text class="snap-sub">{{ plan.schedule_data.current_fitness_snapshot.age >= 50 ? '72-96h 恢复律' : '正常' }}</text>
+            <text class="snap-label">跑者组别</text>
+            <text class="snap-val">{{ (plan.schedule_data.current_fitness_snapshot.age && plan.schedule_data.current_fitness_snapshot.age >= 50) ? '大师组' : plan.schedule_data.current_fitness_snapshot.age ? `${plan.schedule_data.current_fitness_snapshot.age} 岁` : '—' }}</text>
+            <text class="snap-sub">{{ (plan.schedule_data.current_fitness_snapshot.age && plan.schedule_data.current_fitness_snapshot.age >= 50) ? '72-96h 恢复律' : '正常恢复' }}</text>
           </view>
           <view class="snap-item">
             <text class="snap-label">VO2Max</text>
@@ -317,7 +317,7 @@
           <text class="profile-name">{{ athleteInfo.name || "跑者" }}</text>
           <text class="profile-meta">
             {{ athleteInfo.gender === 'female' ? '♀ 女' : '♂ 男' }} · 
-            {{ athleteInfo.age ? `${athleteInfo.age} 岁` : '未录入年龄' }} · 
+            {{ (athleteInfo.age && athleteInfo.age >= 50) ? '大师组' : athleteInfo.age ? `${athleteInfo.age} 岁` : '未录入年龄' }} · 
             跑龄 {{ athleteInfo.years_running || 2 }} 年
           </text>
         </view>
@@ -649,8 +649,8 @@
     <!-- Empty / Fallback State -->
     <view v-else class="empty-card">
       <text class="empty-icon">⚡</text>
-      <text class="empty-title">Canova AI 教练就绪</text>
-      <text class="empty-desc">配置您的目标赛事，点击下方按钮，AI 教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。</text>
+      <text class="empty-title">Canova教练就绪</text>
+      <text class="empty-desc">配置您的目标赛事，点击下方按钮，Canova教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。</text>
       <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成最新训练诊断</button>
     </view>
     </view>
@@ -1060,7 +1060,7 @@ function applyPreset(p: any) {
 }
 
 const defaultAnalysis = {
-  summary: "欢迎来到 Renato Canova AI 耐力教练专区！绑定 Garmin 或高驰手表后将自动生成您的专属报告。",
+  summary: "欢迎来到 Canova教练专区！绑定 Garmin 或高驰手表后将自动生成您的专属报告。",
   fitness_status: "系统将基于您的每日配速、静息心率与夜间 HRV 恢复状态，智能量化评估专项耐力与疲劳水平。",
   periodization_phase: "准备启动期 (Preparation)",
   key_suggestions: [

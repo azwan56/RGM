@@ -51,7 +51,7 @@ export default function Home() {
 
         <p className="text-zinc-400 text-lg md:text-xl max-w-2xl mx-auto mb-10 font-light leading-relaxed">
           专为国内跑者与跑团打造的一站式数据管理平台。
-          直连佳明手表自动同步、Canova AI 教练专项化指导、微信小程序随时随地掌握进度。
+          直连佳明手表自动同步、Canova教练专项化指导、微信小程序随时随地掌握进度。
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -100,7 +100,7 @@ export default function Home() {
             <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-5">
               <Sparkles className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-bold mb-2 text-white">Canova AI 教练</h3>
+            <h3 className="text-lg font-bold mb-2 text-white">Canova教练</h3>
             <p className="text-zinc-400 text-xs sm:text-sm leading-relaxed">
               基于世界顶级马拉松教练 Renato Canova 的专项性哲学，接入通义千问/DeepSeek，评估体能差距与关键课设计。
             </p>

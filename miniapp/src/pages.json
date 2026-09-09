@@ -13,7 +13,7 @@
     {
       "path": "pages/coach/coach",
       "style": {
-        "navigationBarTitleText": "Canova AI 教练",
+        "navigationBarTitleText": "Canova教练",
         "navigationBarBackgroundColor": "#0b0b0d",
         "navigationBarTextStyle": "white",
         "backgroundColor": "#0b0b0d",
@@ -97,7 +97,7 @@
       },
       {
         "pagePath": "pages/coach/coach",
-        "text": "AI教练"
+        "text": "Canova教练"
       },
       {
         "pagePath": "pages/analysis/analysis",

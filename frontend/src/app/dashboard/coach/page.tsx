@@ -182,10 +182,10 @@ export default function CoachPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-black flex items-center gap-2.5">
               <Zap className="w-7 h-7 text-purple-400" />
-              Renato Canova AI 智能耐力教练
+              Canova教练
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              世界级专项化训练哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 负荷与年龄自适应
+              世界级专项化训练哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 负荷与个性化自适应
             </p>
           </div>
 
@@ -197,7 +197,7 @@ export default function CoachPage() {
                 className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 active:scale-95 disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-                {loading ? "AI 深度推理中..." : "启动 AI 专项推理"}
+                {loading ? "Canova 深度推理中..." : "启动专项推理"}
               </button>
             )}
           </div>
@@ -225,7 +225,7 @@ export default function CoachPage() {
             }`}
           >
             <Zap className="w-4 h-4" />
-            AI 专项诊断与宏观赛历 (Diagnostics)
+            Canova 专项诊断与宏观赛历 (Diagnostics)
           </button>
         </div>
 
@@ -259,7 +259,7 @@ export default function CoachPage() {
                 </span>
               </div>
               <div className="text-xs text-zinc-400 flex items-center gap-3">
-                <span>周岁: <strong className="text-purple-300">{athlete?.age ? `${athlete.age} 岁` : "未登记"}</strong></span>
+                <span>组别: <strong className="text-purple-300">{athlete?.age && athlete.age >= 50 ? "大师组 (Masters)" : athlete?.age && athlete.age >= 40 ? "壮年组 (40+)" : athlete?.age ? `${athlete.age} 岁` : "未登记"}</strong></span>
                 <span>跑龄: <strong className="text-purple-300">{athlete?.years_running || 2} 年</strong></span>
               </div>
             </div>
@@ -723,9 +723,9 @@ export default function CoachPage() {
             <div className="w-16 h-16 rounded-3xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto mb-4">
               <Zap className="w-8 h-8" />
             </div>
-            <h3 className="text-lg font-bold text-white mb-2">Canova AI 教练就绪</h3>
+            <h3 className="text-lg font-bold text-white mb-2">Canova教练就绪</h3>
             <p className="text-xs text-zinc-400 max-w-sm mx-auto mb-6">
-              配置您的目标赛事，点击上方“启动 AI 专项推理”，AI 教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。
+              配置您的目标赛事，点击上方“启动 Canova 专项推理”，Canova教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。
             </p>
             <button
               onClick={handleGenerateAnalysis}

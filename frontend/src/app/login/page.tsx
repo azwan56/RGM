@@ -65,7 +65,7 @@ export default function LoginPage() {
               {isSignUp ? "创建跑者账号" : "登录 RGM 国内版"}
             </h1>
             <p className="text-xs text-zinc-400">
-              直连 Garmin 佳明 / 高驰手表 · Canova AI 智能耐力教练
+              直连 Garmin 佳明 / 高驰手表 · Canova教练专项化指导
             </p>
           </div>
 

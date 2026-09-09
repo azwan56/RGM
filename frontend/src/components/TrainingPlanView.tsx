@@ -585,12 +585,12 @@ export default function TrainingPlanView({
           {plan.schedule_data.current_fitness_snapshot && (
             <div className="bg-[#121215] border border-white/[0.08] p-4 sm:p-5 rounded-3xl grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
               <div className="bg-[#18181c] p-3 rounded-2xl border border-white/5">
-                <span className="text-[10px] text-zinc-400 block font-bold">跑者周岁</span>
+                <span className="text-[10px] text-zinc-400 block font-bold">跑者组别</span>
                 <span className="text-sm font-black text-white">
-                  {plan.schedule_data.current_fitness_snapshot.age ? `${plan.schedule_data.current_fitness_snapshot.age} 岁` : "—"}
+                  {plan.schedule_data.current_fitness_snapshot.age ? (plan.schedule_data.current_fitness_snapshot.age >= 50 ? "大师组 (Masters)" : `${plan.schedule_data.current_fitness_snapshot.age} 岁`) : "—"}
                 </span>
                 <span className="text-[9px] text-zinc-500 block mt-0.5">
-                  {plan.schedule_data.current_fitness_snapshot.age >= 50 ? "Masters 72-96h 恢复律" : "常规恢复"}
+                  {plan.schedule_data.current_fitness_snapshot.age >= 50 ? "72-96h 充分恢复律" : "常规恢复"}
                 </span>
               </div>
 

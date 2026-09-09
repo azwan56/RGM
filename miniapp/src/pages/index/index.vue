@@ -183,7 +183,7 @@
               <text class="empty-tw-icon">💡</text>
               <view class="empty-tw-texts">
                 <text class="empty-tw-title">今日暂无专属计划课表</text>
-                <text class="empty-tw-sub">点击前往「AI教练」，定制科学周期训练课表 ›</text>
+                <text class="empty-tw-sub">点击前往「Canova教练」，定制科学周期训练课表 ›</text>
               </view>
             </view>
           </view>

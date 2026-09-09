@@ -66,8 +66,8 @@
             <text class="banner-badge">🥇 英雄风云榜</text>
             <text class="banner-hint-pill">独立专页 ›</text>
           </view>
-          <text class="banner-title">本月跑团英雄榜 · 打卡动态与 AI 点评</text>
-          <text class="banner-desc">查看全团队员跑量排名、达标进度与 Canova AI 动态互动</text>
+          <text class="banner-title">本月跑团英雄榜 · 打卡动态与 Canova教练点评</text>
+          <text class="banner-desc">查看全团队员跑量排名、达标进度与 Canova教练动态互动</text>
         </view>
         <view class="banner-arrow-box">
           <text class="banner-arrow">→</text>
@@ -250,8 +250,8 @@
         <view class="unjoined-highlight-item">
           <text class="uh-icon">💬</text>
           <view class="uh-content">
-            <text class="uh-title">跑友圈动态与 AI 互动</text>
-            <text class="uh-desc">同步跑步记录自动生成 AI 战报与点评，队友点赞留言互勉</text>
+            <text class="uh-title">跑友圈动态与 Canova教练互动</text>
+            <text class="uh-desc">同步跑步记录自动生成 Canova教练战报与点评，队友点赞留言互勉</text>
           </view>
         </view>
         <view class="unjoined-highlight-item">

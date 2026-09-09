@@ -1799,7 +1799,20 @@ class LocalStore:
         age = get_age_from_dob(profile.get("date_of_birth") if profile else None)
         age_advice = ""
         if age and age >= 50:
-            age_advice = f"（鉴于跑者周岁已满 {age} 岁，大负荷后结缔组织与肌糖原再生需充裕时间，建议保证 48~72 小时超量恢复窗口并强化核心抗阻）"
+            age_advice = "（大师组队员大负荷后结缔组织与肌糖原再生需充裕时间，建议保证 48~72 小时超量恢复窗口并强化核心抗阻力量）"
+
+        # Determine runner tier for tone adaptation
+        m_pb = profile.get("marathon_pb") if profile else None
+        h_pb = profile.get("half_pb") if profile else None
+        years = profile.get("years_running") or 1 if profile else 1
+        is_elite = bool((m_pb and m_pb <= 3 * 3600 + 15 * 60) or (h_pb and h_pb <= 88 * 60))
+        is_beginner = (years <= 1 or (m_pb and m_pb > 4 * 3600 + 15 * 60) or (not m_pb and not h_pb)) and not is_elite
+
+        tier_encourage = ""
+        if is_beginner:
+            tier_encourage = " 🌟 每一步都在重塑更好的自己，平时牢记 80/20 极化原则保持低心率慢跑积累，不急于求成！"
+        elif is_elite:
+            tier_encourage = " ⚡ 专项指标达成，紧扣下一阶段配速收敛与边际增益。"
 
         # Check for Trail / Mountain running
         is_trail = elev_gain >= 200 or "越野" in act_name or "山" in act_name or "trail" in act_name.lower()
@@ -1807,11 +1820,11 @@ class LocalStore:
             if elev_gain >= 500 or dist_km >= 20:
                 workout_type = "Renato Canova 山地大爬升专项耐力 (Mountain D+ Specific Endurance)"
                 analysis = f"本次克服累计爬升 +{int(elev_gain)}m，推进 {dist_km}km，均心率 {avg_hr or '—'}bpm。不仅考验心肺氧转，更是对股四头肌离心抗撕裂能力与长陡坡快步走 (Power Hiking) 专项神经肌肉募集的深度刺激。"
-                advice = f"山地下坡离心收缩对下肢肌纤维微损伤较深，建议课后 30 分钟内足量补充蛋白质与电解质，做好大腿前侧与髂胫束筋膜滚压放松。{age_advice}"
+                advice = f"山地下坡离心收缩对下肢肌纤维微损伤较深，建议课后 30 分钟内足量补充蛋白质与电解质，做好大腿前侧与髂胫束筋膜滚压放松。{age_advice}{tier_encourage}"
             else:
                 workout_type = "山地起伏路有氧感知 (Trail Undulation Aerobic)"
                 analysis = f"山地起伏推进 {dist_km}km (爬升 +{int(elev_gain)}m)，均速 {pace_str}。有效激活非铺装路面下肢踝关节本体感觉与核心抗扭转平衡。"
-                advice = f"越野重在时间负荷与心率稳态，注意下坡落脚缓震，避免关节硬着陆。{age_advice}"
+                advice = f"越野重在时间负荷与心率稳态，注意下坡落脚缓震，避免关节硬着陆。{age_advice}{tier_encourage}"
             return f"【{workout_type}】{analysis} 💡 教练建议：{advice}"
 
         pace_seconds = 330
@@ -1826,33 +1839,33 @@ class LocalStore:
             if avg_hr and avg_hr < aerobic_ceiling:
                 workout_type = "Renato Canova 基础长距离耐力课 (Fundamental Aerobic Long Run)"
                 analysis = f"本次完成 {dist_km}km，配速 {pace_str}，平均心率 {avg_hr}bpm (低于个人的有氧上限 {int(aerobic_ceiling)}bpm)。极佳的有氧基础支撑，微血管网与慢肌纤维氧化供能得到充分激活。"
-                advice = f"核心耐力储备极佳！明日建议安排彻底休整或 6~8km 超低心率排酸慢跑。{age_advice}"
+                advice = f"核心耐力储备极佳！明日建议安排彻底休整或 6~8km 超低心率排酸慢跑。{age_advice}{tier_encourage}"
             else:
                 workout_type = "马拉松专项耐力刺激 (Specific Marathon Endurance)"
                 analysis = f"本次高质量推进 {dist_km}km，配速 {pace_str}，心率维持在 {avg_hr or '中高'}bpm。属于典型的 Canova 专项耐力构建课，有效推升后程抗疲劳韧性。"
-                advice = f"肌糖原消耗深度较大，建议 30 分钟内足量补充优质碳水与电解质，后天再安排主课。{age_advice}"
+                advice = f"肌糖原消耗深度较大，建议 30 分钟内足量补充优质碳水与电解质，后天再安排主课。{age_advice}{tier_encourage}"
         elif dist_km >= 12:
             if avg_hr and avg_hr >= threshold_ceiling:
                 workout_type = "快速持续跑 / 混氧门槛突破 (Fast Continuous Progression)"
                 analysis = f"本次推进 {dist_km}km，配速达 {pace_str}，平均心率 {avg_hr}bpm 触达乳酸门槛区。乳酸清除速率与摄氧效率兼备，有效推高乳酸门槛巡航速度。"
-                advice = f"高强度课完成质量极高！接下来 48 小时应以低心率慢跑排酸为主，避免连续大负荷。{age_advice}"
+                advice = f"高强度课完成质量极高！接下来 48 小时应以低心率慢跑排酸为主，避免连续大负荷。{age_advice}{tier_encourage}"
             else:
                 workout_type = "稳态专项有氧进阶 (Aerobic Endurance Progression)"
                 analysis = f"完成 {dist_km}km 专项课，配速 {pace_str}，心率负荷处于稳态吸收区间（TRIMP: {trimp}）。心率漂移可控，肌肉收缩力与步频节奏协调。"
-                advice = f"训练节奏保持得非常好，建议课后做好腘绳肌与小腿放松。{age_advice}"
+                advice = f"训练节奏保持得非常好，建议课后做好腘绳肌与小腿放松。{age_advice}{tier_encourage}"
         elif dist_km >= 6:
             if avg_hr and avg_hr < recovery_ceiling:
                 workout_type = "低心率排酸主动恢复 (Active Recovery Run)"
                 analysis = f"轻松完成 {dist_km}km，平均心率 {avg_hr}bpm (低于恢复阈值 {int(recovery_ceiling)}bpm)。有效促进下肢微循环，加速代谢废物清除，无额外中枢神经疲劳负担。"
-                advice = "极佳的恢复跑执行力！身体已充分就绪，下一堂主课可按计划冲击目标配速。"
+                advice = f"极佳的恢复跑执行力！身体已充分就绪，下一堂主课可按计划冲击目标配速。{tier_encourage}"
             else:
                 workout_type = "日常基础有氧构建 (General Aerobic Foundation)"
                 analysis = f"跑程 {dist_km}km，配速 {pace_str}，平均心率 {avg_hr or '—'}bpm。步态节奏平稳，有效维持有氧基础与下肢肌腱刚性。"
-                advice = f"课表执行到位，明天可根据体感自由选择休整或轻度慢跑。{age_advice}"
+                advice = f"课表执行到位，明天可根据体感自由选择休整或轻度慢跑。{age_advice}{tier_encourage}"
         else:
             workout_type = "短程激活与速度感知 (Short Activation Run)"
             analysis = f"短程奔跑 {dist_km}km，步频顺畅，适合赛前神经激活或大强度课后的排酸调整。"
-            advice = f"适度热身与拉伸，保持良好身体机能。{age_advice}"
+            advice = f"适度热身与拉伸，保持良好身体机能。{age_advice}{tier_encourage}"
 
         return f"【{workout_type}】{analysis} 💡 教练建议：{advice}"
 

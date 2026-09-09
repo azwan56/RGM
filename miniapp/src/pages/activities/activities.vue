@@ -47,7 +47,7 @@
     <view v-if="activeModal" class="modal-mask" @click="activeModal = null">
       <view class="modal-content" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">Canova AI 教练单次点评</text>
+          <text class="modal-title">Canova教练单次点评</text>
           <text class="close-btn" @click="activeModal = null">✕</text>
         </view>
         <view class="modal-body">

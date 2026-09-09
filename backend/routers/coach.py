@@ -26,7 +26,7 @@ class CoachAnalysisRequest(BaseModel):
     race_type: Optional[str] = None  # "trail", "marathon", "half", "10k", "5k"
     elevation_gain: Optional[float] = None
 
-CANOVA_SYSTEM_PROMPT = """你是一位严格遵循世界耐力运动殿堂级教练 Renato Canova (雷纳托·卡诺瓦) 训练哲学的顶级 AI 耐力教练。
+CANOVA_SYSTEM_PROMPT = """你是由 Renato Canova (雷纳托·卡诺瓦) 耐力哲学驱动的专业教练，名为「Canova教练」。
 Canova 哲学的核心准则：
 1. 【专项性 (Specificity) 是王道】：
    - 全程马拉松：所有训练最终必须向 100% 马拉松配速 (MP) 和超长距离糖原耐受收敛。
@@ -52,6 +52,26 @@ Canova 哲学的核心准则：
 7. 【融合赛事情报深度定制 (Race Intelligence Integration)】：
    - 若提供越野赛事情报（累计爬升 D+、下降 D-、最高海拔、地形路况、气候带、关门时间）：必须结合这些客观数据设计爬升垂直耐力课、高海拔心率控制、抗风保暖与强制装备演练建议；
    - 若提供路跑赛事情报（赛事等级、赛道起伏/特点、历史气温与湿度、参赛规模）：必须在关键建议和配速策略中，针对应对赛道坡度、防拥堵起跑节奏、高温高湿下的心率漂移防范与补水降温策略给出针对性方案。
+8. 【针对不同水平队员的差异化施教话术规范 (Differentiated Athlete Coaching & Tone)】：
+   - 【新手 / 入门级队员 (Novice / Beginner)】：
+     * 话术基调：必须以鼓励为主，饱含热情、耐心肯定与温暖引导，多用正向激励（如“每一步都在重塑更好的自己”、“跑得慢才能跑得长”），坚决杜绝生硬苛责或生僻术语轰炸。
+     * 理论结合：必须自然结合经典基础耐力训练理论深入浅出地指导：
+       1) 80/20 极化训练原则（80%的时间保持轻松低心率有氧跑，沉淀微血管网与慢肌氧化底座，绝不可天天全力冲刺）；
+       2) 组织适应滞后律（心肺耐力几周就能提高，但肌腱骨骼重塑需要数月，告诫切忌盲目急躁堆量防伤病）；
+       3) 跑姿与呼吸（建议 170~180 步频小步快频落地、深层腹式呼吸减轻下肢冲击）；
+       4) 超量恢复原理（体能是在深度睡眠与休息中增长，疲劳时勇于减量休整）。
+   - 【精英级 / 高水平队员 (Advanced / Elite)】：
+     * 话术基调：言简意赅，直达重点！杜绝多余废话、冗长寒暄或泛泛而谈的常识性鸡汤。
+     * 专业深度：直击 Canova 核心教条与边际增益 (Marginal Gains)：
+       1) 100% 马拉松专项配速收敛 (Specific Pace Extension) 与末段抗糖原耗竭能力；
+       2) 乳酸门槛 (LT2) 巡航动力学与间歇漂浮跑 (Float Recoveries) 的乳酸再利用清除效率；
+       3) 比赛燃料代谢实战演练（60~90g/h 高碳水与电解质水合耐受）；
+       4) 减量期 (Taper) 中枢神经兴奋度激发与配速精准切片执行。
+   - 【进阶队员 (Intermediate)】：专业严谨，鼓励与技术指导并重，兼顾混氧门槛与周期化推进。
+9. 【大师组队员隐私与尊严保护铁律 (Masters Privacy Protection)】：
+   - 对于大师组队员（40+/50+ 资深跑者），在生成的分析、建议、课表和总结中，【严禁直接提及跑者的具体周岁、出生年份或任何具体年龄数字】（例如绝不可说“您已52岁”、“跑者53岁”等具体年龄隐私）。
+   - 必须统一使用尊称“大师组跑者 / 资深大师跑者 / 经验丰富的资深队员”。
+   - 重点从生理恢复规律层面给予科学关怀（保留 72~96 小时超量恢复窗口、增加抗阻力量防肌肉流失、监测晨起 HRV 与静息心率）。
 
 请根据跑者真实的生理特征、近期打卡、健康睡眠、负荷平衡指数 (CTL/ATL/TSB)、目标赛事以及多赛事赛历统筹，直接以中文标准 JSON 格式输出深度个性化训练诊断报告：
 {
@@ -152,6 +172,65 @@ def resolve_race_category(
 
     return "marathon", "全程马拉松 (Full Marathon)"
 
+
+def resolve_runner_tier(profile: Dict[str, Any], ctl: float = 0.0) -> tuple[str, str]:
+    """
+    Categorizes runner into 'beginner', 'elite', or 'intermediate' and returns detailed coaching instructions.
+    """
+    m_pb = profile.get("marathon_pb")
+    h_pb = profile.get("half_pb")
+    ten_pb = profile.get("ten_k_pb")
+    years = profile.get("years_running") or 1
+
+    # 1. Elite / High Level Athlete
+    is_elite = False
+    if m_pb and m_pb <= (3 * 3600 + 15 * 60):  # Sub 3:15
+        is_elite = True
+    elif h_pb and h_pb <= (88 * 60):  # Sub 1:28
+        is_elite = True
+    elif ten_pb and ten_pb <= (39 * 60):  # Sub 39m
+        is_elite = True
+    elif ctl >= 65 and years >= 3:
+        is_elite = True
+
+    if is_elite:
+        return "elite", (
+            "【高水平/精英级跑者 (Elite Athlete)】\n"
+            "话术要求：言简意赅，直达重点！杜绝多余废话、冗长寒暄或泛泛常识性鸡汤。直接直击 Canova 核心教条与边际增益 (Marginal Gains)："
+            "100% 马拉松专项配速收敛 (Specific Pace Extension)、乳酸门槛 (LT2) 动力学、间歇漂浮跑 (Float) 质量、比赛燃料代谢 (60-90g/h 补碳) 及减量期精准神经激活。"
+        )
+
+    # 2. Novice / Beginner Runner
+    is_beginner = False
+    if years <= 1:
+        is_beginner = True
+    elif not m_pb and not h_pb and ctl < 30:
+        is_beginner = True
+    elif m_pb and m_pb > (4 * 3600 + 15 * 60):  # > 4h15
+        is_beginner = True
+    elif h_pb and h_pb > (115 * 60):  # > 1h55
+        is_beginner = True
+    elif ten_pb and ten_pb > (56 * 60):  # > 56m
+        is_beginner = True
+    elif ctl < 25:
+        is_beginner = True
+
+    if is_beginner:
+        return "beginner", (
+            "【新人/入门级跑者 (Beginner / Novice)】\n"
+            "话术要求：以鼓励为主，饱含热情、耐心肯定与温暖引导，多用正向激励（如“每一步都在重塑更好的自己”、“跑得慢才能跑得长”），严禁生硬苛责。"
+            "必须自然结合经典基础耐力训练理论通俗讲解：\n"
+            "1) 80/20 极化训练原则（80%时间保持轻松低心率有氧跑，沉淀微血管网与慢肌氧化底座，绝不可天天全力冲刺）；\n"
+            "2) 组织适应滞后律（心肺耐力提升较快，但肌腱骨骼重塑需要数月，告诫切忌盲目急躁堆量防伤病）；\n"
+            "3) 步频 170~180 与腹式呼吸减轻关节冲击；\n"
+            "4) 睡眠与超量恢复原理（体能是在深度睡眠与休息中增长，疲劳时勇于减量休整）。"
+        )
+
+    # 3. Intermediate Runner
+    return "intermediate", (
+        "【进阶跑者 (Intermediate Runner)】\n"
+        "话术要求：专业严谨，鼓励与技术指导并重，兼顾混氧门槛巡航 (LT2) 与有氧专项耐力稳步进阶。"
+    )
 
 
 def generate_fallback_multi_race_strategy(multi_analysis: Dict[str, Any], target_race: str, race_category: str) -> Dict[str, Any]:
@@ -328,7 +407,7 @@ def get_latest_coach_report(uid: str):
 
     if not garmin_connected and not coros_connected:
         return {
-            "summary": "欢迎来到 Renato Canova AI 耐力教练专区！请在【我的】页面绑定 Garmin 或高驰 (COROS) 账号同步您的历史运动。",
+            "summary": "欢迎来到 Canova教练 专区！请在【我的】页面绑定 Garmin 或高驰 (COROS) 账号同步您的历史运动。",
             "fitness_status": "暂未检测到手表现用运动数据。系统将在您完成首次数据同步后，自动评估您的乳酸阈值、Banister TSB 疲劳曲线与专项耐力储备。",
             "periodization_phase": "准备启动期 (Preparation)",
             "key_suggestions": [
@@ -397,17 +476,18 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
     gender_zh = "女" if gender.lower() == "female" else "男"
     years_running = user_profile.get("years_running") or 2
 
-    # Age calculation
+    # Age calculation & Masters Privacy Protection
     dob_str = user_profile.get("date_of_birth")
     age = get_age_from_dob(dob_str)
     if age is None:
-        age_desc = "未登记出生年份（系统默认按 30 岁常规体能与 48 小时恢复周期评估）"
+        age_desc = "常规生理机能（按 48 小时常规恢复窗口评估）"
     elif age < 35:
         age_desc = f"{age} 岁 (青年期 - 组织再生快，主课间歇恢复窗口 48 小时，可耐受较高专项密度)"
     elif age < 50:
         age_desc = f"{age} 岁 (中壮年组 - 需兼顾软组织与肌腱微损伤修复，主课间歇恢复窗口 48~72 小时，增加筋膜维护)"
     else:
-        age_desc = f"{age} 岁 (大师组 Masters - 肌肉蛋白合成减缓与胶原刚性下降，主课恢复窗口需 72~96 小时，严格保证超量恢复，重点强化抗阻肌力以防肌肉流失)"
+        # Strict privacy protection for Masters: NEVER output exact age number!
+        age_desc = "大师组 (Masters - 需遵循超量恢复规律，大负荷后恢复窗口需 72~96 小时，强化抗阻肌力以防肌肉流失。特别提醒：严格保护队员隐私，分析中严禁提及具体周岁数字)"
 
     # Real personal bests
     marathon_pb = user_profile.get("marathon_pb")
@@ -428,6 +508,9 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
     acwr = load_metrics.get("acwr", 0.0)
     tsb_status = load_metrics.get("status", "稳健")
     risk_warning = load_metrics.get("risk_warning")
+
+    # Runner tier & coaching tone resolution
+    tier_key, tier_instruction = resolve_runner_tier(user_profile, ctl)
 
     # 3. Race Type Resolution & Specificity Zones
     target_race = request.target_race or "目标赛事"
@@ -555,8 +638,10 @@ def generate_coach_analysis(request: CoachAnalysisRequest):
 跑者真实生理画像：
 - 称呼/姓名: {runner_name}
 - 性别: {gender_zh}
-- 生理年龄状态: {age_desc}
+- 生理年龄与组别: {age_desc}
 - 跑步球龄/年限: {years_running} 年
+- 队员能力层级与教练执教要求:
+{tier_instruction}
 - 最大心率: {max_hr} bpm | 晨起静息心率: {rest_hr} bpm (心率储备 HRR: {max_hr - rest_hr} bpm)
 - 个人历史最佳成绩 (PB):
 {pb_summary}
@@ -609,45 +694,77 @@ Canova 针对该赛事类型的专项训练区间:
         analysis_data = json.loads(clean_json)
     except Exception as e:
         logger.warning(f"[coach] LLM parse fallback: {e}")
-        # Intelligent fallback matching race_category & TSB
-        if race_category == "trail":
-            workout_desc = "模拟赛道起伏课：热身 2km + 15km 山地专项推进 (累计爬升 +800m，上坡手杖快步走保持 Z2 心率，下坡练习平稳着地) + 2km 冷身"
+        # Intelligent fallback matching runner tier, race_category & TSB
+        if tier_key == "beginner":
+            summary_text = f"每一步都在重塑更好的自己！当前处于面向【{target_race}】的有氧基础构建期，保持耐心，稳步积累。"
+            fitness_text = f"近期训练正处于良好的有氧适应阶段 (CTL: {ctl}, TSB: {tsb})，静息心率维持在 {rest_hr} bpm 基线。基础有氧大厦正在一层层筑牢，持之以恒就是最大的胜利！"
+            workout_desc = "基础有氧稳态跑：热身 10 分钟动态关节拉伸 + 35~45 分钟轻松对话跑 (心率严格锁定在 Z2 轻松区间，若心率漂移可果断走跑结合) + 10 分钟静态拉伸放松"
             suggs = [
-                f"针对 {target_race} 赛事，强化爬升专项垂直耐力与山地快步走 (Power Hiking) 效率。",
-                "重点练习连续技术下坡的敏捷落脚，让股四头肌建立对离心冲击的耐受保护。",
-                "长距离实战中严格演练补给策略，确保每 45 分钟补充 1 支能量胶并配合电解质水。"
+                "【80/20 极化训练原则】将 80% 的跑量严格控制在能轻松鼻吸鼻呼的慢跑心率区间。跑得足够慢，才能促进心肌微血管网充分增生，构建日后提速的核心底座。",
+                "【组织适应滞后律】心肺系统提升只需几周，但肌腱、软骨与骨骼微重塑需要 3~6 个月。请切忌盲目急躁加量，每周增量控制在 10% 以内以防伤病。",
+                "【步频与落地技巧】日常慢跑中练习 170~180 步频的小步快频轻柔落地，配合深层腹式呼吸，用膝盖微屈化解地面冲击，有效保护膝关节与踝关节。"
             ]
-        elif race_category == "half":
-            workout_desc = "半马门槛巡航：热身 3km + 3 × 3000m @ 半马专项配速 (间歇 2 分钟慢跑) + 2km 冷身"
-            suggs = [
-                f"针对 {target_race}，核心推进乳酸门槛 (LT2) 速度平台，提升混氧续航时间。",
-                "每周安排一次 14~16km 稳态节奏跑，严格锁定在目标半马配速区间。",
-                "保持轻松跑日的绝对低心率，防止门槛课疲劳向平时渗透。"
-            ]
-        elif race_category in ["10k", "5k"]:
-            workout_desc = "最大摄氧量间歇：热身 2km + 5 × 1000m @ 比赛配速 (间歇 90 秒慢跑) + 2km 冷身"
-            suggs = [
-                f"针对 {target_race} 场地/路跑，重点提升 VO2max 峰值与乳酸耐受能力。",
-                "增强下肢踝关节刚性与后蹬步频节奏，减少触地时间。",
-                "短距离高强度课前后做好深层筋膜放松与充分动态拉伸。"
-            ]
+            rec_text = "训练只是提供成长信号，真正的体能增长发生在睡眠与充分休整中。跑完当天保证 8 小时优质睡眠，如有肌肉酸痛隔天果断安排休整。"
+        elif tier_key == "elite":
+            summary_text = f"直击核心专项收敛瓶颈，当前处于面向【{target_race}】的高阶专项冲刺准备期。"
+            fitness_text = f"体能负荷基线深厚 (CTL: {ctl}, TSB: {tsb})，静息心率 {rest_hr} bpm，神经肌肉募集与专项氧化酶储备充沛。"
+            if race_category == "trail":
+                workout_desc = "山地专项强化大课：热身 2km + 18km 连续技术起伏跑 (爬升 +1000m，陡坡手杖快步走压在 HRR 75%，技术下坡专注轻捷落脚) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race} 赛道爬升，严控上坡心率漂移，将快步走 (Power Hiking) 垂直推进效率推向极致。",
+                    "利用下坡反复演练股四头肌离心抗疲劳耐受，减少技术路段着地触地时间与制动能耗。",
+                    "全程严格执行每小时 60~90g 高碳水与电解质水合摄入，杜绝胃肠不耐受风险。"
+                ]
+            else:
+                workout_desc = "马拉松专项大课：热身 3km + 4 × 4000m @ 100% 目标比赛配速 (间歇 1000m 漂浮跑 @ 门槛-15s) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race} 目标，核心推进 100% 比赛配速下的糖原节约效率，延长专项巡航耐力极限。",
+                    "间歇组间以高质量漂浮跑 (Float) 替代慢跑散步，极致拉高血乳酸清除再利用能力。",
+                    "长距离大课严格演练 60~90g/h 液体碳水补充，防范后程能量悬崖。"
+                ]
+            rec_text = "严控 TSB 在 -15 ~ -25 之间最佳负荷吸收区。赛前 18 天准时切入指数级减量，激发神经兴奋峰值。"
         else:
-            workout_desc = "马拉松专项长推进：热身 3km + 3 × 4000m @ 全马专项配速 (间歇 1000m 漂浮跑) + 2km 冷身"
-            suggs = [
-                f"针对 {target_race}，重点强化 100% 马拉松配速 (MP) 下的肌糖原节约效率。",
-                "每周安排一次 20~24km 的渐速长距离跑 (Progression Run)，末段 5km 提至比赛配速段。",
-                "保持轻松跑日的绝对低心率控制，杜绝无效疲劳垃圾跑量。"
-            ]
+            # Intermediate
+            summary_text = f"体能稳步构建中，当前处于面向【{target_race}】的专项准备期。"
+            fitness_text = f"近期训练负荷处于稳态 (CTL: {ctl}, TSB: {tsb})，静息心率维持在 {rest_hr} bpm 基线，具备进阶专项负荷的生理基础。"
+            if race_category == "trail":
+                workout_desc = "模拟赛道起伏课：热身 2km + 15km 山地专项推进 (累计爬升 +800m，上坡手杖快步走保持 Z2 心率，下坡练习平稳着地) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race} 赛事，强化爬升专项垂直耐力与山地快步走 (Power Hiking) 效率。",
+                    "重点练习连续技术下坡的敏捷落脚，让股四头肌建立对离心冲击的耐受保护。",
+                    "长距离实战中严格演练补给策略，确保每 45 分钟补充 1 支能量胶并配合电解质水。"
+                ]
+            elif race_category == "half":
+                workout_desc = "半马门槛巡航：热身 3km + 3 × 3000m @ 半马专项配速 (间歇 2 分钟慢跑) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race}，核心推进乳酸门槛 (LT2) 速度平台，提升混氧续航时间。",
+                    "每周安排一次 14~16km 稳态节奏跑，严格锁定在目标半马配速区间。",
+                    "保持轻松跑日的绝对低心率，防止门槛课疲劳向平时渗透。"
+                ]
+            elif race_category in ["10k", "5k"]:
+                workout_desc = "最大摄氧量间歇：热身 2km + 5 × 1000m @ 比赛配速 (间歇 90 秒慢跑) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race} 场地/路跑，重点提升 VO2max 峰值与乳酸耐受能力。",
+                    "增强下肢踝关节刚性与后蹬步频节奏，减少触地时间。",
+                    "短距离高强度课前后做好深层筋膜放松与充分动态拉伸。"
+                ]
+            else:
+                workout_desc = "马拉松专项长推进：热身 3km + 3 × 4000m @ 全马专项配速 (间歇 1000m 漂浮跑) + 2km 冷身"
+                suggs = [
+                    f"针对 {target_race}，重点强化 100% 马拉松配速 (MP) 下的肌糖原节约效率。",
+                    "每周安排一次 20~24km 的渐速长距离跑 (Progression Run)，末段 5km 提至比赛配速段。",
+                    "保持轻松跑日的绝对低心率控制，杜绝无效疲劳垃圾跑量。"
+                ]
+            rec_text = "课后 30 分钟内补充优质碳水与乳清蛋白，夜间保证 8 小时深度睡眠，监控晨起 HRV 与静息心率恢复。"
 
-        rec_text = "课后 30 分钟内补充优质碳水与乳清蛋白，夜间保证 8 小时深度睡眠，监控晨起 HRV 与静息心率恢复。"
         if risk_warning:
             rec_text = f"【负荷预警】{risk_warning} 请降低训练密度，优先保证充分休息。"
         elif age and age >= 50:
-            rec_text = f"【大师组恢复特别提示】跑者周岁满 {age} 岁，大课后需保留 72 小时超量恢复窗口，夜间保证深睡并配合蛋白质补充。"
+            rec_text = "【大师组恢复特别提示】作为经验丰富的大师组队员，大负荷课后需保留充裕的超量恢复窗口（72~96小时），夜间保证高质量深睡并配合充足蛋白质摄入与核心抗阻维护。"
 
         analysis_data = {
-            "summary": f"体能稳步构建中，当前处于面向 {target_race} 的专项准备期。",
-            "fitness_status": f"近期训练负荷处于稳态 (CTL: {ctl}, TSB: {tsb})，静息心率维持在 {rest_hr} bpm 基线，具备进阶专项负荷的生理基础。",
+            "summary": summary_text,
+            "fitness_status": fitness_text,
             "periodization_phase": "专项准备期 (Special Period)",
             "key_suggestions": suggs,
             "focus_workout_of_the_week": workout_desc,
@@ -1310,7 +1427,13 @@ def generate_fallback_training_plan(
 
     target_display = target_race_name if goal_type == "race_prep" else focus_cn
     title = f"{athlete_name} · {target_display} {weeks_count}周科学训练计划"
-    summary = f"严格结合跑者真实生理画像（{age or 35}岁大师组恢复律、VO2Max {vdot or 50.0}），参考过去18个月历史长拉练能力（单次最长 {max_long_run_18m_km}km），按照 Canova 专项收敛律推进。"
+    if age and age >= 50:
+        age_str = "大师组超量恢复律"
+    elif age:
+        age_str = f"{age}岁恢复律"
+    else:
+        age_str = "常规生理恢复律"
+    summary = f"严格结合跑者真实生理画像（{age_str}、VO2Max {vdot or 50.0}），参考过去18个月历史长拉练能力（单次最长 {max_long_run_18m_km}km），按照 Canova 专项收敛律推进。"
     res_plan = {
         "macro_cycle_name": title,
         "goal_summary": summary,
@@ -1416,15 +1539,18 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
         if r.get("race_date") and start_date <= str(r["race_date"])[:10] <= end_date
     ]
 
-    # Age category prompt description
+    # Age category prompt description & Masters Privacy Protection
     if age is None:
-        age_desc = "未登记年龄（按 32 岁中青年 48 小时恢复窗口规划）"
+        age_desc = "常规生理机能（按 48 小时常规恢复窗口规划）"
     elif age < 35:
         age_desc = f"{age} 岁 (青年组 - 恢复快，大课恢复窗口 48 小时，耐受专项密度高)"
     elif age < 50:
         age_desc = f"{age} 岁 (中壮年组 - 大课恢复窗口需 48~72 小时，增加筋膜维护)"
     else:
-        age_desc = f"{age} 岁 (大师组 Masters - 肌肉胶原与糖原合成较缓，大课后需保留 72~96 小时超量恢复窗口，坚决执行 Hard-Easy 规律，防肌肉流失与关节损伤)"
+        # Strict privacy protection for Masters
+        age_desc = "大师组 (Masters - 肌肉胶原与糖原合成较缓，大课后需保留 72~96 小时超量恢复窗口，坚决执行 Hard-Easy 规律，防肌肉流失与关节损伤。严禁在计划中直接输出具体周岁数字)"
+
+    plan_tier_key, plan_tier_instruction = resolve_runner_tier(user_profile, ctl)
 
     scheduled_races_prompt = []
     for r in active_scheduled_races:
@@ -1453,7 +1579,9 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
     user_context = f"""
 跑者真实画像：
 - 姓名/昵称: {runner_name}
-- 性别: {gender_zh} | 生理年龄: {age_desc}
+- 性别: {gender_zh} | 生理组别: {age_desc}
+- 队员能力分层与执教话术指引:
+{plan_tier_instruction}
 - VO2Max (最大摄氧量): {vo2max}
 - 个人最好成绩 (PB):
   * 全马 PB: {format_duration(marathon_pb)}
