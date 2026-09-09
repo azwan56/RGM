@@ -1124,6 +1124,8 @@ async function loadLatestReport() {
     const rRes = await request(`/api/profile/${uid}/races`);
     if (Array.isArray(rRes)) {
       userRaces.value = rRes;
+    } else if (rRes && Array.isArray(rRes.races)) {
+      userRaces.value = rRes.races;
     }
   } catch (e) {
     console.warn("Fetch user races fallback:", e);
