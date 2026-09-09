@@ -1122,6 +1122,7 @@ class LocalStore:
 
     @staticmethod
     def upsert_race_plan(uid: str, plan_data: Dict[str, Any]):
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             plan_id = plan_data.get("id") or f"race_{int(datetime.utcnow().timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
@@ -1140,7 +1141,7 @@ class LocalStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 plan_id,
-                uid,
+                canonical_uid,
                 plan_data.get("name") or "未命名赛事",
                 plan_data.get("race_type") or "全马",
                 plan_data.get("race_date") or date.today().isoformat(),
@@ -1154,33 +1155,39 @@ class LocalStore:
 
     @staticmethod
     def update_race_plan_priority(uid: str, race_identifier: str, priority: int) -> bool:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE race_plans 
                 SET priority = ? 
-                WHERE user_id = ? AND (id = ? OR name = ?)
-            """, (priority, uid, race_identifier, race_identifier))
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (priority, canonical_uid, uid, race_identifier, race_identifier))
             conn.commit()
             return cursor.rowcount > 0
 
     @staticmethod
     def delete_race_plan(uid: str, race_id: str):
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM race_plans WHERE id = ? AND user_id = ?", (race_id, uid))
+            cursor.execute("""
+                DELETE FROM race_plans 
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (canonical_uid, uid, race_id, race_id))
             conn.commit()
 
     @staticmethod
     def update_race_info(uid: str, race_identifier: str, race_info: Dict[str, Any]) -> bool:
         """Update only the race_info JSON blob for a specific race plan."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE race_plans
                 SET race_info = ?
-                WHERE user_id = ? AND (id = ? OR name = ?)
-            """, (json.dumps(race_info, ensure_ascii=False), uid, race_identifier, race_identifier))
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (json.dumps(race_info, ensure_ascii=False), canonical_uid, uid, race_identifier, race_identifier))
             conn.commit()
             return cursor.rowcount > 0
 
