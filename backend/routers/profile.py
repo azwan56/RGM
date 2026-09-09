@@ -504,3 +504,28 @@ def update_race_info(uid: str, race_id: str, req: RaceInfoUpdateRequest):
     if not updated:
         raise HTTPException(status_code=404, detail="赛事未找到")
     return {"message": "赛事情报已更新", "races": LocalStore.get_race_plans(uid)}
+
+
+class RaceLookupRequest(BaseModel):
+    race_name: str
+    race_type: Optional[str] = None
+
+
+@router.post("/race-intel-lookup")
+def lookup_race_intelligence(req: RaceLookupRequest):
+    """
+    Searches for race intelligence (elevation, difficulty, weather, race level, etc.)
+    using curated knowledge base and LLM AI inference.
+    """
+    from utils.race_intel import fetch_race_intelligence
+    res = fetch_race_intelligence(req.race_name, req.race_type)
+    return res
+
+
+@router.post("/{uid}/races/lookup-info")
+def lookup_user_race_intelligence(uid: str, req: RaceLookupRequest):
+    """User-scoped alias for race intelligence auto-search."""
+    from utils.race_intel import fetch_race_intelligence
+    res = fetch_race_intelligence(req.race_name, req.race_type)
+    return res
+

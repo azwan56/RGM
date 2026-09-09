@@ -205,17 +205,30 @@
           </view>
 
           <!-- ── Race Intelligence Collapsible Panel ── -->
-          <view class="race-info-toggle-row" @click="toggleRaceInfo(race.id || race.name)">
-            <text class="race-info-toggle-label">
-              {{ hasRaceInfo(race) ? '📋 赛事情报已填写' : '📋 填写赛事情报' }}
-            </text>
-            <text class="race-info-toggle-arrow">{{ expandedRaceInfo[race.id || race.name] ? '▲' : '▼' }}</text>
+          <view class="race-info-toggle-row">
+            <view class="race-info-toggle-trigger" @click="toggleRaceInfo(race.id || race.name)">
+              <text class="race-info-toggle-label">
+                {{ hasRaceInfo(race) ? '📋 赛事情报已填写 (可编辑)' : '📋 填写赛事情报' }}
+              </text>
+              <text class="race-info-toggle-arrow">{{ expandedRaceInfo[race.id || race.name] ? '▲' : '▼' }}</text>
+            </view>
+            <button
+              class="race-ai-fetch-btn"
+              :loading="searchingRaceInfo[race.id || race.name]"
+              :disabled="searchingRaceInfo[race.id || race.name]"
+              @click.stop="handleAutoFetchRaceInfo(race)"
+            >⚡ AI 自动获取填写</button>
           </view>
 
           <view v-if="expandedRaceInfo[race.id || race.name]" class="race-info-panel">
+            <view class="race-info-panel-hint">
+              <text class="panel-hint-text">💡 已支持自动检索或手动编辑，确认无误后点击下方保存生效</text>
+            </view>
+
             <!-- ── 越野赛专属字段 ── -->
             <template v-if="isTrail(race.race_type)">
               <text class="race-info-section-title">🏔️ 越野赛情报</text>
+
 
               <view class="race-info-row">
                 <text class="race-info-label">报名赛程 (km)</text>
@@ -1842,6 +1855,42 @@ async function handleSaveRaceInfo(race: any) {
   }
 }
 
+const searchingRaceInfo = ref<Record<string, boolean>>({});
+
+async function handleAutoFetchRaceInfo(race: any) {
+  if (!race.name || !race.name.trim()) {
+    uni.showToast({ title: "请先输入比赛名称", icon: "none" });
+    return;
+  }
+  const raceKey = race.id || race.name;
+  searchingRaceInfo.value = { ...searchingRaceInfo.value, [raceKey]: true };
+  uni.showLoading({ title: "检索赛事情报中..." });
+  try {
+    const res = await request("/api/profile/race-intel-lookup", "POST", {
+      race_name: race.name.trim(),
+      race_type: race.race_type,
+    });
+    uni.hideLoading();
+    if (res?.success && res?.race_info) {
+      // Put retrieved info into draft so user can edit before saving
+      raceInfoDrafts.value[raceKey] = {
+        ...(raceInfoDrafts.value[raceKey] || {}),
+        ...res.race_info,
+      };
+      expandedRaceInfo.value[raceKey] = true;
+      uni.showToast({ title: "已自动填充赛事情报 ✓", icon: "success" });
+    } else {
+      uni.showToast({ title: res?.message || "未能检索到，请手动填写", icon: "none" });
+    }
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: "检索超时，请稍后重试", icon: "none" });
+  } finally {
+    searchingRaceInfo.value = { ...searchingRaceInfo.value, [raceKey]: false };
+  }
+}
+
+
 function goToTeamPage() {
   uni.switchTab({
     url: "/pages/team/rank",
@@ -2773,6 +2822,14 @@ onShow(() => {
   align-items: center;
   justify-content: space-between;
   margin-top: 16rpx;
+  gap: 12rpx;
+}
+
+.race-info-toggle-trigger {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 12rpx 16rpx;
   background-color: rgba(255, 255, 255, 0.04);
   border-radius: 12rpx;
@@ -2789,11 +2846,42 @@ onShow(() => {
   color: #636366;
 }
 
+.race-ai-fetch-btn {
+  margin: 0;
+  padding: 0 16rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #c084fc;
+  background-color: rgba(168, 85, 247, 0.15);
+  border: 1rpx solid rgba(168, 85, 247, 0.35);
+  border-radius: 12rpx;
+  white-space: nowrap;
+}
+
+.race-ai-fetch-btn::after {
+  border: none;
+}
+
+.race-info-panel-hint {
+  padding: 8rpx 12rpx;
+  margin-bottom: 12rpx;
+  background-color: rgba(168, 85, 247, 0.08);
+  border-radius: 8rpx;
+}
+
+.panel-hint-text {
+  font-size: 20rpx;
+  color: #c084fc;
+}
+
 .race-info-panel {
   margin-top: 12rpx;
   padding: 18rpx 16rpx;
   background-color: rgba(255, 255, 255, 0.03);
   border-radius: 16rpx;
+
   border: 1rpx solid rgba(255, 255, 255, 0.07);
 }
 

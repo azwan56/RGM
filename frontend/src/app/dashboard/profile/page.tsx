@@ -334,6 +334,52 @@ export default function ProfilePage() {
     setRaces(updated);
   }
 
+  const [searchingRaceInfo, setSearchingRaceInfo] = useState<Record<number, boolean>>({});
+
+  async function handleAutoFetchRaceInfo(index: number) {
+    const race = races[index];
+    if (!race.name || !race.name.trim()) {
+      alert("请先在上方输入比赛名称（例如：无锡马拉松、上海半马、崇礼168 或 武功山 50K）");
+      return;
+    }
+
+    setSearchingRaceInfo((prev) => ({ ...prev, [index]: true }));
+    try {
+      const res = await apiClient.post("/api/profile/race-intel-lookup", {
+        race_name: race.name.trim(),
+        race_type: race.race_type,
+      });
+
+      if (res.data?.success && res.data?.race_info) {
+        const info = res.data.race_info;
+        const updated = [...races];
+        updated[index] = {
+          ...updated[index],
+          race_info: {
+            ...(updated[index].race_info || {}),
+            ...info,
+          },
+        };
+        // Auto-adapt race_type if detected as trail vs road
+        if (res.data.race_category === "trail" && !updated[index].race_type?.includes("越野")) {
+          const dist = info.race_distance_km ? `${info.race_distance_km}K` : "50K";
+          updated[index].race_type = `越野跑 ${dist}`;
+        }
+        setRaces(updated);
+        // Automatically expand panel so user sees and can review/edit
+        setExpandedRaceInfo((prev) => ({ ...prev, [index]: true }));
+        alert(`✅ ${res.data.message || "已成功获取赛事情报"}！\n已自动填充赛道特点、爬升、历史天气与参赛规模，您可以自由检查与修改。`);
+      } else {
+        alert(res.data?.message || "未能检索到该赛事信息，请直接在下方手动填写。");
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || err.message || "检索失败";
+      alert("自动检索提示: " + msg);
+    } finally {
+      setSearchingRaceInfo((prev) => ({ ...prev, [index]: false }));
+    }
+  }
+
   function removeRace(index: number) {
     setRaces(races.filter((_, idx) => idx !== index));
   }
@@ -765,25 +811,44 @@ export default function ProfilePage() {
                   </div>
 
                   {/* ── Race Intelligence Expandable Panel ── */}
-                  <div className="pt-2 border-t border-white/5">
-                    <button
-                      type="button"
-                      onClick={() => toggleRaceInfoExpand(idx)}
-                      className="w-full flex items-center justify-between px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl text-xs text-zinc-300 font-semibold transition"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        📋 {Object.values(race.race_info || {}).some(v => v !== null && v !== undefined && v !== "") ? "赛事情报已填写" : "填写赛事情报 (难度/天气/海拔等)"}
-                      </span>
-                      <span className="text-zinc-500 text-[10px]">{expandedRaceInfo[idx] ? "▲ 收起" : "▼ 展开"}</span>
-                    </button>
+                  <div className="pt-2 border-t border-white/5 space-y-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleRaceInfoExpand(idx)}
+                        className="flex-1 flex items-center justify-between px-3.5 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl text-xs text-zinc-300 font-semibold transition"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          📋 {Object.values(race.race_info || {}).some(v => v !== null && v !== undefined && v !== "") ? "赛事情报已填写 (点击展开/编辑)" : "赛事情报未填写 (难度/天气/海拔等)"}
+                        </span>
+                        <span className="text-zinc-500 text-[10px]">{expandedRaceInfo[idx] ? "▲ 收起" : "▼ 展开填写"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAutoFetchRaceInfo(idx)}
+                        disabled={searchingRaceInfo[idx]}
+                        className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 transition active:scale-95 disabled:opacity-50 shrink-0"
+                        title="输入比赛名称后，点击即可自动检索赛道爬升、难度、历史气温并自动填充下方表单"
+                      >
+                        <Zap className={`w-3.5 h-3.5 text-purple-400 ${searchingRaceInfo[idx] ? "animate-spin" : ""}`} />
+                        {searchingRaceInfo[idx] ? "正在智能检索赛事情报..." : "⚡ AI 自动搜索填写"}
+                      </button>
+                    </div>
 
                     {expandedRaceInfo[idx] && (
-                      <div className="mt-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl space-y-4 text-xs">
+                      <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl space-y-4 text-xs">
+                        <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                          <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                            {race.race_type?.includes("越野") ? "🏔️ 越野赛情报数据" : "🏅 公路赛事客观情报"}
+                          </span>
+                          <span className="text-[11px] text-zinc-400">
+                            💡 支持手动编辑任意字段，保存后自动同步
+                          </span>
+                        </div>
+
                         {race.race_type?.includes("越野") ? (
                           <>
-                            <div className="font-bold text-zinc-300 flex items-center gap-1.5 pb-1 border-b border-white/5">
-                              🏔️ 越野赛情报数据
-                            </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-zinc-400 block mb-1">报名赛程 (km)</label>
