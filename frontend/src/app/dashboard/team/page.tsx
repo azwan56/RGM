@@ -103,15 +103,19 @@ export default function TeamPage() {
     }
   }
 
-  async function handleJoinClubDirect(clubId: string) {
+  async function handleJoinClubDirect(clubId: string, inviteCode?: string) {
     if (!user?.id) return;
     setJoiningClubId(clubId);
     try {
-      const res = await apiClient.post("/api/team/join-club", {
+      const payload: any = {
         user_id: user.id,
         club_id: clubId,
         privacy_consent: true,
-      });
+      };
+      if (inviteCode) {
+        payload.invite_code = inviteCode;
+      }
+      const res = await apiClient.post("/api/team/join-club", payload);
       alert(res.data?.message || "成功加入跑团！");
       if (typeof window !== "undefined") {
         localStorage.setItem("rgm_active_club_id", clubId);
@@ -124,6 +128,20 @@ export default function TeamPage() {
       alert(err.response?.data?.detail || "加入跑团失败，请重试！");
     } finally {
       setJoiningClubId(null);
+    }
+  }
+
+  async function handleUpdateJoinMode(mode: "free" | "invite") {
+    if (!currentClub?.id || !user?.id) return;
+    try {
+      const res = await apiClient.post(`/api/team/${currentClub.id}/join-mode`, {
+        operator_uid: user.id,
+        join_mode: mode,
+      });
+      alert(res.data?.message || "入团规则已更新！");
+      setCurrentClub((prev: any) => ({ ...prev, join_mode: mode }));
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "更新入团规则失败，请重试！");
     }
   }
 
@@ -935,6 +953,70 @@ export default function TeamPage() {
         {/* ── TAB 2: 👥 跑团成员与管理 ── */}
         {activeTab === "president" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
+            {/* Club Join Rule Settings (Only Owner & Admin) */}
+            {(currentRole === "owner" || user?.is_admin) && (
+              <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-black text-white flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-[#FC4C02]" />
+                      入团规则与准入门槛
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      设定成员加入【{currentClub?.name}】的方式，选择自由入团或凭专属邀请码入团
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleUpdateJoinMode("free")}
+                      className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        currentClub?.join_mode !== "invite"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-lg shadow-emerald-500/10"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/10"
+                      }`}
+                    >
+                      <span>🟢 自由入团（免邀请码）</span>
+                      {currentClub?.join_mode !== "invite" && <span>✓</span>}
+                    </button>
+                    <button
+                      onClick={() => handleUpdateJoinMode("invite")}
+                      className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        currentClub?.join_mode === "invite"
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/10"
+                      }`}
+                    >
+                      <span>🔒 凭专属邀请码入团</span>
+                      {currentClub?.join_mode === "invite" && <span>✓</span>}
+                    </button>
+                  </div>
+                </div>
+
+                {currentClub?.join_mode === "invite" && (
+                  <div className="flex items-center justify-between bg-[#18181c] border border-amber-500/30 rounded-2xl p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-zinc-400">本跑团专属 6 位邀请码：</span>
+                      <span className="font-mono text-base font-black text-amber-400 tracking-wider">
+                        {currentClub.invite_code || "请刷新页面查看"}
+                      </span>
+                    </div>
+                    {currentClub?.invite_code && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(currentClub.invite_code);
+                          alert("跑团邀请码已复制到剪贴板！");
+                        }}
+                        className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold rounded-xl border border-amber-500/20 transition flex items-center gap-1"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        复制邀请码
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
@@ -1624,6 +1706,13 @@ export default function TeamPage() {
                               🏛️ {club.org_name}
                             </span>
                           )}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            club.join_mode === "invite"
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                              : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          }`}>
+                            {club.join_mode === "invite" ? "🔒 需邀请码" : "🟢 自由入团"}
+                          </span>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
                             {club.city || "上海"}
                           </span>
@@ -1662,11 +1751,28 @@ export default function TeamPage() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => handleJoinClubDirect(club.id)}
+                          onClick={() => {
+                            if (club.join_mode === "invite") {
+                              const code = window.prompt(`跑团【${club.name}】已设置凭专属邀请码加入，请输入 6 位邀请码：`);
+                              if (code) {
+                                handleJoinClubDirect(club.id, code.trim().toUpperCase());
+                              }
+                            } else {
+                              handleJoinClubDirect(club.id);
+                            }
+                          }}
                           disabled={joiningClubId === club.id}
-                          className="px-4 py-2 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-xl text-xs font-bold transition shadow-md shadow-[#FC4C02]/20"
+                          className={`px-4 py-2 text-white rounded-xl text-xs font-bold transition shadow-md ${
+                            club.join_mode === "invite"
+                              ? "bg-amber-600 hover:bg-amber-500 shadow-amber-600/20"
+                              : "bg-[#FC4C02] hover:bg-[#ff6426] shadow-[#FC4C02]/20"
+                          }`}
                         >
-                          {joiningClubId === club.id ? "加入中..." : "+ 参加此跑团"}
+                          {joiningClubId === club.id
+                            ? "加入中..."
+                            : club.join_mode === "invite"
+                            ? "🔑 凭码加入"
+                            : "+ 自由加入"}
                         </button>
                       )}
                     </div>

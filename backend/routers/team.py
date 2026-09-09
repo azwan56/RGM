@@ -27,7 +27,12 @@ class JoinClubRequest(BaseModel):
 class JoinClubByIdRequest(BaseModel):
     user_id: str
     club_id: str
+    invite_code: Optional[str] = None
     privacy_consent: Optional[bool] = True
+
+class UpdateJoinModeRequest(BaseModel):
+    operator_uid: str
+    join_mode: str # 'free' or 'invite'
 
 class UpdateMemberRoleRequest(BaseModel):
     operator_uid: str
@@ -45,10 +50,11 @@ class CreateClubEventRequest(BaseModel):
 
 @router.get("/my-clubs/{uid}")
 def get_user_clubs(uid: str):
-    """Returns all running clubs the user has joined (invite_code hidden)."""
+    """Returns all running clubs the user has joined (invite_code visible only to owner)."""
     clubs = LocalStore.get_user_clubs(uid)
     for c in clubs:
-        c.pop("invite_code", None)
+        if c.get("role") != "owner":
+            c.pop("invite_code", None)
     return {"clubs": clubs}
 
 
@@ -70,12 +76,18 @@ def create_club(req: CreateClubRequest):
 
 @router.post("/join-club")
 def join_club_by_id(req: JoinClubByIdRequest):
-    """Allows runner to select and join an existing club directly by club_id."""
-    club = LocalStore.join_club_by_id(
-        user_id=req.user_id,
-        club_id=req.club_id,
-        privacy_consent=req.privacy_consent if req.privacy_consent is not None else True
-    )
+    """Allows runner to select and join an existing club directly by club_id.
+    If the club requires an invite code, verifies it."""
+    try:
+        club = LocalStore.join_club_by_id(
+            user_id=req.user_id,
+            club_id=req.club_id,
+            privacy_consent=req.privacy_consent if req.privacy_consent is not None else True,
+            invite_code=req.invite_code
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not club:
         raise HTTPException(status_code=404, detail="所选跑团不存在或已解散！")
 
@@ -100,15 +112,52 @@ def join_club_by_invite(req: JoinClubRequest):
     return {"message": f"成功加入跑团【{sanitized['name']}】！", "club": sanitized}
 
 
+@router.post("/{club_id}/join-mode")
+def update_club_join_mode(club_id: str, req: UpdateJoinModeRequest):
+    """Allows club owner (团长) to switch between 'free' (自由入团) and 'invite' (凭专属邀请码入团)."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+
+    if req.join_mode not in ("free", "invite"):
+        raise HTTPException(status_code=400, detail="入团规则仅支持 'free' (自由入团) 或 'invite' (凭专属邀请码入团)")
+
+    # Permission check: must be owner
+    is_owner = (club.get("owner_id") == req.operator_uid)
+    if not is_owner:
+        members = LocalStore.get_club_members(club_id)
+        is_owner = any(m["user_id"] == req.operator_uid and m["role"] == "owner" for m in members)
+
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="只有跑团团长有权修改本跑团的入团规则！")
+
+    updated = LocalStore.update_club(club_id, {"join_mode": req.join_mode})
+    mode_text = "自由入团（免邀请码）" if req.join_mode == "free" else "凭专属邀请码入团"
+    return {
+        "success": True,
+        "message": f"入团规则已成功切换为【{mode_text}】！",
+        "club": updated
+    }
+
+
 @router.get("/{club_id}/dashboard")
-def get_club_dashboard(club_id: str):
+def get_club_dashboard(club_id: str, operator_uid: Optional[str] = None):
     """Returns club overview metrics for President and Members."""
     club = LocalStore.get_club(club_id)
     if not club:
         raise HTTPException(status_code=404, detail="跑团不存在")
 
     club = dict(club)
-    club.pop("invite_code", None)
+    is_owner = False
+    if operator_uid:
+        if club.get("owner_id") == operator_uid:
+            is_owner = True
+        else:
+            members = LocalStore.get_club_members(club_id)
+            is_owner = any(m["user_id"] == operator_uid and m["role"] == "owner" for m in members)
+
+    if not is_owner:
+        club.pop("invite_code", None)
 
     members = LocalStore.get_club_members(club_id)
     events = LocalStore.get_club_events(club_id)

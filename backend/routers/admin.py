@@ -26,6 +26,8 @@ class CreateClubAdminRequest(BaseModel):
     city: Optional[str] = "上海"
     logo_url: Optional[str] = None
     owner_id: str
+    org_id: Optional[str] = None
+    join_mode: Optional[str] = "free"
 
 class UpdateClubAdminRequest(BaseModel):
     name: Optional[str] = None
@@ -33,6 +35,8 @@ class UpdateClubAdminRequest(BaseModel):
     city: Optional[str] = None
     logo_url: Optional[str] = None
     invite_code: Optional[str] = None
+    org_id: Optional[str] = None
+    join_mode: Optional[str] = None
 
 class AssignOwnerRequest(BaseModel):
     new_owner_id: str
@@ -118,7 +122,9 @@ def create_club_as_admin(req: CreateClubAdminRequest, admin_info: Dict[str, Any]
         name=req.name.strip(),
         description=req.description,
         city=req.city or "上海",
-        logo_url=req.logo_url
+        logo_url=req.logo_url,
+        org_id=req.org_id,
+        join_mode=req.join_mode or "free"
     )
     return {"message": f"跑团【{req.name}】创建成功，团长已指定为【{owner.get('display_name')}】！", "club": club}
 

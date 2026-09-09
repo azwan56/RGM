@@ -55,6 +55,7 @@ export default function AdminPage() {
   const [editClubDesc, setEditClubDesc] = useState("");
   const [editClubLogo, setEditClubLogo] = useState("");
   const [editClubInviteCode, setEditClubInviteCode] = useState("");
+  const [editClubJoinMode, setEditClubJoinMode] = useState<"free" | "invite">("free");
 
   const [selectedNewOwnerId, setSelectedNewOwnerId] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -198,6 +199,7 @@ export default function AdminPage() {
     setEditClubDesc(club.description || "");
     setEditClubLogo(club.logo_url || "");
     setEditClubInviteCode(club.invite_code || "");
+    setEditClubJoinMode(club.join_mode === "invite" ? "invite" : "free");
     setActionSuccessMsg("");
     setActionErrorMsg("");
     setShowEditModal(true);
@@ -254,7 +256,8 @@ export default function AdminPage() {
           city: editClubCity.trim(),
           description: editClubDesc.trim(),
           logo_url: editClubLogo.trim() || undefined,
-          invite_code: editClubInviteCode.trim() || undefined
+          invite_code: editClubInviteCode.trim() || undefined,
+          join_mode: editClubJoinMode
         },
         { headers: { Authorization: `Bearer ${adminToken}` } }
       );
@@ -513,6 +516,18 @@ export default function AdminPage() {
                         </span>
                       </div>
 
+                      {/* Join Mode */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-500">入团规则:</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          club.join_mode === 'invite'
+                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                            : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                        }`}>
+                          {club.join_mode === 'invite' ? '🔒 凭邀请码入团' : '🟢 自由入团'}
+                        </span>
+                      </div>
+
                       {/* Invite Code */}
                       <div className="flex items-center justify-between">
                         <span className="text-zinc-500">邀请码:</span>
@@ -759,6 +774,34 @@ export default function AdminPage() {
                       onChange={(e) => setEditClubInviteCode(e.target.value.toUpperCase())}
                       className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm font-mono text-[#FC4C02] font-bold focus:outline-none focus:border-[#FC4C02]"
                     />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">入团门槛与规则</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditClubJoinMode("free")}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
+                        editClubJoinMode === "free"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          : "bg-white/5 text-zinc-400 border border-white/10 hover:bg-white/10"
+                      }`}
+                    >
+                      🟢 自由入团（免邀请码）
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditClubJoinMode("invite")}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
+                        editClubJoinMode === "invite"
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                          : "bg-white/5 text-zinc-400 border border-white/10 hover:bg-white/10"
+                      }`}
+                    >
+                      🔒 凭专属邀请码入团
+                    </button>
                   </div>
                 </div>
 

@@ -68,13 +68,16 @@
             <view class="sc-content-box">
               <view class="sc-name-line">
                 <text class="sc-name-title">{{ sc.name }}</text>
+                <text class="mode-badge-pill" :class="sc.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
+                  {{ sc.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                </text>
                 <text class="sc-city-tag">📍 {{ sc.city || '上海' }}</text>
               </view>
               <text class="sc-desc-line">{{ sc.description || '戈友备战与日常训练打卡分跑团' }}</text>
               <text class="sc-meta-line">团长: {{ sc.owner_name || '平台指定' }} · {{ sc.member_count || 1 }} 位队员</text>
             </view>
-            <button class="sc-join-action-btn" :loading="joiningClubId === sc.id" @click="handleJoinClubDirect(sc.id)">
-              加入
+            <button class="sc-join-action-btn" :class="{ 'btn-invite-mode': sc.join_mode === 'invite' }" :loading="joiningClubId === sc.id" @click="handleJoinClubWithCheck(sc)">
+              {{ sc.join_mode === 'invite' ? '🔑 凭码加入' : '+ 自由加入' }}
             </button>
           </view>
         </view>
@@ -183,6 +186,24 @@
           <view class="tool-content">
             <text class="tool-main-title">{{ currentOrg.name }} 大群体花名册</text>
             <text class="tool-sub-desc">核对全体戈友班级、实名认证与归属 ({{ orgMembers.length }}人)</text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
+
+        <view class="owner-tool-item" @click="openJoinModeModal">
+          <view class="tool-icon-box bg-green">
+            <text class="tool-icon">⚙️</text>
+          </view>
+          <view class="tool-content">
+            <view class="tool-title-row">
+              <text class="tool-main-title">入团门槛规则设置</text>
+              <text class="mode-badge-pill" :class="currentClub?.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
+                {{ currentClub?.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+              </text>
+            </view>
+            <text class="tool-sub-desc">
+              {{ currentClub?.join_mode === 'invite' ? '已开启专属邀请码入团，点击管理或切换为自由入团' : '已开启自由入团，戈友与跑者可直接点击加入' }}
+            </text>
           </view>
           <text class="arrow-right">›</text>
         </view>
@@ -295,6 +316,9 @@
             <view class="csc-body">
               <view class="csc-title-row">
                 <text class="csc-name">{{ club.name }}</text>
+                <text class="mode-badge-pill" :class="club.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
+                  {{ club.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                </text>
                 <text class="csc-city">📍 {{ club.city || "上海" }}</text>
               </view>
               <text class="csc-desc">{{ club.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
@@ -304,8 +328,8 @@
                 <text class="csc-meta highlight">{{ club.member_count || 1 }} 位成员</text>
               </view>
             </view>
-            <button class="csc-join-btn" :loading="joiningClubId === club.id" @click="handleJoinClubDirect(club.id)">
-              加入
+            <button class="csc-join-btn" :class="{ 'btn-invite-mode': club.join_mode === 'invite' }" :loading="joiningClubId === club.id" @click="handleJoinClubWithCheck(club)">
+              {{ club.join_mode === 'invite' ? '🔑 凭码加入' : '加入' }}
             </button>
           </view>
         </view>
@@ -529,6 +553,9 @@
               <view class="mcc-info">
                 <view class="mcc-name-row">
                   <text class="mcc-name">{{ c.name }}</text>
+                  <text class="mode-badge-pill" :class="c.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
+                    {{ c.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                  </text>
                   <text class="mcc-city">📍 {{ c.city || '上海' }}</text>
                 </view>
                 <text class="mcc-desc">{{ c.description || '精英跑者联盟，追求 PB 突破与健康长久奔跑。' }}</text>
@@ -553,10 +580,11 @@
                 <button
                   v-else
                   class="mcc-join-btn"
+                  :class="{ 'btn-invite-mode': c.join_mode === 'invite' }"
                   :loading="joiningClubId === c.id"
-                  @click="handleJoinClubDirect(c.id)"
+                  @click="handleJoinClubWithCheck(c)"
                 >
-                  + 加入
+                  {{ c.join_mode === 'invite' ? '🔑 凭码加入' : '+ 自由加入' }}
                 </button>
               </view>
             </view>
@@ -685,6 +713,9 @@
               <view class="mcc-info">
                 <view class="mcc-name-row">
                   <text class="mcc-name">{{ c.name }}</text>
+                  <text class="mode-badge-pill" :class="c.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
+                    {{ c.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                  </text>
                   <text v-if="c.is_member" class="mcc-joined-badge">已加入</text>
                 </view>
                 <text class="mcc-desc">{{ c.description || '戈友备战与日常训练打卡分跑团' }}</text>
@@ -702,10 +733,11 @@
                 <button
                   v-else
                   class="mcc-join-btn"
+                  :class="{ 'btn-invite-mode': c.join_mode === 'invite' }"
                   :loading="joiningClubId === c.id"
-                  @click="handleJoinClubDirect(c.id)"
+                  @click="handleJoinClubWithCheck(c)"
                 >
-                  + 加入
+                  {{ c.join_mode === 'invite' ? '🔑 凭码加入' : '+ 加入' }}
                 </button>
               </view>
             </view>
@@ -766,6 +798,117 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- ── 4. Join Mode Setting Modal (团长设置入团规则) ── -->
+    <view v-if="showJoinModeModal" class="modal-mask" @click="showJoinModeModal = false" @touchmove.stop.prevent>
+      <view class="modal-content join-mode-modal" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">⚙️ 入团门槛规则设置</text>
+            <text class="count-pill">{{ currentClub?.name }}</text>
+          </view>
+          <text class="close-btn" @click="showJoinModeModal = false">✕</text>
+        </view>
+
+        <view class="modal-body">
+          <text class="jm-subtitle">请选择跑友加入【{{ currentClub?.name }}】的准入规则：</text>
+
+          <view class="jm-options-list">
+            <!-- Option 1: 自由入团 -->
+            <view
+              class="jm-option-card"
+              :class="{ 'is-selected': selectedJoinMode === 'free' }"
+              @click="selectedJoinMode = 'free'"
+            >
+              <view class="jm-opt-radio">
+                <text v-if="selectedJoinMode === 'free'" class="jm-radio-dot">●</text>
+                <text v-else class="jm-radio-circle">○</text>
+              </view>
+              <view class="jm-opt-content">
+                <view class="jm-opt-header">
+                  <text class="jm-opt-title">🟢 自由入团（免邀请码）</text>
+                  <text class="jm-rec-tag">推荐</text>
+                </view>
+                <text class="jm-opt-desc">
+                  戈友与跑者无需输入邀请码，直接点击即可加入本跑团。适合日常公开吸纳跑友、班级跑团自由建队。
+                </text>
+              </view>
+            </view>
+
+            <!-- Option 2: 凭专属邀请码入团 -->
+            <view
+              class="jm-option-card"
+              :class="{ 'is-selected': selectedJoinMode === 'invite' }"
+              @click="selectedJoinMode = 'invite'"
+            >
+              <view class="jm-opt-radio">
+                <text v-if="selectedJoinMode === 'invite'" class="jm-radio-dot">●</text>
+                <text v-else class="jm-radio-circle">○</text>
+              </view>
+              <view class="jm-opt-content">
+                <view class="jm-opt-header">
+                  <text class="jm-opt-title">🔒 凭专属邀请码入团</text>
+                </view>
+                <text class="jm-opt-desc">
+                  跑友必须输入本跑团专属邀请码才能加入。适合封闭式备战集训营、特定参赛梯队或私密跑团。
+                </text>
+              </view>
+            </view>
+          </view>
+
+          <!-- Invite code display & copy if in invite mode -->
+          <view v-if="selectedJoinMode === 'invite'" class="jm-code-box">
+            <view class="jm-code-left">
+              <text class="jm-code-label">本跑团专属 6 位邀请码：</text>
+              <text class="jm-code-val">{{ currentClub?.invite_code || '生成中...' }}</text>
+            </view>
+            <button class="jm-copy-btn" @click="handleCopyClubInviteCode">
+              复制邀请码
+            </button>
+          </view>
+
+          <view class="modal-btn-row">
+            <button class="btn-cancel" @click="showJoinModeModal = false">取消</button>
+            <button class="btn-submit" :loading="savingJoinMode" @click="saveClubJoinMode">保存入团规则</button>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── 5. Specific Club Invite Code Prompt Modal (跑者加入凭码跑团弹窗) ── -->
+    <view v-if="showClubCodeModal" class="modal-mask" @click="showClubCodeModal = false" @touchmove.stop.prevent>
+      <view class="modal-content club-code-prompt-modal" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">🔒 凭邀请码加入跑团</text>
+          <text class="close-btn" @click="showClubCodeModal = false">✕</text>
+        </view>
+
+        <view class="modal-body">
+          <view class="prompt-target-banner">
+            <text class="ptb-label">目标跑团：</text>
+            <text class="ptb-name">{{ targetClubForCodeJoin?.name }}</text>
+          </view>
+          <text class="prompt-hint-text">
+            该跑团团长已设置【凭邀请码入团】，请输入团长分享的 6 位跑团专属邀请码：
+          </text>
+
+          <input
+            class="club-code-input"
+            type="text"
+            maxlength="6"
+            :adjust-position="false"
+            :cursor-spacing="30"
+            placeholder="例如: RGM888"
+            v-model="clubJoinCodeInput"
+          />
+
+          <view class="modal-btn-row">
+            <button class="btn-cancel" @click="showClubCodeModal = false">取消</button>
+            <button class="btn-submit" :loading="joiningClubId === targetClubForCodeJoin?.id" @click="submitClubCodeJoin">立即验证并加入</button>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -812,6 +955,15 @@ const showOrgMembersModal = ref(false);
 const showSubClubsModal = ref(false);
 const orgMemberSearch = ref("");
 const joiningOrg = ref(false);
+
+// ── Club Join Mode & Specific Code Prompt State ──
+const showJoinModeModal = ref(false);
+const selectedJoinMode = ref<"free" | "invite">("free");
+const savingJoinMode = ref(false);
+
+const showClubCodeModal = ref(false);
+const targetClubForCodeJoin = ref<any>(null);
+const clubJoinCodeInput = ref("");
 
 const orgJoinForm = ref({
   invite_code: "FDGOBI",
@@ -1054,7 +1206,30 @@ function handleSwitchClub(club: any) {
   loadClubData(club.id);
 }
 
-async function handleJoinClubDirect(clubId: string) {
+function handleJoinClubWithCheck(club: any) {
+  if (!club || !club.id) return;
+  if (club.join_mode === "invite") {
+    targetClubForCodeJoin.value = club;
+    clubJoinCodeInput.value = "";
+    showClubCodeModal.value = true;
+  } else {
+    handleJoinClubDirect(club.id);
+  }
+}
+
+async function submitClubCodeJoin() {
+  const code = clubJoinCodeInput.value.trim().toUpperCase();
+  if (!code) {
+    uni.showToast({ title: "请输入跑团专属邀请码", icon: "none" });
+    return;
+  }
+  const clubId = targetClubForCodeJoin.value?.id;
+  if (!clubId) return;
+  await handleJoinClubDirect(clubId, code);
+  showClubCodeModal.value = false;
+}
+
+async function handleJoinClubDirect(clubId: string, inviteCode?: string) {
   const uid = user.value?.id;
   if (!uid) {
     uni.showToast({ title: "请先登录", icon: "none" });
@@ -1062,18 +1237,72 @@ async function handleJoinClubDirect(clubId: string) {
   }
   joiningClubId.value = clubId;
   try {
-    const res = await request("/api/team/join-club", "POST", {
+    const payload: any = {
       user_id: uid,
       club_id: clubId,
-    });
+    };
+    if (inviteCode) {
+      payload.invite_code = inviteCode;
+    }
+    const res = await request("/api/team/join-club", "POST", payload);
     setActiveClubId(clubId);
     showAllClubsModal.value = false;
+    showSubClubsModal.value = false;
     uni.showToast({ title: res?.message || "加入跑团成功！", icon: "success" });
     await loadClubData(clubId);
   } catch (e: any) {
     uni.showToast({ title: e?.message || "加入失败", icon: "none" });
   } finally {
     joiningClubId.value = null;
+  }
+}
+
+function openJoinModeModal() {
+  selectedJoinMode.value = (currentClub.value?.join_mode === "invite") ? "invite" : "free";
+  showJoinModeModal.value = true;
+}
+
+function handleCopyClubInviteCode() {
+  const code = currentClub.value?.invite_code;
+  if (!code) {
+    uni.showToast({ title: "暂无邀请码", icon: "none" });
+    return;
+  }
+  uni.setClipboardData({
+    data: code,
+    success: () => {
+      uni.showToast({ title: "邀请码已复制到剪贴板", icon: "success" });
+    }
+  });
+}
+
+async function saveClubJoinMode() {
+  const clubId = currentClub.value?.id;
+  const uid = user.value?.id;
+  if (!clubId || !uid) return;
+
+  savingJoinMode.value = true;
+  try {
+    const res = await request(`/api/team/${clubId}/join-mode`, "POST", {
+      operator_uid: uid,
+      join_mode: selectedJoinMode.value
+    });
+    if (currentClub.value) {
+      currentClub.value.join_mode = selectedJoinMode.value;
+    }
+    uni.showToast({
+      title: res?.message || "入团规则已更新",
+      icon: "success"
+    });
+    showJoinModeModal.value = false;
+    await loadClubData(clubId);
+  } catch (err: any) {
+    uni.showToast({
+      title: err?.message || "设置失败，请重试",
+      icon: "none"
+    });
+  } finally {
+    savingJoinMode.value = false;
   }
 }
 
@@ -3083,5 +3312,225 @@ onPullDownRefresh(async () => {
   background: rgba(14, 165, 233, 0.15);
   color: #0ea5e9;
   border: 1rpx solid rgba(14, 165, 233, 0.3);
+}
+
+.bg-green {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Join Mode Badges & Buttons ── */
+.mode-badge-pill {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  flex-shrink: 0;
+}
+
+.mode-badge-pill.mode-free {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.3);
+}
+
+.mode-badge-pill.mode-invite {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1rpx solid rgba(245, 158, 11, 0.3);
+}
+
+.btn-invite-mode {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  color: #ffffff !important;
+}
+
+/* ── Join Mode Setting Modal ── */
+.join-mode-modal {
+  width: 90%;
+  max-width: 660rpx;
+  background: #141416;
+  border-radius: 32rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 36rpx;
+}
+
+.jm-subtitle {
+  font-size: 24rpx;
+  color: #9ca3af;
+  margin-bottom: 24rpx;
+  display: block;
+}
+
+.jm-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  margin-bottom: 24rpx;
+}
+
+.jm-option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 20rpx;
+  background: #1c1c20;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 24rpx;
+  padding: 24rpx;
+  transition: all 0.2s ease;
+}
+
+.jm-option-card.is-selected {
+  border-color: #fc4c02;
+  background: rgba(252, 76, 2, 0.08);
+}
+
+.jm-opt-radio {
+  font-size: 28rpx;
+  margin-top: 4rpx;
+}
+
+.jm-radio-dot {
+  color: #fc4c02;
+}
+
+.jm-radio-circle {
+  color: #71717a;
+}
+
+.jm-opt-content {
+  flex: 1;
+}
+
+.jm-opt-header {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.jm-opt-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.jm-rec-tag {
+  font-size: 18rpx;
+  font-weight: bold;
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.4);
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+}
+
+.jm-opt-desc {
+  font-size: 22rpx;
+  color: #a1a1aa;
+  line-height: 1.5;
+  display: block;
+}
+
+.jm-code-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #18181c;
+  border: 1rpx solid rgba(245, 158, 11, 0.3);
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 28rpx;
+}
+
+.jm-code-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.jm-code-label {
+  font-size: 20rpx;
+  color: #9ca3af;
+}
+
+.jm-code-val {
+  font-size: 32rpx;
+  font-weight: 900;
+  font-family: monospace;
+  color: #f59e0b;
+  letter-spacing: 4rpx;
+}
+
+.jm-copy-btn {
+  font-size: 22rpx;
+  font-weight: bold;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1rpx solid rgba(245, 158, 11, 0.3);
+  border-radius: 14rpx;
+  padding: 8rpx 20rpx;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* ── Club Code Prompt Modal ── */
+.club-code-prompt-modal {
+  width: 88%;
+  max-width: 620rpx;
+  background: #141416;
+  border-radius: 32rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  padding: 36rpx;
+}
+
+.prompt-target-banner {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 16rpx;
+}
+
+.ptb-label {
+  font-size: 22rpx;
+  color: #9ca3af;
+}
+
+.ptb-name {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.prompt-hint-text {
+  font-size: 22rpx;
+  color: #a1a1aa;
+  line-height: 1.5;
+  display: block;
+  margin-bottom: 24rpx;
+}
+
+.club-code-input {
+  width: 100%;
+  height: 88rpx;
+  background: #1c1c20;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  border-radius: 20rpx;
+  color: #ffffff;
+  font-size: 36rpx;
+  font-weight: bold;
+  text-align: center;
+  font-family: monospace;
+  letter-spacing: 6rpx;
+  margin-bottom: 32rpx;
+  box-sizing: border-box;
+}
+
+.club-code-input:focus {
+  border-color: #fc4c02;
 }
 </style>

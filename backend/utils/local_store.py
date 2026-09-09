@@ -198,6 +198,7 @@ def init_db():
                 owner_id TEXT,
                 created_at TEXT,
                 settings TEXT,
+                join_mode TEXT DEFAULT 'free', -- 'free' (自由入团) or 'invite' (凭邀请码入团)
                 FOREIGN KEY(org_id) REFERENCES organizations(id),
                 FOREIGN KEY(owner_id) REFERENCES profiles(id)
             )
@@ -323,6 +324,8 @@ def init_db():
         club_cols = {row[1] for row in cursor.fetchall()}
         if "org_id" not in club_cols:
             cursor.execute("ALTER TABLE clubs ADD COLUMN org_id TEXT")
+        if "join_mode" not in club_cols:
+            cursor.execute("ALTER TABLE clubs ADD COLUMN join_mode TEXT DEFAULT 'free'")
 
         # Seed default Fudan Gobi Organization if none exists
         cursor.execute("SELECT COUNT(*) FROM organizations WHERE id = 'org_fudan_gobi'")
@@ -1284,7 +1287,7 @@ class LocalStore:
     # ── Multi-Tenant Running Clubs API Methods ──
 
     @staticmethod
-    def create_club(owner_id: str, name: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None, org_id: Optional[str] = None) -> Dict[str, Any]:
+    def create_club(owner_id: str, name: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None, org_id: Optional[str] = None, join_mode: str = "free") -> Dict[str, Any]:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             club_id = f"club_{int(datetime.utcnow().timestamp()*1000)}"
@@ -1293,9 +1296,9 @@ class LocalStore:
             created_at = datetime.utcnow().isoformat() + "Z"
 
             cursor.execute("""
-                INSERT INTO clubs (id, org_id, name, logo_url, description, city, invite_code, owner_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (club_id, org_id, name, logo, description, city, code, owner_id, created_at))
+                INSERT INTO clubs (id, org_id, name, logo_url, description, city, invite_code, owner_id, created_at, join_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (club_id, org_id, name, logo, description, city, code, owner_id, created_at, join_mode))
 
             cursor.execute("""
                 INSERT INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
@@ -1312,7 +1315,8 @@ class LocalStore:
                 "city": city,
                 "invite_code": code,
                 "owner_id": owner_id,
-                "created_at": created_at
+                "created_at": created_at,
+                "join_mode": join_mode
             }
 
     @staticmethod
@@ -1374,7 +1378,7 @@ class LocalStore:
             return club_dict
 
     @staticmethod
-    def join_club_by_id(user_id: str, club_id: str, privacy_consent: bool = True) -> Optional[Dict[str, Any]]:
+    def join_club_by_id(user_id: str, club_id: str, privacy_consent: bool = True, invite_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1384,6 +1388,15 @@ class LocalStore:
                 return None
             
             club_dict = dict(club)
+            # If club requires invite code, validate it
+            if club_dict.get("join_mode") == "invite":
+                provided_code = (invite_code or "").strip().upper()
+                expected_code = (club_dict.get("invite_code") or "").strip().upper()
+                if not provided_code:
+                    raise ValueError(f"跑团【{club_dict.get('name')}】已设置凭专属邀请码入团，请输入专属邀请码！")
+                if provided_code != expected_code:
+                    raise ValueError("跑团邀请码错误，请向团长核对后重新输入！")
+
             membership_id = f"{club_id}_{user_id}"
             joined_at = datetime.utcnow().isoformat() + "Z"
 
@@ -1484,7 +1497,7 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            allowed = ["name", "description", "city", "logo_url", "invite_code", "org_id"]
+            allowed = ["name", "description", "city", "logo_url", "invite_code", "org_id", "join_mode"]
             set_clauses = []
             params = []
             for k in allowed:
