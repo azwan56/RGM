@@ -14,6 +14,7 @@ export interface RacePlan {
   target_time: string;
   days_left?: number;
   priority?: number | string;
+  race_info?: Record<string, any>;
 }
 
 import GarminConnectModal from "@/components/GarminConnectModal";
@@ -287,6 +288,12 @@ export default function ProfilePage() {
     }
   }
 
+  const [expandedRaceInfo, setExpandedRaceInfo] = useState<Record<number, boolean>>({});
+
+  function toggleRaceInfoExpand(index: number) {
+    setExpandedRaceInfo((prev) => ({ ...prev, [index]: !prev[index] }));
+  }
+
   function addRace() {
     const newRace: RacePlan = {
       id: `race_${Date.now()}`,
@@ -296,6 +303,7 @@ export default function ProfilePage() {
       target_time: "3:30:00",
       days_left: 60,
       priority: 1,
+      race_info: {},
     };
     setRaces([...races, newRace]);
   }
@@ -310,6 +318,18 @@ export default function ProfilePage() {
         const diff = Math.ceil((target.getTime() - today.getTime()) / (1000 * 3600 * 24));
         updated[index].days_left = Math.max(0, diff);
       } catch (e) {}
+    }
+    setRaces(updated);
+  }
+
+  function updateRaceInfo(index: number, field: string, val: any) {
+    const updated = [...races];
+    const currentInfo = updated[index].race_info || {};
+    if (val === "" || val === null || val === undefined) {
+      const { [field]: _, ...rest } = currentInfo;
+      updated[index] = { ...updated[index], race_info: rest };
+    } else {
+      updated[index] = { ...updated[index], race_info: { ...currentInfo, [field]: val } };
     }
     setRaces(updated);
   }
@@ -743,10 +763,264 @@ export default function ProfilePage() {
                       </select>
                     </div>
                   </div>
+
+                  {/* ── Race Intelligence Expandable Panel ── */}
+                  <div className="pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => toggleRaceInfoExpand(idx)}
+                      className="w-full flex items-center justify-between px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl text-xs text-zinc-300 font-semibold transition"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        📋 {Object.values(race.race_info || {}).some(v => v !== null && v !== undefined && v !== "") ? "赛事情报已填写" : "填写赛事情报 (难度/天气/海拔等)"}
+                      </span>
+                      <span className="text-zinc-500 text-[10px]">{expandedRaceInfo[idx] ? "▲ 收起" : "▼ 展开"}</span>
+                    </button>
+
+                    {expandedRaceInfo[idx] && (
+                      <div className="mt-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl space-y-4 text-xs">
+                        {race.race_type?.includes("越野") ? (
+                          <>
+                            <div className="font-bold text-zinc-300 flex items-center gap-1.5 pb-1 border-b border-white/5">
+                              🏔️ 越野赛情报数据
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-zinc-400 block mb-1">报名赛程 (km)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 50 / 100"
+                                  value={race.race_info?.race_distance_km ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "race_distance_km", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">累计爬升 D+ (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 2800"
+                                  value={race.race_info?.elevation_gain_m ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "elevation_gain_m", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">累计下降 D- (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 2600"
+                                  value={race.race_info?.elevation_loss_m ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "elevation_loss_m", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">最高点海拔 (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 1918"
+                                  value={race.race_info?.max_altitude_m ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "max_altitude_m", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">难度等级</label>
+                                <select
+                                  value={race.race_info?.difficulty_level ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "difficulty_level", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择难度</option>
+                                  <option value="入门级">入门级</option>
+                                  <option value="进阶级">进阶级</option>
+                                  <option value="精英级">精英级</option>
+                                  <option value="极限级">极限级</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">地形类型</label>
+                                <select
+                                  value={race.race_info?.terrain_type ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "terrain_type", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择地形</option>
+                                  <option value="山地跑道">山地跑道</option>
+                                  <option value="高原草甸">高原草甸</option>
+                                  <option value="丛林密林">丛林密林</option>
+                                  <option value="岩石峭壁">岩石峭壁</option>
+                                  <option value="混合地形">混合地形</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">气候带</label>
+                                <select
+                                  value={race.race_info?.climate_zone ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "climate_zone", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择气候带</option>
+                                  <option value="温带大陆性">温带大陆性</option>
+                                  <option value="亚热带季风">亚热带季风</option>
+                                  <option value="高寒高原">高寒高原</option>
+                                  <option value="热带季风">热带季风</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">强制装备要求</label>
+                                <input
+                                  type="text"
+                                  placeholder="如: 头灯、1.5L水、急救毯"
+                                  value={race.race_info?.mandatory_gear ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "mandatory_gear", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-zinc-400 block mb-1">关门时间说明</label>
+                                <input
+                                  type="text"
+                                  placeholder="如: 总关门 20小时，中途补给站 4个"
+                                  value={race.race_info?.cutoff_notes ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "cutoff_notes", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-bold text-zinc-300 flex items-center gap-1.5 pb-1 border-b border-white/5">
+                              🏅 公路赛事客观情报
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-zinc-400 block mb-1">赛事等级</label>
+                                <select
+                                  value={race.race_info?.race_level ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "race_level", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择等级</option>
+                                  <option value="世界白金标">世界白金标</option>
+                                  <option value="国际金标">国际金标</option>
+                                  <option value="IAAF 银标">IAAF 银标</option>
+                                  <option value="IAAF 铜标">IAAF 铜标</option>
+                                  <option value="国内 A 类认证">国内 A 类认证</option>
+                                  <option value="普通大众认证">普通大众认证</option>
+                                  <option value="品牌邀请赛">品牌邀请赛</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">赛道特点</label>
+                                <select
+                                  value={race.race_info?.course_profile ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "course_profile", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择赛道特点</option>
+                                  <option value="极速平坦 (破 PB 首选)">极速平坦 (破 PB 首选)</option>
+                                  <option value="轻微起伏">轻微起伏</option>
+                                  <option value="中等坡度">中等坡度</option>
+                                  <option value="丘陵赛道">丘陵赛道</option>
+                                  <option value="多爬升挑战赛道">多爬升挑战赛道</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">路面材质</label>
+                                <select
+                                  value={race.race_info?.course_surface ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "course_surface", e.target.value || null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                >
+                                  <option value="">请选择路面材质</option>
+                                  <option value="柏油路">柏油路</option>
+                                  <option value="石板路">石板路</option>
+                                  <option value="混合路面">混合路面</option>
+                                  <option value="碎石路">碎石路</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">赛道净爬升 (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 120"
+                                  value={race.race_info?.net_elevation_gain_m ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "net_elevation_gain_m", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        <div className="font-bold text-zinc-300 pt-2 flex items-center gap-1.5 pb-1 border-b border-white/5">
+                          🌤️ 历史天气 & 大致规模
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-zinc-400 block mb-1">历史平均气温 (℃)</label>
+                            <input
+                              type="number"
+                              placeholder="如 12"
+                              value={race.race_info?.avg_temp_c ?? ""}
+                              onChange={(e) => updateRaceInfo(idx, "avg_temp_c", e.target.value ? Number(e.target.value) : null)}
+                              className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                            />
+                          </div>
+                          {!race.race_type?.includes("越野") && (
+                            <div>
+                              <label className="text-zinc-400 block mb-1">历史平均湿度 (%)</label>
+                              <input
+                                type="number"
+                                placeholder="如 65"
+                                value={race.race_info?.humidity_pct ?? ""}
+                                onChange={(e) => updateRaceInfo(idx, "humidity_pct", e.target.value ? Number(e.target.value) : null)}
+                                className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                              />
+                            </div>
+                          )}
+                          <div>
+                            <label className="text-zinc-400 block mb-1">天气情况备注</label>
+                            <input
+                              type="text"
+                              placeholder="如: 秋季举办，通常干燥清凉"
+                              value={race.race_info?.weather_notes ?? ""}
+                              onChange={(e) => updateRaceInfo(idx, "weather_notes", e.target.value || null)}
+                              className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-zinc-400 block mb-1">大致参赛人数</label>
+                            <input
+                              type="number"
+                              placeholder="如 10000"
+                              value={race.race_info?.typical_participants ?? ""}
+                              onChange={(e) => updateRaceInfo(idx, "typical_participants", e.target.value ? Number(e.target.value) : null)}
+                              className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="text-zinc-400 block mb-1">其他补充备注</label>
+                            <input
+                              type="text"
+                              placeholder="补充说明"
+                              value={race.race_info?.custom_notes ?? ""}
+                              onChange={(e) => updateRaceInfo(idx, "custom_notes", e.target.value || null)}
+                              className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
+
 
           {/* ── CARD 2: 个人最佳成绩 (PB) - 从 Garmin 导入 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
