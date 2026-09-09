@@ -1802,9 +1802,31 @@ class LocalStore:
             age_advice = "（大师组队员大负荷后结缔组织与肌糖原再生需充裕时间，建议保证 48~72 小时超量恢复窗口并强化核心抗阻力量）"
 
         # Determine runner tier for tone adaptation
-        m_pb = profile.get("marathon_pb") if profile else None
-        h_pb = profile.get("half_pb") if profile else None
-        years = profile.get("years_running") or 1 if profile else 1
+        def _parse_pb(v):
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                return float(v) if v > 0 else None
+            if isinstance(v, str):
+                p = v.strip().split(":")
+                try:
+                    if len(p) == 3:
+                        return int(p[0]) * 3600 + int(p[1]) * 60 + float(p[2])
+                    if len(p) == 2:
+                        return int(p[0]) * 60 + float(p[1])
+                    return float(v)
+                except Exception:
+                    return None
+            return None
+
+        m_pb = _parse_pb(profile.get("marathon_pb") if profile else None)
+        h_pb = _parse_pb(profile.get("half_pb") or profile.get("half_marathon_pb") if profile else None)
+        raw_years = profile.get("years_running") or 1 if profile else 1
+        try:
+            years = float(raw_years)
+        except Exception:
+            years = 1.0
+
         is_elite = bool((m_pb and m_pb <= 3 * 3600 + 15 * 60) or (h_pb and h_pb <= 88 * 60))
         is_beginner = (years <= 1 or (m_pb and m_pb > 4 * 3600 + 15 * 60) or (not m_pb and not h_pb)) and not is_elite
 

@@ -177,10 +177,31 @@ def resolve_runner_tier(profile: Dict[str, Any], ctl: float = 0.0) -> tuple[str,
     """
     Categorizes runner into 'beginner', 'elite', or 'intermediate' and returns detailed coaching instructions.
     """
-    m_pb = profile.get("marathon_pb")
-    h_pb = profile.get("half_pb")
-    ten_pb = profile.get("ten_k_pb")
-    years = profile.get("years_running") or 1
+    def _parse_pb(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v) if v > 0 else None
+        if isinstance(v, str):
+            p = v.strip().split(":")
+            try:
+                if len(p) == 3:
+                    return int(p[0]) * 3600 + int(p[1]) * 60 + float(p[2])
+                if len(p) == 2:
+                    return int(p[0]) * 60 + float(p[1])
+                return float(v)
+            except Exception:
+                return None
+        return None
+
+    m_pb = _parse_pb(profile.get("marathon_pb") or profile.get("marathon_pb_seconds"))
+    h_pb = _parse_pb(profile.get("half_pb") or profile.get("half_marathon_pb") or profile.get("half_pb_seconds"))
+    ten_pb = _parse_pb(profile.get("ten_k_pb") or profile.get("ten_pb_seconds"))
+    raw_years = profile.get("years_running") or 1
+    try:
+        years = float(raw_years)
+    except Exception:
+        years = 1.0
 
     # 1. Elite / High Level Athlete
     is_elite = False
