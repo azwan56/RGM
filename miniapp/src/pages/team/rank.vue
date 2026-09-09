@@ -276,6 +276,7 @@ import {
   getActiveClubId,
   setActiveClubId,
   resolveActiveClub,
+  syncTabBarIndex,
 } from "../../utils/api";
 
 const user = ref<UserProfile | null>(null);
@@ -411,6 +412,7 @@ async function handleSendComment() {
 }
 
 onShow(() => {
+  syncTabBarIndex(3);
   loadRankData();
 });
 

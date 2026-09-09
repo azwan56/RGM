@@ -173,7 +173,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
-import { request, getStoredUser, checkAndAutoLogin } from "../../utils/api";
+import { request, getStoredUser, checkAndAutoLogin, syncTabBarIndex } from "../../utils/api";
 
 const defaultCanovaZones: Record<string, any> = {
   aerobic_base: {
@@ -535,6 +535,7 @@ onMounted(() => {
 });
 
 onShow(() => {
+  syncTabBarIndex(2);
   loadData();
 });
 

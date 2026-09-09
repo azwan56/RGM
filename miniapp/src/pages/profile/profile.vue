@@ -1000,6 +1000,7 @@ import {
   unbindCoros,
   resolveActiveClub,
   setActiveClubId,
+  syncTabBarIndex,
 } from "../../utils/api";
 
 const defaultProfile = {
@@ -1887,6 +1888,7 @@ async function handleImportGarminPb() {
 }
 
 onShow(() => {
+  syncTabBarIndex(4);
   loadProfileData();
 });
 </script>

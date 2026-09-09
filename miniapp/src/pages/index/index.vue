@@ -876,6 +876,7 @@ import {
   deviceLogin,
   uploadAvatarFile,
   UserProfile,
+  syncTabBarIndex,
 } from "../../utils/api";
 
 const showAuthModal = ref(false);
@@ -1633,6 +1634,7 @@ onMounted(() => {
 });
 
 onShow(() => {
+  syncTabBarIndex(0);
   loadDashboard();
   nextTick(() => {
     setTimeout(drawFitnessChart, 250);

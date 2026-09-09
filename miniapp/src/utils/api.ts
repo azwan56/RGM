@@ -489,3 +489,23 @@ export async function uploadAvatarFile(uid: string, tempFilePath: string): Promi
     });
   }
 }
+
+/**
+ * Helper to update custom tabBar selected index on page onShow
+ */
+export function syncTabBarIndex(index: number) {
+  try {
+    const pages = getCurrentPages();
+    if (pages && pages.length) {
+      const cur = pages[pages.length - 1] as any;
+      if (cur && typeof cur.getTabBar === "function") {
+        const tb = cur.getTabBar();
+        if (tb && typeof tb.setData === "function") {
+          tb.setData({ selected: index });
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore in non-tab contexts
+  }
+}

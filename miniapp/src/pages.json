@@ -111,6 +111,7 @@
         "pagePath": "pages/profile/profile",
         "text": "我的"
       }
-    ]
+    ],
+    "custom": true
   }
 }

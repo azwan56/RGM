@@ -713,7 +713,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
-import { request, getStoredUser, checkAndAutoLogin, UserProfile } from "../../utils/api";
+import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex } from "../../utils/api";
 
 const activeTab = ref<"plan" | "analysis">("plan");
 
@@ -1300,6 +1300,7 @@ function formatAdvice(w: any): string {
 }
 
 onShow(() => {
+  syncTabBarIndex(1);
   loadLatestReport();
   loadUserPlan();
 });
