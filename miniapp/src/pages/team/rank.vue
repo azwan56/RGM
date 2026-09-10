@@ -390,7 +390,7 @@ async function handleSendComment() {
       {
         user_id: uid,
         content: commentTextInput.value.trim(),
-        author_name: user.value?.display_name || user.value?.email?.split("@")[0] || "跑友",
+        author_name: user.value?.display_name || "跑友",
         author_avatar:
           user.value?.avatar_url ||
           "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",

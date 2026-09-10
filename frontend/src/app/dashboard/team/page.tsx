@@ -38,6 +38,7 @@ import {
 
 export default function TeamPage() {
   const [user, setUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [clubs, setClubs] = useState<any[]>([]);
   const [currentClub, setCurrentClub] = useState<any>(null);
   const [currentRole, setCurrentRole] = useState<string>("member");
@@ -82,6 +83,7 @@ export default function TeamPage() {
       const u = data?.session?.user;
       if (u) {
         setUser(u);
+        loadUserProfile(u.id);
         loadUserClubs(u.id);
         loadAllClubs(u.id);
       } else {
@@ -89,6 +91,17 @@ export default function TeamPage() {
       }
     });
   }, [router]);
+
+  async function loadUserProfile(uid: string) {
+    try {
+      const res = await apiClient.get(`/api/profile/${uid}`);
+      if (res.data?.profile) {
+        setUserProfile(res.data.profile);
+      }
+    } catch (e) {
+      console.error("Load user profile error:", e);
+    }
+  }
 
   async function loadAllClubs(uid?: string) {
     const effUid = uid || user?.id;
@@ -246,11 +259,13 @@ export default function TeamPage() {
     if (!content || !user?.id) return;
     setSubmittingComment((prev) => ({ ...prev, [activityId]: true }));
     try {
+      const authorName = userProfile?.display_name || user?.user_metadata?.display_name || "跑友";
+      const authorAvatar = userProfile?.avatar_url || user?.user_metadata?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80";
       const res = await apiClient.post(`/api/team/activities/${activityId}/comments`, {
         user_id: user.id,
         content: content,
-        author_name: user?.user_metadata?.display_name || user?.email?.split("@")[0] || "跑友",
-        author_avatar: user?.user_metadata?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",
+        author_name: authorName,
+        author_avatar: authorAvatar,
       });
 
       const newCmt = res.data.comment;

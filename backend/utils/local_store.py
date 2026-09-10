@@ -2054,10 +2054,14 @@ class LocalStore:
                 has_liked = cursor.fetchone() is not None
 
             cursor.execute("""
-                SELECT id, activity_id, user_id, author_name, author_avatar, content, created_at 
-                FROM activity_comments 
-                WHERE activity_id = ? 
-                ORDER BY created_at ASC
+                SELECT c.id, c.activity_id, c.user_id, 
+                       COALESCE(NULLIF(p.display_name, ''), c.author_name) AS author_name,
+                       COALESCE(NULLIF(p.avatar_url, ''), c.author_avatar) AS author_avatar,
+                       c.content, c.created_at 
+                FROM activity_comments c
+                LEFT JOIN profiles p ON c.user_id = p.id
+                WHERE c.activity_id = ? 
+                ORDER BY c.created_at ASC
             """, (activity_id,))
             comments = [dict(r) for r in cursor.fetchall()]
 

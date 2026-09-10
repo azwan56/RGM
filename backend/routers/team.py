@@ -312,13 +312,26 @@ def get_activity_social_endpoint(activity_id: str, uid: Optional[str] = None):
 @router.post("/activities/{activity_id}/comments")
 def post_comment_endpoint(activity_id: str, req: PostCommentRequest):
     """Posts a member comment on an activity following AI Coach critique."""
-    profile = LocalStore.get_profile(req.user_id) or {}
-    name = req.author_name or profile.get("display_name") or "跑友"
-    avatar = req.author_avatar or profile.get("avatar_url") or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+    canonical_uid = LocalStore.resolve_user_id(req.user_id)
+    profile = LocalStore.get_profile(canonical_uid) or {}
+    
+    # Priority: registered display_name > client author_name (excluding raw email prefixes) > fallback
+    profile_name = (profile.get("display_name") or "").strip()
+    req_name = (req.author_name or "").strip()
+    
+    if profile_name and profile_name not in ("跑者", "微信跑者"):
+        name = profile_name
+    elif req_name and not ("@" in req_name):
+        name = req_name
+    else:
+        name = profile_name or "跑友"
+
+    profile_avatar = profile.get("avatar_url")
+    avatar = profile_avatar or req.author_avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
     
     cmt = LocalStore.add_activity_comment(
         activity_id=activity_id,
-        user_id=req.user_id,
+        user_id=canonical_uid,
         author_name=name,
         author_avatar=avatar,
         content=req.content
