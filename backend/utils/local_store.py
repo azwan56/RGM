@@ -5,6 +5,7 @@ import uuid
 import random
 import string
 import logging
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date, timedelta
 
@@ -301,6 +302,23 @@ def init_db():
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_notifications (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                activity_id TEXT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                type TEXT DEFAULT 'coach_critique',
+                wechat_sent INTEGER DEFAULT 0,
+                wechat_errmsg TEXT,
+                is_read INTEGER DEFAULT 0,
+                created_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES profiles(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sys_notif_user ON system_notifications(user_id, created_at DESC)")
+
         # Dynamic migration for existing profiles table
         cursor.execute("PRAGMA table_info(profiles)")
         existing_cols = {row[1] for row in cursor.fetchall()}
@@ -545,6 +563,10 @@ class LocalStore:
                 "calories", "aerobic_training_effect", "anaerobic_training_effect", "trimp",
                 "ai_journal", "laps_data", "splits_data"
             ]
+            act_id = act.get("id")
+            cursor.execute("SELECT id FROM activities WHERE id = ?", (act_id,))
+            is_new = cursor.fetchone() is None
+
             if not act.get("ai_journal") or not str(act.get("ai_journal")).strip():
                 act["ai_journal"] = LocalStore.generate_canova_critique(act)
 
@@ -567,6 +589,18 @@ class LocalStore:
                     LocalStore.reconcile_training_plan_activities(active_plan, uid)
         except Exception as e:
             logger.warning(f"Plan reconciliation after upsert_activity skipped: {e}")
+
+        # If this is a new activity and has Canova critique, dispatch push notification
+        if is_new and act.get("ai_journal") and act.get("user_id"):
+            try:
+                from utils.wechat import dispatch_canova_critique_push
+                dispatch_canova_critique_push(
+                    user_id=act["user_id"],
+                    activity=act,
+                    critique=act["ai_journal"]
+                )
+            except Exception as pe:
+                logger.warning(f"Canova critique push notification failed: {pe}")
 
     @staticmethod
     def get_recent_activities(uid: str, limit: int = 15) -> List[Dict[str, Any]]:
@@ -2911,4 +2945,86 @@ class LocalStore:
             cursor.execute(f"UPDATE organizations SET {', '.join(set_clauses)} WHERE id = ?", tuple(params))
             conn.commit()
             return LocalStore.get_organization_admin(org_id)
+
+    @staticmethod
+    def create_system_notification(
+        user_id: str,
+        title: str,
+        content: str,
+        activity_id: Optional[str] = None,
+        notif_type: str = "coach_critique",
+        wechat_sent: int = 0,
+        wechat_errmsg: Optional[str] = None
+    ) -> Dict[str, Any]:
+        notif_id = f"notif_{int(time.time() * 1000)}"
+        now_str = datetime.utcnow().isoformat() + "Z"
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO system_notifications (id, user_id, activity_id, title, content, type, wechat_sent, wechat_errmsg, is_read, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (notif_id, canonical_uid, activity_id, title, content, notif_type, wechat_sent, wechat_errmsg, now_str))
+            conn.commit()
+            return {
+                "id": notif_id,
+                "user_id": canonical_uid,
+                "activity_id": activity_id,
+                "title": title,
+                "content": content,
+                "type": notif_type,
+                "wechat_sent": wechat_sent,
+                "wechat_errmsg": wechat_errmsg,
+                "is_read": 0,
+                "created_at": now_str
+            }
+
+    @staticmethod
+    def get_user_notifications(user_id: str, limit: int = 30) -> List[Dict[str, Any]]:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, user_id, activity_id, title, content, type, wechat_sent, wechat_errmsg, is_read, created_at
+                FROM system_notifications
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (canonical_uid, limit))
+            return [dict(r) for r in cursor.fetchall()]
+
+    @staticmethod
+    def mark_notification_as_read(notif_id: str, user_id: str) -> bool:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE system_notifications SET is_read = 1 WHERE id = ? AND user_id = ?
+            """, (notif_id, canonical_uid))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def mark_all_notifications_read(user_id: str) -> int:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE system_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0
+            """, (canonical_uid,))
+            conn.commit()
+            return cursor.rowcount
+
+    @staticmethod
+    def get_unread_notifications_count(user_id: str) -> int:
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM system_notifications WHERE user_id = ? AND is_read = 0
+            """, (canonical_uid,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
+
 

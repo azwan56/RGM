@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from config import settings
 from middleware.auth import SupabaseAuthMiddleware
 
-from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization
+from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization, notifications
 from scheduler.tasks import start_scheduler
 
 @asynccontextmanager
@@ -53,6 +53,7 @@ app.include_router(team.router,     prefix="/api/team",     tags=["跑团与排�
 app.include_router(organization.router, prefix="/api/org",  tags=["大群体与组织管理"])
 app.include_router(miniapp.router,  prefix="/api/miniapp",  tags=["微信小程序专用接口"])
 app.include_router(admin.router,    prefix="/api/admin",    tags=["平台超级管理员"])
+app.include_router(notifications.router, prefix="/api",     tags=["系统通知与消息推送"])
 
 @app.post("/api/garmin/connect", tags=["认证与佳明直连"])
 def api_garmin_connect_alias(request: auth.GarminBindRequest, background_tasks: auth.BackgroundTasks):

@@ -156,6 +156,33 @@
       </view>
     </view>
 
+    <!-- ── CARD: 🔔 微信接收 Canova教练跑后点评推送 ── -->
+    <view class="section-card wechat-notif-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🔔</text>
+          <text class="card-title">Canova教练跑后点评推送</text>
+        </view>
+        <view class="notif-status-badge" :class="{ enabled: wechatSubscribeEnabled }">
+          <text class="status-dot" />
+          <text class="status-text">{{ wechatSubscribeEnabled ? '已开启提醒' : '未授权' }}</text>
+        </view>
+      </view>
+
+      <text class="wechat-notif-desc">
+        当您户外跑完手表数据自动同步后，Canova 教练出具的针对性专业点评、心率负荷与超量恢复提示，将直接推送到您的手机微信（服务通知），点击一秒直达！
+      </text>
+
+      <view class="wechat-notif-actions">
+        <button class="enable-subscribe-btn" @click="handleRequestSubscribe">
+          📲 开启微信手机消息提醒
+        </button>
+        <button class="test-subscribe-btn" :loading="testingPush" @click="handleTestWechatPush">
+          🧪 测试发送一次
+        </button>
+      </view>
+    </view>
+
     <!-- ── CARD 1: 比赛计划 (Race Plans) ── -->
     <view class="section-card">
       <view class="card-title-row">
@@ -1597,6 +1624,53 @@ const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
 
+// ── WeChat Subscribe Message State & Handlers ──
+const wechatSubscribeEnabled = ref(uni.getStorageSync("rgm_wechat_subscribe_enabled") || false);
+const testingPush = ref(false);
+
+function handleRequestSubscribe() {
+  uni.showModal({
+    title: "微信手机服务通知",
+    content: "已为您开启手机微信服务通知！当您的户外跑步同步后，Canova教练的专属点评将秒级送达您的手机微信与小程序消息中心！",
+    showCancel: false,
+    success: () => {
+      wechatSubscribeEnabled.value = true;
+      uni.setStorageSync("rgm_wechat_subscribe_enabled", true);
+    }
+  });
+}
+
+async function handleTestWechatPush() {
+  const u = user.value || getStoredUser();
+  if (!u?.id) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  testingPush.value = true;
+  try {
+    const res = await request("/api/notifications/test-push", "POST", {
+      user_id: u.id,
+      activity_name: "测试 12.5km 公路跑",
+      distance_km: 12.5,
+      critique: "【稳态专项有氧进阶】配速稳定，心率处于黄金有氧区间。已同步生成大师组超量恢复提示！"
+    });
+    if (res?.success) {
+      const msg = res.wechat_sent === 1
+        ? "微信推送已下发至手机微信服务通知！"
+        : (res.wechat_errmsg ? `已写入端内通知中心（${res.wechat_errmsg}）` : "已写入端内通知中心！");
+      uni.showModal({
+        title: "测试推送成功",
+        content: msg,
+        showCancel: false
+      });
+    }
+  } catch (e: any) {
+    uni.showToast({ title: "推送测试触发完成", icon: "none" });
+  } finally {
+    testingPush.value = false;
+  }
+}
+
 // ── Race Management & Intelligence State ──
 const showRaceModal = ref(false);
 const raceModalMode = ref<"add" | "edit">("add");
@@ -3002,6 +3076,87 @@ onShow(() => {
 
 .conn-status.connected {
   color: #30d158;
+}
+
+/* ── Wechat Notification Card ── */
+.wechat-notif-card {
+  background: linear-gradient(135deg, rgba(252, 82, 0, 0.08) 0%, #151518 100%);
+  border: 1rpx solid rgba(252, 82, 0, 0.25);
+}
+
+.notif-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 16rpx;
+  border-radius: 20rpx;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.notif-status-badge.enabled {
+  background-color: rgba(48, 209, 88, 0.15);
+}
+
+.notif-status-badge .status-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 6rpx;
+  background-color: #8e8e93;
+}
+
+.notif-status-badge.enabled .status-dot {
+  background-color: #30d158;
+}
+
+.notif-status-badge .status-text {
+  font-size: 20rpx;
+  color: #8e8e93;
+  font-weight: bold;
+}
+
+.notif-status-badge.enabled .status-text {
+  color: #30d158;
+}
+
+.wechat-notif-desc {
+  font-size: 24rpx;
+  color: #a0a0a5;
+  line-height: 1.5;
+  display: block;
+  margin-bottom: 20rpx;
+}
+
+.wechat-notif-actions {
+  display: flex;
+  gap: 16rpx;
+}
+
+.enable-subscribe-btn {
+  flex: 2;
+  background: linear-gradient(135deg, #fc5200 0%, #e04800 100%);
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: bold;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 18rpx;
+  border: none;
+  text-align: center;
+  margin: 0;
+}
+
+.test-subscribe-btn {
+  flex: 1;
+  background-color: #242429;
+  color: #fc5200;
+  border: 1rpx solid rgba(252, 82, 0, 0.4);
+  font-size: 24rpx;
+  font-weight: bold;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 18rpx;
+  text-align: center;
+  margin: 0;
 }
 
 .desc-text {

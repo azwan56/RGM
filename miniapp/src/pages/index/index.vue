@@ -9,9 +9,17 @@
           <text class="user-name">{{ dashboardData?.user?.display_name || user?.display_name || "跑者" }}</text>
         </view>
       </view>
-      <view class="garmin-badge" :class="{ active: isDeviceConnected }">
-        <view class="pulse-dot" />
-        <text class="badge-text">{{ deviceConnectedText }}</text>
+      <view class="header-right-actions">
+        <view class="notif-bell-btn" @click="openNotificationsModal">
+          <text class="bell-icon">🔔</text>
+          <view v-if="unreadNotifCount > 0" class="notif-badge">
+            <text class="notif-badge-text">{{ unreadNotifCount > 99 ? '99+' : unreadNotifCount }}</text>
+          </view>
+        </view>
+        <view class="garmin-badge" :class="{ active: isDeviceConnected }">
+          <view class="pulse-dot" />
+          <text class="badge-text">{{ deviceConnectedText }}</text>
+        </view>
       </view>
     </view>
 
@@ -863,6 +871,55 @@
         </view>
       </view>
     </view>
+
+    <!-- ── 🔔 Canova教练与系统消息中心 Modal ── -->
+    <view v-if="showNotificationsModal" class="modal-mask notif-mask" @click="showNotificationsModal = false" @touchmove.stop.prevent>
+      <view class="modal-content notif-center-modal" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">🔔 Canova教练与系统通知</text>
+            <text v-if="unreadNotifCount > 0" class="notif-count-pill">{{ unreadNotifCount }} 条未读</text>
+          </view>
+          <view class="header-actions-row">
+            <text v-if="unreadNotifCount > 0" class="btn-read-all" @click="handleReadAllNotifications">全部已读</text>
+            <text class="close-btn" @click="showNotificationsModal = false">✕</text>
+          </view>
+        </view>
+
+        <scroll-view scroll-y class="modal-body notif-modal-body">
+          <view v-if="loadingNotifications" class="notif-loading-box">
+            <text class="loading-text">加载消息中...</text>
+          </view>
+          <view v-else-if="notificationsList.length === 0" class="notif-empty-box">
+            <text class="empty-icon">📭</text>
+            <text class="empty-title">暂无新通知</text>
+            <text class="empty-desc">每当您跑完步手表数据同步后，Canova 教练的专属分析点评将在此和手机微信服务通知同步送达！</text>
+          </view>
+          <view v-else class="notif-list">
+            <view
+              v-for="item in notificationsList"
+              :key="item.id"
+              class="notif-card-item"
+              :class="{ 'is-unread': !item.is_read }"
+              @click="handleNotificationClick(item)"
+            >
+              <view class="notif-card-top">
+                <view class="notif-title-row">
+                  <view v-if="!item.is_read" class="unread-dot" />
+                  <text class="notif-item-title">{{ item.title }}</text>
+                </view>
+                <text class="notif-time-tag">{{ formatNotifTime(item.created_at) }}</text>
+              </view>
+              <text class="notif-content-preview">{{ item.content }}</text>
+              <view class="notif-footer-row">
+                <text class="notif-source-tag">🎯 Canova AI 私教引擎</text>
+                <text class="notif-action-hint">查看详情 →</text>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -890,6 +947,66 @@ const runnerNickName = ref("");
 const runnerAvatar = ref("");
 const agreedTerms = ref(false);
 const confirmingLogin = ref(false);
+
+const showNotificationsModal = ref(false);
+const notificationsList = ref<any[]>([]);
+const unreadNotifCount = ref(0);
+const loadingNotifications = ref(false);
+
+async function loadNotifications() {
+  const u = user.value || getStoredUser();
+  if (!u?.id) return;
+  try {
+    const res = await request(`/api/notifications?user_id=${u.id}&limit=20`);
+    if (res?.success) {
+      notificationsList.value = res.notifications || [];
+      unreadNotifCount.value = res.unread_count || 0;
+    }
+  } catch (e) {
+    console.error("Load notifications error:", e);
+  }
+}
+
+function openNotificationsModal() {
+  showNotificationsModal.value = true;
+  loadingNotifications.value = true;
+  loadNotifications().finally(() => {
+    loadingNotifications.value = false;
+  });
+}
+
+async function handleNotificationClick(item: any) {
+  const u = user.value || getStoredUser();
+  if (u?.id && !item.is_read) {
+    item.is_read = 1;
+    unreadNotifCount.value = Math.max(0, unreadNotifCount.value - 1);
+    request(`/api/notifications/${item.id}/read?user_id=${u.id}`, "POST").catch(() => {});
+  }
+  showNotificationsModal.value = false;
+  uni.showToast({ title: "已阅 Canova 评语", icon: "none" });
+}
+
+async function handleReadAllNotifications() {
+  const u = user.value || getStoredUser();
+  if (!u?.id) return;
+  try {
+    await request("/api/notifications/read-all", "POST", { user_id: u.id });
+    notificationsList.value.forEach((n) => (n.is_read = 1));
+    unreadNotifCount.value = 0;
+    uni.showToast({ title: "全部已读", icon: "success" });
+  } catch (e) {
+    uni.showToast({ title: "操作失败", icon: "none" });
+  }
+}
+
+function formatNotifTime(timeStr: string) {
+  if (!timeStr) return "";
+  try {
+    return timeStr.slice(5, 16).replace("T", " ");
+  } catch {
+    return timeStr;
+  }
+}
 const defaultAvatar =
   "https://thirdwx.qlogo.cn/mmopen/vi_32/POgEwh4mIHO4nibH0KlMECNjjGxQUq24ZEaGT4poC6icRiccVGKSyXwibcPq4ozAawiaYbCQTvDVxp4UMxN5UulpDixA/132";
 
@@ -1578,6 +1695,7 @@ async function loadDashboard() {
       nextTick(() => {
         setTimeout(drawFitnessChart, 150);
       });
+      loadNotifications();
     }
   } catch (e) {
     console.warn("Dashboard fetch fallback:", e);
@@ -1695,6 +1813,50 @@ onPullDownRefresh(async () => {
   font-size: 34rpx;
   font-weight: bold;
   color: #ffffff;
+}
+
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.notif-bell-btn {
+  position: relative;
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 34rpx;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bell-icon {
+  font-size: 32rpx;
+}
+
+.notif-badge {
+  position: absolute;
+  top: -6rpx;
+  right: -6rpx;
+  background-color: #ff3b30;
+  border-radius: 16rpx;
+  min-width: 30rpx;
+  height: 30rpx;
+  padding: 0 6rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid #0b0b0d;
+}
+
+.notif-badge-text {
+  font-size: 18rpx;
+  font-weight: bold;
+  color: #ffffff;
+  line-height: 1;
 }
 
 .garmin-badge {
@@ -3579,5 +3741,158 @@ onPullDownRefresh(async () => {
 
 .device-confirm-btn {
   background: linear-gradient(135deg, #00d2be, #00a896) !important;
+}
+
+/* ── 🔔 Notification Center Modal ── */
+.notif-center-modal {
+  max-width: 680rpx;
+  width: 92%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.title-with-pill {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.notif-count-pill {
+  font-size: 20rpx;
+  color: #fc4c02;
+  background-color: rgba(252, 76, 2, 0.15);
+  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  padding: 2rpx 14rpx;
+  border-radius: 12rpx;
+  font-weight: bold;
+}
+
+.header-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.btn-read-all {
+  font-size: 22rpx;
+  color: #a1a1aa;
+  padding: 6rpx 14rpx;
+  border-radius: 8rpx;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.notif-modal-body {
+  max-height: 60vh;
+  box-sizing: border-box;
+}
+
+.notif-loading-box, .notif-empty-box {
+  padding: 60rpx 30rpx;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.empty-icon {
+  font-size: 64rpx;
+  margin-bottom: 16rpx;
+}
+
+.empty-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 10rpx;
+}
+
+.empty-desc {
+  font-size: 22rpx;
+  color: #71717a;
+  line-height: 1.5;
+  padding: 0 20rpx;
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  padding: 10rpx 0;
+}
+
+.notif-card-item {
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 18rpx;
+  padding: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  transition: all 0.2s;
+}
+
+.notif-card-item.is-unread {
+  border-color: rgba(252, 76, 2, 0.4);
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.06) 0%, #1a1a1e 100%);
+}
+
+.notif-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notif-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.unread-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 6rpx;
+  background-color: #fc4c02;
+}
+
+.notif-item-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.notif-time-tag {
+  font-size: 20rpx;
+  color: #71717a;
+}
+
+.notif-content-preview {
+  font-size: 22rpx;
+  color: #d4d4d8;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.notif-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.05);
+}
+
+.notif-source-tag {
+  font-size: 20rpx;
+  color: #a1a1aa;
+}
+
+.notif-action-hint {
+  font-size: 20rpx;
+  color: #fc4c02;
+  font-weight: bold;
 }
 </style>
