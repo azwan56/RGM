@@ -850,6 +850,12 @@ export default function TeamPage() {
                               <span>❤️ 心率 <strong className="text-rose-400">{act.average_heartrate || "—"} bpm</strong></span>
                               <span>·</span>
                               <span>⚡ 负荷 TRIMP <strong className="text-amber-400">{act.trimp || 50}</strong></span>
+                              {((act.elevation_gain_meters && Number(act.elevation_gain_meters) > 0) || (act.total_elevation_gain && Number(act.total_elevation_gain) > 0)) && (
+                                <>
+                                  <span>·</span>
+                                  <span>⛰️ 爬升 <strong className="text-emerald-400">+{Math.round(Number(act.elevation_gain_meters || act.total_elevation_gain))} m</strong></span>
+                                </>
+                              )}
                               <span>·</span>
                               <span className="text-[11px] text-zinc-500">{act.start_time?.slice(0, 16)?.replace("T", " ")}</span>
                             </div>

@@ -567,6 +567,19 @@ class LocalStore:
             cursor.execute("SELECT id FROM activities WHERE id = ?", (act_id,))
             is_new = cursor.fetchone() is None
 
+            # Ensure elevation_gain_meters is robustly captured from any common adapter key
+            if act.get("elevation_gain_meters") is None:
+                elev = act.get("total_elevation_gain")
+                if elev is None:
+                    elev = act.get("elevationGain")
+                if elev is None:
+                    elev = act.get("elevation_gain")
+                if elev is not None:
+                    try:
+                        act["elevation_gain_meters"] = round(float(elev), 1)
+                    except (ValueError, TypeError):
+                        pass
+
             if not act.get("ai_journal") or not str(act.get("ai_journal")).strip():
                 act["ai_journal"] = LocalStore.generate_canova_critique(act)
 
@@ -1904,7 +1917,7 @@ class LocalStore:
         pace_str = activity.get("avg_pace_str") or "5:30"
         avg_hr = activity.get("average_heartrate")
         trimp = float(activity.get("trimp") or 50)
-        elev_gain = float(activity.get("elevation_gain_meters") or 0)
+        elev_gain = float(activity.get("elevation_gain_meters") or activity.get("total_elevation_gain") or activity.get("elevationGain") or 0)
         act_name = str(activity.get("name") or "")
 
         if dist_km < 1.0:

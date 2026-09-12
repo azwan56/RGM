@@ -457,6 +457,7 @@ class CorosAdapter:
             "max_heartrate": int(max_hr) if max_hr else None,
             "average_cadence": int(avg_cadence) if avg_cadence else None,
             "total_elevation_gain": round(float(elev_gain), 1),
+            "elevation_gain_meters": round(float(elev_gain), 1),
             "calories": int(calories),
             "aerobic_training_effect": round(float(aerobic_te), 1) if aerobic_te else None,
             "anaerobic_training_effect": round(float(anaerobic_te), 1) if anaerobic_te else None,

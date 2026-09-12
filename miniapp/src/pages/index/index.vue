@@ -589,7 +589,10 @@
           class="activity-card"
         >
           <view class="act-top">
-            <text class="act-name">{{ act.name }}</text>
+            <view class="act-name-group">
+              <text class="act-name">{{ act.name }}</text>
+              <text v-if="act.elevation_gain_meters && act.elevation_gain_meters > 0" class="act-elev-tag">⛰️ +{{ Math.round(act.elevation_gain_meters) }}m</text>
+            </view>
             <text class="act-time">{{ formatTime(act.start_time) }}</text>
           </view>
           <view class="act-data-row">
@@ -2811,10 +2814,26 @@ onPullDownRefresh(async () => {
   margin-bottom: 20rpx;
 }
 
+.act-name-group {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
 .act-name {
   font-size: 28rpx;
   font-weight: bold;
   color: #ffffff;
+}
+
+.act-elev-tag {
+  font-size: 20rpx;
+  color: #30d158;
+  background-color: rgba(48, 209, 88, 0.12);
+  border: 1rpx solid rgba(48, 209, 88, 0.25);
+  border-radius: 10rpx;
+  padding: 2rpx 10rpx;
+  font-weight: bold;
 }
 
 .act-time {

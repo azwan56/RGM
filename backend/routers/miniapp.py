@@ -80,6 +80,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "moving_time_seconds": a.get("moving_time_seconds") or 0,
                 "avg_pace_str": a.get("avg_pace_str") or "—",
                 "average_heartrate": a.get("average_heartrate"),
+                "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
                 "trimp": a.get("trimp"),
                 "ai_journal": a.get("ai_journal")
             })
@@ -308,6 +309,7 @@ def get_miniapp_activities(uid: str, limit: int = 50) -> Dict[str, Any]:
             "moving_time_seconds": a.get("moving_time_seconds") or 0,
             "avg_pace_str": a.get("avg_pace_str") or "—",
             "average_heartrate": a.get("average_heartrate"),
+            "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
             "trimp": a.get("trimp"),
             "ai_journal": a.get("ai_journal")
         })

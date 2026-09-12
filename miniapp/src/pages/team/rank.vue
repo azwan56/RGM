@@ -120,7 +120,7 @@
               <view class="feed-user-meta">
                 <text class="feed-author">{{ act.display_name }}</text>
                 <text class="feed-act-name">
-                  {{ act.name }} · 配速 {{ act.avg_pace_str }} · 心率 {{ act.average_heartrate || '—' }} bpm · TRIMP {{ act.trimp || 50 }}
+                  {{ act.name }} · 配速 {{ act.avg_pace_str }} · 心率 {{ act.average_heartrate || '—' }} bpm · TRIMP {{ act.trimp || 50 }}{{ (act.elevation_gain_meters && act.elevation_gain_meters > 0) ? ` · ⛰️ +${Math.round(act.elevation_gain_meters)}m` : '' }}
                 </text>
               </view>
               <view class="feed-distance">
