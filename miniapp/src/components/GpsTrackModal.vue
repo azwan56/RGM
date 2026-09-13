@@ -1,9 +1,9 @@
 <template>
   <view v-if="visible" class="gps-modal-root">
-    <!-- Backdrop: prevents background scroll and handles backdrop tap -->
+    <!-- Backdrop: prevents background page scroll and handles backdrop tap to close -->
     <view class="gps-modal-backdrop" @click="handleClose" @touchmove.stop.prevent />
 
-    <!-- Modal Sheet: Sibling to backdrop, free from catchtouchmove so map & canvas gestures work smoothly -->
+    <!-- Modal Sheet: Sibling to backdrop, NO catchtouchmove on container so gestures work smoothly -->
     <view class="gps-modal-sheet" @click.stop>
       <!-- Modal Header -->
       <view class="gps-modal-header">
@@ -66,8 +66,8 @@
         </view>
       </view>
 
-      <!-- Body Content Area -->
-      <view class="gps-modal-body">
+      <!-- Visualizer Stage: Fixed height, NO overflow-y: auto, so map drag/pinch gestures are never stolen! -->
+      <view class="visualizer-stage">
         <!-- Loading Spinner -->
         <view v-if="loading" class="loading-box">
           <text class="loading-spinner">⏳</text>
@@ -127,7 +127,7 @@
 
             <view class="map-corner-pill">
               <text class="pill-dot">●</text>
-              <text class="pill-text">GCJ-02 纠偏 · 支持双指缩放/拖拽/俯仰</text>
+              <text class="pill-text">GCJ-02 纠偏 · 支持双指缩放/单指拖拽/俯仰</text>
             </view>
           </view>
           <view v-else-if="mapImageUrl" class="img-fallback-wrapper">
@@ -142,7 +142,7 @@
           </view>
         </view>
 
-        <!-- TAB 2: Elevation Profile Canvas -->
+        <!-- TAB 2: Elevation Profile View -->
         <view v-else-if="activeTab === 'elevation'" class="elevation-wrapper">
           <view class="elevation-stats-bar">
             <view class="elev-stat">
@@ -159,7 +159,7 @@
             </view>
           </view>
 
-          <!-- Interactive Elevation Chart with Canvas -->
+          <!-- Interactive Elevation Profile with Native Image SVG + Scrub Layer -->
           <view class="chart-box">
             <!-- Active Scrubbing Reading Banner -->
             <view v-if="scrubPoint" class="scrub-tip-banner">
@@ -171,14 +171,30 @@
               <text class="scrub-hint">👆 在剖面图上左右滑动，可交互查看沿途里程与海拔</text>
             </view>
 
-            <canvas
-              canvas-id="elevCanvas"
-              id="elevCanvas"
-              class="elev-canvas"
-              @touchstart="handleCanvasTouch"
-              @touchmove="handleCanvasTouch"
-              @touchend="handleCanvasTouchEnd"
-            />
+            <!-- Elevation Graphic Container -->
+            <view
+              class="elev-graphic-container"
+              @touchstart="handleScrubTouch"
+              @touchmove="handleScrubTouch"
+              @touchend="handleScrubEnd"
+            >
+              <!-- 1. Native High-Res SVG Image (100% Reliable across all WeChat platforms) -->
+              <image
+                v-if="elevationSvgDataUri"
+                class="elev-svg-img"
+                :src="elevationSvgDataUri"
+                mode="scaleToFill"
+              />
+
+              <!-- 2. Interactive Cursor Line when scrubbing -->
+              <view
+                v-if="scrubCursorX >= 0"
+                class="scrub-cursor-line"
+                :style="{ left: scrubCursorX + 'px' }"
+              >
+                <view class="cursor-dot" :style="{ top: scrubCursorY + 'px' }" />
+              </view>
+            </view>
           </view>
         </view>
 
@@ -186,15 +202,17 @@
         <view v-else-if="activeTab === 'image'" class="image-wrapper">
           <image class="official-map-img" :src="mapImageUrl" mode="widthFix" />
         </view>
+      </view>
 
-        <!-- Canova Coach Critique Snapshot -->
-        <view v-if="coachCritique" class="coach-critique-card">
-          <view class="critique-header">
-            <text class="critique-robot">🤖</text>
-            <text class="critique-title">Canova教练专属复盘</text>
-          </view>
-          <text class="critique-content">{{ coachCritique }}</text>
+      <!-- Canova Coach Critique Snapshot (Scrollable if text is long) -->
+      <view v-if="coachCritique" class="coach-critique-card">
+        <view class="critique-header">
+          <text class="critique-robot">🤖</text>
+          <text class="critique-title">Canova教练专属复盘</text>
         </view>
+        <scroll-view scroll-y class="critique-scroll">
+          <text class="critique-content">{{ coachCritique }}</text>
+        </scroll-view>
       </view>
     </view>
   </view>
@@ -225,7 +243,11 @@ const mapImageUrl = ref("");
 const trackCenter = ref<{ latitude: number; longitude: number }>({ latitude: 28.0, longitude: 114.0 });
 const mapScale = ref(13);
 const isSatellite = ref(false);
+
+// Scrubbing state
 const scrubPoint = ref<any>(null);
+const scrubCursorX = ref(-1);
+const scrubCursorY = ref(0);
 
 const distanceKm = computed(() => {
   const m = activityData.value?.distance_meters || props.initialActivity?.distance_meters || 0;
@@ -306,7 +328,7 @@ const trackMarkers = computed(() => {
     },
   ];
 
-  // If there's an elevation peak that is significantly above min elevation, add summit marker
+  // If there's an elevation peak, add summit marker
   if (elevationProfile.value.length > 2 && maxElevation.value > minElevation.value + 50) {
     let peakElev = elevationProfile.value[0];
     for (const p of elevationProfile.value) {
@@ -340,15 +362,162 @@ const trackMarkers = computed(() => {
   return markers;
 });
 
+// Pure Base64 encoder for universal Mini Program compatibility
+const b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+function base64Encode(str: string): string {
+  const utf8Bytes = encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
+    return String.fromCharCode(parseInt(p1, 16));
+  });
+  let output = "";
+  for (let i = 0; i < utf8Bytes.length; i += 3) {
+    const a = utf8Bytes.charCodeAt(i);
+    const b = utf8Bytes.charCodeAt(i + 1);
+    const c = utf8Bytes.charCodeAt(i + 2);
+    output += b64chars.charAt(a >> 2);
+    output += b64chars.charAt(((a & 3) << 4) | (b >> 4));
+    output += isNaN(b) ? "=" : b64chars.charAt(((b & 15) << 2) | (c >> 6));
+    output += isNaN(b) || isNaN(c) ? "=" : b64chars.charAt(c & 63);
+  }
+  return output;
+}
+
+// Generate complete SVG vector graph for the elevation profile
+const elevationSvgDataUri = computed(() => {
+  const list = elevationProfile.value;
+  if (!list || list.length < 2) return "";
+
+  const W = 330;
+  const H = 145;
+  const padL = 38;
+  const padR = 12;
+  const padT = 20;
+  const padB = 22;
+
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const minE = minElevation.value;
+  const maxE = maxElevation.value;
+  const diffE = Math.max(20, maxE - minE);
+
+  const totalDist = list[list.length - 1].dist_km || 1;
+
+  const getX = (distKm: number) => Math.round((padL + (distKm / totalDist) * plotW) * 10) / 10;
+  const getY = (elevM: number) => Math.round((padT + (plotH * (maxE - elevM)) / diffE) * 10) / 10;
+
+  const pts = list.map((item) => ({
+    x: getX(item.dist_km),
+    y: getY(item.elevation_m),
+    data: item,
+  }));
+
+  // Build Line Path
+  let lineD = "";
+  for (let i = 0; i < pts.length; i++) {
+    lineD += i === 0 ? `M ${pts[i].x} ${pts[i].y}` : ` L ${pts[i].x} ${pts[i].y}`;
+  }
+
+  // Build Area Path
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const bottomY = H - padB;
+  const areaD = `${lineD} L ${last.x} ${bottomY} L ${first.x} ${bottomY} Z`;
+
+  // Find Peak
+  let peakPt = pts[0];
+  for (const p of pts) {
+    if (p.data.elevation_m > peakPt.data.elevation_m) {
+      peakPt = p;
+    }
+  }
+
+  // Grid levels
+  const gridSteps = [0, 0.5, 1];
+  let gridSvg = "";
+  gridSteps.forEach((step) => {
+    const y = padT + plotH * step;
+    const elevVal = Math.round(maxE - step * diffE);
+    gridSvg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(255,255,255,0.08)" stroke-width="1" />`;
+    gridSvg += `<text x="${padL - 4}" y="${y + 3}" fill="#71717a" font-size="9" text-anchor="end" font-family="sans-serif">${elevVal}m</text>`;
+  });
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" height="100%">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#FC4C02" stop-opacity="0.5" />
+        <stop offset="100%" stop-color="#FC4C02" stop-opacity="0.02" />
+      </linearGradient>
+    </defs>
+    ${gridSvg}
+    <path d="${areaD}" fill="url(#g)" />
+    <path d="${lineD}" fill="none" stroke="#FC4C02" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="${peakPt.x}" cy="${peakPt.y}" r="4" fill="#ffffff" stroke="#FC4C02" stroke-width="2" />
+    <text x="${peakPt.x}" y="${Math.max(12, peakPt.y - 6)}" fill="#fb923c" font-size="9" font-weight="bold" text-anchor="middle" font-family="sans-serif">▲ ${Math.round(peakPt.data.elevation_m)}m</text>
+    <text x="${padL}" y="${H - 4}" fill="#71717a" font-size="9" text-anchor="start" font-family="sans-serif">0 km</text>
+    <text x="${padL + plotW / 2}" y="${H - 4}" fill="#71717a" font-size="9" text-anchor="middle" font-family="sans-serif">${(totalDist / 2).toFixed(1)} km</text>
+    <text x="${W - padR}" y="${H - 4}" fill="#71717a" font-size="9" text-anchor="end" font-family="sans-serif">${totalDist.toFixed(1)} km</text>
+  </svg>`;
+
+  return "data:image/svg+xml;base64," + base64Encode(svg);
+});
+
+// Interactive touch scrubbing on elevation graphic
+function handleScrubTouch(e: any) {
+  const list = elevationProfile.value;
+  if (!list || list.length < 2) return;
+
+  const touch = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+  if (!touch) return;
+
+  const sysInfo = uni.getSystemInfoSync();
+  const screenW = sysInfo.windowWidth || 375;
+  const containerW = Math.min(330, screenW - 60);
+
+  const padL = 38;
+  const padR = 12;
+  const plotW = containerW - padL - padR;
+
+  // Compute touch position relative to graphic
+  const touchX = typeof touch.x === "number" ? touch.x : (touch.clientX - 30);
+  const clampedX = Math.max(padL, Math.min(containerW - padR, touchX));
+
+  const ratio = (clampedX - padL) / plotW;
+  const totalDist = list[list.length - 1].dist_km || 1;
+  const targetDist = ratio * totalDist;
+
+  // Find nearest point
+  let closest = list[0];
+  let minDiff = Math.abs(list[0].dist_km - targetDist);
+  for (const p of list) {
+    const d = Math.abs(p.dist_km - targetDist);
+    if (d < minDiff) {
+      minDiff = d;
+      closest = p;
+    }
+  }
+
+  scrubPoint.value = closest;
+  scrubCursorX.value = clampedX;
+
+  const minE = minElevation.value;
+  const maxE = maxElevation.value;
+  const diffE = Math.max(20, maxE - minE);
+  const normY = (maxE - closest.elevation_m) / diffE;
+  scrubCursorY.value = 20 + normY * (145 - 20 - 22);
+}
+
+function handleScrubEnd() {
+  setTimeout(() => {
+    scrubPoint.value = null;
+    scrubCursorX.value = -1;
+  }, 2500);
+}
+
 function switchTab(tab: "map" | "elevation" | "image") {
   activeTab.value = tab;
   if (tab === "map") {
     nextTick(() => {
-      setTimeout(fitRoute, 200);
-    });
-  } else if (tab === "elevation") {
-    nextTick(() => {
-      setTimeout(() => drawElevationChart(), 200);
+      setTimeout(fitRoute, 250);
     });
   }
 }
@@ -376,180 +545,6 @@ function fitRoute() {
   }
 }
 
-// Draw Elevation Profile on Native Canvas
-function drawElevationChart(activeTouchX?: number) {
-  const ctx = uni.createCanvasContext("elevCanvas", instance?.proxy);
-  if (!ctx) return;
-
-  const profile = elevationProfile.value;
-  if (!profile || profile.length < 2) {
-    ctx.clearRect(0, 0, 400, 160);
-    ctx.draw();
-    return;
-  }
-
-  const sysInfo = uni.getSystemInfoSync();
-  const screenW = sysInfo.windowWidth || 375;
-  const W = Math.min(360, screenW - 60);
-  const H = 140;
-
-  const padL = 38;
-  const padR = 14;
-  const padT = 20;
-  const padB = 22;
-
-  const plotW = Math.max(10, W - padL - padR);
-  const plotH = Math.max(10, H - padT - padB);
-
-  const minE = minElevation.value;
-  const maxE = maxElevation.value;
-  const diffE = Math.max(20, maxE - minE);
-
-  const totalDist = profile[profile.length - 1].dist_km || 1;
-
-  const getX = (distKm: number) => padL + (distKm / totalDist) * plotW;
-  const getY = (elevM: number) => padT + (plotH * (maxE - elevM)) / diffE;
-
-  ctx.clearRect(0, 0, W, H);
-
-  // 1. Gridlines & Altitude Labels
-  const gridSteps = [0, 0.5, 1];
-  ctx.setFontSize(9);
-  ctx.setTextAlign("right");
-
-  gridSteps.forEach((step) => {
-    const y = padT + plotH * step;
-    const elevVal = Math.round(maxE - step * diffE);
-
-    ctx.setStrokeStyle("rgba(255, 255, 255, 0.08)");
-    ctx.setLineWidth(1);
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(W - padR, y);
-    ctx.stroke();
-
-    ctx.setFillStyle("#71717a");
-    ctx.fillText(`${elevVal}m`, padL - 4, y + 3);
-  });
-
-  // 2. Build sampled point coordinates
-  const pts = profile.map((p) => ({
-    x: getX(p.dist_km),
-    y: getY(p.elevation_m),
-    data: p,
-  }));
-
-  // 3. Area Gradient Fill
-  const grad = ctx.createLinearGradient(0, padT, 0, H - padB);
-  grad.addColorStop(0, "rgba(252, 76, 2, 0.45)");
-  grad.addColorStop(1, "rgba(252, 76, 2, 0.02)");
-
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(pts[i].x, pts[i].y);
-  }
-  ctx.lineTo(pts[pts.length - 1].x, H - padB);
-  ctx.lineTo(pts[0].x, H - padB);
-  ctx.closePath();
-  ctx.setFillStyle(grad);
-  ctx.fill();
-
-  // 4. Stroke Ridge Line
-  ctx.beginPath();
-  ctx.setStrokeStyle("#FC4C02");
-  ctx.setLineWidth(2.5);
-  ctx.setLineCap("round");
-  ctx.setLineJoin("round");
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(pts[i].x, pts[i].y);
-  }
-  ctx.stroke();
-
-  // 5. Peak Indicator Dot & Altitude Label
-  let peakPt = pts[0];
-  for (const pt of pts) {
-    if (pt.data.elevation_m > peakPt.data.elevation_m) {
-      peakPt = pt;
-    }
-  }
-
-  if (activeTouchX === undefined && peakPt) {
-    ctx.beginPath();
-    ctx.arc(peakPt.x, peakPt.y, 4, 0, 2 * Math.PI);
-    ctx.setFillStyle("#ffffff");
-    ctx.fill();
-    ctx.setStrokeStyle("#FC4C02");
-    ctx.setLineWidth(2);
-    ctx.stroke();
-
-    ctx.setFontSize(9);
-    ctx.setFillStyle("#fb923c");
-    ctx.setTextAlign("center");
-    ctx.fillText(`▲ ${Math.round(peakPt.data.elevation_m)}m`, peakPt.x, Math.max(12, peakPt.y - 6));
-  }
-
-  // 6. Interactive Touch Scrubbing
-  if (activeTouchX !== undefined) {
-    let closestPt = pts[0];
-    let minDist = Math.abs(pts[0].x - activeTouchX);
-    for (const pt of pts) {
-      const d = Math.abs(pt.x - activeTouchX);
-      if (d < minDist) {
-        minDist = d;
-        closestPt = pt;
-      }
-    }
-
-    scrubPoint.value = closestPt.data;
-
-    // Vertical cursor line
-    ctx.beginPath();
-    ctx.setStrokeStyle("rgba(255, 255, 255, 0.5)");
-    ctx.setLineWidth(1);
-    ctx.moveTo(closestPt.x, padT);
-    ctx.lineTo(closestPt.x, H - padB);
-    ctx.stroke();
-
-    // Cursor circle dot
-    ctx.beginPath();
-    ctx.arc(closestPt.x, closestPt.y, 5, 0, 2 * Math.PI);
-    ctx.setFillStyle("#ffffff");
-    ctx.fill();
-    ctx.setStrokeStyle("#FC4C02");
-    ctx.setLineWidth(2.5);
-    ctx.stroke();
-  }
-
-  // 7. Distance Labels at Bottom Axis
-  ctx.setFontSize(9);
-  ctx.setFillStyle("#71717a");
-  ctx.setTextAlign("left");
-  ctx.fillText("0 km", padL, H - 4);
-  ctx.setTextAlign("center");
-  ctx.fillText(`${(totalDist / 2).toFixed(1)} km`, padL + plotW / 2, H - 4);
-  ctx.setTextAlign("right");
-  ctx.fillText(`${totalDist.toFixed(1)} km`, W - padR, H - 4);
-
-  ctx.draw(false);
-}
-
-function handleCanvasTouch(e: any) {
-  if (!elevationProfile.value.length) return;
-  const touch = e.touches && e.touches[0];
-  if (!touch) return;
-  const touchX = typeof touch.x === "number" ? touch.x : touch.clientX;
-  drawElevationChart(touchX);
-}
-
-function handleCanvasTouchEnd() {
-  setTimeout(() => {
-    scrubPoint.value = null;
-    drawElevationChart();
-  }, 2500);
-}
-
 watch(
   () => props.visible,
   (newVal) => {
@@ -572,6 +567,7 @@ function resetState() {
   mapScale.value = 13;
   isSatellite.value = false;
   scrubPoint.value = null;
+  scrubCursorX.value = -1;
 }
 
 async function loadTrack() {
@@ -614,10 +610,8 @@ async function loadTrack() {
       setTimeout(() => {
         if (activeTab.value === "map") {
           fitRoute();
-        } else if (activeTab.value === "elevation") {
-          drawElevationChart();
         }
-      }, 200);
+      }, 250);
     });
   }
 }
@@ -656,7 +650,7 @@ function handleClose() {
   background-color: #18181b;
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
-  max-height: 88vh;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   padding: 20px 16px 36px;
@@ -668,7 +662,7 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .header-left {
@@ -791,15 +785,19 @@ function handleClose() {
   color: #ffffff;
 }
 
-.gps-modal-body {
-  overflow-y: auto;
-  max-height: 60vh;
+/* Stage Area: Fixed height, NO scroll interception! */
+.visualizer-stage {
+  position: relative;
+  width: 100%;
+  height: 295px;
+  margin-bottom: 10px;
 }
 
 .loading-box,
 .error-box,
 .empty-track-box {
-  padding: 40px 16px;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -824,15 +822,15 @@ function handleClose() {
 .map-wrapper {
   position: relative;
   width: 100%;
+  height: 100%;
   border-radius: 16px;
   overflow: hidden;
-  margin-bottom: 12px;
 }
 
 .map-inner {
   position: relative;
   width: 100%;
-  height: 290px;
+  height: 100%;
 }
 
 .track-map-view {
@@ -943,20 +941,24 @@ function handleClose() {
 .fallback-map-img,
 .official-map-img {
   width: 100%;
+  height: 100%;
   border-radius: 16px;
 }
 
 .elevation-wrapper {
   background-color: #27272a;
   border-radius: 16px;
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: 12px 14px;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .elevation-stats-bar {
   display: flex;
   justify-content: space-around;
-  margin-bottom: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 8px;
 }
@@ -982,6 +984,7 @@ function handleClose() {
   width: 100%;
   display: flex;
   flex-direction: column;
+  margin-top: 6px;
 }
 
 .scrub-tip-banner {
@@ -993,7 +996,7 @@ function handleClose() {
   border: 1px solid rgba(252, 76, 2, 0.4);
   border-radius: 8px;
   padding: 4px 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .scrub-dist,
@@ -1015,24 +1018,53 @@ function handleClose() {
   color: #71717a;
 }
 
-.elev-canvas {
+.elev-graphic-container {
+  position: relative;
   width: 100%;
-  height: 140px;
+  height: 155px;
+}
+
+.elev-svg-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.scrub-cursor-line {
+  position: absolute;
+  top: 15px;
+  bottom: 22px;
+  width: 1px;
+  background-color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
+.cursor-dot {
+  position: absolute;
+  left: -5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  border: 2.5px solid #FC4C02;
+  box-shadow: 0 0 6px rgba(252, 76, 2, 0.8);
 }
 
 .coach-critique-card {
   background: linear-gradient(135deg, rgba(88, 28, 135, 0.25), rgba(30, 27, 75, 0.4));
   border: 1px solid rgba(168, 85, 247, 0.3);
   border-radius: 14px;
-  padding: 12px 14px;
-  margin-top: 8px;
+  padding: 10px 12px;
+  max-height: 125px;
+  display: flex;
+  flex-direction: column;
 }
 
 .critique-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .critique-robot {
@@ -1043,6 +1075,10 @@ function handleClose() {
   font-size: 12px;
   font-weight: bold;
   color: #d8b4fe;
+}
+
+.critique-scroll {
+  max-height: 85px;
 }
 
 .critique-content {
