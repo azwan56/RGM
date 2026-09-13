@@ -80,5 +80,87 @@ def backfill_garmin_gps_tracks(limit: int = 20):
         except Exception as e:
             logger.error(f"Error processing activities for user {uid}: {e}", exc_info=True)
 
+
+def backfill_coros_map_images():
+    """
+    Backfills map_image_url for all historical COROS activities from COROS cloud API.
+    """
+    import requests
+    from utils.coros_adapter import CorosAdapter
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("""
+            SELECT DISTINCT user_id 
+            FROM activities 
+            WHERE id LIKE 'coros_%' AND (map_image_url IS NULL OR map_image_url = '')
+        """)
+        uids = [r[0] for r in c.fetchall()]
+
+    if not uids:
+        logger.info("No COROS activities needing map image backfill.")
+        return
+
+    logger.info(f"Found {len(uids)} COROS user(s) needing map image backfill.")
+
+    for uid in uids:
+        profile = LocalStore.get_profile(uid)
+        if not profile or not profile.get("coros_connected") or not profile.get("coros_encrypted_password"):
+            continue
+
+        try:
+            pwd = decrypt_string(profile["coros_encrypted_password"])
+            domain = profile.get("coros_domain") or "teamcnapi.coros.com"
+            adapter = CorosAdapter(profile["coros_account"], pwd, domain=domain)
+            if not adapter.login():
+                logger.error(f"Failed to log in to COROS for user {uid}")
+                continue
+
+            url = f"{adapter.base_url}/activity/query"
+            page_number = 1
+            total_updated = 0
+
+            while True:
+                payload = {
+                    "modeList": [100, 101, 102, 103, 200, 300],
+                    "pageNumber": page_number,
+                    "size": 100
+                }
+                resp = requests.post(url, json=payload, headers=adapter._get_headers(), timeout=15)
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                data_list = (data.get("data") or {}).get("dataList") or []
+                if not data_list:
+                    break
+
+                with sqlite3.connect(DB_PATH) as conn:
+                    cursor = conn.cursor()
+                    for item in data_list:
+                        raw_id = item.get("labelId") or item.get("activityId") or item.get("hId")
+                        img_url = item.get("imageUrl")
+                        if raw_id and img_url:
+                            act_id = f"coros_{raw_id}"
+                            cursor.execute(
+                                "UPDATE activities SET map_image_url = ? WHERE id = ? AND (map_image_url IS NULL OR map_image_url = '')",
+                                (img_url, act_id)
+                            )
+                            total_updated += cursor.rowcount
+                    conn.commit()
+
+                if len(data_list) < 100:
+                    break
+                page_number += 1
+                if page_number > 20:
+                    break
+
+            logger.info(f"✓ Successfully backfilled {total_updated} COROS map image URLs for user {uid}")
+        except Exception as e:
+            logger.error(f"Error backfilling COROS activities for user {uid}: {e}", exc_info=True)
+
+
 if __name__ == "__main__":
-    backfill_garmin_gps_tracks()
+    backfill_coros_map_images()
+    backfill_garmin_gps_tracks(limit=50)
+

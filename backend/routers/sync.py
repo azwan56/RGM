@@ -172,9 +172,22 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
         max_hr = user.get("max_heart_rate") or 190
         gender = user.get("gender") or "male"
 
+        # Auto-fetch GPS track for the latest outdoor activities
+        if garmin_adapter:
+            for act in all_activities[:3]:
+                act_id = act.get("id", "")
+                if act_id.startswith("garmin_") and act.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]:
+                    try:
+                        track_data = garmin_adapter.fetch_activity_gps_track(act_id)
+                        if track_data:
+                            act["gps_track_data"] = json.dumps(track_data, ensure_ascii=False)
+                    except Exception as te:
+                        logger.warning(f"[sync] Garmin GPS track prefetch failed for {act_id}: {te}")
+
         for act in all_activities:
             # Calculate TRIMP
             moving_mins = (act.get("moving_time_seconds") or 0) / 60.0
+
             avg_hr = act.get("average_heartrate")
             if avg_hr and avg_hr > rest_hr:
                 act["trimp"] = calculate_trimp(moving_mins, avg_hr, rest_hr, max_hr, gender)
