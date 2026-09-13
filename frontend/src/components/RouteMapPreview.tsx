@@ -183,14 +183,28 @@ export default function RouteMapPreview({
         >
           {activeTab === "map" ? (
             mapImageUrl ? (
-              <div className="relative h-52 overflow-hidden bg-black/40">
+              <div className="relative h-56 w-full bg-[#121215] overflow-hidden flex items-center justify-center group">
+                {/* Subtle ambient blur behind the map */}
+                <div
+                  className="absolute inset-0 opacity-20 scale-125 pointer-events-none"
+                  style={{
+                    backgroundImage: `url(${mapImageUrl})`,
+                    backgroundPosition: "center",
+                    backgroundSize: "cover",
+                    filter: "blur(24px) hue-rotate(-52deg) saturate(1.4)",
+                  }}
+                />
                 <img
                   src={mapImageUrl}
-                  alt="官方跑步地图切片"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  alt="跑步路线地图"
+                  className="relative z-10 max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                  style={{
+                    filter: "hue-rotate(-52deg) saturate(1.25) contrast(1.08)",
+                  }}
                 />
-                <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg text-xs bg-black/80 text-zinc-200 backdrop-blur-md border border-white/10 flex items-center gap-1.5 shadow-lg">
-                  <span>🗺️ COROS 官方地图实景</span>
+                <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg text-xs bg-black/80 text-zinc-200 backdrop-blur-md border border-white/10 flex items-center gap-1.5 shadow-lg z-20">
+                  <span className="w-2 h-2 rounded-full bg-[#FC4C02]" />
+                  <span>🗺️ GPS 航迹路线 (COROS)</span>
                 </div>
               </div>
             ) : (
@@ -352,7 +366,16 @@ export default function RouteMapPreview({
                   <span className="text-[10px] text-zinc-500">纠偏坐标系 (GCJ-02)</span>
                 </div>
                 {mapImageUrl ? (
-                  <img src={mapImageUrl} alt="地图详情" className="w-full rounded-xl object-contain max-h-96" />
+                  <div className="flex items-center justify-center bg-[#121215] rounded-xl overflow-hidden p-3">
+                    <img
+                      src={mapImageUrl}
+                      alt="地图详情"
+                      className="max-h-96 w-auto object-contain rounded-lg"
+                      style={{
+                        filter: "hue-rotate(-52deg) saturate(1.25) contrast(1.08)",
+                      }}
+                    />
+                  </div>
                 ) : (
                   <div className="h-80 w-full flex items-center justify-center">
                     <svg viewBox="0 0 600 220" className="w-full h-full" preserveAspectRatio="xMidYMid meet">

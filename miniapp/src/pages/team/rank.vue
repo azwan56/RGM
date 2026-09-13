@@ -135,7 +135,7 @@
               class="feed-map-card"
               @click.stop="openTrackModal(act)"
             >
-              <image class="feed-map-thumb" :src="act.map_image_url" mode="aspectFill" />
+              <image class="feed-map-thumb" :src="act.map_image_url" mode="aspectFit" />
               <view class="feed-map-overlay">
                 <text class="feed-map-pill">🗺️ 点击展开 GPS 路线与高程剖面</text>
               </view>
@@ -974,11 +974,16 @@ onPullDownRefresh(async () => {
   border-radius: 18rpx;
   overflow: hidden;
   margin-bottom: 16rpx;
+  background-color: #121215;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .feed-map-thumb {
-  width: 100%;
   height: 100%;
+  max-width: 100%;
+  filter: hue-rotate(-52deg) saturate(1.25) contrast(1.08);
 }
 
 .feed-map-overlay {

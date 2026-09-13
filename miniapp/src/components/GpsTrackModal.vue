@@ -142,7 +142,7 @@
               <view v-else-if="mapImageUrl" class="img-fallback-wrapper">
                 <image class="fallback-map-img" :src="mapImageUrl" mode="aspectFit" />
                 <view class="map-corner-pill">
-                  <text class="pill-text">COROS 官方地图实景</text>
+                  <text class="pill-text">🗺️ COROS 航迹路线</text>
                 </view>
               </view>
               <view v-else class="empty-track-box">
@@ -999,11 +999,24 @@ function handleClose() {
   color: #e4e4e7;
 }
 
-.fallback-map-img,
-.official-map-img {
+.img-fallback-wrapper {
+  position: relative;
   width: 100%;
   height: 100%;
+  background-color: #121215;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 16px;
+  overflow: hidden;
+}
+
+.fallback-map-img,
+.official-map-img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 16px;
+  filter: hue-rotate(-52deg) saturate(1.25) contrast(1.08);
 }
 
 .elevation-wrapper {
