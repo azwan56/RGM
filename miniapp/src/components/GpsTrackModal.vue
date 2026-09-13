@@ -3,9 +3,9 @@
     <!-- Backdrop: prevents background page scroll and handles backdrop tap to close -->
     <view class="gps-modal-backdrop" @click="handleClose" @touchmove.stop.prevent />
 
-    <!-- Modal Sheet: Sibling to backdrop, NO catchtouchmove on container so gestures work smoothly -->
+    <!-- Modal Sheet: Sibling to backdrop, with fixed header and smooth scrollable body -->
     <view class="gps-modal-sheet" @click.stop>
-      <!-- Modal Header -->
+      <!-- Fixed Modal Header -->
       <view class="gps-modal-header">
         <view class="header-left">
           <text class="modal-badge">🗺️ GPS 路线与高程</text>
@@ -16,204 +16,245 @@
         </view>
       </view>
 
-      <!-- Sub Header: Distance, Pace, HR, Elev -->
-      <view class="activity-hero-stats">
-        <view class="hero-stat-item">
-          <text class="stat-num orange">{{ distanceKm }}</text>
-          <text class="stat-unit">km</text>
-        </view>
-        <view class="hero-divider" />
-        <view class="hero-stat-item">
-          <text class="stat-num">{{ activityData?.avg_pace_str || initialActivity?.avg_pace_str || '—' }}</text>
-          <text class="stat-lbl">平均配速</text>
-        </view>
-        <view class="hero-divider" />
-        <view class="hero-stat-item">
-          <text class="stat-num text-rose">{{ activityData?.average_heartrate || initialActivity?.average_heartrate || '—' }}</text>
-          <text class="stat-lbl">心率 (bpm)</text>
-        </view>
-        <view class="hero-divider" />
-        <view class="hero-stat-item">
-          <text class="stat-num text-emerald">+{{ Math.round(elevationGain) }}</text>
-          <text class="stat-lbl">爬升 (m)</text>
-        </view>
-      </view>
-
-      <!-- Tab Switcher (路线地图 / 高程剖面 / 地图切片) -->
-      <view class="tab-strip">
-        <view
-          class="tab-btn"
-          :class="{ active: activeTab === 'map' }"
-          @click="switchTab('map')"
-        >
-          <text class="tab-text">🗺️ 轨迹路线</text>
-        </view>
-        <view
-          v-if="hasElevationProfile"
-          class="tab-btn"
-          :class="{ active: activeTab === 'elevation' }"
-          @click="switchTab('elevation')"
-        >
-          <text class="tab-text">📈 海拔剖面</text>
-        </view>
-        <view
-          v-if="mapImageUrl"
-          class="tab-btn"
-          :class="{ active: activeTab === 'image' }"
-          @click="switchTab('image')"
-        >
-          <text class="tab-text">🖼️ 地图切片</text>
-        </view>
-      </view>
-
-      <!-- Visualizer Stage: Fixed height, NO overflow-y: auto, so map drag/pinch gestures are never stolen! -->
-      <view class="visualizer-stage">
-        <!-- Loading Spinner -->
-        <view v-if="loading" class="loading-box">
-          <text class="loading-spinner">⏳</text>
-          <text class="loading-tip">正在获取高精度 GPS 轨迹并完成坐标纠偏...</text>
-        </view>
-
-        <!-- Error State -->
-        <view v-else-if="errorMsg && !trackPoints.length && !mapImageUrl" class="error-box">
-          <text class="error-icon">⚠️</text>
-          <text class="error-text">{{ errorMsg }}</text>
-        </view>
-
-        <!-- TAB 1: Native Interactive Map -->
-        <view v-else-if="activeTab === 'map'" class="map-wrapper">
-          <view v-if="trackPoints.length" class="map-inner">
-            <map
-              id="trackMap"
-              class="track-map-view"
-              :latitude="trackCenter.latitude"
-              :longitude="trackCenter.longitude"
-              :scale="mapScale"
-              :markers="trackMarkers"
-              :polyline="trackPolylines"
-              :show-location="false"
-              :enable-zoom="true"
-              :enable-scroll="true"
-              :enable-rotate="true"
-              :enable-overlooking="true"
-              :show-compass="true"
-              :show-scale="true"
-              :enable-satellite="isSatellite"
-            />
-
-            <!-- Floating Controls: Fit Route, Satellite Toggle, Zoom In/Out -->
-            <view class="map-floating-controls">
-              <!-- Fit Route / Reset Bounds -->
-              <view class="map-ctl-btn" @click="fitRoute" hover-class="btn-hover">
-                <text class="ctl-icon">🎯</text>
-                <text class="ctl-text">全貌</text>
-              </view>
-              <!-- Satellite Toggle -->
-              <view class="map-ctl-btn" :class="{ active: isSatellite }" @click="toggleSatellite" hover-class="btn-hover">
-                <text class="ctl-icon">{{ isSatellite ? '🛰️' : '🗺️' }}</text>
-                <text class="ctl-text">{{ isSatellite ? '卫星' : '标准' }}</text>
-              </view>
-              <!-- Zoom In / Zoom Out -->
-              <view class="zoom-btn-group">
-                <view class="zoom-btn" @click="zoomIn" hover-class="btn-hover">
-                  <text class="zoom-icon">＋</text>
-                </view>
-                <view class="zoom-divider" />
-                <view class="zoom-btn" @click="zoomOut" hover-class="btn-hover">
-                  <text class="zoom-icon">－</text>
-                </view>
-              </view>
+      <!-- Scrollable Body with Native WeChat Scrollbar -->
+      <scroll-view
+        scroll-y="true"
+        class="modal-scroll-area"
+        enhanced="true"
+        :show-scrollbar="true"
+        :bounces="true"
+      >
+        <view class="scroll-content-inner">
+          <!-- Sub Header: Distance, Pace, HR, Elev -->
+          <view class="activity-hero-stats">
+            <view class="hero-stat-item">
+              <text class="stat-num orange">{{ distanceKm }}</text>
+              <text class="stat-unit">km</text>
             </view>
-
-            <view class="map-corner-pill">
-              <text class="pill-dot">●</text>
-              <text class="pill-text">GCJ-02 纠偏 · 支持双指缩放/单指拖拽/俯仰</text>
+            <view class="hero-divider" />
+            <view class="hero-stat-item">
+              <text class="stat-num">{{ activityData?.avg_pace_str || initialActivity?.avg_pace_str || '—' }}</text>
+              <text class="stat-lbl">平均配速</text>
             </view>
-          </view>
-          <view v-else-if="mapImageUrl" class="img-fallback-wrapper">
-            <image class="fallback-map-img" :src="mapImageUrl" mode="aspectFit" />
-            <view class="map-corner-pill">
-              <text class="pill-text">COROS 官方地图实景</text>
+            <view class="hero-divider" />
+            <view class="hero-stat-item">
+              <text class="stat-num text-rose">{{ activityData?.average_heartrate || initialActivity?.average_heartrate || '—' }}</text>
+              <text class="stat-lbl">心率 (bpm)</text>
             </view>
-          </view>
-          <view v-else class="empty-track-box">
-            <text class="empty-icon">📍</text>
-            <text class="empty-text">该次运动未记录 GPS 轨迹（可能为室内跑或跑步机）</text>
-          </view>
-        </view>
-
-        <!-- TAB 2: Elevation Profile View -->
-        <view v-else-if="activeTab === 'elevation'" class="elevation-wrapper">
-          <view class="elevation-stats-bar">
-            <view class="elev-stat">
-              <text class="el-label">最高海拔</text>
-              <text class="el-val text-orange">{{ maxElevation }} m</text>
-            </view>
-            <view class="elev-stat">
-              <text class="el-label">最低海拔</text>
-              <text class="el-val text-blue">{{ minElevation }} m</text>
-            </view>
-            <view class="elev-stat">
-              <text class="el-label">累计爬升</text>
-              <text class="el-val text-emerald">+{{ Math.round(elevationGain) }} m</text>
+            <view class="hero-divider" />
+            <view class="hero-stat-item">
+              <text class="stat-num text-emerald">+{{ Math.round(elevationGain) }}</text>
+              <text class="stat-lbl">爬升 (m)</text>
             </view>
           </view>
 
-          <!-- Interactive Elevation Profile with Native Image SVG + Scrub Layer -->
-          <view class="chart-box">
-            <!-- Active Scrubbing Reading Banner -->
-            <view v-if="scrubPoint" class="scrub-tip-banner">
-              <text class="scrub-dist">📍 距离 {{ scrubPoint.dist_km }}km</text>
-              <text class="scrub-elev">⛰️ 海拔 {{ Math.round(scrubPoint.elevation_m) }}m</text>
-              <text v-if="scrubPoint.hr" class="scrub-hr">❤️ {{ scrubPoint.hr }}bpm</text>
-            </view>
-            <view v-else class="scrub-hint-banner">
-              <text class="scrub-hint">👆 在剖面图上左右滑动，可交互查看沿途里程与海拔</text>
-            </view>
-
-            <!-- Elevation Graphic Container -->
+          <!-- Tab Switcher (路线地图 / 高程剖面 / 地图切片) -->
+          <view class="tab-strip">
             <view
-              class="elev-graphic-container"
-              @touchstart="handleScrubTouch"
-              @touchmove="handleScrubTouch"
-              @touchend="handleScrubEnd"
+              class="tab-btn"
+              :class="{ active: activeTab === 'map' }"
+              @click="switchTab('map')"
             >
-              <!-- 1. Native High-Res SVG Image (100% Reliable across all WeChat platforms) -->
-              <image
-                v-if="elevationSvgDataUri"
-                class="elev-svg-img"
-                :src="elevationSvgDataUri"
-                mode="scaleToFill"
-              />
+              <text class="tab-text">🗺️ 轨迹路线</text>
+            </view>
+            <view
+              v-if="hasElevationProfile"
+              class="tab-btn"
+              :class="{ active: activeTab === 'elevation' }"
+              @click="switchTab('elevation')"
+            >
+              <text class="tab-text">📈 海拔剖面</text>
+            </view>
+            <view
+              v-if="mapImageUrl"
+              class="tab-btn"
+              :class="{ active: activeTab === 'image' }"
+              @click="switchTab('image')"
+            >
+              <text class="tab-text">🖼️ 地图切片</text>
+            </view>
+          </view>
 
-              <!-- 2. Interactive Cursor Line when scrubbing -->
-              <view
-                v-if="scrubCursorX >= 0"
-                class="scrub-cursor-line"
-                :style="{ left: scrubCursorX + 'px' }"
-              >
-                <view class="cursor-dot" :style="{ top: scrubCursorY + 'px' }" />
+          <!-- Visualizer Stage: Height 250px, allowing lower content to be visible and scrolled to -->
+          <view class="visualizer-stage">
+            <!-- Loading Spinner -->
+            <view v-if="loading" class="loading-box">
+              <text class="loading-spinner">⏳</text>
+              <text class="loading-tip">正在获取高精度 GPS 轨迹并完成坐标纠偏...</text>
+            </view>
+
+            <!-- Error State -->
+            <view v-else-if="errorMsg && !trackPoints.length && !mapImageUrl" class="error-box">
+              <text class="error-icon">⚠️</text>
+              <text class="error-text">{{ errorMsg }}</text>
+            </view>
+
+            <!-- TAB 1: Native Interactive Map -->
+            <view v-else-if="activeTab === 'map'" class="map-wrapper">
+              <view v-if="trackPoints.length" class="map-inner">
+                <map
+                  id="trackMap"
+                  class="track-map-view"
+                  :latitude="trackCenter.latitude"
+                  :longitude="trackCenter.longitude"
+                  :scale="mapScale"
+                  :markers="trackMarkers"
+                  :polyline="trackPolylines"
+                  :show-location="false"
+                  :enable-zoom="true"
+                  :enable-scroll="true"
+                  :enable-rotate="true"
+                  :enable-overlooking="true"
+                  :show-compass="true"
+                  :show-scale="true"
+                  :enable-satellite="isSatellite"
+                />
+
+                <!-- Floating Controls: Fit Route, Satellite Toggle, Zoom In/Out -->
+                <view class="map-floating-controls">
+                  <!-- Fit Route / Reset Bounds -->
+                  <view class="map-ctl-btn" @click="fitRoute" hover-class="btn-hover">
+                    <text class="ctl-icon">🎯</text>
+                    <text class="ctl-text">全貌</text>
+                  </view>
+                  <!-- Satellite Toggle -->
+                  <view class="map-ctl-btn" :class="{ active: isSatellite }" @click="toggleSatellite" hover-class="btn-hover">
+                    <text class="ctl-icon">{{ isSatellite ? '🛰️' : '🗺️' }}</text>
+                    <text class="ctl-text">{{ isSatellite ? '卫星' : '标准' }}</text>
+                  </view>
+                  <!-- Zoom In / Zoom Out -->
+                  <view class="zoom-btn-group">
+                    <view class="zoom-btn" @click="zoomIn" hover-class="btn-hover">
+                      <text class="zoom-icon">＋</text>
+                    </view>
+                    <view class="zoom-divider" />
+                    <view class="zoom-btn" @click="zoomOut" hover-class="btn-hover">
+                      <text class="zoom-icon">－</text>
+                    </view>
+                  </view>
+                </view>
+
+                <view class="map-corner-pill">
+                  <text class="pill-dot">●</text>
+                  <text class="pill-text">GCJ-02 纠偏 · 支持双指缩放/拖拽</text>
+                </view>
+              </view>
+              <view v-else-if="mapImageUrl" class="img-fallback-wrapper">
+                <image class="fallback-map-img" :src="mapImageUrl" mode="aspectFit" />
+                <view class="map-corner-pill">
+                  <text class="pill-text">COROS 官方地图实景</text>
+                </view>
+              </view>
+              <view v-else class="empty-track-box">
+                <text class="empty-icon">📍</text>
+                <text class="empty-text">该次运动未记录 GPS 轨迹（可能为室内跑或跑步机）</text>
+              </view>
+            </view>
+
+            <!-- TAB 2: Elevation Profile View -->
+            <view v-else-if="activeTab === 'elevation'" class="elevation-wrapper">
+              <view class="elevation-stats-bar">
+                <view class="elev-stat">
+                  <text class="el-label">最高海拔</text>
+                  <text class="el-val text-orange">{{ maxElevation }} m</text>
+                </view>
+                <view class="elev-stat">
+                  <text class="el-label">最低海拔</text>
+                  <text class="el-val text-blue">{{ minElevation }} m</text>
+                </view>
+                <view class="elev-stat">
+                  <text class="el-label">累计爬升</text>
+                  <text class="el-val text-emerald">+{{ Math.round(elevationGain) }} m</text>
+                </view>
+              </view>
+
+              <!-- Interactive Elevation Profile with Native Image SVG + Scrub Layer -->
+              <view class="chart-box">
+                <!-- Active Scrubbing Reading Banner -->
+                <view v-if="scrubPoint" class="scrub-tip-banner">
+                  <text class="scrub-dist">📍 距离 {{ scrubPoint.dist_km }}km</text>
+                  <text class="scrub-elev">⛰️ 海拔 {{ Math.round(scrubPoint.elevation_m) }}m</text>
+                  <text v-if="scrubPoint.hr" class="scrub-hr">❤️ {{ scrubPoint.hr }}bpm</text>
+                </view>
+                <view v-else class="scrub-hint-banner">
+                  <text class="scrub-hint">👆 在剖面图上左右滑动，可交互查看沿途里程与海拔</text>
+                </view>
+
+                <!-- Elevation Graphic Container -->
+                <view
+                  class="elev-graphic-container"
+                  @touchstart="handleScrubTouch"
+                  @touchmove="handleScrubTouch"
+                  @touchend="handleScrubEnd"
+                >
+                  <image
+                    v-if="elevationSvgDataUri"
+                    class="elev-svg-img"
+                    :src="elevationSvgDataUri"
+                    mode="scaleToFill"
+                  />
+                  <!-- Interactive Cursor Line when scrubbing -->
+                  <view
+                    v-if="scrubCursorX >= 0"
+                    class="scrub-cursor-line"
+                    :style="{ left: scrubCursorX + 'px' }"
+                  >
+                    <view class="cursor-dot" :style="{ top: scrubCursorY + 'px' }" />
+                  </view>
+                </view>
+              </view>
+            </view>
+
+            <!-- TAB 3: Static Image -->
+            <view v-else-if="activeTab === 'image'" class="image-wrapper">
+              <image class="official-map-img" :src="mapImageUrl" mode="widthFix" />
+            </view>
+          </view>
+
+          <!-- Canova Coach Critique Card: Fully visible when scrolling down! -->
+          <view v-if="coachCritique" class="coach-critique-card">
+            <view class="critique-header">
+              <text class="critique-robot">🤖</text>
+              <text class="critique-title">Canova教练专属复盘</text>
+            </view>
+            <text class="critique-content">{{ coachCritique }}</text>
+          </view>
+
+          <!-- Workout Key Metrics Detail Grid -->
+          <view class="workout-details-card">
+            <view class="card-mini-title">📊 训练核心数据汇总</view>
+            <view class="details-grid">
+              <view v-if="activityData?.sport_type" class="detail-item">
+                <text class="detail-lbl">运动类型</text>
+                <text class="detail-val">{{ activityData.sport_type }}</text>
+              </view>
+              <view v-if="activityData?.start_time" class="detail-item">
+                <text class="detail-lbl">打卡时间</text>
+                <text class="detail-val">{{ formatTime(activityData.start_time) }}</text>
+              </view>
+              <view v-if="elevationGain" class="detail-item">
+                <text class="detail-lbl">累计爬升</text>
+                <text class="detail-val text-emerald">+{{ Math.round(elevationGain) }} m</text>
+              </view>
+              <view v-if="maxElevation" class="detail-item">
+                <text class="detail-lbl">最高海拔</text>
+                <text class="detail-val text-orange">{{ maxElevation }} m</text>
+              </view>
+              <view v-if="minElevation" class="detail-item">
+                <text class="detail-lbl">最低海拔</text>
+                <text class="detail-val text-blue">{{ minElevation }} m</text>
+              </view>
+              <view v-if="activityData?.average_heartrate" class="detail-item">
+                <text class="detail-lbl">平均心率</text>
+                <text class="detail-val text-rose">{{ activityData.average_heartrate }} bpm</text>
               </view>
             </view>
           </view>
-        </view>
 
-        <!-- TAB 3: Static Image -->
-        <view v-else-if="activeTab === 'image'" class="image-wrapper">
-          <image class="official-map-img" :src="mapImageUrl" mode="widthFix" />
+          <!-- Bottom Safe Spacing -->
+          <view class="scroll-bottom-spacer" />
         </view>
-      </view>
-
-      <!-- Canova Coach Critique Snapshot (Scrollable if text is long) -->
-      <view v-if="coachCritique" class="coach-critique-card">
-        <view class="critique-header">
-          <text class="critique-robot">🤖</text>
-          <text class="critique-title">Canova教练专属复盘</text>
-        </view>
-        <scroll-view scroll-y class="critique-scroll">
-          <text class="critique-content">{{ coachCritique }}</text>
-        </scroll-view>
-      </view>
+      </scroll-view>
     </view>
   </view>
 </template>
@@ -387,11 +428,11 @@ const elevationSvgDataUri = computed(() => {
   if (!list || list.length < 2) return "";
 
   const W = 330;
-  const H = 145;
+  const H = 140;
   const padL = 38;
   const padR = 12;
-  const padT = 20;
-  const padB = 22;
+  const padT = 18;
+  const padB = 20;
 
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -477,7 +518,6 @@ function handleScrubTouch(e: any) {
   const padR = 12;
   const plotW = containerW - padL - padR;
 
-  // Compute touch position relative to graphic
   const touchX = typeof touch.x === "number" ? touch.x : (touch.clientX - 30);
   const clampedX = Math.max(padL, Math.min(containerW - padR, touchX));
 
@@ -485,7 +525,6 @@ function handleScrubTouch(e: any) {
   const totalDist = list[list.length - 1].dist_km || 1;
   const targetDist = ratio * totalDist;
 
-  // Find nearest point
   let closest = list[0];
   let minDiff = Math.abs(list[0].dist_km - targetDist);
   for (const p of list) {
@@ -503,7 +542,7 @@ function handleScrubTouch(e: any) {
   const maxE = maxElevation.value;
   const diffE = Math.max(20, maxE - minE);
   const normY = (maxE - closest.elevation_m) / diffE;
-  scrubCursorY.value = 20 + normY * (145 - 20 - 22);
+  scrubCursorY.value = 18 + normY * (140 - 18 - 20);
 }
 
 function handleScrubEnd() {
@@ -540,9 +579,14 @@ function fitRoute() {
   if (mapCtx && typeof mapCtx.includePoints === "function") {
     mapCtx.includePoints({
       points: trackPoints.value,
-      padding: [45, 30, 45, 30],
+      padding: [40, 25, 40, 25],
     });
   }
+}
+
+function formatTime(t?: string) {
+  if (!t) return "";
+  return t.replace("T", " ").slice(0, 16);
 }
 
 watch(
@@ -650,12 +694,13 @@ function handleClose() {
   background-color: #18181b;
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
-  max-height: 90vh;
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
-  padding: 20px 16px 36px;
+  padding: 18px 16px 16px;
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
+  box-sizing: border-box;
 }
 
 .gps-modal-header {
@@ -663,6 +708,7 @@ function handleClose() {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  padding-bottom: 4px;
 }
 
 .header-left {
@@ -697,6 +743,19 @@ function handleClose() {
 .close-icon {
   font-size: 16px;
   color: #a1a1aa;
+}
+
+/* Scroll Area: Full height scroll with visible scrollbar */
+.modal-scroll-area {
+  width: 100%;
+  max-height: 74vh;
+  box-sizing: border-box;
+}
+
+.scroll-content-inner {
+  display: flex;
+  flex-direction: column;
+  padding-right: 2px;
 }
 
 .activity-hero-stats {
@@ -785,12 +844,12 @@ function handleClose() {
   color: #ffffff;
 }
 
-/* Stage Area: Fixed height, NO scroll interception! */
+/* Stage Area: Height 250px so lower coaching advice is immediately reachable */
 .visualizer-stage {
   position: relative;
   width: 100%;
-  height: 295px;
-  margin-bottom: 10px;
+  height: 250px;
+  margin-bottom: 12px;
 }
 
 .loading-box,
@@ -841,11 +900,11 @@ function handleClose() {
 
 .map-floating-controls {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   z-index: 100;
 }
 
@@ -854,7 +913,7 @@ function handleClose() {
   backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -868,7 +927,7 @@ function handleClose() {
 }
 
 .ctl-icon {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .ctl-text {
@@ -891,21 +950,21 @@ function handleClose() {
 }
 
 .zoom-btn {
-  width: 32px;
-  height: 28px;
+  width: 30px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .zoom-icon {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: bold;
   color: #ffffff;
 }
 
 .zoom-divider {
-  width: 20px;
+  width: 18px;
   height: 1px;
   background-color: rgba(255, 255, 255, 0.15);
 }
@@ -948,7 +1007,7 @@ function handleClose() {
 .elevation-wrapper {
   background-color: #27272a;
   border-radius: 16px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   height: 100%;
   box-sizing: border-box;
   display: flex;
@@ -960,7 +1019,7 @@ function handleClose() {
   display: flex;
   justify-content: space-around;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 .elev-stat {
@@ -975,16 +1034,16 @@ function handleClose() {
 }
 
 .el-val {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .chart-box {
   width: 100%;
   display: flex;
   flex-direction: column;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .scrub-tip-banner {
@@ -996,7 +1055,7 @@ function handleClose() {
   border: 1px solid rgba(252, 76, 2, 0.4);
   border-radius: 8px;
   padding: 4px 10px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .scrub-dist,
@@ -1010,7 +1069,7 @@ function handleClose() {
 .scrub-hint-banner {
   display: flex;
   justify-content: center;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .scrub-hint {
@@ -1021,7 +1080,7 @@ function handleClose() {
 .elev-graphic-container {
   position: relative;
   width: 100%;
-  height: 155px;
+  height: 140px;
 }
 
 .elev-svg-img {
@@ -1033,9 +1092,9 @@ function handleClose() {
 .scrub-cursor-line {
   position: absolute;
   top: 15px;
-  bottom: 22px;
+  bottom: 20px;
   width: 1px;
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: rgba(255, 255, 255, 0.75);
   pointer-events: none;
 }
 
@@ -1050,40 +1109,91 @@ function handleClose() {
   box-shadow: 0 0 6px rgba(252, 76, 2, 0.8);
 }
 
+/* Canova Coach Critique Card: Full visibility in scroll-view */
 .coach-critique-card {
-  background: linear-gradient(135deg, rgba(88, 28, 135, 0.25), rgba(30, 27, 75, 0.4));
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.28), rgba(30, 27, 75, 0.45));
+  border: 1px solid rgba(168, 85, 247, 0.35);
   border-radius: 14px;
-  padding: 10px 12px;
-  max-height: 125px;
-  display: flex;
-  flex-direction: column;
+  padding: 12px 14px;
+  margin-bottom: 12px;
 }
 
 .critique-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .critique-robot {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .critique-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: bold;
   color: #d8b4fe;
 }
 
-.critique-scroll {
-  max-height: 85px;
+.critique-content {
+  font-size: 12px;
+  color: #e4e4e7;
+  line-height: 1.6;
 }
 
-.critique-content {
+/* Additional Workout Details Card */
+.workout-details-card {
+  background-color: #27272a;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.card-mini-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: #a1a1aa;
+  margin-bottom: 10px;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.03);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.detail-lbl {
   font-size: 11px;
-  color: #e4e4e7;
-  line-height: 1.5;
+  color: #71717a;
+}
+
+.detail-val {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f4f4f5;
+}
+
+.scroll-bottom-spacer {
+  height: 30px;
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
 }
 </style>
