@@ -4,17 +4,23 @@ Reduces network roundtrips by bundling essential dashboard data into single fast
 Includes smart user mapping so newly opened Mini Programs automatically resolve to the active runner profile.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, List
-from datetime import datetime, date, timedelta
+import sqlite3
+import json
 import calendar
 import logging
+from datetime import datetime, date, timedelta
+from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException
+
 from db import supabase_admin
-from utils.local_store import LocalStore
+from utils.local_store import LocalStore, DB_PATH
 from utils.running_metrics import compute_ctl_atl_tsb
+from utils.encryption import decrypt_string
+from utils.garmin_adapter import GarminAdapter
 
 logger = logging.getLogger("router_miniapp")
 router = APIRouter()
+
 
 @router.get("/dashboard/{uid}")
 def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
@@ -71,6 +77,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         for a in local_acts[:10]:
             dist_m = float(a.get("distance_meters") or 0)
             dist_km = round(dist_m / 1000.0, 2)
+            has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or (str(a.get("id")).startswith("garmin_") and a.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]))
             recent_activities.append({
                 "id": a["id"],
                 "name": a["name"],
@@ -82,7 +89,9 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "average_heartrate": a.get("average_heartrate"),
                 "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
                 "trimp": a.get("trimp"),
-                "ai_journal": a.get("ai_journal")
+                "ai_journal": a.get("ai_journal"),
+                "has_gps_track": has_gps,
+                "map_image_url": a.get("map_image_url")
             })
 
         # 5. Today's Health Snapshot (4-grid card data)
@@ -300,6 +309,7 @@ def get_miniapp_activities(uid: str, limit: int = 50) -> Dict[str, Any]:
     formatted = []
     for a in acts:
         dist_m = float(a.get("distance_meters") or 0)
+        has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or (str(a.get("id")).startswith("garmin_") and a.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]))
         formatted.append({
             "id": a["id"],
             "name": a["name"],
@@ -311,6 +321,86 @@ def get_miniapp_activities(uid: str, limit: int = 50) -> Dict[str, Any]:
             "average_heartrate": a.get("average_heartrate"),
             "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
             "trimp": a.get("trimp"),
-            "ai_journal": a.get("ai_journal")
+            "ai_journal": a.get("ai_journal"),
+            "has_gps_track": has_gps,
+            "map_image_url": a.get("map_image_url")
         })
     return {"activities": formatted}
+
+
+@router.get("/activities/{act_id}/track")
+def get_activity_track(act_id: str) -> Dict[str, Any]:
+    """
+    Returns GPS track polyline coordinates (GCJ-02), bounds, and elevation profile for an activity.
+    If track data is not yet cached in DB and the activity is from Garmin,
+    it automatically attempts to fetch, downsample, and store it on-the-fly.
+    """
+    try:
+        track_row = LocalStore.get_activity_gps_track(act_id)
+        if not track_row:
+            raise HTTPException(status_code=404, detail="运动记录不存在")
+
+        track_data = track_row.get("gps_track_data")
+        if isinstance(track_data, str):
+            try:
+                track_data = json.loads(track_data)
+            except Exception:
+                track_data = None
+
+        # If not cached, attempt to fetch from Garmin on demand
+        if not track_data and str(act_id).startswith("garmin_"):
+            with sqlite3.connect(DB_PATH) as conn:
+                c = conn.cursor()
+                c.execute("SELECT user_id FROM activities WHERE id = ?", (act_id,))
+                urow = c.fetchone()
+
+            if urow and urow[0]:
+                user = LocalStore.get_profile(urow[0])
+                if user and user.get("garmin_connected") and user.get("garmin_encrypted_password"):
+                    try:
+                        pwd = decrypt_string(user["garmin_encrypted_password"])
+                        domain = user.get("garmin_domain") or "garmin.cn"
+                        adapter = GarminAdapter(user["garmin_email"], pwd, domain=domain)
+                        fetched_track = adapter.fetch_activity_gps_track(act_id)
+                        if fetched_track:
+                            track_data = fetched_track
+                            # Cache in DB
+                            with sqlite3.connect(DB_PATH) as conn:
+                                c = conn.cursor()
+                                c.execute("UPDATE activities SET gps_track_data = ? WHERE id = ?", (
+                                    json.dumps(fetched_track, ensure_ascii=False),
+                                    act_id
+                                ))
+                                conn.commit()
+                            logger.info(f"[miniapp] Cached fetched GPS track for {act_id}")
+                    except Exception as fe:
+                        logger.warning(f"[miniapp] On-demand GPS track fetch failed for {act_id}: {fe}")
+
+        dist_m = float(track_row.get("distance_meters") or 0)
+        return {
+            "success": True,
+            "activity": {
+                "id": track_row["id"],
+                "name": track_row.get("name"),
+                "sport_type": track_row.get("sport_type"),
+                "start_time": track_row.get("start_time"),
+                "distance_meters": dist_m,
+                "distance_km": round(dist_m / 1000.0, 2),
+                "elevation_gain_meters": track_row.get("elevation_gain_meters"),
+                "avg_pace_str": track_row.get("avg_pace_str"),
+                "average_heartrate": track_row.get("average_heartrate"),
+                "ai_journal": track_row.get("ai_journal")
+            },
+            "has_track": bool(track_data),
+            "track": track_data,
+            "map_image_url": track_row.get("map_image_url")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[miniapp] Error getting activity track for {act_id}: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"获取轨迹失败: {str(e)}"
+        }
+

@@ -869,6 +869,21 @@ export default function TeamPage() {
                         </div>
                       </div>
 
+                      {/* GPS Route Map Preview if available */}
+                      {act.map_image_url && (
+                        <div className="relative rounded-2xl overflow-hidden border border-white/10 max-h-60 bg-zinc-900/60 group">
+                          <img
+                            src={act.map_image_url}
+                            alt="GPS 路线地图"
+                            className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                          <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg text-xs bg-black/75 text-zinc-200 backdrop-blur-md border border-white/10 flex items-center gap-1.5 shadow-lg">
+                            <span>🗺️</span>
+                            <span className="font-medium">GPS 路线地图</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* AI Coach Critique Bubble */}
                       <div className="bg-gradient-to-r from-purple-950/30 via-[#1e1b2e] to-indigo-950/30 border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
                         <div className="flex items-center gap-2 font-bold text-purple-300 mb-1.5">

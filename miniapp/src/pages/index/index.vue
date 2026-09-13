@@ -613,6 +613,19 @@
               <text class="act-sub-label">TRIMP负荷</text>
             </view>
           </view>
+
+          <!-- GPS Track Action Button -->
+          <view
+            v-if="act.has_gps_track || act.map_image_url || act.id?.startsWith('garmin_')"
+            class="act-track-row"
+            @click.stop="openTrackModal(act)"
+          >
+            <view class="act-track-btn">
+              <text class="act-track-icon">🗺️</text>
+              <text class="act-track-text">GPS 轨迹路线与海拔剖面</text>
+              <text class="act-track-arrow">›</text>
+            </view>
+          </view>
         </view>
       </view>
       <view v-else class="empty-act-box">
@@ -923,12 +936,21 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- ── GPS 轨迹与高程剖面弹窗 ── -->
+    <GpsTrackModal
+      :visible="Boolean(selectedTrackActivity)"
+      :activity-id="selectedTrackActivity?.id"
+      :initial-activity="selectedTrackActivity"
+      @close="selectedTrackActivity = null"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
+import GpsTrackModal from "../../components/GpsTrackModal.vue";
 import {
   request,
   getStoredUser,
@@ -938,6 +960,12 @@ import {
   UserProfile,
   syncTabBarIndex,
 } from "../../utils/api";
+
+const selectedTrackActivity = ref<any>(null);
+function openTrackModal(act: any) {
+  selectedTrackActivity.value = act;
+}
+
 
 const showAuthModal = ref(false);
 const authTab = ref<"wechat" | "device">("wechat");
@@ -2878,6 +2906,41 @@ onPullDownRefresh(async () => {
 .text-amber {
   color: #ffd60a;
 }
+
+.act-track-row {
+  margin-top: 18rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.act-track-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(252, 76, 2, 0.08);
+  border: 1rpx solid rgba(252, 76, 2, 0.25);
+  border-radius: 14rpx;
+  padding: 10rpx 18rpx;
+}
+
+.act-track-icon {
+  font-size: 24rpx;
+  margin-right: 10rpx;
+}
+
+.act-track-text {
+  flex: 1;
+  font-size: 22rpx;
+  color: #FC4C02;
+  font-weight: 600;
+}
+
+.act-track-arrow {
+  font-size: 24rpx;
+  color: #FC4C02;
+  font-weight: bold;
+}
+
 
 /* ── Auth Modal in Index ── */
 .modal-mask {

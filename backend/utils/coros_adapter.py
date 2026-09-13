@@ -463,6 +463,7 @@ class CorosAdapter:
             "anaerobic_training_effect": round(float(anaerobic_te), 1) if anaerobic_te else None,
             "splits": act.get("splits") or [],
             "laps": act.get("laps") or [],
+            "map_image_url": act.get("imageUrl"),
             "raw_garmin_data": act, # Compatible key for DB/LocalStore JSONB storage
         }
 

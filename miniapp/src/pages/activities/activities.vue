@@ -31,10 +31,15 @@
           </view>
         </view>
 
+        <!-- GPS Track & Elevation Pill -->
+        <view v-if="act.has_gps_track || act.map_image_url || act.id?.startsWith('garmin_')" class="track-badge-row">
+          <text class="track-pill">🗺️ 查看 GPS 轨迹路线与海拔剖面 ›</text>
+        </view>
+
         <!-- AI Journal preview tag if available -->
-        <view v-if="act.ai_journal?.evaluation" class="journal-preview">
+        <view v-if="act.ai_journal?.evaluation || (typeof act.ai_journal === 'string' && act.ai_journal)" class="journal-preview">
           <text class="journal-tag">AI 点评</text>
-          <text class="journal-text">{{ act.ai_journal.evaluation }}</text>
+          <text class="journal-text">{{ act.ai_journal?.evaluation || act.ai_journal }}</text>
         </view>
       </view>
     </view>
@@ -43,35 +48,25 @@
       <text class="empty-text">暂无运动记录，请绑定 Garmin / 高驰手表后点击同步数据。</text>
     </view>
 
-    <!-- AI Evaluation Modal -->
-    <view v-if="activeModal" class="modal-mask" @click="activeModal = null">
-      <view class="modal-content" @click.stop>
-        <view class="modal-header">
-          <text class="modal-title">Canova教练单次点评</text>
-          <text class="close-btn" @click="activeModal = null">✕</text>
-        </view>
-        <view class="modal-body">
-          <text class="act-modal-name">{{ activeModal.name }} ({{ activeModal.distance_km || (activeModal.distance_meters ? (activeModal.distance_meters / 1000).toFixed(2) : '0') }} km)</text>
-          <text class="act-modal-date">{{ formatDateTime(activeModal.start_time) }}</text>
-
-          <view class="ai-box">
-            <text class="ai-desc">
-              {{ activeModal.ai_journal?.evaluation || "本次训练配速与心率控制平稳，符合 Renato Canova 有氧基础期训练负荷。" }}
-            </text>
-          </view>
-        </view>
-      </view>
-    </view>
+    <!-- GPS Track & Canova Evaluation Modal -->
+    <GpsTrackModal
+      :visible="Boolean(selectedActivity)"
+      :activity-id="selectedActivity?.id"
+      :initial-activity="selectedActivity"
+      @close="selectedActivity = null"
+    />
   </view>
+
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import { request, getStoredUser } from "../../utils/api";
+import GpsTrackModal from "../../components/GpsTrackModal.vue";
 
 const activities = ref<any[]>([]);
-const activeModal = ref<any>(null);
+const selectedActivity = ref<any>(null);
 
 async function loadActivities() {
   const user = getStoredUser();
@@ -91,7 +86,7 @@ async function loadActivities() {
 }
 
 function openDetail(act: any) {
-  activeModal.value = act;
+  selectedActivity.value = act;
 }
 
 function formatDateTime(iso: string): string {
@@ -286,6 +281,21 @@ onPullDownRefresh(async () => {
   margin-top: 6rpx;
   margin-bottom: 20rpx;
   display: block;
+}
+
+.track-badge-row {
+  margin-top: 14rpx;
+  display: flex;
+}
+
+.track-pill {
+  font-size: 22rpx;
+  color: #FC4C02;
+  background-color: rgba(252, 76, 2, 0.12);
+  border: 1px solid rgba(252, 76, 2, 0.3);
+  padding: 6rpx 16rpx;
+  border-radius: 12rpx;
+  font-weight: 600;
 }
 
 .ai-box {

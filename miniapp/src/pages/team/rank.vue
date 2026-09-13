@@ -129,6 +129,27 @@
               </view>
             </view>
 
+            <!-- Map Preview or GPS Action Button -->
+            <view
+              v-if="act.map_image_url"
+              class="feed-map-card"
+              @click.stop="openTrackModal(act)"
+            >
+              <image class="feed-map-thumb" :src="act.map_image_url" mode="aspectFill" />
+              <view class="feed-map-overlay">
+                <text class="feed-map-pill">🗺️ 点击展开 GPS 路线与高程剖面</text>
+              </view>
+            </view>
+            <view
+              v-else-if="act.has_gps_track || act.id?.startsWith('garmin_')"
+              class="feed-track-action-bar"
+              @click.stop="openTrackModal(act)"
+            >
+              <text class="feed-track-icon">🗺️</text>
+              <text class="feed-track-lbl">查看 GPS 路线轨迹与高程剖面</text>
+              <text class="feed-track-arr">›</text>
+            </view>
+
             <!-- AI Coach Critique Bubble -->
             <view class="coach-bubble">
               <view class="coach-badge-row">
@@ -262,12 +283,21 @@
         </view>
       </view>
     </view>
+
+    <!-- ── GPS 轨迹与高程剖面弹窗 ── -->
+    <GpsTrackModal
+      :visible="Boolean(selectedTrackActivity)"
+      :activity-id="selectedTrackActivity?.id"
+      :initial-activity="selectedTrackActivity"
+      @close="selectedTrackActivity = null"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
+import GpsTrackModal from "../../components/GpsTrackModal.vue";
 import {
   request,
   getStoredUser,
@@ -278,6 +308,12 @@ import {
   resolveActiveClub,
   syncTabBarIndex,
 } from "../../utils/api";
+
+const selectedTrackActivity = ref<any>(null);
+function openTrackModal(act: any) {
+  selectedTrackActivity.value = act;
+}
+
 
 const user = ref<UserProfile | null>(null);
 const currentClub = ref<any>(null);
@@ -929,6 +965,64 @@ onPullDownRefresh(async () => {
   font-size: 20rpx;
   color: #8e8e93;
   margin-left: 4rpx;
+}
+
+.feed-map-card {
+  position: relative;
+  width: 100%;
+  height: 240rpx;
+  border-radius: 18rpx;
+  overflow: hidden;
+  margin-bottom: 16rpx;
+}
+
+.feed-map-thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.feed-map-overlay {
+  position: absolute;
+  bottom: 12rpx;
+  right: 12rpx;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  padding: 6rpx 14rpx;
+  border-radius: 10rpx;
+}
+
+.feed-map-pill {
+  font-size: 20rpx;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.feed-track-action-bar {
+  display: flex;
+  align-items: center;
+  background: rgba(252, 76, 2, 0.08);
+  border: 1rpx solid rgba(252, 76, 2, 0.25);
+  border-radius: 14rpx;
+  padding: 10rpx 16rpx;
+  margin-bottom: 16rpx;
+}
+
+.feed-track-icon {
+  font-size: 24rpx;
+  margin-right: 10rpx;
+}
+
+.feed-track-lbl {
+  flex: 1;
+  font-size: 22rpx;
+  color: #FC4C02;
+  font-weight: 600;
+}
+
+.feed-track-arr {
+  font-size: 24rpx;
+  color: #FC4C02;
+  font-weight: bold;
 }
 
 /* AI Coach Bubble */

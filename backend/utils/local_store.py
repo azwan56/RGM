@@ -81,9 +81,19 @@ def init_db():
                 ai_journal TEXT,
                 laps_data TEXT,
                 splits_data TEXT,
+                gps_track_data TEXT,
+                map_image_url TEXT,
                 FOREIGN KEY(user_id) REFERENCES profiles(id)
             )
         """)
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN gps_track_data TEXT")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN map_image_url TEXT")
+        except Exception:
+            pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_health (
@@ -561,7 +571,7 @@ class LocalStore:
                 "moving_time_seconds", "elapsed_time_seconds", "elevation_gain_meters",
                 "average_heartrate", "max_heartrate", "average_cadence", "avg_pace_str",
                 "calories", "aerobic_training_effect", "anaerobic_training_effect", "trimp",
-                "ai_journal", "laps_data", "splits_data"
+                "ai_journal", "laps_data", "splits_data", "gps_track_data", "map_image_url"
             ]
             act_id = act.get("id")
             cursor.execute("SELECT id FROM activities WHERE id = ?", (act_id,))
@@ -632,6 +642,28 @@ class LocalStore:
                     conn.commit()
 
         return rows
+
+    @staticmethod
+    def get_activity_gps_track(activity_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, sport_type, start_time, distance_meters, elevation_gain_meters, 
+                       avg_pace_str, average_heartrate, map_image_url, gps_track_data, ai_journal
+                FROM activities 
+                WHERE id = ?
+            """, (activity_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            if res.get("gps_track_data"):
+                try:
+                    res["gps_track_data"] = json.loads(res["gps_track_data"])
+                except Exception:
+                    pass
+            return res
 
     @staticmethod
     def get_training_load(uid: str, days: int = 60) -> Dict[str, Any]:

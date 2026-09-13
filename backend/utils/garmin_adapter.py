@@ -20,6 +20,16 @@ except ImportError:
 
 TOKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tokens")
 
+try:
+    from utils.geo_utils import wgs84_to_gcj02, downsample_points
+except ImportError:
+    try:
+        from .geo_utils import wgs84_to_gcj02, downsample_points
+    except ImportError:
+        wgs84_to_gcj02 = lambda lat, lng: (lat, lng)
+        downsample_points = lambda pts, max_points=250: pts
+
+
 def pace_str(distance_m: float, moving_time_s: int) -> str:
     """Returns average pace as 'M:SS /km'."""
     km = distance_m / 1000.0
@@ -482,3 +492,98 @@ class GarminAdapter:
             logger.warning(f"[garmin] Could not fetch HRV data for {date_str}: {e}")
 
         return metrics
+
+    def fetch_activity_gps_track(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches GPS polyline coordinates and elevation profile for an activity from Garmin.
+        Transforms WGS-84 coordinates to GCJ-02 (China standard) and downsamples points for smooth rendering.
+        """
+        clean_id = str(activity_id).replace("garmin_", "").strip()
+        if not self.client:
+            if not self.login():
+                return None
+
+        try:
+            logger.info(f"[garmin] Fetching activity details for {clean_id}...")
+            details = self.client.get_activity_details(clean_id)
+            if not details or not isinstance(details, dict):
+                logger.warning(f"[garmin] No details returned for activity {clean_id}")
+                return None
+
+            geo = details.get("geoPolylineDTO") or {}
+            raw_polyline = geo.get("polyline") or []
+            if not raw_polyline:
+                logger.info(f"[garmin] Activity {clean_id} does not contain polyline coordinates")
+                return None
+
+            # Convert WGS-84 coordinates to GCJ-02 (Tencent / WeChat Mini Program map standard)
+            gcj_points = []
+            for pt in raw_polyline:
+                lat = pt.get("lat")
+                lng = pt.get("lon")
+                if lat is not None and lng is not None:
+                    gcj_lat, gcj_lng = wgs84_to_gcj02(float(lat), float(lng))
+                    gcj_points.append({
+                        "latitude": gcj_lat,
+                        "longitude": gcj_lng
+                    })
+
+            if not gcj_points:
+                return None
+
+            # Downsample points (e.g. 250 points) for lightweight fast payload
+            sampled_points = downsample_points(gcj_points, max_points=250)
+
+            # Calculate bounds and center
+            min_lat = min(p["latitude"] for p in sampled_points)
+            max_lat = max(p["latitude"] for p in sampled_points)
+            min_lng = min(p["longitude"] for p in sampled_points)
+            max_lng = max(p["longitude"] for p in sampled_points)
+            center_lat = round((min_lat + max_lat) / 2.0, 6)
+            center_lng = round((min_lng + max_lng) / 2.0, 6)
+
+            # Process Elevation Profile
+            descriptors = details.get("metricDescriptors") or []
+            desc_map = {m["key"]: m.get("metricsIndex") for m in descriptors if isinstance(m, dict) and "key" in m and "metricsIndex" in m}
+            elev_idx = desc_map.get("directElevation")
+            dist_idx = desc_map.get("sumDistance")
+            hr_idx = desc_map.get("directHeartRate")
+
+            raw_profile = []
+            metrics_list = details.get("activityDetailMetrics") or []
+            if elev_idx is not None and dist_idx is not None and metrics_list:
+                for m_obj in metrics_list:
+                    m_vals = m_obj.get("metrics") or []
+                    if len(m_vals) > max(elev_idx, dist_idx):
+                        e = m_vals[elev_idx]
+                        d = m_vals[dist_idx]
+                        if e is not None and d is not None:
+                            hr_val = m_vals[hr_idx] if (hr_idx is not None and len(m_vals) > hr_idx and m_vals[hr_idx] is not None) else None
+                            raw_profile.append({
+                                "dist_km": round(float(d) / 1000.0, 2),
+                                "elevation_m": round(float(e), 1),
+                                "hr": int(hr_val) if hr_val is not None else None
+                            })
+
+            sampled_elevation = downsample_points(raw_profile, max_points=120) if raw_profile else []
+
+            track_data = {
+                "activity_id": f"garmin_{clean_id}",
+                "total_points": len(sampled_points),
+                "original_point_count": len(raw_polyline),
+                "center": {"latitude": center_lat, "longitude": center_lng},
+                "bounds": {
+                    "southwest": {"latitude": min_lat, "longitude": min_lng},
+                    "northeast": {"latitude": max_lat, "longitude": max_lng}
+                },
+                "start_point": sampled_points[0],
+                "end_point": sampled_points[-1],
+                "points": sampled_points,
+                "elevation_profile": sampled_elevation
+            }
+            logger.info(f"[garmin] Successfully processed GPS track for {clean_id}: {len(sampled_points)} points, {len(sampled_elevation)} elevation steps")
+            return track_data
+        except Exception as e:
+            logger.error(f"[garmin] Error fetching GPS track for {clean_id}: {e}", exc_info=True)
+            return None
+
