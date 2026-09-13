@@ -1,6 +1,10 @@
 <template>
-  <view v-if="visible" class="gps-modal-mask" @click="handleClose" @touchmove.stop.prevent>
-    <view class="gps-modal-container" @click.stop>
+  <view v-if="visible" class="gps-modal-root">
+    <!-- Backdrop: prevents background scroll and handles backdrop tap -->
+    <view class="gps-modal-backdrop" @click="handleClose" @touchmove.stop.prevent />
+
+    <!-- Modal Sheet: Sibling to backdrop, free from catchtouchmove so map & canvas gestures work smoothly -->
+    <view class="gps-modal-sheet" @click.stop>
       <!-- Modal Header -->
       <view class="gps-modal-header">
         <view class="header-left">
@@ -12,7 +16,7 @@
         </view>
       </view>
 
-      <!-- Sub Header: Distance & Time -->
+      <!-- Sub Header: Distance, Pace, HR, Elev -->
       <view class="activity-hero-stats">
         <view class="hero-stat-item">
           <text class="stat-num orange">{{ distanceKm }}</text>
@@ -35,12 +39,12 @@
         </view>
       </view>
 
-      <!-- Tab Switcher (路线地图 / 高程剖面 / 卫星实景) -->
+      <!-- Tab Switcher (路线地图 / 高程剖面 / 地图切片) -->
       <view class="tab-strip">
         <view
           class="tab-btn"
           :class="{ active: activeTab === 'map' }"
-          @click="activeTab = 'map'"
+          @click="switchTab('map')"
         >
           <text class="tab-text">🗺️ 轨迹路线</text>
         </view>
@@ -48,7 +52,7 @@
           v-if="hasElevationProfile"
           class="tab-btn"
           :class="{ active: activeTab === 'elevation' }"
-          @click="activeTab = 'elevation'"
+          @click="switchTab('elevation')"
         >
           <text class="tab-text">📈 海拔剖面</text>
         </view>
@@ -56,7 +60,7 @@
           v-if="mapImageUrl"
           class="tab-btn"
           :class="{ active: activeTab === 'image' }"
-          @click="activeTab = 'image'"
+          @click="switchTab('image')"
         >
           <text class="tab-text">🖼️ 地图切片</text>
         </view>
@@ -76,7 +80,7 @@
           <text class="error-text">{{ errorMsg }}</text>
         </view>
 
-        <!-- TAB 1: Native Map -->
+        <!-- TAB 1: Native Interactive Map -->
         <view v-else-if="activeTab === 'map'" class="map-wrapper">
           <view v-if="trackPoints.length" class="map-inner">
             <map
@@ -84,16 +88,46 @@
               class="track-map-view"
               :latitude="trackCenter.latitude"
               :longitude="trackCenter.longitude"
+              :scale="mapScale"
               :markers="trackMarkers"
               :polyline="trackPolylines"
-              :include-points="trackPoints"
               :show-location="false"
               :enable-zoom="true"
               :enable-scroll="true"
+              :enable-rotate="true"
+              :enable-overlooking="true"
+              :show-compass="true"
+              :show-scale="true"
+              :enable-satellite="isSatellite"
             />
+
+            <!-- Floating Controls: Fit Route, Satellite Toggle, Zoom In/Out -->
+            <view class="map-floating-controls">
+              <!-- Fit Route / Reset Bounds -->
+              <view class="map-ctl-btn" @click="fitRoute" hover-class="btn-hover">
+                <text class="ctl-icon">🎯</text>
+                <text class="ctl-text">全貌</text>
+              </view>
+              <!-- Satellite Toggle -->
+              <view class="map-ctl-btn" :class="{ active: isSatellite }" @click="toggleSatellite" hover-class="btn-hover">
+                <text class="ctl-icon">{{ isSatellite ? '🛰️' : '🗺️' }}</text>
+                <text class="ctl-text">{{ isSatellite ? '卫星' : '标准' }}</text>
+              </view>
+              <!-- Zoom In / Zoom Out -->
+              <view class="zoom-btn-group">
+                <view class="zoom-btn" @click="zoomIn" hover-class="btn-hover">
+                  <text class="zoom-icon">＋</text>
+                </view>
+                <view class="zoom-divider" />
+                <view class="zoom-btn" @click="zoomOut" hover-class="btn-hover">
+                  <text class="zoom-icon">－</text>
+                </view>
+              </view>
+            </view>
+
             <view class="map-corner-pill">
               <text class="pill-dot">●</text>
-              <text class="pill-text">GCJ-02 火星坐标纠偏 · 微信原生地图</text>
+              <text class="pill-text">GCJ-02 纠偏 · 支持双指缩放/拖拽/俯仰</text>
             </view>
           </view>
           <view v-else-if="mapImageUrl" class="img-fallback-wrapper">
@@ -108,7 +142,7 @@
           </view>
         </view>
 
-        <!-- TAB 2: Elevation Profile -->
+        <!-- TAB 2: Elevation Profile Canvas -->
         <view v-else-if="activeTab === 'elevation'" class="elevation-wrapper">
           <view class="elevation-stats-bar">
             <view class="elev-stat">
@@ -125,25 +159,26 @@
             </view>
           </view>
 
-          <!-- SVG-like Elevation Profile Visualization -->
+          <!-- Interactive Elevation Chart with Canvas -->
           <view class="chart-box">
-            <svg class="elev-svg" viewBox="0 0 320 120" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="elevGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#FC4C02" stop-opacity="0.6" />
-                  <stop offset="100%" stop-color="#FC4C02" stop-opacity="0.05" />
-                </linearGradient>
-              </defs>
-              <!-- Filled Area Under Curve -->
-              <path :d="elevationAreaPath" fill="url(#elevGrad)" />
-              <!-- Top Profile Line -->
-              <path :d="elevationLinePath" fill="none" stroke="#FC4C02" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <view class="axis-x-row">
-              <text class="axis-x">0 km</text>
-              <text class="axis-x">{{ (distanceKm / 2).toFixed(1) }} km</text>
-              <text class="axis-x">{{ distanceKm }} km</text>
+            <!-- Active Scrubbing Reading Banner -->
+            <view v-if="scrubPoint" class="scrub-tip-banner">
+              <text class="scrub-dist">📍 距离 {{ scrubPoint.dist_km }}km</text>
+              <text class="scrub-elev">⛰️ 海拔 {{ Math.round(scrubPoint.elevation_m) }}m</text>
+              <text v-if="scrubPoint.hr" class="scrub-hr">❤️ {{ scrubPoint.hr }}bpm</text>
             </view>
+            <view v-else class="scrub-hint-banner">
+              <text class="scrub-hint">👆 在剖面图上左右滑动，可交互查看沿途里程与海拔</text>
+            </view>
+
+            <canvas
+              canvas-id="elevCanvas"
+              id="elevCanvas"
+              class="elev-canvas"
+              @touchstart="handleCanvasTouch"
+              @touchmove="handleCanvasTouch"
+              @touchend="handleCanvasTouchEnd"
+            />
           </view>
         </view>
 
@@ -166,7 +201,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, nextTick, getCurrentInstance } from "vue";
 import { request } from "../utils/api";
 
 const props = defineProps<{
@@ -176,6 +211,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(["close"]);
+const instance = getCurrentInstance();
 
 const loading = ref(false);
 const errorMsg = ref("");
@@ -183,10 +219,13 @@ const activeTab = ref<"map" | "elevation" | "image">("map");
 
 const activityData = ref<any>(null);
 const trackPoints = ref<Array<{ latitude: number; longitude: number }>>([]);
-const elevationProfile = ref<Array<{ dist_km: number; elevation_m: number }>>([]);
+const elevationProfile = ref<Array<{ dist_km: number; elevation_m: number; hr?: number }>>([]);
 const mapImageUrl = ref("");
 
 const trackCenter = ref<{ latitude: number; longitude: number }>({ latitude: 28.0, longitude: 114.0 });
+const mapScale = ref(13);
+const isSatellite = ref(false);
+const scrubPoint = ref<any>(null);
 
 const distanceKm = computed(() => {
   const m = activityData.value?.distance_meters || props.initialActivity?.distance_meters || 0;
@@ -234,7 +273,7 @@ const trackMarkers = computed(() => {
   const startPt = trackPoints.value[0];
   const endPt = trackPoints.value[trackPoints.value.length - 1];
 
-  return [
+  const markers: any[] = [
     {
       id: 1,
       latitude: startPt.latitude,
@@ -266,42 +305,250 @@ const trackMarkers = computed(() => {
       },
     },
   ];
+
+  // If there's an elevation peak that is significantly above min elevation, add summit marker
+  if (elevationProfile.value.length > 2 && maxElevation.value > minElevation.value + 50) {
+    let peakElev = elevationProfile.value[0];
+    for (const p of elevationProfile.value) {
+      if (p.elevation_m > peakElev.elevation_m) {
+        peakElev = p;
+      }
+    }
+    const totalDist = elevationProfile.value[elevationProfile.value.length - 1].dist_km || 1;
+    const ratio = Math.max(0, Math.min(1, peakElev.dist_km / totalDist));
+    const idx = Math.min(trackPoints.value.length - 1, Math.round(ratio * (trackPoints.value.length - 1)));
+    const peakPt = trackPoints.value[idx];
+    if (peakPt && idx > 0 && idx < trackPoints.value.length - 1) {
+      markers.push({
+        id: 3,
+        latitude: peakPt.latitude,
+        longitude: peakPt.longitude,
+        title: "最高点",
+        callout: {
+          content: `⛰️ 最高点 ${Math.round(peakElev.elevation_m)}m`,
+          color: "#ffffff",
+          bgColor: "#8b5cf6",
+          display: "ALWAYS",
+          padding: 4,
+          borderRadius: 4,
+          fontSize: 10,
+        },
+      });
+    }
+  }
+
+  return markers;
 });
 
-// SVG Path generator for Elevation Chart
-const elevationCoords = computed(() => {
-  const list = elevationProfile.value;
-  if (!list || list.length < 2) return [];
+function switchTab(tab: "map" | "elevation" | "image") {
+  activeTab.value = tab;
+  if (tab === "map") {
+    nextTick(() => {
+      setTimeout(fitRoute, 200);
+    });
+  } else if (tab === "elevation") {
+    nextTick(() => {
+      setTimeout(() => drawElevationChart(), 200);
+    });
+  }
+}
+
+function toggleSatellite() {
+  isSatellite.value = !isSatellite.value;
+}
+
+function zoomIn() {
+  mapScale.value = Math.min(18, mapScale.value + 1);
+}
+
+function zoomOut() {
+  mapScale.value = Math.max(3, mapScale.value - 1);
+}
+
+function fitRoute() {
+  if (!trackPoints.value.length) return;
+  const mapCtx = uni.createMapContext("trackMap", instance?.proxy);
+  if (mapCtx && typeof mapCtx.includePoints === "function") {
+    mapCtx.includePoints({
+      points: trackPoints.value,
+      padding: [45, 30, 45, 30],
+    });
+  }
+}
+
+// Draw Elevation Profile on Native Canvas
+function drawElevationChart(activeTouchX?: number) {
+  const ctx = uni.createCanvasContext("elevCanvas", instance?.proxy);
+  if (!ctx) return;
+
+  const profile = elevationProfile.value;
+  if (!profile || profile.length < 2) {
+    ctx.clearRect(0, 0, 400, 160);
+    ctx.draw();
+    return;
+  }
+
+  const sysInfo = uni.getSystemInfoSync();
+  const screenW = sysInfo.windowWidth || 375;
+  const W = Math.min(360, screenW - 60);
+  const H = 140;
+
+  const padL = 38;
+  const padR = 14;
+  const padT = 20;
+  const padB = 22;
+
+  const plotW = Math.max(10, W - padL - padR);
+  const plotH = Math.max(10, H - padT - padB);
+
   const minE = minElevation.value;
   const maxE = maxElevation.value;
-  const diffE = Math.max(10, maxE - minE);
+  const diffE = Math.max(20, maxE - minE);
 
-  const totalDist = list[list.length - 1].dist_km || 1;
+  const totalDist = profile[profile.length - 1].dist_km || 1;
 
-  return list.map((item) => {
-    const x = Math.round(((item.dist_km / totalDist) * 300 + 10) * 10) / 10;
-    const normH = (item.elevation_m - minE) / diffE;
-    const y = Math.round((105 - normH * 85) * 10) / 10;
-    return { x, y };
+  const getX = (distKm: number) => padL + (distKm / totalDist) * plotW;
+  const getY = (elevM: number) => padT + (plotH * (maxE - elevM)) / diffE;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. Gridlines & Altitude Labels
+  const gridSteps = [0, 0.5, 1];
+  ctx.setFontSize(9);
+  ctx.setTextAlign("right");
+
+  gridSteps.forEach((step) => {
+    const y = padT + plotH * step;
+    const elevVal = Math.round(maxE - step * diffE);
+
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.08)");
+    ctx.setLineWidth(1);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(W - padR, y);
+    ctx.stroke();
+
+    ctx.setFillStyle("#71717a");
+    ctx.fillText(`${elevVal}m`, padL - 4, y + 3);
   });
-});
 
-const elevationLinePath = computed(() => {
-  const coords = elevationCoords.value;
-  if (!coords.length) return "";
-  return coords.reduce((acc, pt, idx) => {
-    return idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
-  }, "");
-});
+  // 2. Build sampled point coordinates
+  const pts = profile.map((p) => ({
+    x: getX(p.dist_km),
+    y: getY(p.elevation_m),
+    data: p,
+  }));
 
-const elevationAreaPath = computed(() => {
-  const coords = elevationCoords.value;
-  if (!coords.length) return "";
-  const first = coords[0];
-  const last = coords[coords.length - 1];
-  const linePart = elevationLinePath.value;
-  return `${linePart} L ${last.x} 115 L ${first.x} 115 Z`;
-});
+  // 3. Area Gradient Fill
+  const grad = ctx.createLinearGradient(0, padT, 0, H - padB);
+  grad.addColorStop(0, "rgba(252, 76, 2, 0.45)");
+  grad.addColorStop(1, "rgba(252, 76, 2, 0.02)");
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.lineTo(pts[pts.length - 1].x, H - padB);
+  ctx.lineTo(pts[0].x, H - padB);
+  ctx.closePath();
+  ctx.setFillStyle(grad);
+  ctx.fill();
+
+  // 4. Stroke Ridge Line
+  ctx.beginPath();
+  ctx.setStrokeStyle("#FC4C02");
+  ctx.setLineWidth(2.5);
+  ctx.setLineCap("round");
+  ctx.setLineJoin("round");
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.stroke();
+
+  // 5. Peak Indicator Dot & Altitude Label
+  let peakPt = pts[0];
+  for (const pt of pts) {
+    if (pt.data.elevation_m > peakPt.data.elevation_m) {
+      peakPt = pt;
+    }
+  }
+
+  if (activeTouchX === undefined && peakPt) {
+    ctx.beginPath();
+    ctx.arc(peakPt.x, peakPt.y, 4, 0, 2 * Math.PI);
+    ctx.setFillStyle("#ffffff");
+    ctx.fill();
+    ctx.setStrokeStyle("#FC4C02");
+    ctx.setLineWidth(2);
+    ctx.stroke();
+
+    ctx.setFontSize(9);
+    ctx.setFillStyle("#fb923c");
+    ctx.setTextAlign("center");
+    ctx.fillText(`▲ ${Math.round(peakPt.data.elevation_m)}m`, peakPt.x, Math.max(12, peakPt.y - 6));
+  }
+
+  // 6. Interactive Touch Scrubbing
+  if (activeTouchX !== undefined) {
+    let closestPt = pts[0];
+    let minDist = Math.abs(pts[0].x - activeTouchX);
+    for (const pt of pts) {
+      const d = Math.abs(pt.x - activeTouchX);
+      if (d < minDist) {
+        minDist = d;
+        closestPt = pt;
+      }
+    }
+
+    scrubPoint.value = closestPt.data;
+
+    // Vertical cursor line
+    ctx.beginPath();
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.5)");
+    ctx.setLineWidth(1);
+    ctx.moveTo(closestPt.x, padT);
+    ctx.lineTo(closestPt.x, H - padB);
+    ctx.stroke();
+
+    // Cursor circle dot
+    ctx.beginPath();
+    ctx.arc(closestPt.x, closestPt.y, 5, 0, 2 * Math.PI);
+    ctx.setFillStyle("#ffffff");
+    ctx.fill();
+    ctx.setStrokeStyle("#FC4C02");
+    ctx.setLineWidth(2.5);
+    ctx.stroke();
+  }
+
+  // 7. Distance Labels at Bottom Axis
+  ctx.setFontSize(9);
+  ctx.setFillStyle("#71717a");
+  ctx.setTextAlign("left");
+  ctx.fillText("0 km", padL, H - 4);
+  ctx.setTextAlign("center");
+  ctx.fillText(`${(totalDist / 2).toFixed(1)} km`, padL + plotW / 2, H - 4);
+  ctx.setTextAlign("right");
+  ctx.fillText(`${totalDist.toFixed(1)} km`, W - padR, H - 4);
+
+  ctx.draw(false);
+}
+
+function handleCanvasTouch(e: any) {
+  if (!elevationProfile.value.length) return;
+  const touch = e.touches && e.touches[0];
+  if (!touch) return;
+  const touchX = typeof touch.x === "number" ? touch.x : touch.clientX;
+  drawElevationChart(touchX);
+}
+
+function handleCanvasTouchEnd() {
+  setTimeout(() => {
+    scrubPoint.value = null;
+    drawElevationChart();
+  }, 2500);
+}
 
 watch(
   () => props.visible,
@@ -322,6 +569,9 @@ function resetState() {
   mapImageUrl.value = "";
   errorMsg.value = "";
   activeTab.value = "map";
+  mapScale.value = 13;
+  isSatellite.value = false;
+  scrubPoint.value = null;
 }
 
 async function loadTrack() {
@@ -360,6 +610,15 @@ async function loadTrack() {
     errorMsg.value = err.message || "轨迹加载失败";
   } finally {
     loading.value = false;
+    nextTick(() => {
+      setTimeout(() => {
+        if (activeTab.value === "map") {
+          fitRoute();
+        } else if (activeTab.value === "elevation") {
+          drawElevationChart();
+        }
+      }, 200);
+    });
   }
 }
 
@@ -369,21 +628,31 @@ function handleClose() {
 </script>
 
 <style scoped>
-.gps-modal-mask {
+.gps-modal-root {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  z-index: 9999;
+}
+
+.gps-modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
 }
 
-.gps-modal-container {
+.gps-modal-sheet {
+  position: relative;
+  z-index: 10000;
   background-color: #18181b;
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
@@ -563,7 +832,7 @@ function handleClose() {
 .map-inner {
   position: relative;
   width: 100%;
-  height: 280px;
+  height: 290px;
 }
 
 .track-map-view {
@@ -572,17 +841,93 @@ function handleClose() {
   border-radius: 16px;
 }
 
+.map-floating-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.map-ctl-btn {
+  background-color: rgba(24, 24, 27, 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.map-ctl-btn.active {
+  border-color: #FC4C02;
+  background-color: rgba(252, 76, 2, 0.35);
+}
+
+.ctl-icon {
+  font-size: 14px;
+}
+
+.ctl-text {
+  font-size: 9px;
+  color: #ffffff;
+  font-weight: bold;
+  margin-top: 1px;
+}
+
+.zoom-btn-group {
+  background-color: rgba(24, 24, 27, 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-icon {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.zoom-divider {
+  width: 20px;
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn-hover {
+  opacity: 0.75;
+}
+
 .map-corner-pill {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(4px);
   padding: 4px 8px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   gap: 4px;
+  z-index: 100;
 }
 
 .pill-dot {
@@ -611,7 +956,7 @@ function handleClose() {
 .elevation-stats-bar {
   display: flex;
   justify-content: space-around;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 8px;
 }
@@ -639,21 +984,40 @@ function handleClose() {
   flex-direction: column;
 }
 
-.elev-svg {
-  width: 100%;
-  height: 130px;
-}
-
-.axis-x-row {
+.scrub-tip-banner {
   display: flex;
-  justify-content: space-between;
-  margin-top: 4px;
-  padding: 0 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: rgba(252, 76, 2, 0.15);
+  border: 1px solid rgba(252, 76, 2, 0.4);
+  border-radius: 8px;
+  padding: 4px 10px;
+  margin-bottom: 8px;
 }
 
-.axis-x {
+.scrub-dist,
+.scrub-elev,
+.scrub-hr {
+  font-size: 11px;
+  font-weight: bold;
+  color: #ffedd5;
+}
+
+.scrub-hint-banner {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.scrub-hint {
   font-size: 10px;
   color: #71717a;
+}
+
+.elev-canvas {
+  width: 100%;
+  height: 140px;
 }
 
 .coach-critique-card {
