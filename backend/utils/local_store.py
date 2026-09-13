@@ -19,6 +19,14 @@ def generate_invite_code(length: int = 6) -> str:
     chars = chars.replace("O", "").replace("0", "").replace("I", "").replace("1", "")
     return "".join(random.choice(chars) for _ in range(length))
 
+def get_beijing_now() -> datetime:
+    """Returns current datetime in China Standard Time (UTC+8)."""
+    return datetime.utcnow() + timedelta(hours=8)
+
+def get_beijing_today() -> date:
+    """Returns today's date in China Standard Time (UTC+8)."""
+    return (datetime.utcnow() + timedelta(hours=8)).date()
+
 def init_db():
     os.makedirs(DB_DIR, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
@@ -676,7 +684,8 @@ class LocalStore:
         - Physiological status & injury risk warnings
         """
         canonical_uid = LocalStore.resolve_user_id(uid)
-        start_date = date.today() - timedelta(days=days)
+        today = get_beijing_today()
+        start_date = today - timedelta(days=days)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -710,7 +719,6 @@ class LocalStore:
             daily_map[st] = daily_map.get(st, 0.0) + trimp
 
         # Build day-by-day continuous series (decay happens on rest days with 0 TRIMP)
-        today = date.today()
         cur_date = start_date
         daily_series = []
         while cur_date <= today:
@@ -771,6 +779,14 @@ class LocalStore:
 
 
     @staticmethod
+    def get_beijing_today() -> date:
+        return get_beijing_today()
+
+    @staticmethod
+    def get_beijing_now() -> datetime:
+        return get_beijing_now()
+
+    @staticmethod
     def get_month_distance_meters(uid: str, month_start: str) -> float:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
@@ -783,7 +799,7 @@ class LocalStore:
         canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            today = date.today()
+            today = get_beijing_today()
             weekday = today.weekday()  # 0 = Monday, 6 = Sunday
             monday = today - timedelta(days=weekday)
             sunday = monday + timedelta(days=6)
@@ -878,8 +894,7 @@ class LocalStore:
         if not weeks:
             return None
 
-        now_beijing = datetime.utcnow() + timedelta(hours=8)
-        today_iso = now_beijing.strftime("%Y-%m-%d")
+        today_iso = get_beijing_today().isoformat()
 
         for w in weeks:
             days = w.get("days") or []
@@ -918,7 +933,7 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            today = date.today()
+            today = get_beijing_today()
             months = []
             for i in range(num_months - 1, -1, -1):
                 m = today.month - i
@@ -997,7 +1012,7 @@ class LocalStore:
                 except Exception:
                     pass
 
-            today = date.today()
+            today = get_beijing_today()
             passed_months = today.month
             avg_monthly_km = round(total_km / max(1, passed_months), 1)
             projected_year_km = round(avg_monthly_km * 12, 1)

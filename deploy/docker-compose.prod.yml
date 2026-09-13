@@ -9,6 +9,7 @@ services:
     container_name: rgm-backend
     restart: always
     environment:
+      - TZ=Asia/Shanghai
       - ENVIRONMENT=production
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
@@ -25,6 +26,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
     volumes:
       - ../backend/data:/app/data
+      - /etc/localtime:/etc/localtime:ro
     ports:
       - "127.0.0.1:8000:8000"
 
@@ -36,7 +38,9 @@ services:
     working_dir: /app
     volumes:
       - ../frontend:/app
+      - /etc/localtime:/etc/localtime:ro
     environment:
+      - TZ=Asia/Shanghai
       - NODE_ENV=production
       - NODE_OPTIONS=--max-old-space-size=2048
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}

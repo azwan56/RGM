@@ -1,4 +1,14 @@
 import os
+import time
+
+# Enforce China Standard Time (UTC+8) across backend runtime
+os.environ["TZ"] = "Asia/Shanghai"
+if hasattr(time, "tzset"):
+    try:
+        time.tzset()
+    except Exception:
+        pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager

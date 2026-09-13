@@ -46,7 +46,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             LocalStore.upsert_profile(eff_uid, profile)
 
         # 2. Compute Monthly Goal Progress
-        today = date.today()
+        today = LocalStore.get_beijing_today()
         month_start = date(today.year, today.month, 1).isoformat()
         _, total_days = calendar.monthrange(today.year, today.month)
         days_left = max(1, total_days - today.day + 1)
@@ -160,7 +160,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         }
         if local_acts:
             try:
-                today = date.today()
+                today = LocalStore.get_beijing_today()
                 daily_trimp_map = { (today - timedelta(days=i)).isoformat(): 0.0 for i in range(90, -1, -1) }
                 for a in local_acts:
                     st = str(a.get("start_time", ""))[:10]
@@ -235,7 +235,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"[miniapp] Error compiling dashboard: {e}")
-        today = date.today()
+        today = LocalStore.get_beijing_today()
         iso_year, iso_week, _ = today.isocalendar()
         return {
             "user": {
