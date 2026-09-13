@@ -672,7 +672,7 @@ function handleClose() {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 9999;
+  z-index: 99999 !important;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -690,14 +690,16 @@ function handleClose() {
 
 .gps-modal-sheet {
   position: relative;
-  z-index: 10000;
+  z-index: 100000 !important;
   background-color: #18181b;
   border-top-left-radius: 24px;
   border-top-right-radius: 24px;
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  padding: 18px 16px 16px;
+  padding: 18px 16px;
+  padding-bottom: calc(20px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   box-sizing: border-box;
@@ -748,7 +750,7 @@ function handleClose() {
 /* Scroll Area: Full height scroll with visible scrollbar */
 .modal-scroll-area {
   width: 100%;
-  max-height: 74vh;
+  max-height: 72vh;
   box-sizing: border-box;
 }
 
@@ -1183,7 +1185,9 @@ function handleClose() {
 }
 
 .scroll-bottom-spacer {
-  height: 30px;
+  height: 90px;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Custom Sleek Scrollbar */

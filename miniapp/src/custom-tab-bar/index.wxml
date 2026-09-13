@@ -3,11 +3,11 @@
   <view
     wx:for="{{list}}"
     wx:key="index"
-    class="tab-bar-item"
+    class="tab-bar-item {{item.text.length > 4 ? 'tab-bar-item-long' : ''}}"
     data-path="{{item.pagePath}}"
     data-index="{{index}}"
     bindtap="switchTab"
   >
-    <text class="tab-bar-text {{selected === index ? 'active' : ''}}">{{item.text}}</text>
+    <text class="tab-bar-text {{selected === index ? 'active' : ''}} {{item.text.length > 4 ? 'text-compact' : ''}}">{{item.text}}</text>
   </view>
 </view>
