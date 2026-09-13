@@ -122,18 +122,15 @@ def backfill_coros_map_images():
             total_updated = 0
 
             while True:
-                payload = {
-                    "modeList": [100, 101, 102, 103, 200, 300],
-                    "pageNumber": page_number,
-                    "size": 100
-                }
-                resp = requests.post(url, json=payload, headers=adapter._get_headers(), timeout=15)
+                url = f"{adapter.base_url}/activity/query?modeList=100,101,102,103&pageNumber={page_number}&size=100"
+                resp = requests.get(url, headers=adapter._get_headers(), timeout=15)
                 if resp.status_code != 200:
                     break
                 data = resp.json()
                 data_list = (data.get("data") or {}).get("dataList") or []
                 if not data_list:
                     break
+
 
                 with sqlite3.connect(DB_PATH) as conn:
                     cursor = conn.cursor()
