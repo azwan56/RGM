@@ -872,6 +872,7 @@ export default function TeamPage() {
 
                       {/* GPS Route Map & Elevation Profile Preview (for Garmin & COROS) */}
                       <RouteMapPreview
+                        activityId={act.id}
                         trackData={act.gps_track_data}
                         mapImageUrl={act.map_image_url}
                         activityName={act.name}

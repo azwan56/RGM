@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-import { Maximize2, X, Compass, Mountain, MapPin } from "lucide-react";
+import React, { useState, useMemo, useEffect } from "react";
+import { Maximize2, X, Compass, Mountain, MapPin, Loader2 } from "lucide-react";
+import apiClient from "@/lib/apiClient";
 
 interface RouteMapPreviewProps {
+  activityId?: string;
   trackData?: any;
   mapImageUrl?: string;
   activityName?: string;
@@ -13,6 +15,7 @@ interface RouteMapPreviewProps {
 }
 
 export default function RouteMapPreview({
+  activityId,
   trackData: rawTrack,
   mapImageUrl,
   activityName,
@@ -22,19 +25,47 @@ export default function RouteMapPreview({
 }: RouteMapPreviewProps) {
   const [activeTab, setActiveTab] = useState<"map" | "elevation">("map");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [onDemandTrack, setOnDemandTrack] = useState<any>(null);
+  const [isLoadingTrack, setIsLoadingTrack] = useState(false);
 
-  // Parse track data if passed as JSON string
+  // Parse track data if passed as JSON string or fetched on demand
   const track = useMemo(() => {
-    if (!rawTrack) return null;
-    if (typeof rawTrack === "string") {
+    const src = rawTrack || onDemandTrack;
+    if (!src) return null;
+    if (typeof src === "string") {
       try {
-        return JSON.parse(rawTrack);
+        return JSON.parse(src);
       } catch {
         return null;
       }
     }
-    return rawTrack;
-  }, [rawTrack]);
+    return src;
+  }, [rawTrack, onDemandTrack]);
+
+  // On-demand fetch for Garmin activities when trackData is missing
+  useEffect(() => {
+    if (rawTrack || mapImageUrl || !activityId) return;
+    if (!activityId.startsWith("garmin_") && !activityId.startsWith("coros_")) return;
+
+    let isMounted = true;
+    setIsLoadingTrack(true);
+    apiClient
+      .get(`/api/miniapp/activities/${activityId}/track`)
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.data?.success && res.data?.track?.points?.length > 1) {
+          setOnDemandTrack(res.data.track);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) setIsLoadingTrack(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activityId, rawTrack, mapImageUrl]);
 
   const points = useMemo(() => {
     return track?.points || [];
@@ -128,6 +159,15 @@ export default function RouteMapPreview({
       maxElev: Math.round(maxE),
     };
   }, [elevationProfile]);
+
+  if (isLoadingTrack) {
+    return (
+      <div className="rounded-2xl border border-white/5 bg-[#121215]/60 p-4 text-xs text-zinc-400 flex items-center justify-center gap-2 animate-pulse my-2">
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FC4C02]" />
+        <span>正在加载 GPS 航迹路线...</span>
+      </div>
+    );
+  }
 
   // If no GPS track and no map image, render nothing
   if (!mapImageUrl && (!points || points.length < 2)) {

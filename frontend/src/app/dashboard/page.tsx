@@ -7,6 +7,7 @@ import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import GarminConnectModal from "@/components/GarminConnectModal";
+import RouteMapPreview from "@/components/RouteMapPreview";
 import {
   Zap,
   Activity,
@@ -27,6 +28,9 @@ import {
 import {
   ResponsiveContainer,
   ComposedChart,
+  AreaChart,
+  Area,
+  LineChart,
   Line,
   Bar,
   BarChart,
@@ -43,6 +47,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [expandedTrackId, setExpandedTrackId] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [scienceData, setScienceData] = useState<any>(null);
   const [garminModalOpen, setGarminModalOpen] = useState(false);
@@ -810,35 +815,63 @@ export default function DashboardPage() {
               </div>
             ) : (
               dashboardData.recent_activities.map((act: any) => (
-                <div key={act.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02]">
-                      🏃
+                <div key={act.id} className="py-4 border-b border-white/5 last:border-none">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02]">
+                        🏃
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm sm:text-base text-white">{act.name}</div>
+                        <div className="text-xs text-zinc-500 mt-0.5">{act.start_time?.replace("T", " ")?.slice(0, 16)}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="font-bold text-sm sm:text-base text-white">{act.name}</div>
-                      <div className="text-xs text-zinc-500 mt-0.5">{act.start_time?.replace("T", " ")?.slice(0, 16)}</div>
+
+                    <div className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm">
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">距离</span>
+                        <span className="font-bold text-white text-base">{act.distance_km} km</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">配速</span>
+                        <span className="font-bold text-cyan-400">{act.avg_pace_str}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">心率</span>
+                        <span className="font-bold text-rose-400">{act.average_heartrate || "—"} bpm</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">TRIMP</span>
+                        <span className="font-bold text-amber-400">{act.trimp || "—"}</span>
+                      </div>
+                      <button
+                        onClick={() => setExpandedTrackId(expandedTrackId === act.id ? null : act.id)}
+                        className={`px-2.5 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs font-medium border ${
+                          expandedTrackId === act.id
+                            ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-sm"
+                            : "bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border-white/5"
+                        }`}
+                        title="查看/收起 GPS 航迹路线"
+                      >
+                        <span>🗺️</span>
+                        <span>{expandedTrackId === act.id ? "收起地图" : "轨迹地图"}</span>
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6 text-xs sm:text-sm">
-                    <div>
-                      <span className="text-zinc-500 block text-[10px]">距离</span>
-                      <span className="font-bold text-white text-base">{act.distance_km} km</span>
+                  {expandedTrackId === act.id && (
+                    <div className="mt-3 pt-3 border-t border-white/5 animate-in fade-in duration-200">
+                      <RouteMapPreview
+                        activityId={act.id}
+                        trackData={act.gps_track_data}
+                        mapImageUrl={act.map_image_url}
+                        activityName={act.name}
+                        distanceMeters={act.distance_meters || (act.distance_km ? act.distance_km * 1000 : 0)}
+                        elevationGain={act.elevation_gain_meters}
+                        avgPace={act.avg_pace_str}
+                      />
                     </div>
-                    <div>
-                      <span className="text-zinc-500 block text-[10px]">配速</span>
-                      <span className="font-bold text-cyan-400">{act.avg_pace_str}</span>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500 block text-[10px]">心率</span>
-                      <span className="font-bold text-rose-400">{act.average_heartrate || "—"} bpm</span>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500 block text-[10px]">TRIMP</span>
-                      <span className="font-bold text-amber-400">{act.trimp || "—"}</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               ))
             )}
