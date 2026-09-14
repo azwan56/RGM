@@ -234,15 +234,19 @@
             </view>
             <text v-if="race.finish_notes" class="comp-notes-text">“{{ race.finish_notes }}”</text>
             <!-- Photos row in card -->
-            <view v-if="race.photos && race.photos.length" class="card-photos-scroll">
+            <view class="card-photos-scroll">
               <image
-                v-for="(pUrl, pIdx) in race.photos"
+                v-for="(pUrl, pIdx) in (race.photos || [])"
                 :key="pIdx"
                 class="card-photo-thumb"
                 :src="pUrl"
                 mode="aspectFill"
                 @click.stop="handlePreviewImage(pUrl, race.photos)"
               />
+              <view class="card-add-photo-btn" @click.stop="handleCardQuickUploadPhoto(race)">
+                <text class="card-add-icon">📷</text>
+                <text class="card-add-txt">加照片</text>
+              </view>
             </view>
           </view>
           <view v-else-if="race.is_past" class="race-past-tip" @click.stop="openEditRaceModal(race)">
@@ -1478,8 +1482,8 @@
                   <view class="modal-photo-del" @click.stop="handleDeleteModalPhoto(pUrl)">✕</view>
                 </view>
               </view>
-              <view v-else class="modal-photo-empty">
-                <text class="empty-photo-text">暂无照片，支持上传成绩证书、奖牌或现场冲线照 📸</text>
+              <view v-else class="modal-photo-empty" @click="handleChooseRacePhoto">
+                <text class="empty-photo-text">暂无照片，点击此处或上方按钮上传成绩证书、奖牌或冲线照 📸</text>
               </view>
             </view>
           </view>
@@ -1700,6 +1704,7 @@ import {
   deviceLogin,
   uploadAvatarFile,
   uploadRacePhoto,
+  deleteRacePhoto,
   API_BASE_URL,
   UserProfile,
   bindCoros,
@@ -2407,8 +2412,63 @@ async function handleModalMatchActivity() {
   }
 }
 
+function choosePhotoFromDevice(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // #ifdef MP-WEIXIN
+    if (typeof uni.chooseMedia === "function") {
+      uni.chooseMedia({
+        count: 1,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        sizeType: ["compressed"],
+        success: (res: any) => {
+          const file = res.tempFiles?.[0];
+          if (file && file.tempFilePath) {
+            resolve(file.tempFilePath);
+          } else {
+            reject(new Error("未获取到图片"));
+          }
+        },
+        fail: (err: any) => {
+          if (err?.errMsg && err.errMsg.includes("cancel")) {
+            reject(new Error("CANCEL"));
+          } else {
+            console.warn("chooseMedia failed, fallback to chooseImage:", err);
+            fallbackChooseImage(resolve, reject);
+          }
+        }
+      });
+      return;
+    }
+    // #endif
+    fallbackChooseImage(resolve, reject);
+  });
+}
+
+function fallbackChooseImage(resolve: (p: string) => void, reject: (e: any) => void) {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: (res: any) => {
+      if (res.tempFilePaths && res.tempFilePaths[0]) {
+        resolve(res.tempFilePaths[0]);
+      } else {
+        reject(new Error("未获取到图片"));
+      }
+    },
+    fail: (err: any) => {
+      if (err?.errMsg && err.errMsg.includes("cancel")) {
+        reject(new Error("CANCEL"));
+      } else {
+        reject(new Error(err?.errMsg || "选择图片失败"));
+      }
+    }
+  });
+}
+
 async function handleChooseRacePhoto() {
-  const uid = user.value?.id;
+  const uid = user.value?.id || getStoredUser()?.id;
   if (!uid) {
     uni.showToast({ title: "请先登录", icon: "none" });
     return;
@@ -2418,38 +2478,84 @@ async function handleChooseRacePhoto() {
     raceForm.value.id = raceId;
   }
 
-  uni.chooseImage({
-    count: 1,
-    sizeType: ["compressed"],
-    sourceType: ["album", "camera"],
-    success: async (res) => {
-      const tempFilePath = res.tempFilePaths[0];
-      if (!tempFilePath) return;
-      uploadingModalPhoto.value = true;
-      uni.showLoading({ title: "正在上传照片..." });
-      try {
-        const photoUrl = await uploadRacePhoto(uid, raceId, tempFilePath);
-        uni.hideLoading();
-        if (!raceForm.value.photos) raceForm.value.photos = [];
-        if (!raceForm.value.photos.includes(photoUrl)) {
-          raceForm.value.photos.push(photoUrl);
-        }
-        raceForm.value.photo_url = photoUrl;
-        uni.showToast({ title: "照片上传成功 📸", icon: "success" });
-      } catch (err: any) {
-        uni.hideLoading();
-        uni.showToast({ title: err?.message || "上传失败", icon: "none" });
-      } finally {
-        uploadingModalPhoto.value = false;
-      }
+  let tempFilePath = "";
+  try {
+    tempFilePath = await choosePhotoFromDevice();
+  } catch (e: any) {
+    if (e?.message !== "CANCEL") {
+      uni.showToast({ title: e?.message || "选择图片失败", icon: "none" });
     }
-  });
+    return;
+  }
+
+  uploadingModalPhoto.value = true;
+  uni.showLoading({ title: "正在压缩上传..." });
+  try {
+    const photoUrl = await uploadRacePhoto(uid, raceId, tempFilePath);
+    uni.hideLoading();
+    if (!raceForm.value.photos) raceForm.value.photos = [];
+    if (!raceForm.value.photos.includes(photoUrl)) {
+      raceForm.value.photos.push(photoUrl);
+    }
+    raceForm.value.photo_url = photoUrl;
+    uni.showToast({ title: "照片上传成功 📸", icon: "success" });
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: err?.message || "上传失败", icon: "none" });
+  } finally {
+    uploadingModalPhoto.value = false;
+  }
 }
 
-function handleDeleteModalPhoto(photoUrl: string) {
+async function handleCardQuickUploadPhoto(race: any) {
+  const uid = user.value?.id || getStoredUser()?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  const raceId = race.id || race.name;
+
+  let tempFilePath = "";
+  try {
+    tempFilePath = await choosePhotoFromDevice();
+  } catch (e: any) {
+    if (e?.message !== "CANCEL") {
+      uni.showToast({ title: e?.message || "选择图片失败", icon: "none" });
+    }
+    return;
+  }
+
+  uni.showLoading({ title: "正在压缩上传..." });
+  try {
+    const photoUrl = await uploadRacePhoto(uid, raceId, tempFilePath);
+    uni.hideLoading();
+    if (!race.photos) race.photos = [];
+    if (!race.photos.includes(photoUrl)) {
+      race.photos.push(photoUrl);
+    }
+    race.photo_url = photoUrl;
+    uni.showToast({ title: "完赛照片上传成功 📸", icon: "success" });
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: err?.message || "上传失败", icon: "none" });
+  }
+}
+
+async function handleDeleteModalPhoto(photoUrl: string) {
   if (!raceForm.value.photos) return;
   raceForm.value.photos = raceForm.value.photos.filter((p: string) => p !== photoUrl);
   raceForm.value.photo_url = raceForm.value.photos[0] || "";
+
+  // If the race already exists on server, trigger backend deletion in background
+  const uid = user.value?.id || getStoredUser()?.id;
+  const raceId = raceForm.value.id;
+  if (uid && raceId) {
+    try {
+      await deleteRacePhoto(uid, raceId, photoUrl);
+    } catch (e) {
+      console.warn("delete race photo err:", e);
+    }
+  }
 }
 
 function handlePreviewImage(current: string, urls?: string[]) {
@@ -3778,6 +3884,37 @@ onShow(() => {
   border-radius: 12rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.15);
   flex-shrink: 0;
+}
+
+.card-add-photo-btn {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 12rpx;
+  border: 2rpx dashed rgba(255, 107, 0, 0.5);
+  background: rgba(255, 107, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+
+  &:active {
+    background: rgba(255, 107, 0, 0.2);
+  }
+
+  .card-add-icon {
+    font-size: 28rpx;
+    line-height: 1;
+  }
+
+  .card-add-txt {
+    font-size: 18rpx;
+    color: #ff6b00;
+    font-weight: 600;
+    margin-top: 4rpx;
+    line-height: 1;
+  }
 }
 
 .race-past-tip {

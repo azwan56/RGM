@@ -490,31 +490,79 @@ export async function uploadAvatarFile(uid: string, tempFilePath: string): Promi
   }
 }
 /**
+ * Automatically compress image file in WeChat Mini Program before Base64 encoding.
+ * Reduces 5MB-10MB mobile phone camera pictures down to ~150-250KB for rapid, fail-safe transfer.
+ */
+export async function compressImageIfPossible(
+  tempFilePath: string,
+  quality = 75,
+  width = 1280
+): Promise<string> {
+  return new Promise((resolve) => {
+    // #ifdef MP-WEIXIN
+    try {
+      if (typeof uni.compressImage === "function") {
+        uni.compressImage({
+          src: tempFilePath,
+          quality,
+          compressedWidth: width,
+          success: (res: any) => {
+            if (res && res.tempFilePath) {
+              resolve(res.tempFilePath);
+            } else {
+              resolve(tempFilePath);
+            }
+          },
+          fail: (err: any) => {
+            console.warn("[compressImage] failed, fallback to original:", err);
+            resolve(tempFilePath);
+          },
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("[compressImage] exception:", e);
+    }
+    // #endif
+    resolve(tempFilePath);
+  });
+}
+
+/**
  * Uploads a finisher certificate or race photo (tempFilePath from chooseMedia or chooseImage) to the server.
  * Uses Base64 via standard request() so it relies on request合法域名 (bypasses uploadFile domain restrictions).
+ * Automatically compresses high-resolution camera photos beforehand to prevent wx.request payload limits.
  * Falls back to uni.uploadFile if Base64 read is unavailable.
  */
 export async function uploadRacePhoto(uid: string, raceId: string, tempFilePath: string): Promise<string> {
   if (!uid) throw new Error("缺少用户 UID");
   if (!tempFilePath) throw new Error("缺少照片文件路径");
 
-  // 1. Primary: Read file as Base64 and POST via standard request
+  // Step 1: Compress high-res mobile photo to avoid out-of-memory or payload limit
+  let readyFilePath = tempFilePath;
+  try {
+    readyFilePath = await compressImageIfPossible(tempFilePath, 75, 1280);
+  } catch (compErr) {
+    console.warn("compress error, using original file:", compErr);
+  }
+
+  // Step 2: Primary - Read file as Base64 and POST via standard request (uses request合法域名)
   try {
     const base64Data = await new Promise<string>((resolve, reject) => {
       // #ifdef MP-WEIXIN
       try {
         const fs = uni.getFileSystemManager();
         fs.readFile({
-          filePath: tempFilePath,
+          filePath: readyFilePath,
           encoding: "base64",
           success: (res) => {
             if (res.data) resolve(res.data as string);
             else reject(new Error("读取照片内容为空"));
           },
-          fail: (err) => reject(err),
+          fail: (err) => reject(new Error(err?.errMsg || "读取本地图片失败")),
         });
-      } catch (e) {
-        reject(e);
+      } catch (e: any) {
+        reject(new Error(e?.message || "读取文件异常"));
       }
       // #endif
       // #ifndef MP-WEIXIN
@@ -531,15 +579,15 @@ export async function uploadRacePhoto(uid: string, raceId: string, tempFilePath:
       return res.photo_url;
     }
     throw new Error(res?.detail || "上传未返回照片地址");
-  } catch (b64Err) {
+  } catch (b64Err: any) {
     console.warn("Base64 upload error, trying uploadFile fallback:", b64Err);
 
-    // 2. Fallback: uni.uploadFile with encoded URL
+    // Step 3: Fallback - uni.uploadFile with encoded URL
     return new Promise<string>((resolve, reject) => {
       const token = uni.getStorageSync("rgm_token");
       uni.uploadFile({
         url: `${API_BASE_URL}/api/profile/${encodeURIComponent(uid)}/races/${encodeURIComponent(raceId)}/photo`,
-        filePath: tempFilePath,
+        filePath: readyFilePath,
         name: "file",
         header: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -558,11 +606,22 @@ export async function uploadRacePhoto(uid: string, raceId: string, tempFilePath:
         },
         fail: (err) => {
           console.error("uploadFile fail:", err);
-          reject(new Error(err?.errMsg || "照片上传失败"));
+          const msg = b64Err?.message || err?.errMsg || "照片上传失败";
+          reject(new Error(msg));
         },
       });
     });
   }
+}
+
+/**
+ * Deletes a race photo from the race plan.
+ */
+export async function deleteRacePhoto(uid: string, raceId: string, photoUrl: string): Promise<any> {
+  return request(
+    `/api/profile/${encodeURIComponent(uid)}/races/${encodeURIComponent(raceId)}/photo?photo_url=${encodeURIComponent(photoUrl)}`,
+    "DELETE"
+  );
 }
 
 /**
