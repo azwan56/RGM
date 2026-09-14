@@ -61,6 +61,11 @@ class RacePlanRequest(BaseModel):
     target_time: str
     priority: Optional[Any] = 1
     race_info: Optional[Dict[str, Any]] = None
+    status: Optional[str] = "upcoming"
+    finish_time: Optional[str] = None
+    finish_notes: Optional[str] = None
+    photo_url: Optional[str] = None
+    photos: Optional[List[str]] = None
 
 def parse_time_to_seconds(val: Any) -> Optional[int]:
     if val is None or val == "":
@@ -528,4 +533,164 @@ def lookup_user_race_intelligence(uid: str, req: RaceLookupRequest):
     from utils.race_intel import fetch_race_intelligence
     res = fetch_race_intelligence(req.race_name, req.race_type)
     return res
+
+
+# ── Race Completion & Photo Endpoints ──
+
+class RaceCompleteRequest(BaseModel):
+    status: Optional[str] = "completed"  # "completed" | "upcoming"
+    finish_time: Optional[str] = None
+    finish_notes: Optional[str] = None
+    photo_url: Optional[str] = None
+
+
+@router.post("/{uid}/races/{race_id}/complete")
+@router.patch("/{uid}/races/{race_id}/complete")
+def complete_user_race(uid: str, race_id: str, req: RaceCompleteRequest):
+    """
+    Marks a race as completed (or reverts to upcoming), recording actual finish time,
+    personal notes/reflection, and optional finisher photo URL.
+    """
+    success = LocalStore.update_race_completion(
+        uid=uid,
+        race_id=race_id,
+        status=req.status or "completed",
+        finish_time=req.finish_time,
+        finish_notes=req.finish_notes,
+        photo_url=req.photo_url,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="未找到对应的比赛记录")
+    
+    return {
+        "message": "赛事完赛记录已更新 🎉" if req.status == "completed" else "赛事状态已恢复为备战中",
+        "races": LocalStore.get_race_plans(uid)
+    }
+
+
+@router.get("/{uid}/races/{race_id}/matched-activity")
+def get_matched_activity_for_race(uid: str, race_id: str, race_date: Optional[str] = None):
+    """
+    Searches runner's synced Garmin/COROS activities on the race date (±1 day)
+    to auto-suggest actual finish time, elapsed duration, distance, and pace.
+    """
+    date_to_query = race_date
+    if not date_to_query:
+        races = LocalStore.get_race_plans(uid)
+        matched_race = next((r for r in races if r.get("id") == race_id or r.get("name") == race_id), None)
+        if matched_race and matched_race.get("race_date"):
+            date_to_query = str(matched_race["race_date"])[:10]
+
+    if not date_to_query:
+        return {"matched": False, "activity": None, "message": "无法确定比赛日期"}
+
+    act = LocalStore.find_matched_activity_for_race(uid, date_to_query)
+    if act:
+        return {
+            "matched": True,
+            "activity": act,
+            "message": f"找到匹配的运动记录: {act.get('name')} ({act.get('distance_km')}km, 用时 {act.get('formatted_time')})"
+        }
+    return {"matched": False, "activity": None, "message": "未在比赛日找到匹配的手表运动记录"}
+
+
+class RacePhotoBase64Request(BaseModel):
+    image_base64: str
+    ext: Optional[str] = ".jpg"
+
+
+@router.post("/{uid}/races/{race_id}/photo-base64")
+async def upload_race_photo_base64(uid: str, race_id: str, req: RacePhotoBase64Request):
+    """
+    Uploads a finisher certificate or race photo via Base64.
+    Works seamlessly with WeChat request合法域名 without needing uploadFile domain.
+    """
+    import base64
+    ext = (req.ext or ".jpg").lower()
+    if not ext.startswith("."):
+        ext = f".{ext}"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+
+    photos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "race_photos")
+    os.makedirs(photos_dir, exist_ok=True)
+
+    safe_uid = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in uid)
+    safe_race_id = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in race_id)
+    filename = f"race_{safe_uid}_{safe_race_id}_{int(time.time())}{ext}"
+    filepath = os.path.join(photos_dir, filename)
+
+    try:
+        raw_b64 = req.image_base64
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+        img_bytes = base64.b64decode(raw_b64)
+        with open(filepath, "wb") as f:
+            f.write(img_bytes)
+    except Exception as e:
+        logger.error(f"[profile] Failed to decode and save base64 race photo for {uid}/{race_id}: {e}")
+        raise HTTPException(status_code=500, detail="保存赛事照片失败")
+
+    photo_url = f"https://rgm.vanpower.net/api/race-photos/{filename}"
+    photos = LocalStore.add_race_photo(uid, race_id, photo_url)
+
+    return {
+        "photo_url": photo_url,
+        "photos": photos,
+        "message": "完赛照片上传成功 📸",
+        "races": LocalStore.get_race_plans(uid)
+    }
+
+
+@router.post("/{uid}/races/{race_id}/photo")
+async def upload_race_photo(uid: str, race_id: str, file: UploadFile = File(...)):
+    """
+    Uploads a finisher photo or race certificate file via multipart/form-data.
+    """
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    orig_name = file.filename or "race.jpg"
+    ext = os.path.splitext(orig_name)[1].lower()
+    if not ext or ext not in allowed_exts:
+        ext = ".jpg"
+
+    photos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "race_photos")
+    os.makedirs(photos_dir, exist_ok=True)
+
+    safe_uid = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in uid)
+    safe_race_id = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in race_id)
+    filename = f"race_{safe_uid}_{safe_race_id}_{int(time.time())}{ext}"
+    filepath = os.path.join(photos_dir, filename)
+
+    try:
+        contents = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"[profile] Failed to save race photo for {uid}/{race_id}: {e}")
+        raise HTTPException(status_code=500, detail="保存赛事照片失败")
+
+    photo_url = f"https://rgm.vanpower.net/api/race-photos/{filename}"
+    photos = LocalStore.add_race_photo(uid, race_id, photo_url)
+
+    return {
+        "photo_url": photo_url,
+        "photos": photos,
+        "message": "完赛照片上传成功 📸",
+        "races": LocalStore.get_race_plans(uid)
+    }
+
+
+class RacePhotoDeleteRequest(BaseModel):
+    photo_url: str
+
+
+@router.delete("/{uid}/races/{race_id}/photo")
+def delete_race_photo(uid: str, race_id: str, req: RacePhotoDeleteRequest):
+    """Deletes a photo from the race record."""
+    photos = LocalStore.delete_race_photo(uid, race_id, req.photo_url)
+    return {
+        "message": "照片已删除",
+        "photos": photos,
+        "races": LocalStore.get_race_plans(uid)
+    }
 

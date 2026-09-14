@@ -148,14 +148,27 @@ def init_db():
                 priority INTEGER DEFAULT 1,
                 created_at TEXT,
                 race_info TEXT,
+                status TEXT DEFAULT 'upcoming',
+                finish_time TEXT,
+                finish_notes TEXT,
+                photo_url TEXT,
+                photos TEXT,
                 FOREIGN KEY(user_id) REFERENCES profiles(id)
             )
         """)
-        # Migration: add race_info column to existing databases
-        try:
-            cursor.execute("ALTER TABLE race_plans ADD COLUMN race_info TEXT")
-        except Exception:
-            pass
+        # Migration: add columns to existing databases
+        for col_def in [
+            "race_info TEXT",
+            "status TEXT DEFAULT 'upcoming'",
+            "finish_time TEXT",
+            "finish_notes TEXT",
+            "photo_url TEXT",
+            "photos TEXT",
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE race_plans ADD COLUMN {col_def}")
+            except Exception:
+                pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS coach_reports (
@@ -1247,6 +1260,36 @@ class LocalStore:
             conn.commit()
 
     @staticmethod
+    def time_str_to_seconds(time_str: Any) -> Optional[int]:
+        if not time_str:
+            return None
+        if isinstance(time_str, (int, float)):
+            return int(time_str)
+        s = str(time_str).strip()
+        parts = s.split(":")
+        try:
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(float(parts[2]))
+            elif len(parts) == 2:
+                return int(parts[0]) * 60 + int(float(parts[1]))
+            elif len(parts) == 1 and parts[0].isdigit():
+                return int(parts[0])
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def seconds_to_time_str(seconds: Optional[int]) -> str:
+        if not seconds or seconds <= 0:
+            return "00:00"
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    @staticmethod
     def get_race_plans(uid: str) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
@@ -1262,13 +1305,61 @@ class LocalStore:
                 if p.get("id") in seen:
                     continue
                 seen.add(p.get("id"))
+                
+                status = p.get("status") or "upcoming"
+                finish_time = p.get("finish_time") or ""
+                p["status"] = status
+                p["finish_time"] = finish_time
+                p["finish_notes"] = p.get("finish_notes") or ""
+                p["photo_url"] = p.get("photo_url") or ""
+                
+                # Photos list
+                raw_photos = p.get("photos")
+                if raw_photos:
+                    try:
+                        p["photos"] = json.loads(raw_photos) if isinstance(raw_photos, str) else raw_photos
+                    except Exception:
+                        p["photos"] = [p["photo_url"]] if p.get("photo_url") else []
+                else:
+                    p["photos"] = [p["photo_url"]] if p.get("photo_url") else []
+
+                # Completed status & countdown calculation
+                is_completed = (status == "completed" or bool(finish_time))
+                p["is_completed"] = is_completed
+
                 if p.get("race_date"):
                     try:
                         r_date = datetime.strptime(p["race_date"][:10], "%Y-%m-%d").date()
                         days_left = (r_date - today).days
                         p["days_left"] = max(0, days_left)
+                        p["is_past"] = days_left < 0
                     except Exception:
                         p["days_left"] = 0
+                        p["is_past"] = False
+                else:
+                    p["days_left"] = 0
+                    p["is_past"] = False
+
+                # Performance comparison if target_time and finish_time both exist
+                if finish_time and p.get("target_time"):
+                    try:
+                        t_sec = LocalStore.time_str_to_seconds(p["target_time"])
+                        f_sec = LocalStore.time_str_to_seconds(finish_time)
+                        if t_sec and f_sec:
+                            diff = f_sec - t_sec
+                            p["diff_seconds"] = diff
+                            if diff < 0:
+                                p["diff_str"] = f"-{LocalStore.seconds_to_time_str(abs(diff))}"
+                                p["performance_badge"] = "超额达标 🎉"
+                            elif diff == 0:
+                                p["diff_str"] = "精准达标"
+                                p["performance_badge"] = "精准达标 🎯"
+                            else:
+                                p["diff_str"] = f"+{LocalStore.seconds_to_time_str(diff)}"
+                                p["performance_badge"] = "顺利完赛 🏅"
+                    except Exception:
+                        pass
+
                 # Deserialize race_info JSON
                 raw_ri = p.get("race_info")
                 if raw_ri:
@@ -1298,9 +1389,24 @@ class LocalStore:
             else:
                 pri = 1
 
+            status = plan_data.get("status") or "upcoming"
+            finish_time = plan_data.get("finish_time") or None
+            finish_notes = plan_data.get("finish_notes") or None
+            photo_url = plan_data.get("photo_url") or None
+            photos = plan_data.get("photos")
+            if photos is not None:
+                photos_json = json.dumps(photos, ensure_ascii=False)
+            elif photo_url:
+                photos_json = json.dumps([photo_url], ensure_ascii=False)
+            else:
+                photos_json = None
+
             cursor.execute("""
-                INSERT OR REPLACE INTO race_plans (id, user_id, name, race_type, race_date, target_time, priority, created_at, race_info)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO race_plans (
+                    id, user_id, name, race_type, race_date, target_time, priority, created_at, race_info,
+                    status, finish_time, finish_notes, photo_url, photos
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 plan_id,
                 canonical_uid,
@@ -1310,10 +1416,172 @@ class LocalStore:
                 plan_data.get("target_time") or "3:30:00",
                 pri,
                 datetime.utcnow().isoformat() + "Z",
-                json.dumps(plan_data.get("race_info") or {}, ensure_ascii=False) if plan_data.get("race_info") is not None else None
+                json.dumps(plan_data.get("race_info") or {}, ensure_ascii=False) if plan_data.get("race_info") is not None else None,
+                status,
+                finish_time,
+                finish_notes,
+                photo_url,
+                photos_json
             ))
             conn.commit()
             return plan_id
+
+    @staticmethod
+    def update_race_completion(
+        uid: str,
+        race_id: str,
+        status: str = "completed",
+        finish_time: Optional[str] = None,
+        finish_notes: Optional[str] = None,
+        photo_url: Optional[str] = None,
+    ) -> bool:
+        """Marks a race as completed or upcoming, updating finish time, notes, and photo."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            # Fetch existing photos
+            cursor.execute(
+                "SELECT photo_url, photos FROM race_plans WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)",
+                (canonical_uid, uid, race_id, race_id)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            existing_photo_url, existing_photos_raw = row
+            final_photo_url = photo_url if photo_url is not None else existing_photo_url
+            photos_list = []
+            if existing_photos_raw:
+                try:
+                    photos_list = json.loads(existing_photos_raw)
+                except Exception:
+                    photos_list = []
+            if final_photo_url and final_photo_url not in photos_list:
+                photos_list.append(final_photo_url)
+
+            cursor.execute("""
+                UPDATE race_plans
+                SET status = ?, finish_time = COALESCE(?, finish_time), finish_notes = COALESCE(?, finish_notes),
+                    photo_url = COALESCE(?, photo_url), photos = ?
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (
+                status,
+                finish_time,
+                finish_notes,
+                final_photo_url,
+                json.dumps(photos_list, ensure_ascii=False) if photos_list else None,
+                canonical_uid,
+                uid,
+                race_id,
+                race_id
+            ))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def add_race_photo(uid: str, race_id: str, photo_url: str) -> List[str]:
+        """Appends a new photo to the race plan photos list and sets it as primary photo_url."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT photos FROM race_plans WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)",
+                (canonical_uid, uid, race_id, race_id)
+            )
+            row = cursor.fetchone()
+            photos_list = []
+            if row and row[0]:
+                try:
+                    photos_list = json.loads(row[0])
+                except Exception:
+                    photos_list = []
+            if photo_url not in photos_list:
+                photos_list.append(photo_url)
+            cursor.execute("""
+                UPDATE race_plans
+                SET photo_url = ?, photos = ?
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (photo_url, json.dumps(photos_list, ensure_ascii=False), canonical_uid, uid, race_id, race_id))
+            conn.commit()
+            return photos_list
+
+    @staticmethod
+    def delete_race_photo(uid: str, race_id: str, photo_url: str) -> List[str]:
+        """Removes a photo from the race plan photos list."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT photo_url, photos FROM race_plans WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)",
+                (canonical_uid, uid, race_id, race_id)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return []
+            curr_main, existing_photos_raw = row
+            photos_list = []
+            if existing_photos_raw:
+                try:
+                    photos_list = json.loads(existing_photos_raw)
+                except Exception:
+                    photos_list = []
+            photos_list = [p for p in photos_list if p != photo_url]
+            new_main = photos_list[0] if photos_list else None
+            cursor.execute("""
+                UPDATE race_plans
+                SET photo_url = ?, photos = ?
+                WHERE (user_id = ? OR user_id = ?) AND (id = ? OR name = ?)
+            """, (new_main, json.dumps(photos_list, ensure_ascii=False) if photos_list else None, canonical_uid, uid, race_id, race_id))
+            conn.commit()
+            return photos_list
+
+    @staticmethod
+    def find_matched_activity_for_race(uid: str, race_date: str) -> Optional[Dict[str, Any]]:
+        """
+        Finds a Garmin/COROS activity matching the given race date (within date or ±1 day).
+        Useful for one-click autofilling actual finish time and metrics into race plan.
+        """
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        date_clean = (race_date or "")[:10]
+        if not date_clean:
+            return None
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            # Match exact date first
+            cursor.execute("""
+                SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
+                       elapsed_time_seconds, avg_pace_str, elevation_gain_meters, average_heartrate
+                FROM activities
+                WHERE (user_id = ? OR user_id = ?) AND start_time LIKE ?
+                ORDER BY distance_meters DESC
+                LIMIT 1
+            """, (canonical_uid, uid, f"{date_clean}%"))
+            row = cursor.fetchone()
+            if not row:
+                # Try ±1 day
+                try:
+                    d_obj = datetime.strptime(date_clean, "%Y-%m-%d").date()
+                    prev_d = (d_obj - timedelta(days=1)).isoformat()
+                    next_d = (d_obj + timedelta(days=1)).isoformat()
+                    cursor.execute("""
+                        SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
+                               elapsed_time_seconds, avg_pace_str, elevation_gain_meters, average_heartrate
+                        FROM activities
+                        WHERE (user_id = ? OR user_id = ?) AND (start_time LIKE ? OR start_time LIKE ?)
+                        ORDER BY distance_meters DESC
+                        LIMIT 1
+                    """, (canonical_uid, uid, f"{prev_d}%", f"{next_d}%"))
+                    row = cursor.fetchone()
+                except Exception:
+                    row = None
+            if not row:
+                return None
+            act = dict(row)
+            # Duration formatting
+            secs = act.get("elapsed_time_seconds") or act.get("moving_time_seconds") or 0
+            act["formatted_time"] = LocalStore.seconds_to_time_str(int(secs))
+            act["distance_km"] = round((act.get("distance_meters") or 0) / 1000.0, 2)
+            return act
 
     @staticmethod
     def update_race_plan_priority(uid: str, race_identifier: str, priority: int) -> bool:

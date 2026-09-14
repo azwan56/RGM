@@ -489,6 +489,81 @@ export async function uploadAvatarFile(uid: string, tempFilePath: string): Promi
     });
   }
 }
+/**
+ * Uploads a finisher certificate or race photo (tempFilePath from chooseMedia or chooseImage) to the server.
+ * Uses Base64 via standard request() so it relies on request合法域名 (bypasses uploadFile domain restrictions).
+ * Falls back to uni.uploadFile if Base64 read is unavailable.
+ */
+export async function uploadRacePhoto(uid: string, raceId: string, tempFilePath: string): Promise<string> {
+  if (!uid) throw new Error("缺少用户 UID");
+  if (!tempFilePath) throw new Error("缺少照片文件路径");
+
+  // 1. Primary: Read file as Base64 and POST via standard request
+  try {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      // #ifdef MP-WEIXIN
+      try {
+        const fs = uni.getFileSystemManager();
+        fs.readFile({
+          filePath: tempFilePath,
+          encoding: "base64",
+          success: (res) => {
+            if (res.data) resolve(res.data as string);
+            else reject(new Error("读取照片内容为空"));
+          },
+          fail: (err) => reject(err),
+        });
+      } catch (e) {
+        reject(e);
+      }
+      // #endif
+      // #ifndef MP-WEIXIN
+      reject(new Error("非微信小程序环境"));
+      // #endif
+    });
+
+    const res = await request(`/api/profile/${encodeURIComponent(uid)}/races/${encodeURIComponent(raceId)}/photo-base64`, "POST", {
+      image_base64: base64Data,
+      ext: ".jpg",
+    });
+
+    if (res && res.photo_url) {
+      return res.photo_url;
+    }
+    throw new Error(res?.detail || "上传未返回照片地址");
+  } catch (b64Err) {
+    console.warn("Base64 upload error, trying uploadFile fallback:", b64Err);
+
+    // 2. Fallback: uni.uploadFile with encoded URL
+    return new Promise<string>((resolve, reject) => {
+      const token = uni.getStorageSync("rgm_token");
+      uni.uploadFile({
+        url: `${API_BASE_URL}/api/profile/${encodeURIComponent(uid)}/races/${encodeURIComponent(raceId)}/photo`,
+        filePath: tempFilePath,
+        name: "file",
+        header: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        success: (uploadRes) => {
+          try {
+            const data = typeof uploadRes.data === "string" ? JSON.parse(uploadRes.data) : uploadRes.data;
+            if (data.photo_url) {
+              resolve(data.photo_url);
+            } else {
+              reject(new Error(data.detail || "上传未返回照片地址"));
+            }
+          } catch (e) {
+            reject(new Error("解析上传响应失败"));
+          }
+        },
+        fail: (err) => {
+          console.error("uploadFile fail:", err);
+          reject(new Error(err?.errMsg || "照片上传失败"));
+        },
+      });
+    });
+  }
+}
 
 /**
  * Helper to update custom tabBar selected index on page onShow

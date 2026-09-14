@@ -1557,7 +1557,7 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
     all_scheduled_races = LocalStore.get_race_plans(canonical_uid)
     active_scheduled_races = [
         r for r in all_scheduled_races 
-        if r.get("race_date") and start_date <= str(r["race_date"])[:10] <= end_date
+        if r.get("race_date") and start_date <= str(r["race_date"])[:10] <= end_date and not r.get("is_completed") and r.get("status") != "completed"
     ]
 
     # Age category prompt description & Masters Privacy Protection

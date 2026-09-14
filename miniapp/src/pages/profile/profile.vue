@@ -203,12 +203,15 @@
               </text>
             </view>
             <view class="race-top-right">
-              <view class="race-badge" :class="{ urgent: race.days_left < 30 }">
+              <view v-if="race.status === 'completed' || race.is_completed" class="race-badge completed-badge">
+                <text class="badge-text">🏅 已完赛</text>
+              </view>
+              <view v-else class="race-badge" :class="{ urgent: race.days_left < 30 }">
                 <text class="badge-text">{{ race.days_left }} 天{{ race.days_left < 30 ? " 冲刺" : "" }}</text>
               </view>
               <view class="race-quick-actions">
                 <view class="race-action-pill edit-pill" @click.stop="openEditRaceModal(race)">
-                  <text class="pill-text">✏️ 编辑</text>
+                  <text class="pill-text">{{ (race.status === 'completed' || race.is_completed) ? '🏅 记录' : '✏️ 编辑' }}</text>
                 </view>
                 <view class="race-action-pill del-pill" @click.stop="handleDeleteRace(race)">
                   <text class="pill-text">🗑️</text>
@@ -220,6 +223,30 @@
             <text class="race-type-tag">{{ race.race_type }}</text>
             <text class="race-date">{{ race.race_date }}</text>
             <text class="race-target">目标: {{ race.target_time }}</text>
+            <text v-if="race.finish_time" class="race-finish-time-tag">完赛: {{ race.finish_time }}</text>
+          </view>
+
+          <!-- Completed Race Summary Banner in Card -->
+          <view v-if="race.status === 'completed' || race.is_completed" class="race-completed-card-banner">
+            <view class="completed-summary-row">
+              <text class="comp-badge-tag">{{ race.performance_badge || '顺利完赛' }}</text>
+              <text v-if="race.diff_str" class="comp-diff-text">比目标 {{ race.diff_str }}</text>
+            </view>
+            <text v-if="race.finish_notes" class="comp-notes-text">“{{ race.finish_notes }}”</text>
+            <!-- Photos row in card -->
+            <view v-if="race.photos && race.photos.length" class="card-photos-scroll">
+              <image
+                v-for="(pUrl, pIdx) in race.photos"
+                :key="pIdx"
+                class="card-photo-thumb"
+                :src="pUrl"
+                mode="aspectFill"
+                @click.stop="handlePreviewImage(pUrl, race.photos)"
+              />
+            </view>
+          </view>
+          <view v-else-if="race.is_past" class="race-past-tip" @click.stop="openEditRaceModal(race)">
+            <text class="past-tip-text">⚠️ 比赛日已过，点击标记完赛与填报成绩 ➔</text>
           </view>
           <view class="race-priority-row">
             <text class="race-priority-lbl">定位调整:</text>
@@ -1374,7 +1401,90 @@
             </view>
           </view>
 
-          <!-- 5. 赛事情报客观数据（可折叠查看/编辑） -->
+          <!-- 5. 完赛状态与成绩回填 -->
+          <view class="m-field-wrap">
+            <text class="m-field-lbl">赛事状态</text>
+            <view class="status-segmented">
+              <view
+                class="status-seg-item"
+                :class="{ active: raceForm.status !== 'completed' }"
+                @click="raceForm.status = 'upcoming'"
+              >🟢 备战中 (Upcoming)</view>
+              <view
+                class="status-seg-item completed-item"
+                :class="{ active: raceForm.status === 'completed' }"
+                @click="raceForm.status = 'completed'"
+              >🏅 已完赛 (Completed)</view>
+            </view>
+          </view>
+
+          <!-- 完赛详情面板（当选择已完赛时展开） -->
+          <view v-if="raceForm.status === 'completed'" class="m-completion-section">
+            <view class="m-completion-header">
+              <text class="comp-sec-title">🏅 完赛成绩与记录回填</text>
+              <button
+                class="m-auto-match-btn"
+                :loading="matchingWatchActivity"
+                :disabled="matchingWatchActivity"
+                @click="handleModalMatchActivity"
+              >⚡ 从手表记录一键提取</button>
+            </view>
+
+            <view class="m-field-wrap">
+              <view class="finish-time-lbl-row">
+                <text class="m-field-lbl">实际完成时间 (HH:MM:SS)</text>
+                <text v-if="calcModalDiff" class="finish-time-diff-badge" :class="calcModalDiff.isFaster ? 'faster' : 'slower'">
+                  {{ calcModalDiff.badge }} {{ calcModalDiff.str }}
+                </text>
+              </view>
+              <input
+                class="m-input-txt font-mono"
+                type="text"
+                v-model="raceForm.finish_time"
+                placeholder="如: 3:24:15 或 08:12:00"
+                placeholder-class="placeholder-style"
+              />
+            </view>
+
+            <view class="m-field-wrap">
+              <text class="m-field-lbl">完赛心得 / 感言</text>
+              <input
+                class="m-input-txt"
+                type="text"
+                v-model="raceForm.finish_notes"
+                placeholder="如: 补给充分，下坡控速理想，超额达成目标！"
+                placeholder-class="placeholder-style"
+              />
+            </view>
+
+            <view class="m-field-wrap">
+              <view class="m-photo-lbl-row">
+                <text class="m-field-lbl">完赛照片 / 证书 / 奖牌</text>
+                <button
+                  class="m-upload-photo-btn"
+                  :loading="uploadingModalPhoto"
+                  :disabled="uploadingModalPhoto"
+                  @click="handleChooseRacePhoto"
+                >📷 上传照片</button>
+              </view>
+              <view v-if="raceForm.photos && raceForm.photos.length" class="modal-photo-grid">
+                <view v-for="(pUrl, pIdx) in raceForm.photos" :key="pIdx" class="modal-photo-thumb-wrap">
+                  <image
+                    class="modal-photo-img"
+                    :src="pUrl"
+                    mode="aspectFill"
+                    @click="handlePreviewImage(pUrl, raceForm.photos)"
+                  />
+                  <view class="modal-photo-del" @click.stop="handleDeleteModalPhoto(pUrl)">✕</view>
+                </view>
+              </view>
+              <view v-else class="modal-photo-empty">
+                <text class="empty-photo-text">暂无照片，支持上传成绩证书、奖牌或现场冲线照 📸</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 6. 赛事情报客观数据（可折叠查看/编辑） -->
           <view class="m-race-info-block">
             <view class="m-race-info-header" @click="modalExpandRaceInfo = !modalExpandRaceInfo">
               <text class="m-info-title">
@@ -1589,6 +1699,7 @@ import {
   authenticateWechatUser,
   deviceLogin,
   uploadAvatarFile,
+  uploadRacePhoto,
   API_BASE_URL,
   UserProfile,
   bindCoros,
@@ -2207,6 +2318,147 @@ function getRaceKey(race: any, idx?: number): string {
   return String(idx ?? "unknown");
 }
 
+const matchingWatchActivity = ref(false);
+const uploadingModalPhoto = ref(false);
+
+function parseTimeToSec(tStr: string): number | null {
+  if (!tStr) return null;
+  const parts = tStr.trim().split(":");
+  try {
+    if (parts.length === 3) return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  } catch {}
+  return null;
+}
+
+function formatSecToTime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+const calcModalDiff = computed(() => {
+  if (!raceForm.value.finish_time || !raceForm.value.target_time) return null;
+  const tSec = parseTimeToSec(raceForm.value.target_time);
+  const fSec = parseTimeToSec(raceForm.value.finish_time);
+  if (!tSec || !fSec) return null;
+  const diff = fSec - tSec;
+  if (diff < 0) {
+    return {
+      isFaster: true,
+      str: `-${formatSecToTime(Math.abs(diff))}`,
+      badge: "超额达标 🎉",
+    };
+  } else if (diff === 0) {
+    return {
+      isFaster: true,
+      str: "精准达标",
+      badge: "精准达标 🎯",
+    };
+  } else {
+    return {
+      isFaster: false,
+      str: `+${formatSecToTime(diff)}`,
+      badge: "顺利完赛 🏅",
+    };
+  }
+});
+
+async function handleModalMatchActivity() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!raceForm.value.race_date) {
+    uni.showToast({ title: "请先选择比赛日期", icon: "none" });
+    return;
+  }
+  matchingWatchActivity.value = true;
+  uni.showLoading({ title: "正在匹配记录..." });
+  try {
+    const raceId = raceForm.value.id || "temp";
+    const res = await request(`/api/profile/${uid}/races/${raceId}/matched-activity?race_date=${raceForm.value.race_date}`);
+    uni.hideLoading();
+    if (res?.matched && res?.activity) {
+      const act = res.activity;
+      raceForm.value.status = "completed";
+      raceForm.value.finish_time = act.formatted_time || "";
+      if (!raceForm.value.finish_notes) {
+        raceForm.value.finish_notes = `匹配手表记录【${act.name}】(${act.distance_km}km, 配速 ${act.avg_pace_str})`;
+      }
+      uni.showToast({
+        title: `已匹配用时: ${act.formatted_time}`,
+        icon: "success"
+      });
+    } else {
+      uni.showToast({
+        title: res?.message || "未在比赛日找到匹配记录",
+        icon: "none"
+      });
+    }
+  } catch (e: any) {
+    uni.hideLoading();
+    uni.showToast({ title: "检索失败: " + (e?.message || e), icon: "none" });
+  } finally {
+    matchingWatchActivity.value = false;
+  }
+}
+
+async function handleChooseRacePhoto() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  const raceId = raceForm.value.id || `race_${Date.now()}`;
+  if (!raceForm.value.id) {
+    raceForm.value.id = raceId;
+  }
+
+  uni.chooseImage({
+    count: 1,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: async (res) => {
+      const tempFilePath = res.tempFilePaths[0];
+      if (!tempFilePath) return;
+      uploadingModalPhoto.value = true;
+      uni.showLoading({ title: "正在上传照片..." });
+      try {
+        const photoUrl = await uploadRacePhoto(uid, raceId, tempFilePath);
+        uni.hideLoading();
+        if (!raceForm.value.photos) raceForm.value.photos = [];
+        if (!raceForm.value.photos.includes(photoUrl)) {
+          raceForm.value.photos.push(photoUrl);
+        }
+        raceForm.value.photo_url = photoUrl;
+        uni.showToast({ title: "照片上传成功 📸", icon: "success" });
+      } catch (err: any) {
+        uni.hideLoading();
+        uni.showToast({ title: err?.message || "上传失败", icon: "none" });
+      } finally {
+        uploadingModalPhoto.value = false;
+      }
+    }
+  });
+}
+
+function handleDeleteModalPhoto(photoUrl: string) {
+  if (!raceForm.value.photos) return;
+  raceForm.value.photos = raceForm.value.photos.filter((p: string) => p !== photoUrl);
+  raceForm.value.photo_url = raceForm.value.photos[0] || "";
+}
+
+function handlePreviewImage(current: string, urls?: string[]) {
+  uni.previewImage({
+    current,
+    urls: urls && urls.length ? urls : [current],
+  });
+}
+
 function openAddRaceModal() {
   const future = new Date();
   future.setDate(future.getDate() + 60);
@@ -2218,6 +2470,11 @@ function openAddRaceModal() {
     race_date: dateStr,
     target_time: "3:30:00",
     priority: 1,
+    status: "upcoming",
+    finish_time: "",
+    finish_notes: "",
+    photo_url: "",
+    photos: [],
     race_info: {},
   };
   raceModalMode.value = "add";
@@ -2233,6 +2490,11 @@ function openEditRaceModal(race: any) {
     race_date: race.race_date || "",
     target_time: race.target_time || "3:30:00",
     priority: race.priority || 1,
+    status: race.status || (race.is_completed ? "completed" : "upcoming"),
+    finish_time: race.finish_time || "",
+    finish_notes: race.finish_notes || "",
+    photo_url: race.photo_url || "",
+    photos: race.photos ? [...race.photos] : [],
     race_info: { ...(race.race_info || {}) },
   };
   raceModalMode.value = "edit";
@@ -2265,6 +2527,11 @@ async function handleSaveRaceModal() {
       race_date: raceForm.value.race_date,
       target_time: raceForm.value.target_time.trim() || "3:30:00",
       priority: raceForm.value.priority,
+      status: raceForm.value.status || "upcoming",
+      finish_time: raceForm.value.finish_time ? raceForm.value.finish_time.trim() : undefined,
+      finish_notes: raceForm.value.finish_notes ? raceForm.value.finish_notes.trim() : undefined,
+      photo_url: raceForm.value.photo_url || undefined,
+      photos: raceForm.value.photos || [],
       race_info: raceForm.value.race_info,
     };
     const res = await request(`/api/profile/${uid}/races`, "POST", payload);
@@ -2274,7 +2541,7 @@ async function handleSaveRaceModal() {
     }
     showRaceModal.value = false;
     uni.showToast({
-      title: raceModalMode.value === "add" ? "赛事添加成功 🎉" : "赛事修改成功 ✓",
+      title: raceModalMode.value === "add" ? "赛事添加成功 🎉" : "赛事保存成功 ✓",
       icon: "success",
     });
   } catch (err: any) {
@@ -3448,11 +3715,251 @@ onShow(() => {
   color: #fc4c02;
 }
 
-.race-meta-row {
+.race-badge.completed-badge {
+  background-color: rgba(52, 199, 89, 0.2);
+  color: #34c759;
+  border: 1rpx solid rgba(52, 199, 89, 0.35);
+}
+
+.race-finish-time-tag {
+  color: #38bdf8;
+  font-weight: bold;
+}
+
+.race-completed-card-banner {
+  margin-top: 14rpx;
+  padding: 14rpx 16rpx;
+  background-color: rgba(52, 199, 89, 0.08);
+  border: 1rpx solid rgba(52, 199, 89, 0.2);
+  border-radius: 14rpx;
   display: flex;
-  gap: 16rpx;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.completed-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+
+.comp-badge-tag {
   font-size: 20rpx;
-  color: #8e8e93;
+  font-weight: bold;
+  color: #34c759;
+  background-color: rgba(52, 199, 89, 0.15);
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+}
+
+.comp-diff-text {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.comp-notes-text {
+  font-size: 20rpx;
+  color: #d4d4d8;
+  font-style: italic;
+}
+
+.card-photos-scroll {
+  display: flex;
+  gap: 12rpx;
+  overflow-x: auto;
+  padding-top: 4rpx;
+}
+
+.card-photo-thumb {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+}
+
+.race-past-tip {
+  margin-top: 10rpx;
+  padding: 8rpx 14rpx;
+  background-color: rgba(251, 191, 36, 0.1);
+  border: 1rpx solid rgba(251, 191, 36, 0.2);
+  border-radius: 10rpx;
+}
+
+.past-tip-text {
+  font-size: 20rpx;
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+/* Status Segmented in Modal */
+.status-segmented {
+  display: flex;
+  background-color: #242429;
+  border-radius: 14rpx;
+  padding: 6rpx;
+  gap: 8rpx;
+}
+
+.status-seg-item {
+  flex: 1;
+  text-align: center;
+  font-size: 22rpx;
+  font-weight: 600;
+  padding: 14rpx 0;
+  border-radius: 10rpx;
+  color: #a1a1aa;
+}
+
+.status-seg-item.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.status-seg-item.completed-item.active {
+  background: linear-gradient(135deg, rgba(52, 199, 89, 0.3) 0%, rgba(52, 199, 89, 0.5) 100%);
+  color: #ffffff;
+  border: 1rpx solid rgba(52, 199, 89, 0.4);
+}
+
+/* Modal Completion Section */
+.m-completion-section {
+  background-color: rgba(52, 199, 89, 0.05);
+  border: 1rpx solid rgba(52, 199, 89, 0.2);
+  border-radius: 18rpx;
+  padding: 18rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.m-completion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.comp-sec-title {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #34c759;
+}
+
+.m-auto-match-btn {
+  margin: 0;
+  padding: 0 16rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background-color: rgba(252, 76, 2, 0.15);
+  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  border-radius: 10rpx;
+}
+
+.m-auto-match-btn::after {
+  border: none;
+}
+
+.finish-time-lbl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+
+.finish-time-diff-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+}
+
+.finish-time-diff-badge.faster {
+  color: #34c759;
+  background-color: rgba(52, 199, 89, 0.15);
+}
+
+.finish-time-diff-badge.slower {
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.15);
+}
+
+.m-photo-lbl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+
+.m-upload-photo-btn {
+  margin: 0;
+  padding: 0 18rpx;
+  height: 46rpx;
+  line-height: 46rpx;
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #e4e4e7;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  border-radius: 10rpx;
+}
+
+.m-upload-photo-btn::after {
+  border: none;
+}
+
+.modal-photo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 8rpx;
+}
+
+.modal-photo-thumb-wrap {
+  position: relative;
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 14rpx;
+  overflow: hidden;
+  border: 1rpx solid rgba(255, 255, 255, 0.2);
+}
+
+.modal-photo-img {
+  width: 100%;
+  height: 100%;
+}
+
+.modal-photo-del {
+  position: absolute;
+  top: 4rpx;
+  right: 4rpx;
+  width: 32rpx;
+  height: 32rpx;
+  line-height: 30rpx;
+  text-align: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #ff453a;
+  border-radius: 50%;
+  font-size: 20rpx;
+  font-weight: bold;
+}
+
+.modal-photo-empty {
+  padding: 20rpx;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1rpx dashed rgba(255, 255, 255, 0.1);
+  border-radius: 14rpx;
+  text-align: center;
+}
+
+.empty-photo-text {
+  font-size: 20rpx;
+  color: #71717a;
 }
 
 

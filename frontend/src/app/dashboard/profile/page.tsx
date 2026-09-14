@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
-import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame } from "lucide-react";
+import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2 } from "lucide-react";
 
 export interface RacePlan {
   id?: string;
@@ -13,8 +13,18 @@ export interface RacePlan {
   race_date: string;
   target_time: string;
   days_left?: number;
+  is_past?: boolean;
   priority?: number | string;
   race_info?: Record<string, any>;
+  status?: string; // "upcoming" | "completed"
+  finish_time?: string;
+  finish_notes?: string;
+  photo_url?: string;
+  photos?: string[];
+  is_completed?: boolean;
+  diff_seconds?: number;
+  diff_str?: string;
+  performance_badge?: string;
 }
 
 import GarminConnectModal from "@/components/GarminConnectModal";
@@ -384,6 +394,147 @@ export default function ProfilePage() {
     setRaces(races.filter((_, idx) => idx !== index));
   }
 
+  const [uploadingPhotoIdx, setUploadingPhotoIdx] = useState<number | null>(null);
+  const [matchingActivityIdx, setMatchingActivityIdx] = useState<number | null>(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+
+  async function handleMatchActivity(index: number) {
+    const race = races[index];
+    if (!user) return;
+    if (!race.race_date) {
+      alert("请先选择比赛日期");
+      return;
+    }
+    setMatchingActivityIdx(index);
+    try {
+      const raceId = race.id || "temp";
+      const res = await apiClient.get(`/api/profile/${user.id}/races/${raceId}/matched-activity?race_date=${race.race_date}`);
+      if (res.data?.matched && res.data?.activity) {
+        const act = res.data.activity;
+        const updated = [...races];
+        const formattedTime = act.formatted_time || "";
+        let diffSec: number | undefined;
+        let diffStr: string | undefined;
+        let badge: string | undefined;
+
+        try {
+          const tSec = parseTimeToSec(updated[index].target_time);
+          const fSec = parseTimeToSec(formattedTime);
+          if (tSec && fSec) {
+            diffSec = fSec - tSec;
+            if (diffSec < 0) {
+              diffStr = `-${formatSecToTime(Math.abs(diffSec))}`;
+              badge = "超额达标 🎉";
+            } else if (diffSec === 0) {
+              diffStr = "精准达标";
+              badge = "精准达标 🎯";
+            } else {
+              diffStr = `+${formatSecToTime(diffSec)}`;
+              badge = "顺利完赛 🏅";
+            }
+          }
+        } catch {}
+
+        updated[index] = {
+          ...updated[index],
+          status: "completed",
+          is_completed: true,
+          finish_time: formattedTime,
+          diff_seconds: diffSec,
+          diff_str: diffStr,
+          performance_badge: badge,
+          finish_notes: updated[index].finish_notes || `匹配到手表记录【${act.name}】(${act.distance_km}km, 平均配速 ${act.avg_pace_str})`,
+        };
+        setRaces(updated);
+        alert(`🎉 成功从手表记录匹配到成绩！\n记录名称: ${act.name}\n完赛用时: ${formattedTime} (${act.distance_km}km)\n已为您自动填报成绩并标记完赛。`);
+      } else {
+        alert(res.data?.message || "未在比赛日找到匹配的运动记录，您可以手动输入完赛用时。");
+      }
+    } catch (e: any) {
+      alert("手表记录检索失败: " + (e?.message || e));
+    } finally {
+      setMatchingActivityIdx(null);
+    }
+  }
+
+  async function handleUploadRacePhoto(index: number, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    const race = races[index];
+    setUploadingPhotoIdx(index);
+    try {
+      const raceId = race.id || `race_${Date.now()}`;
+      if (!race.id) {
+        const updated = [...races];
+        updated[index].id = raceId;
+        setRaces(updated);
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await apiClient.post(`/api/profile/${user.id}/races/${raceId}/photo`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      if (res.data?.photo_url) {
+        const updated = [...races];
+        updated[index] = {
+          ...updated[index],
+          id: raceId,
+          photo_url: res.data.photo_url,
+          photos: res.data.photos || [res.data.photo_url],
+        };
+        setRaces(updated);
+        alert("📸 完赛照片上传成功！");
+      }
+    } catch (err: any) {
+      alert("上传照片失败: " + (err?.message || err));
+    } finally {
+      setUploadingPhotoIdx(null);
+      e.target.value = "";
+    }
+  }
+
+  async function handleDeleteRacePhoto(index: number, photoUrl: string) {
+    if (!confirm("确定要删除这张照片吗？")) return;
+    const race = races[index];
+    if (!user || !race.id) {
+      const updated = [...races];
+      const photos = (updated[index].photos || []).filter(p => p !== photoUrl);
+      updated[index].photos = photos;
+      updated[index].photo_url = photos[0] || "";
+      setRaces(updated);
+      return;
+    }
+    try {
+      const res = await apiClient.delete(`/api/profile/${user.id}/races/${race.id}/photo`, {
+        data: { photo_url: photoUrl }
+      });
+      const updated = [...races];
+      updated[index].photos = res.data?.photos || [];
+      updated[index].photo_url = updated[index].photos?.[0] || "";
+      setRaces(updated);
+    } catch (e: any) {
+      alert("删除照片失败: " + (e?.message || e));
+    }
+  }
+
+  function parseTimeToSec(tStr: string): number | null {
+    if (!tStr) return null;
+    const parts = tStr.trim().split(":");
+    try {
+      if (parts.length === 3) return parseInt(parts[0])*3600 + parseInt(parts[1])*60 + parseInt(parts[2]);
+      if (parts.length === 2) return parseInt(parts[0])*60 + parseInt(parts[1]);
+    } catch {}
+    return null;
+  }
+
+  function formatSecToTime(sec: number): string {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
   async function handleImportGarminPb() {
     if (!user) return;
     setImportingGarmin(true);
@@ -727,26 +878,57 @@ export default function ProfilePage() {
                   key={race.id || idx}
                   className="bg-[#18181c] border border-white/5 rounded-2xl p-5 space-y-4 relative"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-base">{idx === 0 ? "🔥" : "⛰️"}</span>
                       <span className="text-sm font-bold text-white">比赛 {idx + 1}</span>
-                      <span className="bg-[#24242c] text-zinc-300 text-xs px-2.5 py-0.5 rounded-full border border-white/5 font-semibold">
-                        {race.days_left !== undefined ? `${race.days_left} 天` : "—"}
-                        {race.days_left !== undefined && race.days_left < 30 ? " 冲刺" : ""}
-                      </span>
+                      {race.status === "completed" || race.is_completed ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2.5 py-0.5 rounded-full border border-emerald-500/30 font-bold flex items-center gap-1">
+                            <Trophy className="w-3 h-3 text-emerald-400" />
+                            已完赛
+                          </span>
+                          {race.finish_time && (
+                            <span className="bg-zinc-800 text-cyan-300 text-xs px-2.5 py-0.5 rounded-full border border-white/10 font-mono font-bold">
+                              {race.finish_time}
+                            </span>
+                          )}
+                          {race.performance_badge && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
+                              (race.diff_seconds || 0) <= 0 
+                                ? "bg-amber-500/15 text-amber-300 border-amber-500/30" 
+                                : "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                            }`}>
+                              {race.performance_badge} {race.diff_str}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="bg-[#24242c] text-zinc-300 text-xs px-2.5 py-0.5 rounded-full border border-white/5 font-semibold">
+                            {race.days_left !== undefined ? `${race.days_left} 天` : "—"}
+                            {race.days_left !== undefined && race.days_left < 30 ? " 冲刺" : ""}
+                          </span>
+                          {race.is_past && (
+                            <span className="bg-amber-500/15 text-amber-400 text-[11px] px-2 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
+                              ⚠️ 比赛日已过，可标记完赛
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <button
                       type="button"
                       onClick={() => removeRace(idx)}
                       className="text-zinc-500 hover:text-rose-400 transition p-1"
+                      title="删除此赛事计划"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
                       <label className="text-xs text-zinc-400 block mb-1.5">比赛名称</label>
                       <input
@@ -808,7 +990,165 @@ export default function ProfilePage() {
                         <option value={3}>C 标模拟拉练 (Training Run / 基础长跑)</option>
                       </select>
                     </div>
+
+                    <div>
+                      <label className="text-xs text-zinc-400 block mb-1.5">完赛状态</label>
+                      <select
+                        value={race.status || (race.is_completed ? "completed" : "upcoming")}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          updateRace(idx, "status", val);
+                          updateRace(idx, "is_completed", val === "completed");
+                        }}
+                        className={`w-full border rounded-xl px-3.5 py-2.5 text-sm font-medium focus:outline-none transition ${
+                          race.status === "completed" || race.is_completed
+                            ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
+                            : "bg-[#202026] border-white/10 text-white focus:border-[#FC4C02]"
+                        }`}
+                      >
+                        <option value="upcoming">🟢 备战中 (Upcoming)</option>
+                        <option value="completed">🏅 已完赛 (Completed)</option>
+                      </select>
+                    </div>
                   </div>
+
+                  {/* ── Completed Race Details & Photo Section ── */}
+                  {(race.status === "completed" || race.is_completed) && (
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-4 space-y-4">
+                      <div className="flex items-center justify-between border-b border-emerald-500/10 pb-2.5">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                          <Trophy className="w-4 h-4 text-amber-400" />
+                          <span>已完赛成绩记录与荣誉证书</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleMatchActivity(idx)}
+                          disabled={matchingActivityIdx === idx}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-[#FC4C02]/20 hover:bg-[#FC4C02]/30 text-[#FC4C02] border border-[#FC4C02]/30 transition active:scale-95 disabled:opacity-50"
+                        >
+                          {matchingActivityIdx === idx ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Zap className="w-3.5 h-3.5" />
+                          )}
+                          <span>⚡ 从手表记录一键提取成绩</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-xs text-zinc-400 block mb-1.5 flex items-center justify-between">
+                            <span>实际完成时间 (HH:MM:SS)</span>
+                            {race.diff_str && (
+                              <span className={`text-[11px] font-bold ${
+                                (race.diff_seconds || 0) <= 0 ? "text-emerald-400" : "text-cyan-400"
+                              }`}>
+                                {race.performance_badge} ({race.diff_str})
+                              </span>
+                            )}
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={race.finish_time || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                updateRace(idx, "finish_time", val);
+                                try {
+                                  const tSec = parseTimeToSec(race.target_time);
+                                  const fSec = parseTimeToSec(val);
+                                  if (tSec && fSec) {
+                                    const diff = fSec - tSec;
+                                    updateRace(idx, "diff_seconds", diff);
+                                    updateRace(idx, "diff_str", diff < 0 ? `-${formatSecToTime(Math.abs(diff))}` : (diff === 0 ? "精准达标" : `+${formatSecToTime(diff)}`));
+                                    updateRace(idx, "performance_badge", diff < 0 ? "超额达标 🎉" : "顺利完赛 🏅");
+                                  }
+                                } catch {}
+                              }}
+                              placeholder="如: 3:24:15 或 08:12:00"
+                              className="w-full bg-[#18181f] border border-emerald-500/30 rounded-xl px-3.5 py-2.5 text-sm text-emerald-300 font-mono font-bold focus:outline-none focus:border-emerald-400"
+                            />
+                            <Clock className="w-4 h-4 text-zinc-500 absolute right-3.5 top-3" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-zinc-400 block mb-1.5">完赛心得 / 感言</label>
+                          <input
+                            type="text"
+                            value={race.finish_notes || ""}
+                            onChange={(e) => updateRace(idx, "finish_notes", e.target.value)}
+                            placeholder="如: 补给充分，下坡控速理想，超额达成目标！"
+                            className="w-full bg-[#18181f] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Photo Upload & Gallery */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                            <Camera className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>完赛照片 / 成绩证书 / 奖牌现场照</span>
+                          </label>
+
+                          <label className="cursor-pointer inline-flex items-center gap-1 px-3 py-1 bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 rounded-lg text-xs font-medium transition active:scale-95">
+                            {uploadingPhotoIdx === idx ? (
+                              <Loader2 className="w-3 h-3 animate-spin text-[#FC4C02]" />
+                            ) : (
+                              <Plus className="w-3 h-3 text-[#FC4C02]" />
+                            )}
+                            <span>{uploadingPhotoIdx === idx ? "正在上传..." : "上传照片"}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingPhotoIdx === idx}
+                              onChange={(e) => handleUploadRacePhoto(idx, e)}
+                            />
+                          </label>
+                        </div>
+
+                        {/* Photo thumbnails */}
+                        {race.photos && race.photos.length > 0 ? (
+                          <div className="flex flex-wrap gap-3">
+                            {race.photos.map((pUrl, pIdx) => (
+                              <div
+                                key={pIdx}
+                                className="relative group w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-white/10 bg-black cursor-pointer shadow-md"
+                                onClick={() => setPreviewPhotoUrl(pUrl)}
+                              >
+                                <img
+                                  src={pUrl}
+                                  alt="完赛照片"
+                                  className="w-full h-full object-cover transition duration-200 group-hover:scale-105"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-1">
+                                  <ExternalLink className="w-4 h-4 text-white" />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteRacePhoto(idx, pUrl);
+                                  }}
+                                  className="absolute top-1 right-1 w-5 h-5 bg-black/70 hover:bg-rose-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                                  title="删除照片"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-white/[0.02] border border-dashed border-white/10 rounded-xl text-center text-xs text-zinc-500">
+                            暂无照片，支持上传完赛成绩证书、奖牌合影或现场冲线照 📸
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* ── Race Intelligence Expandable Panel ── */}
                   <div className="pt-2 border-t border-white/5 space-y-2">
@@ -1489,6 +1829,41 @@ export default function ProfilePage() {
           </div>
         </form>
       </main>
+
+      {/* ── Photo Lightbox Preview Modal ── */}
+      {previewPhotoUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setPreviewPhotoUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setPreviewPhotoUrl(null)}
+              className="absolute -top-10 right-0 text-white/80 hover:text-white p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition"
+              title="关闭全屏"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={previewPhotoUrl}
+              alt="完赛照片大图"
+              className="max-h-[80vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/10"
+            />
+            <div className="mt-3 flex items-center gap-3">
+              <a
+                href={previewPhotoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>在新窗口查看原图</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       <GarminConnectModal
         open={garminModalOpen}

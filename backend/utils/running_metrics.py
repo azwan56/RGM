@@ -398,9 +398,15 @@ def analyze_multi_race_calendar(races: List[Dict[str, Any]]) -> Dict[str, Any]:
     from datetime import date, datetime
     today = date.today()
     upcoming = []
+    completed = []
 
     for r in (races or []):
         r_dict = dict(r)
+        is_completed = (r_dict.get("status") == "completed" or bool(r_dict.get("finish_time")))
+        if is_completed:
+            completed.append(r_dict)
+            continue
+
         date_str = str(r_dict.get("race_date") or "")[:10]
         try:
             r_date = datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -410,6 +416,11 @@ def analyze_multi_race_calendar(races: List[Dict[str, Any]]) -> Dict[str, Any]:
                 r_dict["days_left"] = days_left
                 r_dict["race_date_clean"] = date_str
                 upcoming.append(r_dict)
+            else:
+                # Past uncompleted race
+                r_dict["days_left"] = 0
+                r_dict["race_date_clean"] = date_str
+                completed.append(r_dict)
         except Exception:
             continue
 
@@ -418,11 +429,13 @@ def analyze_multi_race_calendar(races: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not upcoming:
         return {
             "total_upcoming": 0,
+            "total_completed": len(completed),
             "races": [],
+            "completed_races": completed,
             "conflicts": [],
             "pairings": [],
             "cross_discipline": [],
-            "macrocycle_summary": "当前暂未录入未来比赛计划，训练以建立稳态基础有氧与力量基线为主。"
+            "macrocycle_summary": "当前暂无未来待备战的比赛计划，建议以稳态基础有氧、神经肌肉激活与日常体能储备为主。"
         }
 
     # Resolve A/B/C tiers
@@ -516,7 +529,9 @@ def analyze_multi_race_calendar(races: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     return {
         "total_upcoming": len(serializable_races),
+        "total_completed": len(completed),
         "races": serializable_races,
+        "completed_races": completed,
         "conflicts": conflicts,
         "pairings": pairings,
         "cross_discipline": cross_discipline,

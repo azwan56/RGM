@@ -47,11 +47,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Static Files (Avatars)
+# 3. Static Files (Avatars & Race Photos)
 from fastapi.staticfiles import StaticFiles
 avatars_dir = os.path.join(os.path.dirname(__file__), "data", "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
 app.mount("/api/avatars", StaticFiles(directory=avatars_dir), name="avatars")
+
+race_photos_dir = os.path.join(os.path.dirname(__file__), "data", "race_photos")
+os.makedirs(race_photos_dir, exist_ok=True)
+app.mount("/api/race-photos", StaticFiles(directory=race_photos_dir), name="race_photos")
 
 # 4. Include Routers
 app.include_router(auth.router,     prefix="/api/auth",     tags=["认证与佳明直连"])
