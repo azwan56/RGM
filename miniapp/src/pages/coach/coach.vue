@@ -203,7 +203,7 @@
           scroll-x
           class="week-scroll-view"
           show-scrollbar="false"
-          :scroll-into-view="'week-chip-' + selectedWeekIdx"
+          :scroll-into-view="scrollIntoWeek"
           :scroll-with-animation="true"
         >
           <view class="week-chips-row">
@@ -216,7 +216,7 @@
                 active: selectedWeekIdx === w.week_index,
                 'is-current-week': currentWeekIndex === w.week_index
               }"
-              @click="selectedWeekIdx = w.week_index"
+              @click="selectWeek(w.week_index)"
             >
               <view class="chip-title-row">
                 <text class="week-chip-title">第 {{ w.week_index }} 周</text>
@@ -724,7 +724,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch, onMounted, nextTick } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex } from "../../utils/api";
 
@@ -736,13 +736,42 @@ const planLoading = ref(false);
 const generatingPlan = ref(false);
 const showPlanConfig = ref(false);
 const selectedWeekIdx = ref(1);
+const scrollIntoWeek = ref("");
+
+function scrollToWeek(wk: number) {
+  scrollIntoWeek.value = "";
+  nextTick(() => {
+    setTimeout(() => {
+      scrollIntoWeek.value = "week-chip-" + wk;
+    }, 120);
+  });
+}
+
+function selectWeek(idx: number) {
+  selectedWeekIdx.value = idx;
+  scrollToWeek(idx);
+}
 
 const currentWeekIndex = computed(() => {
   if (plan.value?.current_week_index) {
-    return plan.value.current_week_index;
+    return Number(plan.value.current_week_index);
   }
   return computeCurrentWeekIndex(plan.value);
 });
+
+watch(
+  () => plan.value,
+  (newPlan) => {
+    if (newPlan) {
+      const curWk = Number(newPlan.current_week_index) || computeCurrentWeekIndex(newPlan);
+      if (curWk) {
+        selectedWeekIdx.value = curWk;
+        scrollToWeek(curWk);
+      }
+    }
+  },
+  { immediate: true }
+);
 
 function computeCurrentWeekIndex(planData: any): number {
   if (!planData) return 1;
@@ -919,10 +948,11 @@ async function loadUserPlan() {
   try {
     const res = await request(`/api/coach/plan/user/${user.value.id}`);
     if (res?.active_plan) {
-      plan.value = res.active_plan;
-      const curWk = res.active_plan.current_week_index || computeCurrentWeekIndex(res.active_plan);
+      const curWk = Number(res.active_plan.current_week_index) || computeCurrentWeekIndex(res.active_plan);
       selectedWeekIdx.value = curWk;
+      plan.value = res.active_plan;
       showPlanConfig.value = false;
+      scrollToWeek(curWk);
     } else {
       showPlanConfig.value = true;
     }
@@ -1364,6 +1394,10 @@ function formatAdvice(w: any): string {
   }
   return String(w);
 }
+
+onMounted(() => {
+  loadUserPlan();
+});
 
 onShow(() => {
   syncTabBarIndex(1);
@@ -2594,6 +2628,11 @@ onPullDownRefresh(async () => {
 .week-chip.active {
   background-color: #af52de;
   border-color: #af52de;
+}
+
+.week-chip.is-current-week:not(.active) {
+  border-color: rgba(175, 82, 222, 0.5);
+  background-color: rgba(175, 82, 222, 0.08);
 }
 
 .chip-title-row {
