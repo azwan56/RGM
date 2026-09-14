@@ -174,7 +174,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
 
         # Auto-fetch GPS track for the latest outdoor activities
         if garmin_adapter:
-            for act in all_activities[:3]:
+            for act in all_activities[:10]:
                 act_id = act.get("id", "")
                 if act_id.startswith("garmin_") and act.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]:
                     try:

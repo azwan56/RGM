@@ -131,11 +131,16 @@
 
             <!-- Map Preview or GPS Action Button -->
             <view
-              v-if="act.map_image_url"
+              v-if="getRoutePreview(act)"
               class="feed-map-card"
               @click.stop="openTrackModal(act)"
             >
-              <image class="feed-map-thumb" :src="act.map_image_url" mode="aspectFit" />
+              <image
+                class="feed-map-thumb"
+                :class="{ 'coros-filter': Boolean(act.map_image_url) }"
+                :src="getRoutePreview(act)"
+                mode="aspectFit"
+              />
               <view class="feed-map-overlay">
                 <text class="feed-map-pill">🗺️ 点击展开 GPS 路线与高程剖面</text>
               </view>
@@ -314,8 +319,94 @@ function openTrackModal(act: any) {
   selectedTrackActivity.value = act;
 }
 
-
 const user = ref<UserProfile | null>(null);
+
+const b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+function base64Encode(str: string): string {
+  const utf8Bytes = encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
+    return String.fromCharCode(parseInt(p1, 16));
+  });
+  let output = "";
+  for (let i = 0; i < utf8Bytes.length; i += 3) {
+    const a = utf8Bytes.charCodeAt(i);
+    const b = utf8Bytes.charCodeAt(i + 1);
+    const c = utf8Bytes.charCodeAt(i + 2);
+    output += b64chars.charAt(a >> 2);
+    output += b64chars.charAt(((a & 3) << 4) | (b >> 4));
+    output += isNaN(b) ? "=" : b64chars.charAt(((b & 15) << 2) | (c >> 6));
+    output += isNaN(b) || isNaN(c) ? "=" : b64chars.charAt(c & 63);
+  }
+  return output;
+}
+
+const routeSvgCache = new Map<string, string>();
+
+function getRoutePreview(act: any): string | null {
+  if (act.map_image_url) return act.map_image_url;
+  if (!act.gps_track_data) return null;
+
+  const actId = act.id || "";
+  if (actId && routeSvgCache.has(actId)) {
+    return routeSvgCache.get(actId)!;
+  }
+
+  try {
+    let track = act.gps_track_data;
+    if (typeof track === "string") {
+      track = JSON.parse(track);
+    }
+    const points = track?.points;
+    if (!points || points.length < 2) return null;
+
+    const W = 320;
+    const H = 140;
+    const pad = 16;
+
+    const lats = points.map((p: any) => p.latitude);
+    const lngs = points.map((p: any) => p.longitude);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+
+    const midLatRad = ((minLat + maxLat) / 2) * (Math.PI / 180);
+    const cosLat = Math.cos(midLatRad);
+    const dLng = (maxLng - minLng) * cosLat;
+    const dLat = maxLat - minLat;
+
+    const availW = W - pad * 2;
+    const availH = H - pad * 2;
+    const scale = Math.min(availW / (dLng || 1e-6), availH / (dLat || 1e-6));
+
+    const shapeW = dLng * scale;
+    const shapeH = dLat * scale;
+    const offsetX = pad + (availW - shapeW) / 2;
+    const offsetY = pad + (availH - shapeH) / 2;
+
+    const projected = points.map((p: any) => {
+      const x = Math.round((offsetX + (p.longitude - minLng) * cosLat * scale) * 10) / 10;
+      const y = Math.round((offsetY + (maxLat - p.latitude) * scale) * 10) / 10;
+      return { x, y };
+    });
+
+    const pathD = projected.reduce((acc: string, pt: { x: number; y: number }, idx: number) => {
+      return idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
+    }, "");
+
+    const startPt = projected[0];
+    const endPt = projected[projected.length - 1];
+
+    const safeId = (actId || "trk").replace(/[^a-zA-Z0-9_]/g, "_");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><defs><filter id="glow_${safeId}" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#FC4C02" flood-opacity="0.6"/></filter></defs><rect width="${W}" height="${H}" fill="#121215" rx="10"/><path d="${pathD}" fill="none" stroke="#FC4C02" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow_${safeId})"/><circle cx="${startPt.x}" cy="${startPt.y}" r="3.5" fill="#10B981" stroke="#ffffff" stroke-width="1"/><circle cx="${endPt.x}" cy="${endPt.y}" r="3.5" fill="#FC4C02" stroke="#ffffff" stroke-width="1"/></svg>`;
+
+    const dataUri = "data:image/svg+xml;base64," + base64Encode(svg);
+    if (actId) {
+      routeSvgCache.set(actId, dataUri);
+    }
+    return dataUri;
+  } catch (e) {
+    return null;
+  }
+}
+
 const currentClub = ref<any>(null);
 const currentRole = ref("member");
 const userClubs = ref<any[]>([]);
@@ -983,6 +1074,9 @@ onPullDownRefresh(async () => {
 .feed-map-thumb {
   height: 100%;
   max-width: 100%;
+}
+
+.feed-map-thumb.coros-filter {
   filter: hue-rotate(-52deg) saturate(1.25) contrast(1.08);
 }
 

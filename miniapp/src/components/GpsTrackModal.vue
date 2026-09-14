@@ -324,7 +324,7 @@ const trackPolylines = computed(() => {
       points: trackPoints.value,
       color: "#FC4C02",
       width: 5,
-      arrowLine: true,
+      arrowLine: false,
       borderColor: "#ffffff",
       borderWidth: 1,
     },
