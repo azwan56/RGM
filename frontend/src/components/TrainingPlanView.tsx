@@ -79,12 +79,53 @@ export default function TrainingPlanView({
     }
   }, [user]);
 
+function computeCurrentWeekIndex(planData: any): number {
+  if (!planData) return 1;
+  if (planData.current_week_index) return planData.current_week_index;
+  const weeks = planData.schedule_data?.weeks || [];
+  if (!weeks.length) return 1;
+
+  const now = new Date();
+  const beijingTime = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
+  const y = beijingTime.getFullYear();
+  const m = String(beijingTime.getMonth() + 1).padStart(2, "0");
+  const d = String(beijingTime.getDate()).padStart(2, "0");
+  const todayStr = `${y}-${m}-${d}`;
+
+  for (const w of weeks) {
+    const days = w.days || [];
+    if (days.some((day: any) => day.date === todayStr)) {
+      return w.week_index || 1;
+    }
+    const dates = days.map((day: any) => day.date).filter(Boolean);
+    if (dates.length && dates[0] <= todayStr && todayStr <= dates[dates.length - 1]) {
+      return w.week_index || 1;
+    }
+  }
+
+  const firstDays = weeks[0]?.days || [];
+  const firstDates = firstDays.map((day: any) => day.date).filter(Boolean);
+  if (firstDates.length && todayStr < firstDates[0]) {
+    return weeks[0].week_index || 1;
+  }
+
+  const lastDays = weeks[weeks.length - 1]?.days || [];
+  const lastDates = lastDays.map((day: any) => day.date).filter(Boolean);
+  if (lastDates.length && todayStr > lastDates[lastDates.length - 1]) {
+    return weeks[weeks.length - 1].week_index || weeks.length;
+  }
+
+  return 1;
+}
+
   async function loadUserPlan(uid: string) {
     setLoading(true);
     try {
       const res = await apiClient.get(`/api/coach/plan/user/${uid}`);
       if (res.data?.active_plan) {
         setPlan(res.data.active_plan);
+        const curWk = res.data.active_plan.current_week_index || computeCurrentWeekIndex(res.data.active_plan);
+        setSelectedWeekIdx(curWk);
         setShowConfig(false);
       } else {
         setShowConfig(true);
@@ -151,7 +192,8 @@ export default function TrainingPlanView({
       const res = await apiClient.post("/api/coach/plan/generate", payload);
       if (res.data?.success && res.data?.plan) {
         setPlan(res.data.plan);
-        setSelectedWeekIdx(1);
+        const curWk = res.data.plan.current_week_index || computeCurrentWeekIndex(res.data.plan);
+        setSelectedWeekIdx(curWk);
         setShowConfig(false);
       }
     } catch (err) {
@@ -668,7 +710,16 @@ export default function TrainingPlanView({
                     }`}
                   >
                     <div className="flex items-center gap-1.5 w-full justify-between">
-                      <span>第 {w.week_index} 周</span>
+                      <span className="flex items-center gap-1">
+                        <span>第 {w.week_index} 周</span>
+                        {(plan?.current_week_index || computeCurrentWeekIndex(plan)) === w.week_index && (
+                          <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${
+                            isActive ? "bg-white/20 text-white" : "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                          }`}>
+                            本周
+                          </span>
+                        )}
+                      </span>
                       {hasRace && (
                         <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
                           🏁 实战

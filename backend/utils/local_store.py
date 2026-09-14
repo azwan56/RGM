@@ -2469,6 +2469,63 @@ class LocalStore:
         return plan
 
     @staticmethod
+    def _enrich_plan_with_current_week(plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not plan:
+            return None
+        sched = plan.get("schedule_data") or {}
+        if isinstance(sched, str):
+            try:
+                sched = json.loads(sched)
+                plan["schedule_data"] = sched
+            except Exception:
+                sched = {}
+        weeks = sched.get("weeks") or []
+        if not weeks:
+            plan["current_week_index"] = 1
+            plan["current_week_dates"] = []
+            return plan
+
+        today_iso = get_beijing_today().isoformat()
+        current_week_idx = None
+        current_week_dates = []
+
+        for w in weeks:
+            days = w.get("days") or []
+            # 1. Exact match on any day's date
+            if any(str(d.get("date") or "") == today_iso for d in days):
+                current_week_idx = w.get("week_index")
+                dates = [str(d.get("date") or "") for d in days if d.get("date")]
+                if dates:
+                    current_week_dates = [dates[0], dates[-1]]
+                break
+            # 2. Between min and max date of the week
+            dates = [str(d.get("date") or "") for d in days if d.get("date")]
+            if dates and min(dates) <= today_iso <= max(dates):
+                current_week_idx = w.get("week_index")
+                current_week_dates = [dates[0], dates[-1]]
+                break
+
+        # 3. If today is before the first week
+        if current_week_idx is None:
+            first_days = weeks[0].get("days") or []
+            first_dates = [str(d.get("date") or "") for d in first_days if d.get("date")]
+            if first_dates and today_iso < min(first_dates):
+                current_week_idx = weeks[0].get("week_index", 1)
+                current_week_dates = [first_dates[0], first_dates[-1]] if first_dates else []
+
+        # 4. If today is after the last week
+        if current_week_idx is None:
+            last_days = weeks[-1].get("days") or []
+            last_dates = [str(d.get("date") or "") for d in last_days if d.get("date")]
+            if last_dates and today_iso > max(last_dates):
+                current_week_idx = weeks[-1].get("week_index", len(weeks))
+                current_week_dates = [last_dates[0], last_dates[-1]] if last_dates else []
+
+        plan["current_week_index"] = current_week_idx or 1
+        plan["current_week_dates"] = current_week_dates
+        return plan
+
+    @staticmethod
     def get_training_plan(plan_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -2485,7 +2542,7 @@ class LocalStore:
                     pass
             if reconcile:
                 res = LocalStore.reconcile_training_plan_activities(res, res.get("user_id"))
-            return res
+            return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
     def get_user_active_training_plan(user_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
@@ -2518,7 +2575,7 @@ class LocalStore:
                     pass
             if reconcile:
                 res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
-            return res
+            return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
     def get_user_training_plans(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:

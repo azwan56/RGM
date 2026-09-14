@@ -19,7 +19,7 @@ from utils.garmin_adapter import GarminAdapter
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("backfill_gps")
 
-def backfill_garmin_gps_tracks(limit: int = 20):
+def backfill_garmin_gps_tracks(limit: int = 100):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -75,7 +75,13 @@ def backfill_garmin_gps_tracks(limit: int = 20):
                         conn.commit()
                     logger.info(f"✓ Saved {len(track_data['points'])} GPS points, {len(track_data.get('elevation_profile', []))} elevation points for {act_id}")
                 else:
-                    logger.info(f"- No GPS polyline available for {act_id} (may be indoor/manual)")
+                    with sqlite3.connect(DB_PATH) as conn:
+                        conn.cursor().execute(
+                            "UPDATE activities SET gps_track_data = '{\"points\":[]}' WHERE id = ?",
+                            (act_id,)
+                        )
+                        conn.commit()
+                    logger.info(f"- No GPS polyline available for {act_id} (may be indoor/manual), marked empty.")
 
         except Exception as e:
             logger.error(f"Error processing activities for user {uid}: {e}", exc_info=True)

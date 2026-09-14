@@ -199,16 +199,29 @@
         </view>
 
         <!-- Horizontal Week Scroll -->
-        <scroll-view scroll-x class="week-scroll-view" show-scrollbar="false">
+        <scroll-view
+          scroll-x
+          class="week-scroll-view"
+          show-scrollbar="false"
+          :scroll-into-view="'week-chip-' + selectedWeekIdx"
+          :scroll-with-animation="true"
+        >
           <view class="week-chips-row">
             <view
               v-for="w in (plan.schedule_data.weeks || [])"
               :key="w.week_index"
+              :id="'week-chip-' + w.week_index"
               class="week-chip"
-              :class="{ active: selectedWeekIdx === w.week_index }"
+              :class="{
+                active: selectedWeekIdx === w.week_index,
+                'is-current-week': currentWeekIndex === w.week_index
+              }"
               @click="selectedWeekIdx = w.week_index"
             >
-              <text class="week-chip-title">第 {{ w.week_index }} 周</text>
+              <view class="chip-title-row">
+                <text class="week-chip-title">第 {{ w.week_index }} 周</text>
+                <text v-if="currentWeekIndex === w.week_index" class="current-week-tag">本周</text>
+              </view>
               <text class="week-chip-sub">{{ w.weekly_mileage_km || 0 }}km · {{ (w.phase || '训练').split(' ')[0] }}</text>
             </view>
           </view>
@@ -724,6 +737,54 @@ const generatingPlan = ref(false);
 const showPlanConfig = ref(false);
 const selectedWeekIdx = ref(1);
 
+const currentWeekIndex = computed(() => {
+  if (plan.value?.current_week_index) {
+    return plan.value.current_week_index;
+  }
+  return computeCurrentWeekIndex(plan.value);
+});
+
+function computeCurrentWeekIndex(planData: any): number {
+  if (!planData) return 1;
+  const weeks = planData.schedule_data?.weeks || [];
+  if (!weeks.length) return 1;
+
+  // Format today in Beijing time (YYYY-MM-DD)
+  const now = new Date();
+  const beijingTime = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
+  const y = beijingTime.getFullYear();
+  const m = String(beijingTime.getMonth() + 1).padStart(2, "0");
+  const d = String(beijingTime.getDate()).padStart(2, "0");
+  const todayStr = `${y}-${m}-${d}`;
+
+  for (const w of weeks) {
+    const days = w.days || [];
+    if (days.some((day: any) => day.date === todayStr)) {
+      return w.week_index || 1;
+    }
+    const dates = days.map((day: any) => day.date).filter(Boolean);
+    if (dates.length && dates[0] <= todayStr && todayStr <= dates[dates.length - 1]) {
+      return w.week_index || 1;
+    }
+  }
+
+  // If today is before first week
+  const firstDays = weeks[0]?.days || [];
+  const firstDates = firstDays.map((day: any) => day.date).filter(Boolean);
+  if (firstDates.length && todayStr < firstDates[0]) {
+    return weeks[0].week_index || 1;
+  }
+
+  // If today is after last week
+  const lastDays = weeks[weeks.length - 1]?.days || [];
+  const lastDates = lastDays.map((day: any) => day.date).filter(Boolean);
+  if (lastDates.length && todayStr > lastDates[lastDates.length - 1]) {
+    return weeks[weeks.length - 1].week_index || weeks.length;
+  }
+
+  return 1;
+}
+
 const planGoalType = ref<"race_prep" | "fitness_maintenance">("race_prep");
 const planRaceName = ref("上海马拉松");
 const planTargetTime = ref("3:09:30");
@@ -859,6 +920,8 @@ async function loadUserPlan() {
     const res = await request(`/api/coach/plan/user/${user.value.id}`);
     if (res?.active_plan) {
       plan.value = res.active_plan;
+      const curWk = res.active_plan.current_week_index || computeCurrentWeekIndex(res.active_plan);
+      selectedWeekIdx.value = curWk;
       showPlanConfig.value = false;
     } else {
       showPlanConfig.value = true;
@@ -939,7 +1002,8 @@ async function handleGeneratePlan() {
     const res = await request("/api/coach/plan/generate", "POST", payload);
     if (res?.success && res?.plan) {
       plan.value = res.plan;
-      selectedWeekIdx.value = 1;
+      const curWk = res.plan.current_week_index || computeCurrentWeekIndex(res.plan);
+      selectedWeekIdx.value = curWk;
       showPlanConfig.value = false;
       uni.showToast({ title: "课表生成成功！", icon: "success" });
     }
@@ -2530,6 +2594,29 @@ onPullDownRefresh(async () => {
 .week-chip.active {
   background-color: #af52de;
   border-color: #af52de;
+}
+
+.chip-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.current-week-tag {
+  font-size: 18rpx;
+  color: #af52de;
+  background: rgba(175, 82, 222, 0.16);
+  border: 1rpx solid rgba(175, 82, 222, 0.35);
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.week-chip.active .current-week-tag {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .week-chip-title {
