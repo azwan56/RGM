@@ -1741,18 +1741,61 @@ const races = ref<any[]>([]);
 const userClub = ref<any>(null);
 
 // ── WeChat Subscribe Message State & Handlers ──
+const WECHAT_SUBSCRIBE_TEMPLATE_ID = "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0";
 const wechatSubscribeEnabled = ref(uni.getStorageSync("rgm_wechat_subscribe_enabled") || false);
 const testingPush = ref(false);
 
-function handleRequestSubscribe() {
-  uni.showModal({
-    title: "微信手机服务通知",
-    content: "已为您开启手机微信服务通知！当您的户外跑步同步后，Canova教练的专属点评将秒级送达您的手机微信与小程序消息中心！",
-    showCancel: false,
-    success: () => {
-      wechatSubscribeEnabled.value = true;
-      uni.setStorageSync("rgm_wechat_subscribe_enabled", true);
+function getMiniappEnvState(): string {
+  try {
+    const accountInfo = (uni as any).getAccountInfoSync?.();
+    const env = accountInfo?.miniProgram?.envVersion;
+    if (env === "develop") return "developer";
+    if (env === "trial") return "trial";
+    return "formal";
+  } catch (e) {
+    return "formal";
+  }
+}
+
+function handleRequestSubscribe(): Promise<boolean> {
+  return new Promise((resolve) => {
+    // #ifdef MP-WEIXIN
+    if (typeof uni.requestSubscribeMessage === "function") {
+      uni.requestSubscribeMessage({
+        tmplIds: [WECHAT_SUBSCRIBE_TEMPLATE_ID],
+        success: (res: any) => {
+          const status = res[WECHAT_SUBSCRIBE_TEMPLATE_ID];
+          if (status === "accept") {
+            wechatSubscribeEnabled.value = true;
+            uni.setStorageSync("rgm_wechat_subscribe_enabled", true);
+            uni.showToast({ title: "已开启微信手机推送 🔔", icon: "success" });
+            resolve(true);
+          } else if (status === "reject") {
+            uni.showToast({ title: "已取消授权，您仍可在端内查看点评", icon: "none" });
+            resolve(false);
+          } else {
+            resolve(false);
+          }
+        },
+        fail: (err: any) => {
+          console.warn("[requestSubscribeMessage] fail:", err);
+          if (err?.errCode === 20004) {
+            uni.showModal({
+              title: "订阅消息提醒",
+              content: "微信服务通知已被系统关闭。如需在手机微信接收点评，请点击右上角【···】->【设置】->【通知管理】开启通知。",
+              showCancel: false,
+            });
+          } else {
+            uni.showToast({ title: "订阅授权暂未开启", icon: "none" });
+          }
+          resolve(false);
+        }
+      });
+      return;
     }
+    // #endif
+    uni.showToast({ title: "当前环境不支持订阅消息", icon: "none" });
+    resolve(false);
   });
 }
 
@@ -1762,25 +1805,56 @@ async function handleTestWechatPush() {
     uni.showToast({ title: "请先登录", icon: "none" });
     return;
   }
-  testingPush.value = true;
+
+  // In WeChat Mini Programs, each push requires at least 1 subscription authorization quota.
+  // Prompting native requestSubscribeMessage here guarantees user has a valid quota for this test push!
   try {
+    await new Promise((resolve) => {
+      // #ifdef MP-WEIXIN
+      if (typeof uni.requestSubscribeMessage === "function") {
+        uni.requestSubscribeMessage({
+          tmplIds: [WECHAT_SUBSCRIBE_TEMPLATE_ID],
+          complete: () => resolve(true),
+        });
+        return;
+      }
+      // #endif
+      resolve(true);
+    });
+  } catch (e) {}
+
+  testingPush.value = true;
+  uni.showLoading({ title: "正在发送微信推送..." });
+  try {
+    const envState = getMiniappEnvState();
     const res = await request("/api/notifications/test-push", "POST", {
       user_id: u.id,
       activity_name: "测试 12.5km 公路跑",
       distance_km: 12.5,
-      critique: "【稳态专项有氧进阶】配速稳定，心率处于黄金有氧区间。已同步生成大师组超量恢复提示！"
+      critique: "【稳态专项有氧进阶】配速稳定心率理想，已同步生成超量恢复提示！",
+      miniprogram_state: envState,
     });
+    uni.hideLoading();
     if (res?.success) {
-      const msg = res.wechat_sent === 1
-        ? "微信推送已下发至手机微信服务通知！"
-        : (res.wechat_errmsg ? `已写入端内通知中心（${res.wechat_errmsg}）` : "已写入端内通知中心！");
-      uni.showModal({
-        title: "测试推送成功",
-        content: msg,
-        showCancel: false
-      });
+      if (res.wechat_sent === 1) {
+        wechatSubscribeEnabled.value = true;
+        uni.setStorageSync("rgm_wechat_subscribe_enabled", true);
+        uni.showModal({
+          title: "🎉 微信推送成功！",
+          content: "Canova教练跑后点评已下发至您的手机微信！请前往微信聊天列表中的「服务通知」查看。",
+          showCancel: false
+        });
+      } else {
+        const detailMsg = res.wechat_errmsg || "微信下发受限，已保存在端内通知中心";
+        uni.showModal({
+          title: "推送已记录",
+          content: `${detailMsg}。\n\n提示：若需在手机微信收到卡片，请点击左侧【开启微信手机消息提醒】并选择【允许】。`,
+          showCancel: false
+        });
+      }
     }
   } catch (e: any) {
+    uni.hideLoading();
     uni.showToast({ title: "推送测试触发完成", icon: "none" });
   } finally {
     testingPush.value = false;

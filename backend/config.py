@@ -29,7 +29,7 @@ class Settings:
     # WeChat Mini Program
     WECHAT_APP_ID: str = os.getenv("WECHAT_APP_ID") or "wxdfff48d6d0506130"
     WECHAT_APP_SECRET: str = os.getenv("WECHAT_APP_SECRET") or "6d35e4fbedf55e9cb1596a21ed2d67fa"
-    WECHAT_SUBSCRIBE_TEMPLATE_ID: str = os.getenv("WECHAT_SUBSCRIBE_TEMPLATE_ID", "")
+    WECHAT_SUBSCRIBE_TEMPLATE_ID: str = os.getenv("WECHAT_SUBSCRIBE_TEMPLATE_ID", "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0")
     WECHAT_MINIPROGRAM_STATE: str = os.getenv("WECHAT_MINIPROGRAM_STATE", "formal")
 
     # Aliyun SMS

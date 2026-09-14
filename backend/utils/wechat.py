@@ -145,7 +145,8 @@ wechat_client = WeChatAPI()
 def dispatch_canova_critique_push(
     user_id: str,
     activity: Dict[str, Any],
-    critique: str
+    critique: str,
+    miniprogram_state: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Dispatches Canova Coach critique:
@@ -172,26 +173,42 @@ def dispatch_canova_critique_push(
     wechat_errmsg = None
 
     # Try WeChat Subscribe Message push if openid is available
-    tmpl_id = getattr(settings, "WECHAT_SUBSCRIBE_TEMPLATE_ID", "")
+    tmpl_id = getattr(settings, "WECHAT_SUBSCRIBE_TEMPLATE_ID", "") or "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0"
     if openid and openid.startswith("ogDgjx") and tmpl_id:
-        clean_critique = critique.replace("\n", " ").strip()
-        critique_snippet = clean_critique[:20] if len(clean_critique) > 20 else clean_critique
-        sport_name = act_name[:20] if len(act_name) > 20 else act_name
+        # Format fields strictly adhering to template I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0 (收到点评通知)
+        # name1: 点评对象 (name rule, 10 Chinese chars or 20 letters max, no digits or special chars)
+        runner_raw = profile.get("display_name") or "跑者同学"
+        clean_name = "".join(c for c in runner_raw if c.isalpha() or '\u4e00' <= c <= '\u9fff')[:10]
+        if not clean_name:
+            clean_name = "跑者同学"
+
+        # thing2: 点评主题 (thing rule, 20 chars max)
+        theme = f"{dist_km}km跑步训练点评"[:20]
+
+        # thing3: 点评内容 (thing rule, 20 chars max)
+        clean_critique = critique.replace("\n", " ").replace("【", "").replace("】", "").strip()[:20]
+        if not clean_critique:
+            clean_critique = "Canova教练已完成分析"
 
         data = {
-            "thing1": {"value": sport_name or "专项跑步"},
-            "character_string2": {"value": f"{dist_km}km"},
-            "thing3": {"value": critique_snippet or "Canova教练专业评语"},
-            "time4": {"value": datetime.now().strftime("%Y-%m-%d %H:%M")}
+            "name1": {"value": clean_name},
+            "thing2": {"value": theme},
+            "thing3": {"value": clean_critique}
         }
+
+        state = miniprogram_state or getattr(settings, "WECHAT_MINIPROGRAM_STATE", "formal") or "formal"
         res = wechat_client.send_subscribe_message(
             touser=openid,
             template_id=tmpl_id,
             data=data,
-            page=f"pages/index/index?activity_id={act_id}"
+            page=f"pages/index/index?activity_id={act_id}",
+            miniprogram_state=state
         )
         if res.get("errcode") == 0:
             wechat_sent = 1
+        elif res.get("errcode") == 43101:
+            wechat_sent = -1
+            wechat_errmsg = "用户尚未在手机微信中授权此订阅通知，请点击【开启微信手机消息提醒】并选择【允许】"
         else:
             wechat_sent = -1
             wechat_errmsg = f"[{res.get('errcode')}] {res.get('errmsg')}"

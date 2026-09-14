@@ -21,6 +21,21 @@ class TestPushRequest(BaseModel):
     activity_name: Optional[str] = "公路专项拉练"
     distance_km: Optional[float] = 12.5
     critique: Optional[str] = "【稳态专项有氧进阶】配速稳健，心率漂移可控。已同步生成大师组超量恢复提示，建议保证 48 小时充裕恢复窗口。"
+    miniprogram_state: Optional[str] = None
+
+
+@router.get("/subscribe-config")
+def get_subscribe_config():
+    """
+    Returns the configured WeChat Subscribe Message template ID and miniprogram state.
+    Used by the miniapp to call uni.requestSubscribeMessage().
+    """
+    tmpl_id = getattr(settings, "WECHAT_SUBSCRIBE_TEMPLATE_ID", "") or "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0"
+    return {
+        "template_id": tmpl_id,
+        "template_ids": [tmpl_id] if tmpl_id else [],
+        "miniprogram_state": getattr(settings, "WECHAT_MINIPROGRAM_STATE", "formal") or "formal"
+    }
 
 
 @router.get("")
@@ -82,10 +97,11 @@ def test_push_notification(req: TestPushRequest):
     result = dispatch_canova_critique_push(
         user_id=canonical_uid,
         activity=mock_act,
-        critique=critique_text
+        critique=critique_text,
+        miniprogram_state=req.miniprogram_state
     )
 
-    tmpl_id = getattr(settings, "WECHAT_SUBSCRIBE_TEMPLATE_ID", "")
+    tmpl_id = getattr(settings, "WECHAT_SUBSCRIBE_TEMPLATE_ID", "") or "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0"
     return {
         "success": True,
         "user_id": canonical_uid,
