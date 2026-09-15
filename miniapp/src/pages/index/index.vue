@@ -937,6 +937,99 @@
       </view>
     </view>
 
+    <!-- ── 🎯 Canova教练跑后深度点评与复盘详情 Modal ── -->
+    <view
+      v-if="selectedCritiqueNotif"
+      class="modal-mask critique-detail-mask"
+      @click="selectedCritiqueNotif = null"
+      @touchmove.stop.prevent
+    >
+      <view class="modal-content critique-detail-modal" @click.stop>
+        <view class="modal-header">
+          <view class="critique-header-title-box">
+            <view class="critique-header-row">
+              <text class="critique-header-icon">🎯</text>
+              <text class="modal-title">Canova教练专属复盘</text>
+            </view>
+            <text class="critique-header-sub">Renato Canova 专项耐力推演与生理反馈</text>
+          </view>
+          <view class="close-hit" @click="selectedCritiqueNotif = null">
+            <text class="close-btn">✕</text>
+          </view>
+        </view>
+
+        <scroll-view scroll-y class="modal-body critique-detail-body">
+          <!-- 关联跑步记录卡片 -->
+          <view
+            v-if="selectedCritiqueActivity || selectedCritiqueNotif.activity_id"
+            class="critique-run-summary-card"
+            @click="handleOpenTrackFromCritique"
+          >
+            <view class="run-sum-top">
+              <view class="run-sum-name-row">
+                <text class="run-sum-badge">🏃 关联训练</text>
+                <text class="run-sum-name">{{ selectedCritiqueActivity?.name || selectedCritiqueNotif.title }}</text>
+              </view>
+              <text class="run-sum-time">{{ formatNotifTime(selectedCritiqueActivity?.start_time || selectedCritiqueNotif.created_at) }}</text>
+            </view>
+            <view class="run-sum-metrics">
+              <view class="run-metric-item">
+                <text class="m-val text-emerald">{{ selectedCritiqueActivity?.distance_km || getDistFromNotif(selectedCritiqueNotif) }} <text class="m-unit">km</text></text>
+                <text class="m-lbl">跑步距离</text>
+              </view>
+              <view class="run-metric-item" v-if="selectedCritiqueActivity?.avg_pace_str">
+                <text class="m-val">{{ selectedCritiqueActivity.avg_pace_str }}</text>
+                <text class="m-lbl">平均配速</text>
+              </view>
+              <view class="run-metric-item" v-if="selectedCritiqueActivity?.average_heartrate">
+                <text class="m-val text-rose">{{ selectedCritiqueActivity.average_heartrate }} <text class="m-unit">bpm</text></text>
+                <text class="m-lbl">平均心率</text>
+              </view>
+              <view class="run-metric-item" v-if="selectedCritiqueActivity?.elevation_gain_meters">
+                <text class="m-val text-amber">+{{ Math.round(selectedCritiqueActivity.elevation_gain_meters) }} <text class="m-unit">m</text></text>
+                <text class="m-lbl">累计爬升</text>
+              </view>
+            </view>
+            <view class="run-track-pill-hint">
+              <text class="pill-icon">🗺️</text>
+              <text class="pill-text">查看 GPS 轨迹路线与海拔剖面</text>
+              <text class="pill-arr">›</text>
+            </view>
+          </view>
+
+          <!-- 教练评语分块正文 -->
+          <view class="critique-sections-list">
+            <view
+              v-for="(sec, sIdx) in parseCritiqueParagraphs(selectedCritiqueNotif.content)"
+              :key="sIdx"
+              class="critique-section-card"
+              :class="sec.type"
+            >
+              <view class="sec-header">
+                <text class="sec-icon">{{ sec.icon }}</text>
+                <text class="sec-title">{{ sec.title }}</text>
+              </view>
+              <text class="sec-text">{{ sec.text }}</text>
+            </view>
+          </view>
+
+          <!-- 底部操作按钮 -->
+          <view class="critique-actions-row">
+            <button
+              v-if="selectedCritiqueNotif.activity_id"
+              class="critique-action-btn track-btn"
+              @click="handleOpenTrackFromCritique"
+            >
+              🗺️ 查看 GPS 轨迹与完整数据
+            </button>
+            <button class="critique-action-btn coach-btn" @click="handleGoToCoachFromCritique">
+              📅 Canova 周期课表 ➔
+            </button>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
+
     <!-- ── GPS 轨迹与高程剖面弹窗 ── -->
     <GpsTrackModal
       :visible="Boolean(selectedTrackActivity)"
@@ -949,7 +1042,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from "vue";
-import { onPullDownRefresh, onShow } from "@dcloudio/uni-app";
+import { onPullDownRefresh, onShow, onLoad } from "@dcloudio/uni-app";
 import GpsTrackModal from "../../components/GpsTrackModal.vue";
 import {
   request,
@@ -984,6 +1077,117 @@ const notificationsList = ref<any[]>([]);
 const unreadNotifCount = ref(0);
 const loadingNotifications = ref(false);
 
+const selectedCritiqueNotif = ref<any>(null);
+const selectedCritiqueActivity = ref<any>(null);
+
+function getDistFromNotif(notif: any): string {
+  if (!notif) return "";
+  const match = (notif.title || "").match(/([\d\.]+)km/i);
+  return match ? match[1] : "";
+}
+
+interface CritiqueSection {
+  type: "special" | "advice" | "target" | "general";
+  icon: string;
+  title: string;
+  text: string;
+}
+
+function parseCritiqueParagraphs(raw: string): CritiqueSection[] {
+  if (!raw) return [];
+  const text = raw.trim();
+  const sections: CritiqueSection[] = [];
+
+  const adviceIdx = text.indexOf("💡");
+  const targetIdx = text.indexOf("⚡");
+
+  if (adviceIdx !== -1) {
+    const part1 = text.slice(0, adviceIdx).trim();
+    if (part1) {
+      let title = "专项负荷与能力刺激诊断";
+      let body = part1;
+      const bracketMatch = part1.match(/^【(.*?)】/);
+      if (bracketMatch) {
+        title = bracketMatch[1];
+        body = part1.slice(bracketMatch[0].length).trim();
+      }
+      sections.push({
+        type: "special",
+        icon: "🎯",
+        title: title || "专项负荷诊断",
+        text: body || part1,
+      });
+    }
+
+    if (targetIdx !== -1 && targetIdx > adviceIdx) {
+      const part2 = text.slice(adviceIdx, targetIdx).trim();
+      const body2 = part2.replace(/^💡\s*(教练建议[:：]?\s*)?/, "").trim();
+      sections.push({
+        type: "advice",
+        icon: "💡",
+        title: "恢复与肌筋膜调理建议",
+        text: body2,
+      });
+
+      const part3 = text.slice(targetIdx).trim();
+      const body3 = part3.replace(/^⚡\s*/, "").trim();
+      sections.push({
+        type: "target",
+        icon: "⚡",
+        title: "下阶段边际增益策略",
+        text: body3,
+      });
+    } else {
+      const part2 = text.slice(adviceIdx).trim();
+      const body2 = part2.replace(/^💡\s*(教练建议[:：]?\s*)?/, "").trim();
+      sections.push({
+        type: "advice",
+        icon: "💡",
+        title: "恢复与肌筋膜调理建议",
+        text: body2,
+      });
+    }
+  } else if (targetIdx !== -1) {
+    const part1 = text.slice(0, targetIdx).trim();
+    if (part1) {
+      sections.push({
+        type: "special",
+        icon: "🎯",
+        title: "Canova 专项诊断",
+        text: part1,
+      });
+    }
+    const part2 = text.slice(targetIdx).trim().replace(/^⚡\s*/, "");
+    sections.push({
+      type: "target",
+      icon: "⚡",
+      title: "下阶段边际增益策略",
+      text: part2,
+    });
+  } else {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+      lines.forEach((l, idx) => {
+        sections.push({
+          type: "general",
+          icon: idx === 0 ? "🎯" : "💬",
+          title: idx === 0 ? "Canova 专项诊断" : `复盘要点 ${idx + 1}`,
+          text: l,
+        });
+      });
+    } else {
+      sections.push({
+        type: "general",
+        icon: "🎯",
+        title: "Canova 教练专属复盘",
+        text,
+      });
+    }
+  }
+
+  return sections;
+}
+
 async function loadNotifications() {
   const u = user.value || getStoredUser();
   if (!u?.id) return;
@@ -1014,8 +1218,87 @@ async function handleNotificationClick(item: any) {
     request(`/api/notifications/${item.id}/read?user_id=${u.id}`, "POST").catch(() => {});
   }
   showNotificationsModal.value = false;
-  uni.showToast({ title: "已阅 Canova 评语", icon: "none" });
+
+  // Open the critique detail modal to display full commentary
+  selectedCritiqueNotif.value = item;
+  selectedCritiqueActivity.value = null;
+
+  if (item.activity_id) {
+    const cached = dashboardData.value?.recent_activities?.find(
+      (a: any) => a.id === item.activity_id
+    );
+    if (cached) {
+      selectedCritiqueActivity.value = cached;
+    } else {
+      try {
+        const res: any = await request(`/api/miniapp/activities/${item.activity_id}/track`);
+        if (res?.success && res.activity) {
+          selectedCritiqueActivity.value = {
+            ...res.activity,
+            has_gps_track: res.has_track,
+            map_image_url: res.map_image_url,
+          };
+        }
+      } catch (e) {
+        console.warn("Fetch activity for critique modal failed:", e);
+      }
+    }
+  }
 }
+
+function handleOpenTrackFromCritique() {
+  const notif = selectedCritiqueNotif.value;
+  const act =
+    selectedCritiqueActivity.value ||
+    (notif?.activity_id
+      ? {
+          id: notif.activity_id,
+          name: notif.title,
+          ai_journal: notif.content,
+        }
+      : null);
+
+  if (act) {
+    selectedCritiqueNotif.value = null;
+    openTrackModal(act);
+  }
+}
+
+function handleGoToCoachFromCritique() {
+  selectedCritiqueNotif.value = null;
+  syncTabBarIndex(1);
+  uni.switchTab({ url: "/pages/coach/coach" });
+}
+
+onLoad(async (options: any) => {
+  if (options?.activity_id) {
+    const actId = options.activity_id;
+    try {
+      const res: any = await request(`/api/miniapp/activities/${actId}/track`);
+      if (res?.success && res.activity) {
+        const act = {
+          ...res.activity,
+          has_gps_track: res.has_track,
+          map_image_url: res.map_image_url,
+        };
+        if (act.ai_journal) {
+          selectedCritiqueNotif.value = {
+            id: `notif_${actId}`,
+            activity_id: actId,
+            title: act.name || "Canova 训练点评",
+            content: act.ai_journal,
+            created_at: act.start_time || new Date().toISOString(),
+          };
+          selectedCritiqueActivity.value = act;
+        } else {
+          openTrackModal(act);
+        }
+      }
+    } catch (e) {
+      console.warn("Load activity from onLoad query error:", e);
+    }
+  }
+});
 
 async function handleReadAllNotifications() {
   const u = user.value || getStoredUser();
@@ -3976,5 +4259,280 @@ onPullDownRefresh(async () => {
   font-size: 20rpx;
   color: #fc4c02;
   font-weight: bold;
+}
+
+/* ── 🎯 Canova Critique Detail Modal ── */
+.critique-detail-modal {
+  max-width: 680rpx;
+  width: 92%;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: #141418;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  border-radius: 28rpx;
+  box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.65);
+}
+
+.critique-header-title-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.critique-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.critique-header-icon {
+  font-size: 32rpx;
+}
+
+.critique-header-sub {
+  font-size: 20rpx;
+  color: #71717a;
+}
+
+.critique-detail-body {
+  max-height: 68vh;
+  box-sizing: border-box;
+  padding: 10rpx 0 20rpx 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+/* 关联训练卡片 */
+.critique-run-summary-card {
+  background: #1c1c22;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:active {
+    background: #24242c;
+    border-color: rgba(252, 76, 2, 0.4);
+  }
+}
+
+.run-sum-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.run-sum-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.run-sum-badge {
+  font-size: 18rpx;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  font-weight: 600;
+}
+
+.run-sum-name {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #ffffff;
+  max-width: 320rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-sum-time {
+  font-size: 20rpx;
+  color: #71717a;
+}
+
+.run-sum-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 12rpx 0;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 14rpx;
+}
+
+.run-metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.m-val {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #f4f4f5;
+  line-height: 1.1;
+
+  .m-unit {
+    font-size: 18rpx;
+    font-weight: normal;
+    color: #a1a1aa;
+    margin-left: 4rpx;
+  }
+}
+
+.m-lbl {
+  font-size: 18rpx;
+  color: #71717a;
+}
+
+.run-track-pill-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 8rpx 0;
+  background: rgba(252, 76, 2, 0.1);
+  border: 1rpx solid rgba(252, 76, 2, 0.25);
+  border-radius: 12rpx;
+}
+
+.pill-icon {
+  font-size: 22rpx;
+}
+
+.pill-text {
+  font-size: 20rpx;
+  color: #fc4c02;
+  font-weight: 600;
+}
+
+.pill-arr {
+  font-size: 22rpx;
+  color: #fc4c02;
+}
+
+/* 评语卡片列表 */
+.critique-sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.critique-section-card {
+  border-radius: 20rpx;
+  padding: 22rpx 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.critique-section-card.special {
+  background: linear-gradient(145deg, rgba(16, 185, 129, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
+  border: 1rpx solid rgba(16, 185, 129, 0.25);
+
+  .sec-title {
+    color: #34d399;
+  }
+}
+
+.critique-section-card.advice {
+  background: linear-gradient(145deg, rgba(251, 191, 36, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
+  border: 1rpx solid rgba(251, 191, 36, 0.25);
+
+  .sec-title {
+    color: #fbbf24;
+  }
+}
+
+.critique-section-card.target {
+  background: linear-gradient(145deg, rgba(249, 115, 22, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
+  border: 1rpx solid rgba(249, 115, 22, 0.25);
+
+  .sec-title {
+    color: #fb923c;
+  }
+}
+
+.critique-section-card.general {
+  background: #1a1a1f;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+
+  .sec-title {
+    color: #f4f4f5;
+  }
+}
+
+.sec-header {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.sec-icon {
+  font-size: 28rpx;
+}
+
+.sec-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.sec-text {
+  font-size: 24rpx;
+  color: #d4d4d8;
+  line-height: 1.65;
+  letter-spacing: 0.5rpx;
+}
+
+/* 底部操作按钮 */
+.critique-actions-row {
+  display: flex;
+  gap: 16rpx;
+  padding-top: 8rpx;
+  padding-bottom: 16rpx;
+}
+
+.critique-action-btn {
+  flex: 1;
+  height: 80rpx;
+  line-height: 80rpx;
+  border-radius: 16rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.critique-action-btn.track-btn {
+  background: rgba(252, 76, 2, 0.15);
+  color: #fc4c02;
+  border: 1rpx solid rgba(252, 76, 2, 0.4);
+
+  &:active {
+    background: rgba(252, 76, 2, 0.3);
+  }
+}
+
+.critique-action-btn.coach-btn {
+  background: #27272a;
+  color: #ffffff;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+
+  &:active {
+    background: #3f3f46;
+  }
 }
 </style>
