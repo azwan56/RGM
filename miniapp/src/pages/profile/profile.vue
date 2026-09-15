@@ -242,12 +242,14 @@
                 :src="pUrl"
                 mode="aspectFill"
                 @click.stop="handlePreviewImage(pUrl, race.photos)"
+                @longpress.stop="handleCardPhotoAction(pUrl, race)"
               />
               <view class="card-add-photo-btn" @click.stop="handleCardQuickUploadPhoto(race)">
                 <text class="card-add-icon">📷</text>
                 <text class="card-add-txt">加照片</text>
               </view>
             </view>
+            <text v-if="race.photos && race.photos.length > 0" class="card-photo-hint">长按照片可删除或放大 🔍</text>
           </view>
           <view v-else-if="race.is_past" class="race-past-tip" @click.stop="openEditRaceModal(race)">
             <text class="past-tip-text">⚠️ 比赛日已过，点击标记完赛与填报成绩 ➔</text>
@@ -2569,9 +2571,19 @@ async function handleChooseRacePhoto() {
     uni.hideLoading();
     if (!raceForm.value.photos) raceForm.value.photos = [];
     if (!raceForm.value.photos.includes(photoUrl)) {
-      raceForm.value.photos.push(photoUrl);
+      raceForm.value.photos = [...raceForm.value.photos, photoUrl];
     }
     raceForm.value.photo_url = photoUrl;
+    raceForm.value = { ...raceForm.value };
+    // Synchronize card list immediately if this race exists
+    const curRaceId = raceForm.value.id || raceForm.value.name;
+    if (curRaceId && races.value) {
+      races.value = races.value.map((r: any) =>
+        (r.id === curRaceId || r.name === curRaceId)
+          ? { ...r, photo_url: photoUrl, photos: [...raceForm.value.photos] }
+          : r
+      );
+    }
     uni.showToast({ title: "照片上传成功 📸", icon: "success" });
   } catch (err: any) {
     uni.hideLoading();
@@ -2605,20 +2617,95 @@ async function handleCardQuickUploadPhoto(race: any) {
     uni.hideLoading();
     if (!race.photos) race.photos = [];
     if (!race.photos.includes(photoUrl)) {
-      race.photos.push(photoUrl);
+      race.photos = [...race.photos, photoUrl];
     }
     race.photo_url = photoUrl;
+
+    // Force reactive UI update on MiniProgram by replacing array reference
+    races.value = races.value.map((r: any) =>
+      (r.id === raceId || r.name === raceId)
+        ? { ...r, photo_url: photoUrl, photos: [...race.photos] }
+        : r
+    );
     uni.showToast({ title: "完赛照片上传成功 📸", icon: "success" });
+
+    // Request authoritative data from backend to ensure persistent sync
+    try {
+      const res: any = await request(`/api/profile/${uid}/races`);
+      if (res && res.races) {
+        races.value = res.races;
+      }
+    } catch (fetchErr) {
+      console.warn("fetch races after photo upload error:", fetchErr);
+    }
   } catch (err: any) {
     uni.hideLoading();
     uni.showToast({ title: err?.message || "上传失败", icon: "none" });
   }
 }
 
+function handleCardPhotoAction(photoUrl: string, race: any) {
+  uni.showActionSheet({
+    itemList: ["放大查看大图 🔍", "删除此照片 🗑️"],
+    success: async (res) => {
+      if (res.tapIndex === 0) {
+        handlePreviewImage(photoUrl, race.photos);
+      } else if (res.tapIndex === 1) {
+        uni.showModal({
+          title: "确认删除照片",
+          content: "确定要从该比赛中删除这张完赛照片吗？",
+          confirmText: "删除",
+          confirmColor: "#ef4444",
+          success: async (confirmRes) => {
+            if (confirmRes.confirm) {
+              const uid = user.value?.id || getStoredUser()?.id;
+              const raceId = race.id || race.name;
+              if (uid && raceId) {
+                try {
+                  uni.showLoading({ title: "正在删除..." });
+                  await deleteRacePhoto(uid, raceId, photoUrl);
+                  uni.hideLoading();
+                  if (race.photos) {
+                    race.photos = race.photos.filter((p: string) => p !== photoUrl);
+                    race.photo_url = race.photos[0] || "";
+                  }
+                  races.value = races.value.map((r: any) =>
+                    (r.id === raceId || r.name === raceId)
+                      ? { ...r, photo_url: race.photo_url, photos: race.photos ? [...race.photos] : [] }
+                      : r
+                  );
+                  uni.showToast({ title: "照片已删除", icon: "success" });
+                  try {
+                    const rRes: any = await request(`/api/profile/${uid}/races`);
+                    if (rRes?.races) races.value = rRes.races;
+                  } catch (e) {}
+                } catch (err: any) {
+                  uni.hideLoading();
+                  uni.showToast({ title: err?.message || "删除失败", icon: "none" });
+                }
+              }
+            }
+          },
+        });
+      }
+    },
+  });
+}
+
 async function handleDeleteModalPhoto(photoUrl: string) {
   if (!raceForm.value.photos) return;
   raceForm.value.photos = raceForm.value.photos.filter((p: string) => p !== photoUrl);
   raceForm.value.photo_url = raceForm.value.photos[0] || "";
+  raceForm.value = { ...raceForm.value };
+
+  const curRaceId = raceForm.value.id || raceForm.value.name;
+  if (curRaceId && races.value) {
+    races.value = races.value.map((r: any) =>
+      (r.id === curRaceId || r.name === curRaceId)
+        ? { ...r, photo_url: raceForm.value.photo_url, photos: [...raceForm.value.photos] }
+        : r
+    );
+  }
 
   // If the race already exists on server, trigger backend deletion in background
   const uid = user.value?.id || getStoredUser()?.id;
@@ -3989,6 +4076,13 @@ onShow(() => {
     margin-top: 4rpx;
     line-height: 1;
   }
+}
+
+.card-photo-hint {
+  font-size: 18rpx;
+  color: #71717a;
+  margin-top: 6rpx;
+  display: block;
 }
 
 .race-past-tip {
