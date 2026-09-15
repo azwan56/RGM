@@ -55,6 +55,23 @@ export default function CoachPage() {
     });
   }, [router]);
 
+  function getRecommendedTargetRace(races: any[]): any | null {
+    if (!races || races.length === 0) return null;
+    const upcomingRaces = races.filter(
+      (r) => r.status !== "completed" && !r.is_completed && !r.is_past
+    );
+    const candidates = upcomingRaces.length > 0 ? upcomingRaces : races;
+    const aRace = candidates.find(
+      (r) => r.priority === 1 || r.priority === "A" || r.priority === "1"
+    );
+    if (aRace) return aRace;
+    const bRace = candidates.find(
+      (r) => r.priority === 2 || r.priority === "B" || r.priority === "2"
+    );
+    if (bRace) return bRace;
+    return candidates[0] || races[0];
+  }
+
   async function loadLatestAnalysis(uid: string) {
     try {
       // 1. Fetch user registered race plans
@@ -69,28 +86,39 @@ export default function CoachPage() {
         console.warn("User races fetch error:", err);
       }
 
+      const recRace = getRecommendedTargetRace(realRaces);
+
       // 2. Fetch coach report
       const res = await apiClient.get(`/api/coach/latest/${uid}`);
       if (res.data && res.data.summary) {
         setAnalysis(res.data);
         const savedTarget = res.data.athlete_snapshot?.target_race;
-        if (savedTarget) {
+        const savedRaceObj = realRaces.find((r) => r.name === savedTarget);
+        const isSavedTargetCompleted =
+          savedRaceObj &&
+          (savedRaceObj.status === "completed" ||
+            savedRaceObj.is_completed ||
+            savedRaceObj.is_past);
+
+        // If saved target is already finished, automatically advance to upcoming A-race!
+        if (savedTarget && !isSavedTargetCompleted) {
           setTargetRace(savedTarget);
-        } else if (realRaces.length > 0) {
-          setTargetRace(realRaces[0].name);
-          if (realRaces[0].target_time) setTargetTime(realRaces[0].target_time);
+        } else if (recRace) {
+          setTargetRace(recRace.name);
+          if (recRace.target_time) setTargetTime(recRace.target_time);
+          if (recRace.race_type) setRaceType(recRace.race_type);
         }
 
-        if (res.data.athlete_snapshot?.target_time) {
+        if (res.data.athlete_snapshot?.target_time && !isSavedTargetCompleted) {
           setTargetTime(res.data.athlete_snapshot.target_time);
         }
-        if (res.data.athlete_snapshot?.race_category) {
+        if (res.data.athlete_snapshot?.race_category && !isSavedTargetCompleted) {
           setRaceType(res.data.athlete_snapshot.race_category);
         }
-      } else if (realRaces.length > 0) {
-        // Auto-select first registered race if no previous report
-        setTargetRace(realRaces[0].name);
-        if (realRaces[0].target_time) setTargetTime(realRaces[0].target_time);
+      } else if (recRace) {
+        setTargetRace(recRace.name);
+        if (recRace.target_time) setTargetTime(recRace.target_time);
+        if (recRace.race_type) setRaceType(recRace.race_type);
       }
     } catch (e) {
       console.error("Latest coach report fetch error:", e);

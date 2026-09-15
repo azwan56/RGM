@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import apiClient from "@/lib/apiClient";
 import {
   Calendar,
@@ -78,6 +78,58 @@ export default function TrainingPlanView({
       loadUserPlan(user.id);
     }
   }, [user]);
+
+  function getRecommendedTargetRace(races: any[]): any | null {
+    if (!races || races.length === 0) return null;
+    const upcomingRaces = races.filter(
+      (r) => r.status !== "completed" && !r.is_completed && !r.is_past
+    );
+    const candidates = upcomingRaces.length > 0 ? upcomingRaces : races;
+    const aRace = candidates.find(
+      (r) => r.priority === 1 || r.priority === "A" || r.priority === "1"
+    );
+    if (aRace) return aRace;
+    const bRace = candidates.find(
+      (r) => r.priority === 2 || r.priority === "B" || r.priority === "2"
+    );
+    if (bRace) return bRace;
+    return candidates[0] || races[0];
+  }
+
+  const recommendedRace = useMemo(
+    () => getRecommendedTargetRace(userRaces),
+    [userRaces]
+  );
+
+  const isTargetRaceCompleted = useMemo(() => {
+    if (!plan || !userRaces || userRaces.length === 0) return false;
+    const targetName = plan.target_race_name;
+    const matched = userRaces.find(
+      (r: any) =>
+        r.name === targetName || (plan.title && plan.title.includes(r.name))
+    );
+    return Boolean(
+      matched &&
+        (matched.status === "completed" ||
+          matched.is_completed ||
+          matched.is_past)
+    );
+  }, [plan, userRaces]);
+
+  useEffect(() => {
+    if (
+      recommendedRace &&
+      (!targetRaceName ||
+        targetRaceName === "目标赛事" ||
+        userRaces.find((r: any) => r.name === targetRaceName)?.status ===
+          "completed")
+    ) {
+      setTargetRaceName(recommendedRace.name);
+      if (recommendedRace.target_time) setTargetTime(recommendedRace.target_time);
+      if (recommendedRace.race_date) setTargetDate(recommendedRace.race_date);
+      if (recommendedRace.race_type) setRaceType(recommendedRace.race_type);
+    }
+  }, [recommendedRace, userRaces]);
 
 function computeCurrentWeekIndex(planData: any): number {
   if (!planData) return 1;
@@ -362,6 +414,41 @@ function computeCurrentWeekIndex(planData: any): number {
         </div>
       </div>
 
+      {/* ── 🏆 Target Race Completed / A-Race Switch Recommendation Banner ── */}
+      {plan && isTargetRaceCompleted && recommendedRace && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-transparent border border-amber-500/30 rounded-3xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-start gap-3">
+            <span className="text-3xl">🏆</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-300">
+                  原目标「{plan.target_race_name}」已顺利完赛！
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/30">
+                  自动推荐聚焦下一核心 A 标
+                </span>
+              </div>
+              <p className="text-xs text-zinc-300 mt-1 leading-relaxed">
+                依据科学周期化备赛逻辑，您的下一个宏观备赛终极目标应锚定为核心 A 标 <strong className="text-purple-300">「{recommendedRace.name}」</strong>（{recommendedRace.race_type || "核心突破"} · {recommendedRace.race_date}）。中途其他 B/C 标赛事将作为实战代练自动融入新课表！
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setTargetRaceName(recommendedRace.name);
+              if (recommendedRace.target_time) setTargetTime(recommendedRace.target_time);
+              if (recommendedRace.race_date) setTargetDate(recommendedRace.race_date);
+              if (recommendedRace.race_type) setRaceType(recommendedRace.race_type);
+              setShowConfig(true);
+            }}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 transition flex items-center justify-center gap-1.5 flex-shrink-0"
+          >
+            <Sparkles className="w-4 h-4" />
+            切换并重新制定计划 ➔
+          </button>
+        </div>
+      )}
+
       {/* ── Collapsible Plan Generation / Configuration Panel ── */}
       {(showConfig || !plan) && (
         <div className="bg-[#121215] border border-purple-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
@@ -379,31 +466,31 @@ function computeCurrentWeekIndex(planData: any): number {
             </span>
           </div>
 
-          {/* Goal Type Switcher */}
+          {/* Goal Type Tabs */}
           <div className="space-y-3">
-            <label className="text-xs font-bold text-zinc-400 block">
-              1. 核心目标类型 (Goal Type)
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-xs font-bold text-zinc-300 block">训练周期核心性质</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
                 type="button"
                 onClick={() => setGoalType("race_prep")}
-                className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 ${
+                className={`p-4 rounded-2xl border text-left transition relative flex items-start gap-3 ${
                   goalType === "race_prep"
-                    ? "bg-purple-600/10 border-purple-500 text-white shadow-lg shadow-purple-900/20"
-                    : "bg-[#18181c] border-white/5 text-zinc-400 hover:border-white/15"
+                    ? "bg-purple-600/15 border-purple-500 text-white shadow-lg shadow-purple-500/10"
+                    : "bg-[#18181c] border-white/5 text-zinc-400 hover:border-white/10 hover:text-zinc-200"
                 }`}
               >
-                <div className={`p-2.5 rounded-xl ${goalType === "race_prep" ? "bg-purple-500 text-white" : "bg-zinc-800 text-zinc-400"}`}>
-                  <Trophy className="w-5 h-5" />
+                <div className={`p-2 rounded-xl ${goalType === "race_prep" ? "bg-purple-600 text-white" : "bg-zinc-800 text-zinc-400"}`}>
+                  <Trophy className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-white flex items-center gap-2">
-                    赛事突破备战 (Race Preparation)
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-normal">全马/半马/越野</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">针对目标赛事周期备战</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold">
+                      Canova 专项哲学
+                    </span>
                   </div>
                   <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                    以既定比赛为导向，由比赛日倒排周期：基础构建 → 乳酸门槛 → 比赛专项收敛 → 赛前 2~3 周减量。
+                    以指定比赛日为终点，构建基础期、专项准备期、特定耐力期与巅峰赛前减量期。
                   </p>
                 </div>
               </button>
@@ -411,19 +498,21 @@ function computeCurrentWeekIndex(planData: any): number {
               <button
                 type="button"
                 onClick={() => setGoalType("fitness_maintenance")}
-                className={`p-4 rounded-2xl border text-left transition flex items-start gap-3 ${
+                className={`p-4 rounded-2xl border text-left transition relative flex items-start gap-3 ${
                   goalType === "fitness_maintenance"
-                    ? "bg-emerald-600/10 border-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "bg-[#18181c] border-white/5 text-zinc-400 hover:border-white/15"
+                    ? "bg-purple-600/15 border-purple-500 text-white shadow-lg shadow-purple-500/10"
+                    : "bg-[#18181c] border-white/5 text-zinc-400 hover:border-white/10 hover:text-zinc-200"
                 }`}
               >
-                <div className={`p-2.5 rounded-xl ${goalType === "fitness_maintenance" ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-400"}`}>
-                  <Mountain className="w-5 h-5" />
+                <div className={`p-2 rounded-xl ${goalType === "fitness_maintenance" ? "bg-purple-600 text-white" : "bg-zinc-800 text-zinc-400"}`}>
+                  <Mountain className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-white flex items-center gap-2">
-                    非赛季体能与专项能力进阶 (Off-Season / Trail)
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-normal">无比赛周期</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">非赛期专项体能维持</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/10 font-bold">
+                      Daniels 基础构建
+                    </span>
                   </div>
                   <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                     暂无比赛时，针对性强化低心率有氧底座、乳酸门槛、越野爬坡抗阻或 VO2Max 速度储备。
@@ -440,28 +529,62 @@ function computeCurrentWeekIndex(planData: any): number {
               {userRaces.length > 0 && (
                 <div className="space-y-2">
                   <span className="text-[11px] font-bold text-zinc-400">
-                    🚩 从您已登记的赛历中快速套用：
+                    🚩 从您已登记的赛历中快速套用（优先推荐 A 标核心赛事）：
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {userRaces.map((r: any) => (
-                      <button
-                        key={r.id || r.name}
-                        type="button"
-                        onClick={() => {
-                          setTargetRaceName(r.name);
-                          if (r.target_time) setTargetTime(r.target_time);
-                          if (r.race_date) setTargetDate(r.race_date);
-                          if (r.race_type) setRaceType(r.race_type);
-                        }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
-                          targetRaceName === r.name
-                            ? "bg-purple-600/30 border-purple-500 text-purple-200"
-                            : "bg-[#121215] border-white/10 text-zinc-400 hover:text-white"
-                        }`}
-                      >
-                        {r.name} · {r.target_time || "目标"}
-                      </button>
-                    ))}
+                    {userRaces.map((r: any) => {
+                      const isA = r.priority == 1 || r.priority === "A" || r.priority === "1";
+                      const isB = r.priority == 2 || r.priority === "B" || r.priority === "2";
+                      const isDone = r.status === "completed" || r.is_completed;
+                      const priorityBadge = isDone
+                        ? "🏁 已完赛"
+                        : isA
+                        ? "⭐ A标核心"
+                        : isB
+                        ? "⚡ B标代练"
+                        : "🏃 C标拉练";
+
+                      return (
+                        <button
+                          key={r.id || r.name}
+                          type="button"
+                          disabled={isDone}
+                          onClick={() => {
+                            if (isDone) return;
+                            setTargetRaceName(r.name);
+                            if (r.target_time) setTargetTime(r.target_time);
+                            if (r.race_date) setTargetDate(r.race_date);
+                            if (r.race_type) setRaceType(r.race_type);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition flex items-center gap-1.5 ${
+                            isDone
+                              ? "bg-white/[0.02] border-white/5 text-zinc-600 cursor-not-allowed line-through"
+                              : targetRaceName === r.name
+                              ? "bg-purple-600/30 border-purple-500 text-purple-200 shadow-sm"
+                              : isA
+                              ? "bg-amber-500/10 border-amber-500/30 text-amber-200 hover:border-amber-500/60"
+                              : "bg-[#121215] border-white/10 text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              isDone
+                                ? "bg-zinc-800 text-zinc-500"
+                                : isA
+                                ? "bg-amber-500/20 text-amber-300 font-bold"
+                                : isB
+                                ? "bg-sky-500/20 text-sky-300"
+                                : "bg-zinc-800 text-zinc-400"
+                            }`}
+                          >
+                            {priorityBadge}
+                          </span>
+                          <span>
+                            {r.name} · {r.target_time || "目标"}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

@@ -48,6 +48,20 @@
         </button>
       </view>
 
+      <!-- 🏆 Target Race Completed Switch Banner -->
+      <view v-if="plan && isTargetRaceCompleted && recommendedRace" class="plan-switch-banner">
+        <view class="banner-top-row">
+          <text class="banner-badge">🏆 原目标已完赛</text>
+          <text class="banner-sub">建议切换至核心 A 标</text>
+        </view>
+        <text class="banner-desc">
+          「{{ plan.target_race_name }}」已顺利完赛！依据周期化备赛逻辑，您的下一个宏观备赛终极目标应锚定为核心 A 标「{{ recommendedRace.name }}」（{{ recommendedRace.race_type || '核心突破' }} · {{ recommendedRace.race_date }}）。中途其他 B/C 标赛事将作为实战代练自动融入新课表！
+        </text>
+        <button class="banner-switch-btn" @click="handleApplyRecommendedRace">
+          切换为「{{ recommendedRace.name }}」并重新定制课表 ➔
+        </button>
+      </view>
+
       <!-- Plan Setup Panel -->
       <view v-if="showPlanConfig || !plan" class="plan-setup-card">
         <view class="card-title-row">
@@ -79,15 +93,22 @@
         <!-- If Race: Quick Select & Inputs -->
         <view v-if="planGoalType === 'race_prep'" class="race-setup-inputs">
           <view v-if="userRaces.length" class="registered-races-row">
-            <text class="registered-label">🚩 点击已登记赛历快速套用：</text>
+            <text class="registered-label">🚩 快速套用（优先推荐 A 标核心赛事）：</text>
             <view class="registered-chips">
               <view
                 v-for="r in userRaces"
                 :key="r.id || r.name"
                 class="reg-chip"
-                :class="{ active: planRaceName === r.name }"
-                @click="planRaceName = r.name; if(r.target_time) planTargetTime = r.target_time;"
+                :class="{
+                  active: planRaceName === r.name,
+                  'is-done': r.status === 'completed' || r.is_completed,
+                  'is-a': (r.priority == 1 || r.priority === 'A') && r.status !== 'completed'
+                }"
+                @click="handleSelectPlanRace(r)"
               >
+                <text class="reg-chip-tier tier-done" v-if="r.status === 'completed' || r.is_completed">🏁 已完赛</text>
+                <text class="reg-chip-tier tier-a" v-else-if="r.priority == 1 || r.priority === 'A'">⭐ A标核心</text>
+                <text class="reg-chip-tier tier-b" v-else-if="r.priority == 2 || r.priority === 'B'">⚡ B标代练</text>
                 <text class="reg-chip-name">{{ r.name }}</text>
               </view>
             </view>
@@ -815,13 +836,62 @@ function computeCurrentWeekIndex(planData: any): number {
 }
 
 const planGoalType = ref<"race_prep" | "fitness_maintenance">("race_prep");
-const planRaceName = ref("上海马拉松");
+const planRaceName = ref("");
 const planTargetTime = ref("3:09:30");
 const planMaintenanceFocus = ref("aerobic_base");
 const planWeeksCount = ref(8);
 const planDaysPerWeek = ref(4);
 const userGoal = ref<any>(null);
 const syncingGoal = ref(false);
+
+const recommendedRace = computed(() => {
+  if (!userRaces.value || userRaces.value.length === 0) return null;
+  const upcomingRaces = userRaces.value.filter(
+    (r: any) => r.status !== "completed" && !r.is_completed && !r.is_past
+  );
+  const candidates = upcomingRaces.length > 0 ? upcomingRaces : userRaces.value;
+  const aRace = candidates.find(
+    (r: any) => r.priority == 1 || r.priority === "A" || r.priority === "1"
+  );
+  if (aRace) return aRace;
+  const bRace = candidates.find(
+    (r: any) => r.priority == 2 || r.priority === "B" || r.priority === "2"
+  );
+  if (bRace) return bRace;
+  return candidates[0] || userRaces.value[0];
+});
+
+const isTargetRaceCompleted = computed(() => {
+  if (!plan.value || !userRaces.value || userRaces.value.length === 0) return false;
+  const targetName = plan.value.target_race_name;
+  const matched = userRaces.value.find(
+    (r: any) =>
+      r.name === targetName || (plan.value.title && plan.value.title.includes(r.name))
+  );
+  return Boolean(
+    matched &&
+      (matched.status === "completed" ||
+        matched.is_completed ||
+        matched.is_past)
+  );
+});
+
+function handleApplyRecommendedRace() {
+  if (!recommendedRace.value) return;
+  const rec = recommendedRace.value;
+  planRaceName.value = rec.name;
+  if (rec.target_time) planTargetTime.value = rec.target_time;
+  showPlanConfig.value = true;
+}
+
+function handleSelectPlanRace(r: any) {
+  if (r.status === "completed" || r.is_completed) {
+    uni.showToast({ title: "该比赛已完赛，请选择未完赛的目标", icon: "none" });
+    return;
+  }
+  planRaceName.value = r.name;
+  if (r.target_time) planTargetTime.value = r.target_time;
+}
 
 function getAlignmentRatio(week: any): number {
   const target = Number(userGoal.value?.weekly_target) || 50;
@@ -1266,6 +1336,19 @@ async function loadLatestReport() {
       });
     }
   }
+
+  if (recommendedRace.value) {
+    if (
+      !planRaceName.value ||
+      userRaces.value.find((r: any) => r.name === planRaceName.value)?.status ===
+        "completed"
+    ) {
+      planRaceName.value = recommendedRace.value.name;
+      if (recommendedRace.value.target_time) {
+        planTargetTime.value = recommendedRace.value.target_time;
+      }
+    }
+  }
 }
 
 function handleSelectRegisteredRace(r: any) {
@@ -1649,6 +1732,61 @@ onPullDownRefresh(async () => {
   font-weight: bold;
 }
 
+/* 🏆 Target Race Completed Switch Banner */
+.plan-switch-banner {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(175, 82, 222, 0.12) 100%);
+  border: 1rpx solid rgba(251, 191, 36, 0.35);
+  border-radius: 20rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.banner-top-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.banner-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.2);
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.banner-sub {
+  font-size: 20rpx;
+  color: #c084fc;
+  font-weight: 600;
+}
+
+.banner-desc {
+  font-size: 22rpx;
+  color: #e4e4e7;
+  line-height: 1.5;
+}
+
+.banner-switch-btn {
+  background: #9333ea;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: bold;
+  height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 14rpx;
+  border: none;
+  margin-top: 6rpx;
+
+  &:active {
+    background: #7e22ce;
+  }
+}
+
 /* Registered User Races */
 .registered-races-row {
   margin-top: 14rpx;
@@ -1680,6 +1818,16 @@ onPullDownRefresh(async () => {
   border-radius: 16rpx;
 }
 
+.reg-chip.is-done {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.reg-chip.is-a {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.08);
+}
+
 .reg-chip.active {
   background-color: rgba(175, 82, 222, 0.2);
   border-color: #af52de;
@@ -1692,9 +1840,14 @@ onPullDownRefresh(async () => {
   border-radius: 8rpx;
 }
 
+.reg-chip-tier.tier-done {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #71717a;
+}
+
 .reg-chip-tier.tier-a {
-  background-color: rgba(244, 63, 94, 0.25);
-  color: #fb7185;
+  background-color: rgba(251, 191, 36, 0.25);
+  color: #fbbf24;
 }
 
 .reg-chip-tier.tier-b {
