@@ -104,12 +104,37 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
         raise HTTPException(status_code=500, detail="加入大组织失败，请重试")
 
 
+from datetime import datetime
+
+def calculate_age_group(dob: Optional[str]) -> str:
+    """Calculates marathon/Gobi competition age group while protecting runner privacy.
+    Note: '精英' is strictly reserved for performance/pace tiers, never for age groups."""
+    if not dob:
+        return "青年组"
+    try:
+        birth_year = int(str(dob)[:4])
+        current_year = datetime.utcnow().year
+        age = current_year - birth_year
+        if age >= 50:
+            return "大师组"
+        elif age >= 40:
+            return "壮年组"
+        elif age >= 30:
+            return "中坚组"
+        else:
+            return "青年组"
+    except Exception:
+        return "青年组"
+
+
 @router.get("/my-orgs/{uid}")
 def get_user_organizations_endpoint(uid: str):
     """
     Returns all grand communities/organizations the user has joined with verified credentials.
     """
     orgs = LocalStore.get_user_organizations(uid)
+    for org in orgs:
+        org["age_group"] = calculate_age_group(org.get("date_of_birth"))
     return {"organizations": orgs}
 
 
@@ -134,11 +159,28 @@ def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None):
 
 
 @router.get("/{org_id}/members")
-def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None):
+def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None, operator_uid: Optional[str] = None):
     """
-    Returns verified member directory for the grand community (name, class, birthdate, status, sub-clubs).
+    Returns verified member directory for the grand community (name, class, age_group, status, sub-clubs).
+    Protects runner birth year and phone privacy for non-admin viewers.
     """
     members = LocalStore.get_org_members(org_id, search, class_filter)
+    is_admin = False
+    if operator_uid:
+        org = LocalStore.get_organization(org_id)
+        if org and org.get("owner_id") == operator_uid:
+            is_admin = True
+        else:
+            for m in members:
+                if m.get("user_id") == operator_uid and m.get("role") in ("owner", "admin"):
+                    is_admin = True
+                    break
+
+    for m in members:
+        m["age_group"] = calculate_age_group(m.get("date_of_birth"))
+        if not is_admin:
+            m.pop("date_of_birth", None)
+            m.pop("phone", None)
     return {"members": members}
 
 

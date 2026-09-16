@@ -91,3 +91,20 @@ def test_club_join_rules_workflow():
     members_after = LocalStore.get_club_members(club_id)
     uids_after = [m["user_id"] for m in members_after]
     assert member_uid_2 in uids_after
+
+    # 9. Test entering organization invite code (FDGOBI) in /api/team/join
+    org_join_res = client.post("/api/team/join", json={
+        "user_id": member_uid_1,
+        "invite_code": "FDGOBI"
+    })
+    assert org_join_res.status_code == 400
+    assert "复旦戈" in org_join_res.json()["detail"]
+    assert "大群体" in org_join_res.json()["detail"]
+
+    # 10. Test entering completely invalid code in /api/team/join
+    invalid_res = client.post("/api/team/join", json={
+        "user_id": member_uid_1,
+        "invite_code": "NOTEXIST123"
+    })
+    assert invalid_res.status_code == 404
+    assert "无效的邀请码" in invalid_res.json()["detail"]

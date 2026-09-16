@@ -396,6 +396,24 @@ def init_db():
         # Associate any club named like '复旦戈' or '闵文' to org_fudan_gobi
         cursor.execute("UPDATE clubs SET org_id = 'org_fudan_gobi' WHERE (name LIKE '%复旦戈%' OR name LIKE '%闵文%') AND (org_id IS NULL OR org_id = '')")
 
+        # Seed default sub-club for org_fudan_gobi if none exists
+        cursor.execute("SELECT COUNT(*) FROM clubs WHERE org_id = 'org_fudan_gobi'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT OR IGNORE INTO clubs (id, name, logo_url, description, city, invite_code, owner_id, org_id, join_mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'free', ?)
+            """, (
+                "club_fudan_gobi_main",
+                "复旦戈友先锋跑团",
+                "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=300&auto=format&fit=crop&q=80",
+                "复旦大学戈壁挑战赛日常拉练与备战总跑团，面向全体复旦戈友队员。",
+                "上海",
+                "FD8888",
+                "u_df65d9a588c9",
+                "org_fudan_gobi",
+                datetime.utcnow().isoformat() + "Z"
+            ))
+
         # Seed default flagship club if none exists
         cursor.execute("SELECT COUNT(*) FROM clubs")
         if cursor.fetchone()[0] == 0:

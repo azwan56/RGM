@@ -31,7 +31,7 @@
       <view class="org-meta-pill-row">
         <text class="org-meta-pill">👤 {{ currentOrg.real_name || '已认证' }}</text>
         <text class="org-meta-pill highlight">🎓 {{ currentOrg.class_name || '复旦商学院' }}</text>
-        <text class="org-meta-pill">🎂 {{ currentOrg.date_of_birth ? currentOrg.date_of_birth.substring(0, 4) + '年生' : '保密' }}</text>
+        <text class="org-meta-pill">🏅 {{ currentOrg.age_group || getAgeGroup(currentOrg.date_of_birth) }}</text>
         <text class="org-meta-pill">🚻 {{ currentOrg.gender === 'female' ? '女' : '男' }}</text>
       </view>
     </view>
@@ -803,7 +803,7 @@
                   <text class="m-status-pill" :class="m.status">{{ m.status === 'confirmed' ? '已核验' : '待核对' }}</text>
                 </view>
                 <text class="m-sub-text">
-                  {{ m.gender === 'female' ? '女' : '男' }} · {{ m.date_of_birth ? m.date_of_birth.substring(0, 4) + '年生' : '' }} · 分队: {{ m.sub_clubs && m.sub_clubs.length ? m.sub_clubs.map((s: any) => s.name).join('、') : '暂未入队' }}
+                  {{ m.gender === 'female' ? '女' : '男' }} · {{ m.age_group || getAgeGroup(m.date_of_birth) }} · 分队: {{ m.sub_clubs && m.sub_clubs.length ? m.sub_clubs.map((s: any) => s.name).join('、') : '暂未入队' }}
                 </text>
               </view>
             </view>
@@ -997,6 +997,19 @@ const orgJoinForm = ref({
   class_name: "",
   phone: ""
 });
+
+function getAgeGroup(dob?: string, fallbackGroup?: string): string {
+  if (fallbackGroup) return fallbackGroup;
+  if (!dob) return "青年组";
+  const year = parseInt(dob.substring(0, 4), 10);
+  if (isNaN(year) || year < 1920) return "青年组";
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - year;
+  if (age >= 50) return "大师组";
+  if (age >= 40) return "壮年组";
+  if (age >= 30) return "中坚组";
+  return "青年组";
+}
 
 function openOrgJoinModal() {
   const u = user.value || getStoredUser();
@@ -1364,7 +1377,21 @@ async function handleJoinClub() {
     inviteCodeInput.value = "";
     await loadClubData();
   } catch (e: any) {
-    uni.showToast({ title: e.message || "加入失败，请核对邀请码", icon: "none" });
+    const msg = e.message || "加入失败，请核对邀请码";
+    if (msg.includes("大群体") || msg.includes("戈友")) {
+      const code = inviteCodeInput.value.trim().toUpperCase();
+      showJoinModal.value = false;
+      openOrgJoinModal();
+      orgJoinForm.value.invite_code = code;
+      uni.showModal({
+        title: "戈友大群体认证提示",
+        content: msg,
+        showCancel: false,
+        confirmText: "去实名登记"
+      });
+    } else {
+      uni.showToast({ title: msg, icon: "none" });
+    }
   } finally {
     joiningClub.value = false;
   }

@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -52,6 +53,9 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
         synced_health = False
         sync_time_iso = datetime.utcnow().isoformat() + "Z"
         profile_updates: Dict[str, Any] = {}
+        garmin_adapter: Optional[GarminAdapter] = None
+        coros_adapter: Optional[CorosAdapter] = None
+        sync_errors: List[str] = []
 
         # 1. Sync Garmin if connected
         if has_garmin:
@@ -104,6 +108,11 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     profile_updates["garmin_last_sync_at"] = sync_time_iso
             except Exception as ge:
                 logger.error(f"[sync] Garmin sync error for {uid}: {ge}")
+                err_msg = str(ge)
+                if "429" in err_msg or "rate limit" in err_msg.lower():
+                    sync_errors.append("Garmin 官方接口访问频次超限(429)，请稍后重试")
+                else:
+                    sync_errors.append(f"Garmin 同步异常: {err_msg}")
 
         # 2. Sync COROS if connected
         if has_coros:
@@ -156,6 +165,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     profile_updates["coros_last_sync_at"] = sync_time_iso
             except Exception as ce:
                 logger.error(f"[sync] COROS sync error for {uid}: {ce}")
+                sync_errors.append(f"COROS 同步异常: {str(ce)}")
 
         # 3. Apply profile updates
         if profile_updates:
@@ -197,6 +207,12 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
             act["user_id"] = uid
             LocalStore.upsert_activity(act)
             saved_count += 1
+
+        if saved_count == 0 and not synced_health and sync_errors:
+            return {
+                "success": False,
+                "error": "；".join(sync_errors)
+            }
 
         return {
             "success": True,

@@ -3024,7 +3024,28 @@ async function handleJoinClub() {
     inviteCodeInput.value = "";
     await loadProfileData();
   } catch (e: any) {
-    uni.showToast({ title: e.message || "加入失败，请核对邀请码", icon: "none" });
+    const msg = e.message || "加入失败，请核对邀请码";
+    if (msg.includes("大群体") || msg.includes("戈友")) {
+      uni.showModal({
+        title: "戈友大群体认证提示",
+        content: msg,
+        confirmText: "前往认证",
+        cancelText: "知道了",
+        success: (modalRes) => {
+          if (modalRes.confirm) {
+            showJoinModal.value = false;
+            uni.navigateTo({
+              url: "/pages/team/team",
+              fail: () => {
+                uni.switchTab({ url: "/pages/team/rank" });
+              }
+            });
+          }
+        }
+      });
+    } else {
+      uni.showToast({ title: msg, icon: "none" });
+    }
   } finally {
     joiningClub.value = false;
   }

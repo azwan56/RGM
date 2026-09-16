@@ -105,6 +105,14 @@ def join_club_by_invite(req: JoinClubRequest):
         privacy_consent=req.privacy_consent if req.privacy_consent is not None else True
     )
     if not club:
+        code = (req.invite_code or "").strip().upper()
+        org = LocalStore.get_organization_by_code(code)
+        if org:
+            org_name = org.get("name", "高校戈友")
+            raise HTTPException(
+                status_code=400,
+                detail=f"【{org_name}】是高校戈友/大群体专属认证码（非普通跑团码）。请前往【跑团】页面，点击【凭专属邀请码实名认证加入】进行认证！"
+            )
         raise HTTPException(status_code=404, detail="无效的邀请码，请向团长核对后重新输入！")
 
     sanitized = dict(club)
