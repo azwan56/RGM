@@ -86,10 +86,17 @@ def test_org_admin_management_workflow():
     assert "成功加入" in join_res.json()["message"]
 
     # 7. Query roster
-    members_res = client.get(f"/api/org/{org_id}/members")
+    # As org owner/admin:
+    members_res = client.get(f"/api/org/{org_id}/members?operator_uid={owner_uid}")
     assert members_res.status_code == 200
     members = members_res.json()["members"]
     assert any(m["user_id"] == member_uid and m["real_name"] == "李安泰" for m in members)
+
+    # As anonymous/non-admin: privacy masking protects real name
+    anon_res = client.get(f"/api/org/{org_id}/members")
+    assert anon_res.status_code == 200
+    anon_members = anon_res.json()["members"]
+    assert any(m["user_id"] == member_uid and m["real_name"] == "李*泰" for m in anon_members)
 
     # 8. Unbind club
     unbind_res = client.post(f"/api/org/{org_id}/bind-club", json={

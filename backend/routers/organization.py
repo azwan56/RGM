@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
 from utils.local_store import LocalStore
+from utils.encryption import mask_name, mask_id_card, mask_phone, compute_age_group
 
 logger = logging.getLogger("router_org")
 router = APIRouter()
@@ -18,6 +19,7 @@ class JoinOrganizationRequest(BaseModel):
     date_of_birth: str   # 'YYYY-MM-DD'
     class_name: str      # 'EMBA 23春' / 'MBA 21级'
     phone: Optional[str] = None
+    id_card: Optional[str] = None
 
 class ConfirmMemberRequest(BaseModel):
     operator_uid: Optional[str] = None
@@ -90,7 +92,8 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
             gender=req.gender,
             date_of_birth=req.date_of_birth,
             class_name=req.class_name,
-            phone=req.phone
+            phone=req.phone,
+            id_card=req.id_card
         )
         return {
             "success": True,
@@ -104,29 +107,6 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
         raise HTTPException(status_code=500, detail="加入大组织失败，请重试")
 
 
-from datetime import datetime
-
-def calculate_age_group(dob: Optional[str]) -> str:
-    """Calculates marathon/Gobi competition age group while protecting runner privacy.
-    Note: '精英' is strictly reserved for performance/pace tiers, never for age groups."""
-    if not dob:
-        return "青年组"
-    try:
-        birth_year = int(str(dob)[:4])
-        current_year = datetime.utcnow().year
-        age = current_year - birth_year
-        if age >= 50:
-            return "大师组"
-        elif age >= 40:
-            return "壮年组"
-        elif age >= 30:
-            return "中坚组"
-        else:
-            return "青年组"
-    except Exception:
-        return "青年组"
-
-
 @router.get("/my-orgs/{uid}")
 def get_user_organizations_endpoint(uid: str):
     """
@@ -134,7 +114,7 @@ def get_user_organizations_endpoint(uid: str):
     """
     orgs = LocalStore.get_user_organizations(uid)
     for org in orgs:
-        org["age_group"] = calculate_age_group(org.get("date_of_birth"))
+        org["age_group"] = compute_age_group(org.get("date_of_birth"))
     return {"organizations": orgs}
 
 
@@ -162,7 +142,7 @@ def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None):
 def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None, operator_uid: Optional[str] = None):
     """
     Returns verified member directory for the grand community (name, class, age_group, status, sub-clubs).
-    Protects runner birth year and phone privacy for non-admin viewers.
+    Protects runner birth year, phone, and id_card privacy for non-admin viewers.
     """
     members = LocalStore.get_org_members(org_id, search, class_filter)
     is_admin = False
@@ -177,10 +157,25 @@ def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_fi
                     break
 
     for m in members:
-        m["age_group"] = calculate_age_group(m.get("date_of_birth"))
-        if not is_admin:
-            m.pop("date_of_birth", None)
+        is_self = bool(operator_uid and m.get("user_id") == operator_uid)
+        dob = m.get("date_of_birth") or ""
+        m["age_group"] = compute_age_group(dob)
+        m["birth_year"] = dob[:4] if len(dob) >= 4 and dob[:4].isdigit() else ""
+
+        if is_admin:
+            # Org admin/owner sees full real name, but masked phone & ID card
+            m["phone"] = mask_phone(m.get("phone"))
+            m["id_card"] = mask_id_card(m.get("id_card"))
+        elif is_self:
+            # Self sees unmasked phone and masked ID card
+            m["phone"] = m.get("phone") or ""
+            m["id_card"] = mask_id_card(m.get("id_card"))
+        else:
+            # Other members: masked name, remove sensitive fields
+            m["real_name"] = mask_name(m.get("real_name"))
             m.pop("phone", None)
+            m.pop("id_card", None)
+            m.pop("date_of_birth", None)
     return {"members": members}
 
 

@@ -8,6 +8,7 @@ import logging
 import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date, timedelta
+from utils.encryption import encrypt_pii, decrypt_pii, compute_age_group
 
 logger = logging.getLogger("local_store")
 
@@ -61,6 +62,8 @@ def init_db():
                 years_running INTEGER DEFAULT 3,
                 bio TEXT,
                 date_of_birth TEXT,
+                real_name TEXT,
+                id_card TEXT,
                 vo2max REAL,
                 wecom_webhook_url TEXT,
                 created_at TEXT
@@ -206,6 +209,7 @@ def init_db():
                 date_of_birth TEXT NOT NULL,
                 class_name TEXT NOT NULL,
                 phone TEXT,
+                id_card TEXT,
                 role TEXT DEFAULT 'member', -- 'owner', 'admin', 'member'
                 status TEXT DEFAULT 'confirmed', -- 'confirmed', 'pending'
                 joined_at TEXT,
@@ -367,6 +371,16 @@ def init_db():
             cursor.execute("ALTER TABLE profiles ADD COLUMN vo2max REAL")
         if "date_of_birth" not in existing_cols:
             cursor.execute("ALTER TABLE profiles ADD COLUMN date_of_birth TEXT")
+        if "id_card" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN id_card TEXT")
+        if "real_name" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN real_name TEXT")
+
+        # Dynamic migration for organization_members table
+        cursor.execute("PRAGMA table_info(organization_members)")
+        org_mem_cols = {row[1] for row in cursor.fetchall()}
+        if "id_card" not in org_mem_cols:
+            cursor.execute("ALTER TABLE organization_members ADD COLUMN id_card TEXT")
 
         # Dynamic migration for clubs table
         cursor.execute("PRAGMA table_info(clubs)")
@@ -482,6 +496,16 @@ class LocalStore:
         return uid
 
     @staticmethod
+    def _decrypt_profile_dict(d: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not d:
+            return d
+        res = dict(d)
+        for f in ["id_card", "date_of_birth", "phone", "real_name"]:
+            if f in res and res[f]:
+                res[f] = decrypt_pii(res[f])
+        return res
+
+    @staticmethod
     def get_profile(uid: str) -> Optional[Dict[str, Any]]:
         eff_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
@@ -493,7 +517,7 @@ class LocalStore:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
                 d["coros_connected"] = bool(d.get("coros_connected"))
-                return d
+                return LocalStore._decrypt_profile_dict(d)
             return None
 
     @staticmethod
@@ -506,7 +530,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
-                return d
+                return LocalStore._decrypt_profile_dict(d)
             return None
 
     @staticmethod
@@ -522,7 +546,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
-                return d
+                return LocalStore._decrypt_profile_dict(d)
             return None
 
     @staticmethod
@@ -538,7 +562,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d["coros_connected"] = bool(d.get("coros_connected"))
-                return d
+                return LocalStore._decrypt_profile_dict(d)
             return None
 
     @staticmethod
@@ -552,7 +576,7 @@ class LocalStore:
             for r in rows:
                 d = dict(r)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
-                result.append(d)
+                result.append(LocalStore._decrypt_profile_dict(d))
             return result
 
     @staticmethod
@@ -561,10 +585,17 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM profiles WHERE id = ?", (uid,))
             cursor.execute("DELETE FROM club_memberships WHERE user_id = ?", (uid,))
+            cursor.execute("DELETE FROM organization_members WHERE user_id = ?", (uid,))
             conn.commit()
 
     @staticmethod
     def upsert_profile(uid: str, data: Dict[str, Any]):
+        data = dict(data)
+        # Encrypt sensitive personal privacy fields before saving
+        for pii in ["id_card", "date_of_birth", "phone", "real_name"]:
+            if pii in data and data[pii] is not None:
+                data[pii] = encrypt_pii(data[pii])
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -3127,13 +3158,24 @@ class LocalStore:
         gender: str,
         date_of_birth: str,
         class_name: str,
-        phone: Optional[str] = None
+        phone: Optional[str] = None,
+        id_card: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Validates invite code, registers member into organization_members with real name,
-        gender, date_of_birth, class_name, and synchronizes profile physiological basics.
+        Validates invite code, registers member into organization_members with encrypted real name,
+        gender, date_of_birth, class_name, phone, id_card, and synchronizes profile basics.
         """
         clean_code = (invite_code or "").strip().upper()
+        clean_name = (real_name or "").strip()
+        clean_dob = (date_of_birth or "").strip()
+        clean_phone = (phone or "").strip()
+        clean_id_card = (id_card or "").strip()
+
+        enc_real_name = encrypt_pii(clean_name)
+        enc_dob = encrypt_pii(clean_dob)
+        enc_phone = encrypt_pii(clean_phone) if clean_phone else ""
+        enc_id_card = encrypt_pii(clean_id_card) if clean_id_card else ""
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -3153,24 +3195,26 @@ class LocalStore:
 
             cursor.execute("""
                 INSERT OR REPLACE INTO organization_members (
-                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at, confirmed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT joined_at FROM organization_members WHERE id = ?), ?), ?)
+                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, id_card, role, status, joined_at, confirmed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT joined_at FROM organization_members WHERE id = ?), ?), ?)
             """, (
-                membership_id, org_id, user_id, real_name.strip(), gender, date_of_birth, class_name.strip(),
-                phone or "", role, status, membership_id, now, now
+                membership_id, org_id, user_id, enc_real_name, gender, enc_dob, class_name.strip(),
+                enc_phone, enc_id_card, role, status, membership_id, now, now
             ))
 
-            # Sync real_name, gender, date_of_birth into profiles table
-            cursor.execute("SELECT display_name, gender, date_of_birth FROM profiles WHERE id = ?", (user_id,))
+            # Sync real_name, gender, date_of_birth, phone, id_card into profiles table
+            cursor.execute("SELECT display_name, gender, date_of_birth, phone, id_card, real_name FROM profiles WHERE id = ?", (user_id,))
             p_row = cursor.fetchone()
             if p_row:
                 cur_name = p_row["display_name"]
-                new_name = cur_name if cur_name and cur_name not in ["跑者", "微信用户"] else real_name.strip()
+                new_name = cur_name if cur_name and cur_name not in ["跑者", "微信用户"] else clean_name
                 cursor.execute("""
                     UPDATE profiles 
-                    SET display_name = ?, gender = ?, date_of_birth = ?, phone = COALESCE(NULLIF(phone, ''), ?)
+                    SET display_name = ?, gender = ?, date_of_birth = ?, real_name = ?,
+                        phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                        id_card = CASE WHEN ? != '' THEN ? ELSE id_card END
                     WHERE id = ?
-                """, (new_name, gender, date_of_birth, phone or "", user_id))
+                """, (new_name, gender, enc_dob, enc_real_name, enc_phone, enc_phone, enc_id_card, enc_id_card, user_id))
 
             conn.commit()
 
@@ -3178,10 +3222,12 @@ class LocalStore:
                 "org_id": org_id,
                 "org_name": org["name"],
                 "org_logo": org["logo_url"],
-                "real_name": real_name.strip(),
+                "real_name": clean_name,
                 "class_name": class_name.strip(),
                 "gender": gender,
-                "date_of_birth": date_of_birth,
+                "date_of_birth": clean_dob,
+                "phone": clean_phone,
+                "id_card": clean_id_card,
                 "status": status,
                 "role": role
             }
@@ -3193,14 +3239,25 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT o.id, o.name, o.logo_url, o.description, o.city,
-                       m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.role, m.status, m.joined_at, m.confirmed_at
+                       m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at
                 FROM organization_members m
                 JOIN organizations o ON m.org_id = o.id
                 WHERE m.user_id = ?
                 ORDER BY m.joined_at ASC
             """, (user_id,))
             rows = cursor.fetchall()
-            return [dict(r) for r in rows]
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["real_name"] = decrypt_pii(d.get("real_name"))
+                d["date_of_birth"] = decrypt_pii(d.get("date_of_birth"))
+                d["phone"] = decrypt_pii(d.get("phone"))
+                d["id_card"] = decrypt_pii(d.get("id_card"))
+                d["age_group"] = compute_age_group(d.get("date_of_birth"))
+                dob_val = d.get("date_of_birth") or ""
+                d["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
+                result.append(d)
+            return result
 
     @staticmethod
     def get_org_sub_clubs(org_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -3239,17 +3296,13 @@ class LocalStore:
             cursor = conn.cursor()
             query = """
                 SELECT m.id, m.org_id, m.user_id, m.real_name, m.gender, m.date_of_birth, m.class_name,
-                       m.phone, m.role, m.status, m.joined_at, m.confirmed_at,
+                       m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at,
                        p.avatar_url, p.display_name, p.marathon_pb, p.half_pb
                 FROM organization_members m
                 LEFT JOIN profiles p ON m.user_id = p.id
                 WHERE m.org_id = ?
             """
             params = [org_id]
-            if search:
-                query += " AND (m.real_name LIKE ? OR m.class_name LIKE ? OR p.display_name LIKE ?)"
-                like_term = f"%{search.strip()}%"
-                params.extend([like_term, like_term, like_term])
             if class_filter:
                 query += " AND m.class_name = ?"
                 params.append(class_filter.strip())
@@ -3261,6 +3314,22 @@ class LocalStore:
             result = []
             for r in rows:
                 d = dict(r)
+                d["real_name"] = decrypt_pii(d.get("real_name"))
+                d["date_of_birth"] = decrypt_pii(d.get("date_of_birth"))
+                d["phone"] = decrypt_pii(d.get("phone"))
+                d["id_card"] = decrypt_pii(d.get("id_card"))
+                d["age_group"] = compute_age_group(d.get("date_of_birth"))
+                dob_val = d.get("date_of_birth") or ""
+                d["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
+
+                if search:
+                    s = search.strip().lower()
+                    rn = (d.get("real_name") or "").lower()
+                    cn = (d.get("class_name") or "").lower()
+                    dn = (d.get("display_name") or "").lower()
+                    if s not in rn and s not in cn and s not in dn:
+                        continue
+
                 cursor.execute("""
                     SELECT c.id, c.name 
                     FROM club_memberships cm
@@ -3270,6 +3339,66 @@ class LocalStore:
                 d["sub_clubs"] = [dict(sc) for sc in cursor.fetchall()]
                 result.append(d)
             return result
+
+    @staticmethod
+    def purge_user_privacy_data(user_id: str) -> Dict[str, Any]:
+        """
+        Permanently wipes all sensitive personally identifiable information (PII) for the given user:
+        - profiles: real_name, id_card, date_of_birth, phone, email, bio, wecom_webhook_url,
+          Garmin & Coros credentials/tokens.
+        - organization_members: removes member registration records.
+        - resets display_name to anonymous '跑者_xxxx', avatar to default.
+        - preserves activities, logs, and athletic mileage for club/team statistics.
+        """
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM profiles WHERE id = ?", (user_id,))
+            if not cursor.fetchone():
+                return {"success": False, "message": "用户不存在"}
+
+            anon_name = f"跑者_{user_id[-4:]}" if len(user_id) >= 4 else "跑者_8888"
+            default_avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
+
+            cursor.execute("""
+                UPDATE profiles
+                SET real_name = '',
+                    id_card = '',
+                    date_of_birth = '',
+                    phone = '',
+                    email = '',
+                    bio = '',
+                    wecom_webhook_url = '',
+                    garmin_connected = 0,
+                    garmin_email = '',
+                    garmin_encrypted_password = '',
+                    coros_connected = 0,
+                    coros_account = '',
+                    coros_encrypted_password = '',
+                    display_name = ?,
+                    avatar_url = ?
+                WHERE id = ?
+            """, (anon_name, default_avatar, user_id))
+
+            # Delete organization memberships so identity is erased from org rosters
+            cursor.execute("DELETE FROM organization_members WHERE user_id = ?", (user_id,))
+
+            conn.commit()
+
+        # Remove local token files if any exist
+        token_dir = os.path.join(DB_DIR, "tokens")
+        if os.path.exists(token_dir):
+            for fname in os.listdir(token_dir):
+                if user_id in fname:
+                    try:
+                        os.remove(os.path.join(token_dir, fname))
+                    except Exception:
+                        pass
+
+        return {
+            "success": True,
+            "message": "所有个人隐私数据（真实姓名、身份证号、出生日期、手机号及绑定手表凭证）已彻底安全清除！",
+            "anonymized_display_name": anon_name
+        }
 
     @staticmethod
     def confirm_org_member(org_id: str, target_uid: str, operator_uid: Optional[str] = None) -> bool:

@@ -11,7 +11,7 @@ from utils.local_store import LocalStore
 from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
 from utils.running_metrics import get_age_from_dob, estimate_vo2max
-from utils.encryption import decrypt_string
+from utils.encryption import decrypt_string, compute_age_group
 
 logger = logging.getLogger("router_profile")
 router = APIRouter()
@@ -20,6 +20,8 @@ class ProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     phone: Optional[str] = None
+    real_name: Optional[str] = None
+    id_card: Optional[str] = None
     gender: Optional[str] = None
     date_of_birth: Optional[str] = None
     height_cm: Optional[float] = None
@@ -130,6 +132,9 @@ def get_user_profile(uid: str):
     profile.pop("garmin_encrypted_password", None)
     profile.pop("coros_encrypted_password", None)
     profile["age"] = get_age_from_dob(profile.get("date_of_birth"))
+    profile["age_group"] = compute_age_group(profile.get("date_of_birth"))
+    dob_val = profile.get("date_of_birth") or ""
+    profile["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
     goal = LocalStore.get_goal(uid)
     races = LocalStore.get_race_plans(uid)
 
@@ -152,6 +157,20 @@ def update_user_profile(uid: str, req: ProfileUpdateRequest):
     LocalStore.upsert_profile(uid, payload)
 
     return {"message": "个人资料更新成功", "data": payload}
+
+
+@router.post("/{uid}/purge-privacy")
+def purge_user_privacy_endpoint(uid: str):
+    """
+    Permanently wipes all sensitive privacy and personal identity data for the runner.
+    Athletic logs and historical mileage are retained with an anonymized persona.
+    """
+    if not uid:
+        raise HTTPException(status_code=400, detail="缺少用户标识")
+    result = LocalStore.purge_user_privacy_data(uid)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("message", "用户不存在"))
+    return result
 
 
 class AvatarBase64Request(BaseModel):

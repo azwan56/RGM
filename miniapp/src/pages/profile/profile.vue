@@ -600,9 +600,12 @@
         <!-- 出生日期 & 动态年龄 -->
         <view class="form-group full-width-group">
           <view class="label-with-tag">
-            <text class="label">出生日期 (Date of Birth)</text>
+            <view class="label-with-sec">
+              <text class="label">出生日期 (Date of Birth)</text>
+              <text class="field-sec-tag">🔒 AES-256 加密</text>
+            </view>
             <text v-if="displayAge !== null" class="age-badge-pill">
-              {{ displayAge }} 岁 · {{ displayAge >= 50 ? '大师组 (50+)' : displayAge >= 40 ? '壮年大师组 (40+)' : '黄金年龄组' }}
+              {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
             </text>
           </view>
           <picker
@@ -619,6 +622,55 @@
               <text class="picker-arrow">📅</text>
             </view>
           </picker>
+          <text class="field-privacy-subtip">🛡️ 仅本人及赛事管理可见完整日期，大群体公开名册仅展示组别脱敏保护</text>
+        </view>
+
+        <!-- 真实姓名 -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">真实姓名</text>
+            <text class="field-sec-tag">🔒 加密存储</text>
+          </view>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="戈友实名认证姓名"
+            :value="profile?.real_name || ''"
+            @input="onInputRealName"
+          />
+        </view>
+
+        <!-- 联系手机 -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">联系手机</text>
+            <text class="field-sec-tag">🔒 保密</text>
+          </view>
+          <input
+            class="form-input"
+            type="number"
+            maxlength="11"
+            placeholder="紧急联络手机"
+            :value="profile?.phone || ''"
+            @input="onInputPhone"
+          />
+        </view>
+
+        <!-- 身份证号码 / 证件号 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">身份证号码 / 证件号 (选填)</text>
+            <text class="field-sec-tag">🔒 密文存储 · 非必要不暴露</text>
+          </view>
+          <input
+            class="form-input"
+            type="idcard"
+            maxlength="18"
+            placeholder="用于赛事保险投保与参赛资格核验"
+            :value="profile?.id_card || ''"
+            @input="onInputIdCard"
+          />
+          <text class="field-privacy-subtip">🛡️ 保密承诺：证件号采用 AES-256 密文存储，任何普通成员均不可见，且可随时一键清除。</text>
         </view>
 
         <!-- 生理性别 -->
@@ -848,6 +900,54 @@
       <view class="save-box">
         <button class="save-btn" :loading="saving" @click="handleSaveAll">
           保存我的跑量目标与配置
+        </button>
+      </view>
+    </view>
+
+    <!-- ── CARD: 🛡️ 个人隐私与数据安全保障 ── -->
+    <view v-if="user" class="section-card privacy-guard-card">
+      <view class="card-title-row">
+        <view class="title-with-badge">
+          <text class="card-title">🛡️ 个人隐私与数据安全保障</text>
+          <text class="security-chip">AES-256 加密保护</text>
+        </view>
+      </view>
+
+      <view class="privacy-statement-box">
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">🔒</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">敏感隐私 AES-256 高强度密文存储</text>
+            <text class="privacy-rule-desc">
+              真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
+            </text>
+          </view>
+        </view>
+
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">👁️</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">大群体名册严格自动脱敏</text>
+            <text class="privacy-rule-desc">
+              在团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
+            </text>
+          </view>
+        </view>
+
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">🧹</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">随时一键彻底清除个人隐私</text>
+            <text class="privacy-rule-desc">
+              您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。原有运动里程与活动记录将以匿名形式保留，以保障跑团队伍统计完整性。
+            </text>
+          </view>
+        </view>
+      </view>
+
+      <view class="privacy-actions-row">
+        <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
+          🧹 一键清除所有个人隐私数据
         </button>
       </view>
     </view>
@@ -1729,6 +1829,9 @@ const defaultProfile = {
   coros_domain: "teamcnapi.coros.com",
   gender: "male",
   date_of_birth: "",
+  real_name: "",
+  phone: "",
+  id_card: "",
   vo2max: null,
   years_running: 3,
   height: 175,
@@ -1741,6 +1844,7 @@ const user = ref<UserProfile | null>(null);
 const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
+const purgingPrivacy = ref(false);
 
 // ── WeChat Subscribe Message State & Handlers ──
 const WECHAT_SUBSCRIBE_TEMPLATE_ID = "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0";
@@ -3139,6 +3243,21 @@ function onInputYearsRunning(e: any) {
   profile.value.years_running = e.detail?.value ? parseInt(e.detail.value, 10) : null;
 }
 
+function onInputRealName(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.real_name = e.detail?.value || "";
+}
+
+function onInputPhone(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.phone = e.detail?.value || "";
+}
+
+function onInputIdCard(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.id_card = e.detail?.value || "";
+}
+
 async function handleSyncDeviceProfile() {
   const uid = user.value?.id;
   if (!uid) {
@@ -3230,6 +3349,9 @@ async function handleSaveAll() {
       weight_kg: profile.value?.weight || profile.value?.weight_kg,
       gender: profile.value?.gender,
       date_of_birth: profile.value?.date_of_birth,
+      real_name: profile.value?.real_name,
+      phone: profile.value?.phone,
+      id_card: profile.value?.id_card,
       vo2max: profile.value?.vo2max !== undefined && profile.value?.vo2max !== null && profile.value?.vo2max !== "" ? Number(profile.value.vo2max) : null,
       years_running: profile.value?.years_running,
     });
@@ -3251,6 +3373,58 @@ async function handleSaveAll() {
   } finally {
     saving.value = false;
   }
+}
+
+async function handleConfirmPurgePrivacy() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+
+  uni.showModal({
+    title: "⚠️ 彻底清除个人隐私数据？",
+    content: "此操作将永久抹除您的真实姓名、身份证号、出生日期、联系电话以及绑定的佳明/高驰账号与密码密文。\n\n为保证跑团队伍训练统计与排行榜完整，您的历史跑量里程将以匿名形式（跑者_xxxx）保留。此操作不可撤销！",
+    confirmText: "确定彻底清除",
+    confirmColor: "#ef4444",
+    cancelText: "取消",
+    success: async (modalRes) => {
+      if (!modalRes.confirm) return;
+
+      purgingPrivacy.value = true;
+      uni.showLoading({ title: "正在清除隐私数据..." });
+      try {
+        const purgeRes = await request(`/api/profile/${uid}/purge-privacy`, "POST");
+        uni.hideLoading();
+        uni.showModal({
+          title: "🛡️ 清除成功",
+          content: purgeRes?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！",
+          showCancel: false,
+          confirmText: "我知道了",
+          success: () => {
+            if (purgeRes?.anonymized_display_name) {
+              if (user.value) user.value.display_name = purgeRes.anonymized_display_name;
+              if (profile.value) {
+                profile.value.display_name = purgeRes.anonymized_display_name;
+                profile.value.real_name = "";
+                profile.value.id_card = "";
+                profile.value.phone = "";
+                profile.value.date_of_birth = "";
+                profile.value.garmin_connected = false;
+                profile.value.coros_connected = false;
+              }
+            }
+            loadProfileData();
+          }
+        });
+      } catch (err: any) {
+        uni.hideLoading();
+        uni.showToast({ title: err?.message || "清除失败，请重试", icon: "none" });
+      } finally {
+        purgingPrivacy.value = false;
+      }
+    }
+  });
 }
 
 async function handleBindGarmin() {
@@ -6115,5 +6289,109 @@ onShow(() => {
 .auth-modal-content .modal-body {
   padding: 24rpx 36rpx 48rpx;
   box-sizing: border-box;
+}
+
+/* ── Privacy Guard Card & Privacy Controls ── */
+.privacy-guard-card {
+  border: 1rpx solid rgba(16, 185, 129, 0.25) !important;
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.04) 0%, rgba(18, 18, 20, 0.95) 100%);
+  margin-top: 24rpx;
+}
+
+.security-chip {
+  font-size: 20rpx;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1rpx solid rgba(16, 185, 129, 0.25);
+  padding: 4rpx 14rpx;
+  border-radius: 12rpx;
+  font-family: monospace;
+}
+
+.privacy-statement-box {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin: 16rpx 0 24rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.privacy-rule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.privacy-rule-icon {
+  font-size: 30rpx;
+  margin-top: 4rpx;
+}
+
+.privacy-rule-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.privacy-rule-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #e5e7eb;
+}
+
+.privacy-rule-desc {
+  font-size: 22rpx;
+  color: #9ca3af;
+  line-height: 1.5;
+}
+
+.privacy-actions-row {
+  margin-top: 8rpx;
+}
+
+.purge-privacy-btn {
+  width: 100%;
+  height: 84rpx;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1rpx solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
+  font-size: 26rpx;
+  font-weight: 600;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.purge-privacy-btn:active {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.label-with-sec {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.field-sec-tag {
+  font-size: 18rpx;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1rpx solid rgba(16, 185, 129, 0.25);
+  padding: 2rpx 8rpx;
+  border-radius: 8rpx;
+}
+
+.field-privacy-subtip {
+  font-size: 20rpx;
+  color: #9ca3af;
+  margin-top: 8rpx;
+  line-height: 1.4;
+  display: block;
 }
 </style>

@@ -629,7 +629,16 @@
         </view>
 
         <view class="modal-body org-form-body">
-          <text class="modal-intro">💡 加入大群体需登记真实姓名、性别、出生日期及班级等信息，以便管理员核验并解锁下属跑团。</text>
+          <view class="privacy-security-notice">
+            <view class="privacy-badge-row">
+              <text class="privacy-badge-icon">🛡️</text>
+              <text class="privacy-badge-title">个人隐私与数据安全保障</text>
+              <text class="privacy-badge-tag">AES-256 加密</text>
+            </view>
+            <text class="privacy-security-desc">
+              真实姓名、证件号、出生日期及手机号均在数据库底层采用 AES-256 密文存储，非必要不暴露，仅用于戈赛资格核验与分组合规。普通跑友无法查看您的明文隐私，且支持随时一键彻底清除。
+            </text>
+          </view>
 
           <view class="form-group">
             <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
@@ -642,7 +651,10 @@
           </view>
 
           <view class="form-group">
-            <text class="input-label">真实姓名 <text class="req-star">*</text></text>
+            <view class="label-with-icon-row">
+              <text class="input-label">真实姓名 <text class="req-star">*</text></text>
+              <text class="field-security-pill">🔒 加密存储</text>
+            </view>
             <input
               class="text-input"
               type="text"
@@ -672,14 +684,32 @@
           </view>
 
           <view class="form-group">
-            <text class="input-label">出生日期 <text class="req-star">*</text></text>
+            <view class="label-with-icon-row">
+              <text class="input-label">出生日期 <text class="req-star">*</text></text>
+              <text class="field-security-pill">🔒 密文分级</text>
+            </view>
             <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange">
               <view class="picker-display-box">
                 <text class="picker-value">{{ orgJoinForm.date_of_birth || '请选择出生日期' }}</text>
                 <text class="picker-arrow">📅 选择 ›</text>
               </view>
             </picker>
-            <text class="field-hint">仅用于生理体能评估与大组织分组核实，对外展示将严格脱敏保护隐私</text>
+            <text class="field-hint">仅用于生理体能评估与大组织分组核实，对外展示仅显示组别脱敏保护隐私</text>
+          </view>
+
+          <view class="form-group">
+            <view class="label-with-icon-row">
+              <text class="input-label">身份证号码 / 证件号 (选填)</text>
+              <text class="field-security-pill">🔒 密文存储</text>
+            </view>
+            <input
+              class="text-input"
+              type="idcard"
+              maxlength="18"
+              placeholder="用于赛事保险投保与参赛资格核验"
+              v-model="orgJoinForm.id_card"
+            />
+            <text class="field-hint">仅用于戈友挑战赛保险与参赛资格审核，非必要绝不向第三方暴露</text>
           </view>
 
           <view class="form-group">
@@ -693,7 +723,10 @@
           </view>
 
           <view class="form-group">
-            <text class="input-label">联系手机 (选填)</text>
+            <view class="label-with-icon-row">
+              <text class="input-label">联系手机 (选填)</text>
+              <text class="field-security-pill">🔒 保密</text>
+            </view>
             <input
               class="text-input"
               type="number"
@@ -995,7 +1028,8 @@ const orgJoinForm = ref({
   gender: "male",
   date_of_birth: "1988-08-08",
   class_name: "",
-  phone: ""
+  phone: "",
+  id_card: ""
 });
 
 function getAgeGroup(dob?: string, fallbackGroup?: string): string {
@@ -1015,12 +1049,11 @@ function openOrgJoinModal() {
   const u = user.value || getStoredUser();
   if (u) {
     orgJoinForm.value.real_name =
-      u.display_name && u.display_name !== "跑者" && u.display_name !== "微信用户"
-        ? u.display_name
-        : "";
+      u.real_name || (u.display_name && u.display_name !== "跑者" && u.display_name !== "微信用户" ? u.display_name : "");
     orgJoinForm.value.gender = u.gender || "male";
     orgJoinForm.value.date_of_birth = u.date_of_birth || "1988-08-08";
     orgJoinForm.value.phone = u.phone || "";
+    orgJoinForm.value.id_card = u.id_card || "";
   }
   showOrgJoinModal.value = true;
 }
@@ -1061,7 +1094,8 @@ async function submitOrgJoin() {
       gender: orgJoinForm.value.gender,
       date_of_birth: orgJoinForm.value.date_of_birth.trim(),
       class_name: orgJoinForm.value.class_name.trim(),
-      phone: orgJoinForm.value.phone.trim()
+      phone: orgJoinForm.value.phone.trim(),
+      id_card: orgJoinForm.value.id_card.trim()
     });
 
     uni.showToast({ title: res?.message || "加入大群体成功！", icon: "success" });
@@ -1089,11 +1123,12 @@ function openOrgMembersModal() {
 async function handleConfirmOrgMember(targetUid: string) {
   if (!currentOrg.value) return;
   try {
+    const uid = user.value?.id;
     await request(`/api/org/${currentOrg.value.id}/members/${targetUid}/confirm`, "POST", {
-      operator_uid: user.value?.id
+      operator_uid: uid
     });
     uni.showToast({ title: "已确认该戈友资料", icon: "success" });
-    const memRes = await request(`/api/org/${currentOrg.value.id}/members`);
+    const memRes = await request(`/api/org/${currentOrg.value.id}/members?operator_uid=${uid || ''}`);
     orgMembers.value = memRes?.members || [];
   } catch (e: any) {
     uni.showToast({ title: e?.message || "确认失败", icon: "none" });
@@ -1187,7 +1222,7 @@ async function loadClubData(preferredClubId?: string) {
         currentOrg.value = userOrgs.value[0];
         const subRes = await request(`/api/org/${currentOrg.value.id}/sub-clubs?user_id=${uid}`);
         orgSubClubs.value = subRes?.sub_clubs || [];
-        const memRes = await request(`/api/org/${currentOrg.value.id}/members`);
+        const memRes = await request(`/api/org/${currentOrg.value.id}/members?operator_uid=${uid}`);
         orgMembers.value = memRes?.members || [];
       } else {
         currentOrg.value = null;
@@ -3705,5 +3740,62 @@ onPullDownRefresh(async () => {
 
 .club-code-input:focus {
   border-color: #fc4c02;
+}
+
+/* ── Privacy Security Notice & Security Badges ── */
+.privacy-security-notice {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1rpx solid rgba(16, 185, 129, 0.25);
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.privacy-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-bottom: 10rpx;
+}
+
+.privacy-badge-icon {
+  font-size: 28rpx;
+}
+
+.privacy-badge-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #10b981;
+}
+
+.privacy-badge-tag {
+  font-size: 20rpx;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  padding: 4rpx 12rpx;
+  border-radius: 12rpx;
+  font-family: monospace;
+}
+
+.privacy-security-desc {
+  font-size: 22rpx;
+  color: #d1d5db;
+  line-height: 1.6;
+}
+
+.label-with-icon-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.field-security-pill {
+  font-size: 20rpx;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1rpx solid rgba(16, 185, 129, 0.25);
+  padding: 2rpx 10rpx;
+  border-radius: 10rpx;
 }
 </style>
