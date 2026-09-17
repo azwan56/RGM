@@ -511,6 +511,22 @@ export default function AdminPage() {
     setTimeout(() => setCopiedCode(""), 2000);
   }
 
+  function getAgeGroup(dob?: string, fallbackGroup?: string): string {
+    if (fallbackGroup) return fallbackGroup;
+    if (!dob) return "青年组";
+    try {
+      const y = parseInt(dob.slice(0, 4), 10);
+      const thisYear = new Date().getFullYear();
+      const age = thisYear - y;
+      if (age >= 50) return "大师组";
+      if (age >= 40) return "壮年组";
+      if (age >= 30) return "中坚组";
+      return "青年组";
+    } catch {
+      return "青年组";
+    }
+  }
+
   const filteredMembers = orgMembers.filter((m) => {
     if (!rosterSearch.trim()) return true;
     const q = rosterSearch.toLowerCase();
@@ -1745,6 +1761,9 @@ export default function AdminPage() {
                               <div>
                                 <span className="font-bold text-white block text-sm">{m.real_name || "未实名"}</span>
                                 <span className="text-[11px] text-zinc-500 block">昵称: {m.display_name || "跑友"}</span>
+                                {m.id_card && (
+                                  <span className="text-[10px] text-zinc-500 block font-mono">证件: {m.id_card}</span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -1752,9 +1771,14 @@ export default function AdminPage() {
                             {m.class_name || "复旦商学院"}
                           </td>
                           <td className="p-3.5 text-zinc-300">
-                            <span>{m.gender === "female" ? "🚺 女" : "🚹 男"}</span>
-                            <span className="text-zinc-500 mx-1">·</span>
-                            <span>{m.date_of_birth ? `${m.date_of_birth.substring(0, 4)}年生` : "--"}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{m.gender === "female" ? "🚺 女" : "🚹 男"}</span>
+                              <span className="text-zinc-500">·</span>
+                              <span>{m.date_of_birth ? `${m.date_of_birth.substring(0, 4)}年生` : "--"}</span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                {m.age_group || getAgeGroup(m.date_of_birth)}
+                              </span>
+                            </div>
                           </td>
                           <td className="p-3.5 text-zinc-400 font-mono">
                             {m.phone || "未填写"}

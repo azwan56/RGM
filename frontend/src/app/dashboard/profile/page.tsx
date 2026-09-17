@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
-import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2 } from "lucide-react";
+import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check } from "lucide-react";
 
 export interface RacePlan {
   id?: string;
@@ -60,6 +60,19 @@ export default function ProfilePage() {
   const [age, setAge] = useState<number | null>(null);
   const [syncingDeviceProfile, setSyncingDeviceProfile] = useState(false);
 
+  // ── Privacy & Sensitive Identity Fields ──
+  const [realName, setRealName] = useState("");
+  const [idCard, setIdCard] = useState("");
+  const [phone, setPhone] = useState("");
+
+  const [showRealName, setShowRealName] = useState(false);
+  const [showIdCard, setShowIdCard] = useState(false);
+  const [showPhone, setShowPhone] = useState(false);
+  const [showDob, setShowDob] = useState(false);
+
+  const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
+  const [purgingPrivacy, setPurgingPrivacy] = useState(false);
+
   function computeAge(dobStr: string): number | null {
     if (!dobStr) return null;
     try {
@@ -80,6 +93,14 @@ export default function ProfilePage() {
     } catch {
       return null;
     }
+  }
+
+  function getAgeGroup(ageVal: number | null): string {
+    if (ageVal === null || ageVal === undefined) return "青年组";
+    if (ageVal >= 50) return "大师组 (50+)";
+    if (ageVal >= 40) return "壮年组 (40-49)";
+    if (ageVal >= 30) return "中坚组 (30-39)";
+    return "青年组 (<30)";
   }
 
   // PB (HH:MM:SS or MM:SS)
@@ -158,6 +179,9 @@ export default function ProfilePage() {
         setCorosConnected(Boolean(profile.coros_connected));
         setCorosAccount(profile.coros_account || "");
         setCorosDomain(profile.coros_domain || "teamcnapi.coros.com");
+        if (profile.real_name) setRealName(profile.real_name);
+        if (profile.id_card) setIdCard(profile.id_card);
+        if (profile.phone) setPhone(profile.phone);
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.date_of_birth) {
@@ -646,6 +670,9 @@ export default function ProfilePage() {
         display_name: displayName.trim() || undefined,
         avatar_url: avatarUrl || undefined,
         gender,
+        real_name: realName.trim() || null,
+        id_card: idCard.trim() || null,
+        phone: phone.trim() || null,
         date_of_birth: dateOfBirth || null,
         vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
@@ -678,6 +705,32 @@ export default function ProfilePage() {
       alert("保存失败: " + (e?.message || e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleExecutePurgePrivacy() {
+    if (!user?.id) return;
+    setPurgingPrivacy(true);
+    try {
+      const res = await apiClient.post(`/api/profile/${user.id}/purge-privacy`);
+      alert(res.data?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！");
+      if (res.data?.anonymized_display_name) {
+        setDisplayName(res.data.anonymized_display_name);
+      }
+      setRealName("");
+      setIdCard("");
+      setPhone("");
+      setDateOfBirth("");
+      setAge(null);
+      setGarminConnected(false);
+      setGarminEmail("");
+      setCorosConnected(false);
+      setCorosAccount("");
+      setShowPurgeConfirmModal(false);
+    } catch (e: any) {
+      alert("清除失败: " + (e.response?.data?.detail || e.message || "网络异常"));
+    } finally {
+      setPurgingPrivacy(false);
     }
   }
 
@@ -1523,31 +1576,165 @@ export default function ProfilePage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-              {/* 出生日期 & 年龄 */}
-              <div className="sm:col-span-2">
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-zinc-400">出生日期 (Date of Birth)</label>
-                  {age !== null && (
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
-                      {age} 岁 · {age >= 50 ? "大师组 (50+)" : age >= 40 ? "壮年大师组 (40+)" : "黄金年龄组"}
-                    </span>
-                  )}
+            {/* ── 敏感个人实名与隐私信息 (AES-256-GCM 密文存储) ── */}
+            <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-sm font-bold text-white tracking-wide">个人实名身份与敏感信息</h3>
                 </div>
-                <input
-                  type="date"
-                  value={dateOfBirth}
-                  onChange={(e) => {
-                    setDateOfBirth(e.target.value);
-                    setAge(computeAge(e.target.value));
-                  }}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
+                  🔒 AES-256 高强度加密 · 非必要不暴露
+                </span>
               </div>
+              <p className="text-xs text-zinc-400">
+                真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储。默认以 *** 隐藏保护隐私，点击眼睛符号才完整显示。
+              </p>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 真实姓名 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>真实姓名 (实名认证)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showRealName ? "text" : "password"}
+                      value={realName}
+                      onChange={(e) => setRealName(e.target.value)}
+                      placeholder="戈友实名认证真实姓名"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRealName(!showRealName)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showRealName ? "隐藏" : "显示"}
+                    >
+                      {showRealName ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 紧急联系手机 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>联系手机 (Emergency Phone)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">保密</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showPhone ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showPhone ? "tel" : "password"}
+                      maxLength={11}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="便于紧急联络与赛事活动通知"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPhone(!showPhone)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showPhone ? "隐藏" : "显示"}
+                    >
+                      {showPhone ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 出生日期 & 年龄 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>出生日期 (Date of Birth)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
+                    </label>
+                    {age !== null && (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
+                        {age} 岁 · {getAgeGroup(age)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex items-center">
+                    {showDob ? (
+                      <input
+                        type="date"
+                        value={dateOfBirth}
+                        onChange={(e) => {
+                          setDateOfBirth(e.target.value);
+                          setAge(computeAge(e.target.value));
+                        }}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    ) : (
+                      <input
+                        type="password"
+                        readOnly
+                        value={dateOfBirth ? "1990-01-01" : ""}
+                        placeholder="点击右侧眼睛显示并选择出生日期"
+                        onClick={() => setShowDob(true)}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02] cursor-pointer"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowDob(!showDob)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showDob ? "隐藏" : "显示"}
+                    >
+                      {showDob ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    仅用于生理体能评估与大组织分组核实，对外公开名册仅显示组别脱敏保护
+                  </p>
+                </div>
+
+                {/* 身份证号码 / 证件号 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>身份证号码 / 证件号 (选填)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">非必要不暴露</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showIdCard ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showIdCard ? "text" : "password"}
+                      maxLength={18}
+                      value={idCard}
+                      onChange={(e) => setIdCard(e.target.value)}
+                      placeholder="用于赛事保险投保与参赛资格核验"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowIdCard(!showIdCard)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showIdCard ? "隐藏" : "显示"}
+                    >
+                      {showIdCard ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向任何第三方暴露
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
               {/* 性别 */}
               <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">性别</label>
+                <label className="text-xs text-zinc-400 block mb-1.5">生理性别</label>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
@@ -1816,6 +2003,65 @@ export default function ProfilePage() {
             )}
           </div>
 
+          {/* ── CARD 5: 个人隐私与数据安全保障 & 一键彻底清除 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">个人隐私与数据安全保障</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
+                🔒 AES-256-GCM 高强度密文保护
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">🔒</span>
+                  <span>敏感隐私密文存储</span>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与资格核验。
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">👁️</span>
+                  <span>大群体名册自动脱敏</span>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  在公开团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">🧹</span>
+                  <span>随时一键彻底清除</span>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。历史运动里程将以匿名跑者形式保留。
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <p className="text-xs text-zinc-500">
+                若您不再需要参与赛事资格审核，可随时一键清除所有个人实名与认证记录。
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowPurgeConfirmModal(true)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition active:scale-95 shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>🧹 一键清除所有个人隐私数据</span>
+              </button>
+            </div>
+          </div>
+
           {/* Submit Button */}
           <div className="flex justify-end pt-4">
             <button
@@ -1829,6 +2075,114 @@ export default function ProfilePage() {
           </div>
         </form>
       </main>
+
+      {/* ── Anti-Accidental Deletion Purge Confirm Modal (一键彻底清除防误删弹窗) ── */}
+      {showPurgeConfirmModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setShowPurgeConfirmModal(false)}
+        >
+          <div
+            className="bg-[#151518] border border-rose-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">🚨</span>
+                <h3 className="text-lg font-black text-rose-400">
+                  高危操作：确认清除个人隐私数据
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPurgeConfirmModal(false)}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex items-start gap-3">
+              <span className="text-rose-400 text-lg">⚠️</span>
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-rose-300">请谨慎确认，清除后数据不可撤销！</p>
+                <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                  系统将立即从服务器物理抹除您的敏感身份信息，防止任何潜在隐私泄露。
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#1c1c20] border border-white/5 rounded-2xl p-4 space-y-3.5 text-xs">
+              <div className="space-y-2">
+                <p className="font-bold text-rose-400 flex items-center gap-1.5">
+                  <span>将被彻底物理抹除的隐私（不可恢复）：</span>
+                </p>
+                <ul className="space-y-1.5 text-zinc-300 pl-1">
+                  <li className="flex items-center gap-2">
+                    <span className="text-rose-500 font-bold">✕</span>
+                    <span>真实姓名、身份证号码、出生年月日</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-rose-500 font-bold">✕</span>
+                    <span>紧急联系手机号、个人邮箱、个人简介</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-rose-500 font-bold">✕</span>
+                    <span>已绑定的 Garmin / 高驰手表授权密码与令牌</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-rose-500 font-bold">✕</span>
+                    <span>各大跑团 / 大群体花名册中的实名认证登记</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="h-px bg-white/10" />
+
+              <div className="space-y-2">
+                <p className="font-bold text-emerald-400 flex items-center gap-1.5">
+                  <span>将被安全保留的信息（匿名化保护）：</span>
+                </p>
+                <ul className="space-y-1.5 text-zinc-300 pl-1">
+                  <li className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>历史跑步里程、活动与打卡记录（自动显示为匿名跑者）</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>所在跑团队伍历史总里程与数据统计不受影响</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPurgeConfirmModal(false)}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-xs font-bold transition"
+              >
+                取消返回
+              </button>
+              <button
+                type="button"
+                disabled={purgingPrivacy}
+                onClick={handleExecutePurgePrivacy}
+                className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {purgingPrivacy ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>正在彻底清除...</span>
+                  </>
+                ) : (
+                  <span>确认彻底清除</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Photo Lightbox Preview Modal ── */}
       {previewPhotoUrl && (

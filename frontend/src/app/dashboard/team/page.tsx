@@ -34,7 +34,11 @@ import {
   Target,
   TrendingUp,
   UserMinus,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Eye,
+  EyeOff,
+  Lock,
+  Loader2
 } from "lucide-react";
 
 export default function TeamPage() {
@@ -62,10 +66,26 @@ export default function TeamPage() {
 
   // Modals & form states
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showOrgJoinModal, setShowOrgJoinModal] = useState(false);
   const [showAllClubsModal, setShowAllClubsModal] = useState(false);
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
   const [selectedStudentForReport, setSelectedStudentForReport] = useState<any | null>(null);
+
+  // Org Join Form States with Privacy Toggles
+  const [orgJoining, setOrgJoining] = useState(false);
+  const [orgInviteCode, setOrgInviteCode] = useState("");
+  const [orgRealName, setOrgRealName] = useState("");
+  const [orgGender, setOrgGender] = useState<"male" | "female">("male");
+  const [orgDob, setOrgDob] = useState("");
+  const [orgClassName, setOrgClassName] = useState("");
+  const [orgPhone, setOrgPhone] = useState("");
+  const [orgIdCard, setOrgIdCard] = useState("");
+
+  const [showOrgRealName, setShowOrgRealName] = useState(false);
+  const [showOrgDob, setShowOrgDob] = useState(false);
+  const [showOrgIdCard, setShowOrgIdCard] = useState(false);
+  const [showOrgPhone, setShowOrgPhone] = useState(false);
 
   const [allClubs, setAllClubs] = useState<any[]>([]);
   const [loadingAllClubs, setLoadingAllClubs] = useState(false);
@@ -97,7 +117,13 @@ export default function TeamPage() {
     try {
       const res = await apiClient.get(`/api/profile/${uid}`);
       if (res.data?.profile) {
-        setUserProfile(res.data.profile);
+        const p = res.data.profile;
+        setUserProfile(p);
+        if (p.real_name) setOrgRealName(p.real_name);
+        if (p.gender === "female") setOrgGender("female");
+        if (p.date_of_birth) setOrgDob(p.date_of_birth);
+        if (p.phone) setOrgPhone(p.phone);
+        if (p.id_card) setOrgIdCard(p.id_card);
       }
     } catch (e) {
       console.error("Load user profile error:", e);
@@ -142,6 +168,49 @@ export default function TeamPage() {
       alert(err.response?.data?.detail || "加入跑团失败，请重试！");
     } finally {
       setJoiningClubId(null);
+    }
+  }
+
+  async function handleOrgJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user?.id) return;
+    if (!orgInviteCode.trim()) {
+      alert("请输入大群体专属邀请码");
+      return;
+    }
+    if (!orgRealName.trim()) {
+      alert("请填写真实姓名以便管理员核对确认");
+      return;
+    }
+    if (!orgClassName.trim()) {
+      alert("请填写所在班级或届别（例如 EMBA 23春、MBA 21级）");
+      return;
+    }
+    if (!orgDob.trim()) {
+      alert("请选择出生日期");
+      return;
+    }
+
+    setOrgJoining(true);
+    try {
+      const res = await apiClient.post("/api/org/join", {
+        user_id: user.id,
+        invite_code: orgInviteCode.trim().toUpperCase(),
+        real_name: orgRealName.trim(),
+        gender: orgGender,
+        date_of_birth: orgDob.trim(),
+        class_name: orgClassName.trim(),
+        phone: orgPhone.trim(),
+        id_card: orgIdCard.trim(),
+      });
+      alert(res.data?.message || "实名认证登记成功，已加入大群体！");
+      setShowOrgJoinModal(false);
+      await loadUserClubs(user.id);
+      await loadAllClubs(user.id);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "加入大群体失败，请检查邀请码后重试！");
+    } finally {
+      setOrgJoining(false);
     }
   }
 
@@ -453,13 +522,20 @@ export default function TeamPage() {
             <p className="text-sm text-zinc-400 max-w-xl mx-auto leading-relaxed mb-6">
               请在下方浏览平台所有已创建跑团并选择加入，与队友共同参加月度跑量挑战、查看英雄榜与教练负荷监控！
             </p>
-            <div className="flex items-center justify-center">
+            <div className="flex items-center justify-center gap-3 flex-wrap">
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition"
               >
                 <UserPlus className="w-3.5 h-3.5 text-[#FC4C02]" />
-                已有邀请码？点此输入邀请码加入
+                已有跑团邀请码？点此加入
+              </button>
+              <button
+                onClick={() => setShowOrgJoinModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 rounded-xl transition shadow-lg shadow-amber-500/10"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
+                加入大群体 · 戈友实名认证
               </button>
             </div>
           </div>
@@ -655,6 +731,13 @@ export default function TeamPage() {
               >
                 <UserPlus className="w-4 h-4 text-[#FC4C02]" />
                 输入邀请码
+              </button>
+              <button
+                onClick={() => setShowOrgJoinModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-2xl text-xs font-bold transition shadow-lg shadow-amber-500/10"
+              >
+                <Shield className="w-4 h-4 text-amber-400" />
+                加入大群体 · 戈友认证
               </button>
             </div>
           </div>
@@ -1655,6 +1738,264 @@ export default function TeamPage() {
           </div>
         )}
       </main>
+      )}
+
+      {/* Grand Organization Real-Name Join Modal (大群体实名认证加入) */}
+      {showOrgJoinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#151518] border border-amber-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🏛️</span>
+                <div>
+                  <h3 className="text-lg font-black text-white">
+                    加入大群体 · 戈友实名认证
+                  </h3>
+                  <span className="text-[10px] text-amber-400 font-semibold">凭专属邀请码认证</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOrgJoinModal(false)}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Privacy Security Notice */}
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                  <Shield className="w-4 h-4 text-amber-400" />
+                  <span>个人隐私与数据安全保障</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  AES-256 加密
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-300 leading-relaxed">
+                真实姓名、证件号、出生日期及手机号均在底层采用 AES-256 密文存储，非必要不暴露，仅用于戈赛资格核验与分组合规。普通跑友无法查看您的明文隐私，且支持随时一键彻底清除。
+              </p>
+            </div>
+
+            <form onSubmit={handleOrgJoin} className="space-y-3.5 text-xs">
+              {/* 专属邀请码 */}
+              <div>
+                <label className="text-zinc-400 block mb-1 font-semibold">
+                  大群体专属邀请码 <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={orgInviteCode}
+                  onChange={(e) => setOrgInviteCode(e.target.value.toUpperCase())}
+                  placeholder="例如复旦戈友会邀请码"
+                  className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono tracking-wider uppercase focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {/* 真实姓名 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-400 font-semibold flex items-center gap-1.5">
+                    <span>真实姓名 <span className="text-rose-400">*</span></span>
+                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
+                  </label>
+                  <span className="text-[11px] text-zinc-500">{showOrgRealName ? "明文" : "掩码"}</span>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type={showOrgRealName ? "text" : "password"}
+                    required
+                    value={orgRealName}
+                    onChange={(e) => setOrgRealName(e.target.value)}
+                    placeholder="请填写真实姓名以便管理员核对"
+                    className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-white focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgRealName(!showOrgRealName)}
+                    className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                  >
+                    {showOrgRealName ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* 生理性别 */}
+              <div>
+                <label className="text-zinc-400 block mb-1 font-semibold">
+                  生理性别 <span className="text-rose-400">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setOrgGender("male")}
+                    className={`py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                      orgGender === "male"
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                        : "bg-[#1c1c20] text-zinc-400 border border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    <span>🚹 男 (Male)</span>
+                    {orgGender === "male" && <span>✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrgGender("female")}
+                    className={`py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                      orgGender === "female"
+                        ? "bg-rose-600 text-white shadow-md shadow-rose-600/20"
+                        : "bg-[#1c1c20] text-zinc-400 border border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    <span>🚺 女 (Female)</span>
+                    {orgGender === "female" && <span>✓</span>}
+                  </button>
+                </div>
+              </div>
+
+              {/* 出生日期 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-400 font-semibold flex items-center gap-1.5">
+                    <span>出生日期 <span className="text-rose-400">*</span></span>
+                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
+                  </label>
+                </div>
+                <div className="relative flex items-center">
+                  {showOrgDob ? (
+                    <input
+                      type="date"
+                      required
+                      value={orgDob}
+                      onChange={(e) => setOrgDob(e.target.value)}
+                      className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  ) : (
+                    <input
+                      type="password"
+                      readOnly
+                      value={orgDob ? "1990-01-01" : ""}
+                      placeholder="点击右侧眼睛显示并选择出生日期"
+                      onClick={() => setShowOrgDob(true)}
+                      className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgDob(!showOrgDob)}
+                    className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                  >
+                    {showOrgDob ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  仅用于生理体能评估与大组织分组核实，对外公开名册仅显示组别脱敏保护
+                </p>
+              </div>
+
+              {/* 所在班级 / 届别 */}
+              <div>
+                <label className="text-zinc-400 block mb-1 font-semibold">
+                  所在班级 / 届别 <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={orgClassName}
+                  onChange={(e) => setOrgClassName(e.target.value)}
+                  placeholder="例如: EMBA 23春、MBA 21级"
+                  className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {/* 身份证号码 / 证件号 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-400 font-semibold flex items-center gap-1.5">
+                    <span>身份证号码 / 证件号 (选填)</span>
+                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">非必要不暴露</span>
+                  </label>
+                  <span className="text-[11px] text-zinc-500">{showOrgIdCard ? "明文" : "掩码"}</span>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type={showOrgIdCard ? "text" : "password"}
+                    maxLength={18}
+                    value={orgIdCard}
+                    onChange={(e) => setOrgIdCard(e.target.value)}
+                    placeholder="用于赛事保险投保与参赛资格核验"
+                    className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-white focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgIdCard(!showOrgIdCard)}
+                    className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                  >
+                    {showOrgIdCard ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向任何第三方暴露
+                </p>
+              </div>
+
+              {/* 紧急联系手机 */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-400 font-semibold flex items-center gap-1.5">
+                    <span>联系手机 (选填)</span>
+                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">保密</span>
+                  </label>
+                  <span className="text-[11px] text-zinc-500">{showOrgPhone ? "明文" : "掩码"}</span>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type={showOrgPhone ? "tel" : "password"}
+                    maxLength={11}
+                    value={orgPhone}
+                    onChange={(e) => setOrgPhone(e.target.value)}
+                    placeholder="便于紧急联络与赛事活动通知"
+                    className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-white focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgPhone(!showOrgPhone)}
+                    className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                  >
+                    {showOrgPhone ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOrgJoinModal(false)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-xs font-bold transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={orgJoining}
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black rounded-2xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {orgJoining ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-black" />
+                      <span>正在认证加入...</span>
+                    </>
+                  ) : (
+                    <span>立即提交实名认证</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Join Club Modal */}
