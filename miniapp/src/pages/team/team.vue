@@ -655,12 +655,18 @@
               <text class="input-label">真实姓名 <text class="req-star">*</text></text>
               <text class="field-security-pill">🔒 加密存储</text>
             </view>
-            <input
-              class="text-input"
-              type="text"
-              placeholder="请填写真实姓名以便管理员核实"
-              v-model="orgJoinForm.real_name"
-            />
+            <view class="secure-input-wrapper">
+              <input
+                class="text-input secure-input"
+                :password="!showOrgRealName"
+                type="text"
+                placeholder="请填写真实姓名以便管理员核实"
+                v-model="orgJoinForm.real_name"
+              />
+              <view class="eye-toggle-btn" @click="showOrgRealName = !showOrgRealName">
+                <text class="eye-icon">{{ showOrgRealName ? '👁️' : '🙈' }}</text>
+              </view>
+            </view>
           </view>
 
           <view class="form-group">
@@ -688,13 +694,20 @@
               <text class="input-label">出生日期 <text class="req-star">*</text></text>
               <text class="field-security-pill">🔒 密文分级</text>
             </view>
-            <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange">
-              <view class="picker-display-box">
-                <text class="picker-value">{{ orgJoinForm.date_of_birth || '请选择出生日期' }}</text>
-                <text class="picker-arrow">📅 选择 ›</text>
+            <view class="secure-picker-row">
+              <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange" class="secure-picker-flex">
+                <view class="picker-display-box">
+                  <text class="picker-value">
+                    {{ showOrgDob ? (orgJoinForm.date_of_birth || '请选择出生日期') : (orgJoinForm.date_of_birth ? '****-**-**' : '请选择出生日期') }}
+                  </text>
+                  <text class="picker-arrow">📅 选择 ›</text>
+                </view>
+              </picker>
+              <view class="eye-toggle-btn" @click.stop="showOrgDob = !showOrgDob">
+                <text class="eye-icon">{{ showOrgDob ? '👁️' : '🙈' }}</text>
               </view>
-            </picker>
-            <text class="field-hint">仅用于生理体能评估与大组织分组核实，对外展示仅显示组别脱敏保护隐私</text>
+            </view>
+            <text class="field-hint">点击眼睛符号显示/隐藏。对外仅展示组别脱敏保护隐私</text>
           </view>
 
           <view class="form-group">
@@ -702,14 +715,20 @@
               <text class="input-label">身份证号码 / 证件号 (选填)</text>
               <text class="field-security-pill">🔒 密文存储</text>
             </view>
-            <input
-              class="text-input"
-              type="idcard"
-              maxlength="18"
-              placeholder="用于赛事保险投保与参赛资格核验"
-              v-model="orgJoinForm.id_card"
-            />
-            <text class="field-hint">仅用于戈友挑战赛保险与参赛资格审核，非必要绝不向第三方暴露</text>
+            <view class="secure-input-wrapper">
+              <input
+                class="text-input secure-input"
+                :password="!showOrgIdCard"
+                type="text"
+                maxlength="18"
+                placeholder="用于赛事保险投保与参赛资格核验"
+                v-model="orgJoinForm.id_card"
+              />
+              <view class="eye-toggle-btn" @click="showOrgIdCard = !showOrgIdCard">
+                <text class="eye-icon">{{ showOrgIdCard ? '👁️' : '🙈' }}</text>
+              </view>
+            </view>
+            <text class="field-hint">默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向第三方暴露</text>
           </view>
 
           <view class="form-group">
@@ -727,13 +746,19 @@
               <text class="input-label">联系手机 (选填)</text>
               <text class="field-security-pill">🔒 保密</text>
             </view>
-            <input
-              class="text-input"
-              type="number"
-              maxlength="11"
-              placeholder="便于紧急联络与赛事活动通知"
-              v-model="orgJoinForm.phone"
-            />
+            <view class="secure-input-wrapper">
+              <input
+                class="text-input secure-input"
+                :password="!showOrgPhone"
+                type="number"
+                maxlength="11"
+                placeholder="便于紧急联络与赛事活动通知"
+                v-model="orgJoinForm.phone"
+              />
+              <view class="eye-toggle-btn" @click="showOrgPhone = !showOrgPhone">
+                <text class="eye-icon">{{ showOrgPhone ? '👁️' : '🙈' }}</text>
+              </view>
+            </view>
           </view>
 
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
@@ -1031,6 +1056,11 @@ const orgJoinForm = ref({
   phone: "",
   id_card: ""
 });
+
+const showOrgRealName = ref(false);
+const showOrgDob = ref(false);
+const showOrgIdCard = ref(false);
+const showOrgPhone = ref(false);
 
 function getAgeGroup(dob?: string, fallbackGroup?: string): string {
   if (fallbackGroup) return fallbackGroup;
@@ -3797,5 +3827,62 @@ onPullDownRefresh(async () => {
   border: 1rpx solid rgba(16, 185, 129, 0.25);
   padding: 2rpx 10rpx;
   border-radius: 10rpx;
+}
+
+/* ── Secure Privacy Input & Eye Toggle ── */
+.secure-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.secure-input {
+  flex: 1;
+  padding-right: 76rpx !important;
+}
+
+.eye-toggle-btn {
+  position: absolute;
+  right: 12rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 60rpx;
+  height: 60rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.eye-icon {
+  font-size: 32rpx;
+  opacity: 0.85;
+}
+
+.eye-toggle-btn:active .eye-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.secure-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  width: 100%;
+}
+
+.secure-picker-flex {
+  flex: 1;
+}
+
+.secure-picker-row .eye-toggle-btn {
+  position: static;
+  transform: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  border-radius: 16rpx;
+  width: 80rpx;
+  height: 80rpx;
 }
 </style>

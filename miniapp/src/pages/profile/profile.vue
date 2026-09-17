@@ -608,21 +608,27 @@
               {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
             </text>
           </view>
-          <picker
-            mode="date"
-            :value="profile?.date_of_birth || '1990-01-01'"
-            start="1940-01-01"
-            :end="todayDateStr"
-            @change="onDateOfBirthChange"
-          >
-            <view class="picker-input-box">
-              <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
-                {{ profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)' }}
-              </text>
-              <text class="picker-arrow">📅</text>
+          <view class="secure-picker-row">
+            <picker
+              mode="date"
+              :value="profile?.date_of_birth || '1990-01-01'"
+              start="1940-01-01"
+              :end="todayDateStr"
+              @change="onDateOfBirthChange"
+              class="secure-picker-flex"
+            >
+              <view class="picker-input-box">
+                <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
+                  {{ showDob ? (profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)') : (profile?.date_of_birth ? '****-**-**' : '请选择出生年月日 (YYYY-MM-DD)') }}
+                </text>
+                <text class="picker-arrow">📅</text>
+              </view>
+            </picker>
+            <view class="eye-toggle-btn" @click.stop="showDob = !showDob">
+              <text class="eye-icon">{{ showDob ? '👁️' : '🙈' }}</text>
             </view>
-          </picker>
-          <text class="field-privacy-subtip">🛡️ 仅本人及赛事管理可见完整日期，大群体公开名册仅展示组别脱敏保护</text>
+          </view>
+          <text class="field-privacy-subtip">🛡️ 点击右侧眼睛符号显示/隐藏完整日期，大群体公开名册仅展示组别脱敏保护</text>
         </view>
 
         <!-- 真实姓名 -->
@@ -631,13 +637,19 @@
             <text class="label">真实姓名</text>
             <text class="field-sec-tag">🔒 加密存储</text>
           </view>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="戈友实名认证姓名"
-            :value="profile?.real_name || ''"
-            @input="onInputRealName"
-          />
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showRealName"
+              type="text"
+              placeholder="戈友实名认证姓名"
+              :value="profile?.real_name || ''"
+              @input="onInputRealName"
+            />
+            <view class="eye-toggle-btn" @click="showRealName = !showRealName">
+              <text class="eye-icon">{{ showRealName ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
         </view>
 
         <!-- 联系手机 -->
@@ -646,14 +658,20 @@
             <text class="label">联系手机</text>
             <text class="field-sec-tag">🔒 保密</text>
           </view>
-          <input
-            class="form-input"
-            type="number"
-            maxlength="11"
-            placeholder="紧急联络手机"
-            :value="profile?.phone || ''"
-            @input="onInputPhone"
-          />
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showPhone"
+              type="number"
+              maxlength="11"
+              placeholder="紧急联络手机"
+              :value="profile?.phone || ''"
+              @input="onInputPhone"
+            />
+            <view class="eye-toggle-btn" @click="showPhone = !showPhone">
+              <text class="eye-icon">{{ showPhone ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
         </view>
 
         <!-- 身份证号码 / 证件号 -->
@@ -662,15 +680,21 @@
             <text class="label">身份证号码 / 证件号 (选填)</text>
             <text class="field-sec-tag">🔒 密文存储 · 非必要不暴露</text>
           </view>
-          <input
-            class="form-input"
-            type="idcard"
-            maxlength="18"
-            placeholder="用于赛事保险投保与参赛资格核验"
-            :value="profile?.id_card || ''"
-            @input="onInputIdCard"
-          />
-          <text class="field-privacy-subtip">🛡️ 保密承诺：证件号采用 AES-256 密文存储，任何普通成员均不可见，且可随时一键清除。</text>
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showIdCard"
+              type="text"
+              maxlength="18"
+              placeholder="用于赛事保险投保与参赛资格核验"
+              :value="profile?.id_card || ''"
+              @input="onInputIdCard"
+            />
+            <view class="eye-toggle-btn" @click="showIdCard = !showIdCard">
+              <text class="eye-icon">{{ showIdCard ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
+          <text class="field-privacy-subtip">🛡️ 默认以 *** 隐藏，点击眼睛符号才完整显示。证件号采用 AES-256 密文存储，任何普通成员不可见。</text>
         </view>
 
         <!-- 生理性别 -->
@@ -1792,6 +1816,71 @@
         </scroll-view>
       </view>
     </view>
+
+    <!-- ── Privacy Purge Confirmation Modal (一键彻底清除隐私数据防误删弹窗) ── -->
+    <view v-if="showPurgeConfirmModal" class="modal-mask purge-modal-mask" @click="showPurgeConfirmModal = false" @touchmove.stop.prevent>
+      <view class="modal-content purge-modal-content" @click.stop>
+        <view class="modal-header purge-modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title text-red">⚠️ 彻底清除个人隐私数据？</text>
+          </view>
+          <text class="close-btn" @click="showPurgeConfirmModal = false">✕</text>
+        </view>
+
+        <view class="modal-body purge-modal-body">
+          <view class="purge-warning-banner">
+            <text class="purge-warn-icon">🚨</text>
+            <view class="purge-warn-text-wrap">
+              <text class="purge-warn-title">请谨慎确认，清除后不可撤销！</text>
+              <text class="purge-warn-desc">
+                为防止误删，请仔细阅读以下清除与保留规则：
+              </text>
+            </view>
+          </view>
+
+          <view class="purge-details-box">
+            <text class="purge-detail-header red-header">将被彻底物理抹除的隐私（不可恢复）：</text>
+            <view class="purge-detail-item red-item">
+              <text class="purge-dot red-dot">✕</text>
+              <text class="purge-item-text">真实姓名、身份证号码、出生年月日</text>
+            </view>
+            <view class="purge-detail-item red-item">
+              <text class="purge-dot red-dot">✕</text>
+              <text class="purge-item-text">紧急联系手机号、个人邮箱、简介与头像</text>
+            </view>
+            <view class="purge-detail-item red-item">
+              <text class="purge-dot red-dot">✕</text>
+              <text class="purge-item-text">已绑定的 Garmin / 高驰手表授权密码与令牌</text>
+            </view>
+            <view class="purge-detail-item red-item">
+              <text class="purge-dot red-dot">✕</text>
+              <text class="purge-item-text">各大跑团/大群体花名册中的实名认证登记</text>
+            </view>
+
+            <view class="purge-divider"></view>
+
+            <text class="purge-detail-header green-header">将被安全保留的信息（匿名化）：</text>
+            <view class="purge-detail-item green-item">
+              <text class="purge-dot green-dot">✓</text>
+              <text class="purge-item-text">历史跑步里程、活动与打卡记录（显示为匿名跑者）</text>
+            </view>
+            <view class="purge-detail-item green-item">
+              <text class="purge-dot green-dot">✓</text>
+              <text class="purge-item-text">所在跑团队伍历史总里程与数据统计不受影响</text>
+            </view>
+          </view>
+
+          <view class="purge-modal-actions">
+            <button class="purge-cancel-btn" @click="showPurgeConfirmModal = false">
+              取消返回
+            </button>
+            <button class="purge-execute-btn" :loading="purgingPrivacy" @click="executePurgePrivacy">
+              确认彻底清除
+            </button>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -1845,6 +1934,11 @@ const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
 const purgingPrivacy = ref(false);
+const showDob = ref(false);
+const showRealName = ref(false);
+const showPhone = ref(false);
+const showIdCard = ref(false);
+const showPurgeConfirmModal = ref(false);
 
 // ── WeChat Subscribe Message State & Handlers ──
 const WECHAT_SUBSCRIBE_TEMPLATE_ID = "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0";
@@ -3375,56 +3469,55 @@ async function handleSaveAll() {
   }
 }
 
-async function handleConfirmPurgePrivacy() {
+function handleConfirmPurgePrivacy() {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  showPurgeConfirmModal.value = true;
+}
+
+async function executePurgePrivacy() {
   const uid = user.value?.id;
   if (!uid) {
     uni.showToast({ title: "请先登录", icon: "none" });
     return;
   }
 
-  uni.showModal({
-    title: "⚠️ 彻底清除个人隐私数据？",
-    content: "此操作将永久抹除您的真实姓名、身份证号、出生日期、联系电话以及绑定的佳明/高驰账号与密码密文。\n\n为保证跑团队伍训练统计与排行榜完整，您的历史跑量里程将以匿名形式（跑者_xxxx）保留。此操作不可撤销！",
-    confirmText: "确定彻底清除",
-    confirmColor: "#ef4444",
-    cancelText: "取消",
-    success: async (modalRes) => {
-      if (!modalRes.confirm) return;
-
-      purgingPrivacy.value = true;
-      uni.showLoading({ title: "正在清除隐私数据..." });
-      try {
-        const purgeRes = await request(`/api/profile/${uid}/purge-privacy`, "POST");
-        uni.hideLoading();
-        uni.showModal({
-          title: "🛡️ 清除成功",
-          content: purgeRes?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！",
-          showCancel: false,
-          confirmText: "我知道了",
-          success: () => {
-            if (purgeRes?.anonymized_display_name) {
-              if (user.value) user.value.display_name = purgeRes.anonymized_display_name;
-              if (profile.value) {
-                profile.value.display_name = purgeRes.anonymized_display_name;
-                profile.value.real_name = "";
-                profile.value.id_card = "";
-                profile.value.phone = "";
-                profile.value.date_of_birth = "";
-                profile.value.garmin_connected = false;
-                profile.value.coros_connected = false;
-              }
-            }
-            loadProfileData();
+  purgingPrivacy.value = true;
+  uni.showLoading({ title: "正在彻底清除隐私..." });
+  try {
+    const purgeRes = await request(`/api/profile/${uid}/purge-privacy`, "POST");
+    uni.hideLoading();
+    showPurgeConfirmModal.value = false;
+    uni.showModal({
+      title: "🛡️ 清除成功",
+      content: purgeRes?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！",
+      showCancel: false,
+      confirmText: "我知道了",
+      success: () => {
+        if (purgeRes?.anonymized_display_name) {
+          if (user.value) user.value.display_name = purgeRes.anonymized_display_name;
+          if (profile.value) {
+            profile.value.display_name = purgeRes.anonymized_display_name;
+            profile.value.real_name = "";
+            profile.value.id_card = "";
+            profile.value.phone = "";
+            profile.value.date_of_birth = "";
+            profile.value.garmin_connected = false;
+            profile.value.coros_connected = false;
           }
-        });
-      } catch (err: any) {
-        uni.hideLoading();
-        uni.showToast({ title: err?.message || "清除失败，请重试", icon: "none" });
-      } finally {
-        purgingPrivacy.value = false;
+        }
+        loadProfileData();
       }
-    }
-  });
+    });
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showToast({ title: err?.message || "清除失败，请重试", icon: "none" });
+  } finally {
+    purgingPrivacy.value = false;
+  }
 }
 
 async function handleBindGarmin() {
@@ -6393,5 +6486,217 @@ onShow(() => {
   margin-top: 8rpx;
   line-height: 1.4;
   display: block;
+}
+
+/* ── Secure Input & Eye Toggle in Profile ── */
+.secure-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.secure-input {
+  flex: 1;
+  padding-right: 76rpx !important;
+}
+
+.eye-toggle-btn {
+  position: absolute;
+  right: 12rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 60rpx;
+  height: 60rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.eye-icon {
+  font-size: 32rpx;
+  opacity: 0.85;
+}
+
+.eye-toggle-btn:active .eye-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.secure-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  width: 100%;
+}
+
+.secure-picker-flex {
+  flex: 1;
+}
+
+.secure-picker-row .eye-toggle-btn {
+  position: static;
+  transform: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  border-radius: 16rpx;
+  width: 80rpx;
+  height: 80rpx;
+}
+
+/* ── Custom Privacy Purge Modal ── */
+.purge-modal-mask {
+  align-items: center !important;
+  padding-top: 0 !important;
+}
+
+.purge-modal-content {
+  width: 90% !important;
+  max-width: 640rpx !important;
+  background: #141416 !important;
+  border-radius: 32rpx !important;
+  border: 1rpx solid rgba(239, 68, 68, 0.3) !important;
+  padding: 0 !important;
+  overflow: hidden;
+  box-shadow: 0 16rpx 48rpx rgba(0, 0, 0, 0.7);
+}
+
+.purge-modal-header {
+  padding: 32rpx 36rpx 20rpx;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.text-red {
+  color: #ef4444 !important;
+}
+
+.purge-modal-body {
+  padding: 28rpx 36rpx 36rpx !important;
+}
+
+.purge-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1rpx solid rgba(239, 68, 68, 0.25);
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.purge-warn-icon {
+  font-size: 36rpx;
+}
+
+.purge-warn-text-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.purge-warn-title {
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #fca5a5;
+}
+
+.purge-warn-desc {
+  font-size: 22rpx;
+  color: #d1d5db;
+  line-height: 1.5;
+}
+
+.purge-details-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 32rpx;
+}
+
+.purge-detail-header {
+  font-size: 24rpx;
+  font-weight: bold;
+  margin-bottom: 14rpx;
+  display: block;
+}
+
+.red-header {
+  color: #f87171;
+}
+
+.green-header {
+  color: #10b981;
+}
+
+.purge-detail-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+
+.purge-dot {
+  font-size: 22rpx;
+  font-weight: bold;
+  width: 28rpx;
+  line-height: 1.4;
+}
+
+.red-dot {
+  color: #ef4444;
+}
+
+.green-dot {
+  color: #10b981;
+}
+
+.purge-item-text {
+  flex: 1;
+  font-size: 22rpx;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.purge-divider {
+  height: 1rpx;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 18rpx 0;
+}
+
+.purge-modal-actions {
+  display: flex;
+  gap: 20rpx;
+}
+
+.purge-cancel-btn {
+  flex: 1;
+  height: 84rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  color: #e5e7eb;
+  font-size: 26rpx;
+  font-weight: 600;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.purge-execute-btn {
+  flex: 1;
+  height: 84rpx;
+  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  color: #ffffff !important;
+  font-size: 26rpx;
+  font-weight: bold;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 16rpx rgba(239, 68, 68, 0.35);
 }
 </style>
