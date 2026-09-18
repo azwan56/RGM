@@ -42,7 +42,8 @@ import {
   Loader2,
   Clock,
   Download,
-  BarChart3
+  BarChart3,
+  Image as ImageIcon
 } from "lucide-react";
 
 export default function TeamPage() {
@@ -104,6 +105,7 @@ export default function TeamPage() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportPeriodType, setReportPeriodType] = useState<"week" | "month">("week");
   const [reportPeriodOffset, setReportPeriodOffset] = useState<number>(0);
+  const [reportViewMode, setReportViewMode] = useState<"poster" | "text">("poster");
   const [reportData, setReportData] = useState<any>(null);
   const [loadingReport, setLoadingReport] = useState<boolean>(false);
   const [copiedReportText, setCopiedReportText] = useState<boolean>(false);
@@ -330,6 +332,264 @@ export default function TeamPage() {
     }
     window.open(url, "_blank");
   }
+
+  function drawRoundedRectWeb(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number, fillStyle?: string, strokeStyle?: string) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.arcTo(x + width, y, x + width, y + radius, radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+    ctx.lineTo(x + radius, y + height);
+    ctx.arcTo(x, y + height, x, y + height - radius, radius);
+    ctx.lineTo(x, y + radius);
+    ctx.arcTo(x, y, x + radius, y, radius);
+    ctx.closePath();
+    if (fillStyle) {
+      ctx.fillStyle = fillStyle;
+      ctx.fill();
+    }
+    if (strokeStyle) {
+      ctx.strokeStyle = strokeStyle;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawWrappedTextWeb(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 4) {
+    let line = "";
+    let lineCount = 0;
+    for (let i = 0; i < text.length; i++) {
+      const testLine = line + text[i];
+      if (ctx.measureText(testLine).width > maxWidth && i > 0) {
+        ctx.fillText(line, x, y);
+        line = text[i];
+        y += lineHeight;
+        lineCount++;
+        if (lineCount >= maxLines - 1) {
+          const remaining = text.substring(i);
+          let lastLine = "";
+          for (let j = 0; j < remaining.length; j++) {
+            if (ctx.measureText(lastLine + remaining[j] + "...").width > maxWidth) {
+              break;
+            }
+            lastLine += remaining[j];
+          }
+          ctx.fillText(lastLine + "...", x, y);
+          return y + lineHeight;
+        }
+      } else {
+        line = testLine;
+      }
+    }
+    ctx.fillText(line, x, y);
+    return y + lineHeight;
+  }
+
+  const handleDownloadPosterImage = () => {
+    if (!reportData) return;
+    const canvas = document.createElement("canvas");
+    const W = 750;
+    const H = 1320;
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rep = reportData;
+
+    // Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, "#0e1017");
+    bgGrad.addColorStop(0.5, "#131620");
+    bgGrad.addColorStop(1, "#0a0b10");
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Outer border
+    drawRoundedRectWeb(ctx, 16, 16, W - 32, H - 32, 24, undefined, "rgba(255, 215, 0, 0.25)");
+
+    // Header
+    drawRoundedRectWeb(ctx, 40, 42, 190, 42, 21, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("👑 跑团专属战报", 52, 71);
+
+    ctx.font = "900 36px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(rep.club_name || "跑团战报", 40, 130);
+
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText(`${rep.period_label} · ${rep.date_range_str}`, 40, 172);
+
+    ctx.beginPath();
+    ctx.moveTo(40, 195);
+    ctx.lineTo(W - 40, 195);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.stroke();
+
+    // Hero Total Mileage
+    drawRoundedRectWeb(ctx, 40, 215, W - 80, 155, 20, "#181b26", "rgba(252, 76, 2, 0.35)");
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("全团累计奔跑总里程", 64, 252);
+
+    ctx.font = "900 72px monospace";
+    ctx.fillStyle = "#fc4c02";
+    ctx.fillText(`${rep.total_distance_km}`, 64, 326);
+
+    const kmWidth = ctx.measureText(`${rep.total_distance_km}`).width;
+    ctx.font = "900 30px sans-serif";
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillText("KM", 64 + kmWidth + 12, 324);
+
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#71717a";
+    ctx.fillText("汇聚全员热血汗水 · 每一步都在突破极限", 64, 355);
+
+    // 4-Metrics Grid
+    const gW = (W - 80 - 18) / 2;
+    const gH = 92;
+
+    drawRoundedRectWeb(ctx, 40, 390, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("队员出勤率", 56, 422);
+    ctx.font = "bold 30px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${rep.attendance_rate_pct}%`, 56, 462);
+    ctx.font = "18px sans-serif";
+    ctx.fillStyle = "#6b7280";
+    ctx.fillText(`(${rep.active_members_count}/${rep.total_members_count}人)`, 160, 460);
+
+    drawRoundedRectWeb(ctx, 40 + gW + 18, 390, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("全团平均配速", 56 + gW + 18, 422);
+    ctx.font = "bold 30px monospace";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${rep.avg_pace_str}`, 56 + gW + 18, 462);
+
+    drawRoundedRectWeb(ctx, 40, 498, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("累计爬升克服", 56, 530);
+    ctx.font = "bold 30px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`+${rep.total_elevation_gain_m}m`, 56, 570);
+
+    drawRoundedRectWeb(ctx, 40 + gW + 18, 498, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("累计打卡总人次", 56 + gW + 18, 530);
+    ctx.font = "bold 30px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${rep.total_activities_count} 次`, 56 + gW + 18, 570);
+
+    // Podium Top 3
+    drawRoundedRectWeb(ctx, 40, 606, W - 80, 235, 20, "#151722", "rgba(255, 215, 0, 0.3)");
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("🏆 荣誉榜单 Top 3", 60, 642);
+
+    const podium = rep.podium || [];
+    const medals = ["🥇 冠军", "🥈 亚军", "🥉 季军"];
+    const medalBgs = ["rgba(255, 215, 0, 0.12)", "rgba(192, 192, 192, 0.10)", "rgba(205, 127, 50, 0.10)"];
+    const medalStrokes = ["rgba(255, 215, 0, 0.35)", "rgba(192, 192, 192, 0.3)", "rgba(205, 127, 50, 0.3)"];
+
+    for (let i = 0; i < 3; i++) {
+      const pY = 660 + i * 55;
+      if (podium[i]) {
+        drawRoundedRectWeb(ctx, 60, pY, W - 120, 48, 12, medalBgs[i], medalStrokes[i]);
+        ctx.font = "bold 22px sans-serif";
+        ctx.fillStyle = "#ffd700";
+        ctx.fillText(medals[i], 76, pY + 32);
+
+        ctx.font = "bold 22px sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(podium[i].display_name || "跑者", 185, pY + 32);
+
+        ctx.font = "900 22px monospace";
+        ctx.fillStyle = "#fc4c02";
+        ctx.fillText(`${podium[i].distance_km} km`, W - 250, pY + 32);
+
+        ctx.font = "20px monospace";
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText(podium[i].avg_pace_str || "—", W - 145, pY + 32);
+      }
+    }
+
+    // Highlights
+    const hY = 858;
+    const hW = (W - 80 - 18) / 2;
+    if (rep.hardcore_runner) {
+      drawRoundedRectWeb(ctx, 40, hY, hW, 82, 14, "#151722", "rgba(56, 189, 248, 0.25)");
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText("🌟 毅力先锋", 54, hY + 28);
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(`${rep.hardcore_runner.display_name}`, 54, hY + 54);
+      ctx.font = "16px sans-serif";
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(`打卡 ${rep.hardcore_runner.runs_count} 次 · ${rep.hardcore_runner.distance_km}km`, 54, hY + 74);
+    }
+    if (rep.longest_run) {
+      drawRoundedRectWeb(ctx, 40 + hW + 18, hY, hW, 82, 14, "#151722", "rgba(56, 189, 248, 0.25)");
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText("🚀 最长突破", 54 + hW + 18, hY + 28);
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(`${rep.longest_run.runner_name}`, 54 + hW + 18, hY + 54);
+      ctx.font = "16px sans-serif";
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(`单次 ${rep.longest_run.distance_km}km · ${rep.longest_run.avg_pace_str}`, 54 + hW + 18, hY + 74);
+    }
+
+    // Canova Quote Box
+    const cY = 955;
+    drawRoundedRectWeb(ctx, 40, cY, W - 80, 215, 18, "#181624", "rgba(191, 90, 242, 0.35)");
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillStyle = "#bf5af2";
+    ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
+
+    ctx.font = "italic 18px sans-serif";
+    ctx.fillStyle = "#d1d5db";
+    drawWrappedTextWeb(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 28, 4);
+
+    // Footer
+    const fY = 1195;
+    ctx.beginPath();
+    ctx.moveTo(40, fY);
+    ctx.lineTo(W - 40, fY);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+    ctx.stroke();
+
+    ctx.font = "900 22px sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("RGM RUNNING MATRIX", 40, fY + 40);
+
+    ctx.font = "16px sans-serif";
+    ctx.fillStyle = "#71717a";
+    ctx.fillText("跑者成长矩阵 · 科学耐力训练与跑团系统 · 官方认证战报", 40, fY + 68);
+
+    drawRoundedRectWeb(ctx, W - 160, fY + 20, 120, 48, 12, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("官方战报", W - 138, fY + 50);
+
+    // Download PNG
+    const dataUrl = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `${rep.club_name || "跑团"}_${rep.period_label || "战报"}_海报.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   async function loadUserClubs(uid: string) {
     setLoading(true);
@@ -2540,6 +2800,32 @@ export default function TeamPage() {
                   {reportPeriodType === "week" ? "上周战报" : "上月战报"}
                 </button>
               </div>
+
+              {/* View mode switcher */}
+              <div className="flex gap-2 p-1 bg-black/40 rounded-xl border border-white/5">
+                <button
+                  onClick={() => setReportViewMode("poster")}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    reportViewMode === "poster"
+                      ? "bg-gradient-to-r from-amber-500 to-amber-600 text-black shadow-md font-black"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>🎨 战报海报图片样式</span>
+                </button>
+                <button
+                  onClick={() => setReportViewMode("text")}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    reportViewMode === "text"
+                      ? "bg-gradient-to-r from-amber-500 to-amber-600 text-black shadow-md font-black"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>💬 微信群转发文本</span>
+                </button>
+              </div>
             </div>
 
             {/* Content Area */}
@@ -2550,183 +2836,236 @@ export default function TeamPage() {
               </div>
             ) : reportData ? (
               <div className="flex-1 overflow-y-auto space-y-5 pr-1 custom-scrollbar">
-                {/* Period banner */}
-                <div className="flex items-center justify-between bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/30 rounded-2xl p-4">
-                  <div className="font-black text-white text-sm">{reportData.period_label}</div>
-                  <div className="text-xs text-amber-400 font-mono">{reportData.date_range_str}</div>
-                </div>
+                {/* ── POSTER VIEW ── */}
+                {reportViewMode === "poster" ? (
+                  <div className="p-1">
+                    <div className="bg-gradient-to-b from-[#11141d] via-[#151824] to-[#0c0d14] border-2 border-amber-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-6">
+                      {/* Top Branding Header */}
+                      <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={currentClub?.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=200&auto=format&fit=crop&q=80"}
+                            alt=""
+                            className="w-12 h-12 rounded-full object-cover border-2 border-amber-400 shadow-md"
+                          />
+                          <div>
+                            <h4 className="text-base font-black text-white">{reportData.club_name || currentClub?.name}</h4>
+                            <span className="text-[11px] font-bold text-amber-400">👑 跑团官方战报 · 荣誉榜</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs font-black text-white">{reportData.period_label}</div>
+                          <div className="text-[10px] text-zinc-400 font-mono">{reportData.date_range_str}</div>
+                        </div>
+                      </div>
 
-                {/* Overview Metrics Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                      <Flame className="w-3.5 h-3.5 text-[#FC4C02]" />
-                      全团跑量
-                    </span>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-black text-[#FC4C02]">{reportData.total_distance_km}</span>
-                      <span className="text-[10px] text-zinc-500">km</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-blue-400" />
-                      队员出勤率
-                    </span>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-black text-white">{reportData.attendance_rate_pct}%</span>
-                      <span className="text-[10px] text-zinc-500">
-                        ({reportData.active_members_count}/{reportData.total_members_count})
-                      </span>
-                    </div>
-                  </div>
-                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
-                      全团平均配速
-                    </span>
-                    <div className="text-lg font-black text-white font-mono">{reportData.avg_pace_str}</div>
-                  </div>
-                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                      <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
-                      累计爬升
-                    </span>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-black text-white">+{reportData.total_elevation_gain_m}</span>
-                      <span className="text-[10px] text-zinc-500">m</span>
-                    </div>
-                  </div>
-                </div>
+                      {/* Hero Total Mileage */}
+                      <div className="bg-gradient-to-br from-[#fc4c02]/15 via-amber-500/10 to-transparent border border-[#fc4c02]/30 rounded-2xl p-5 text-center space-y-1">
+                        <span className="text-[10px] font-bold text-zinc-400 tracking-wider uppercase">全团累计奔跑总里程</span>
+                        <div className="flex items-baseline justify-center gap-2">
+                          <span className="text-5xl sm:text-6xl font-black text-[#fc4c02] font-mono tracking-tight">{reportData.total_distance_km}</span>
+                          <span className="text-2xl font-black text-amber-400">KM</span>
+                        </div>
+                        <p className="text-[11px] text-zinc-500">汇聚全员热血汗水 · 每一步都在突破极限</p>
+                      </div>
 
-                {/* 🏆 Podium Top 3 */}
-                <div className="bg-[#18181b] border border-white/5 rounded-2xl p-4 space-y-3">
-                  <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                    <Trophy className="w-4 h-4" />
-                    <span>荣誉榜单 Top 3</span>
-                  </div>
-                  {reportData.podium && reportData.podium.length > 0 ? (
-                    <div className="space-y-2">
-                      {reportData.podium.map((p: any, idx: number) => (
-                        <div
-                          key={p.user_id}
-                          className={`flex items-center justify-between p-2.5 rounded-xl border ${
-                            idx === 0
-                              ? "bg-amber-500/10 border-amber-500/30"
-                              : idx === 1
-                              ? "bg-slate-400/10 border-slate-400/30"
-                              : "bg-amber-700/10 border-amber-700/30"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span className="text-lg font-bold">
-                              {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"}
-                            </span>
-                            <img
-                              src={
-                                p.avatar_url ||
-                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-                              }
-                              alt=""
-                              className="w-7 h-7 rounded-full object-cover"
-                            />
-                            <div>
-                              <div className="text-xs font-black text-white">{p.display_name}</div>
+                      {/* 4-Metrics Bar */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <div className="bg-white/[0.04] border border-white/[0.07] rounded-xl p-3 space-y-0.5">
+                          <span className="text-[10px] text-zinc-400">队员出勤率</span>
+                          <div className="text-lg font-black text-white">{reportData.attendance_rate_pct}%</div>
+                          <span className="text-[9px] text-zinc-500">({reportData.active_members_count}/{reportData.total_members_count}人)</span>
+                        </div>
+                        <div className="bg-white/[0.04] border border-white/[0.07] rounded-xl p-3 space-y-0.5">
+                          <span className="text-[10px] text-zinc-400">全团均速</span>
+                          <div className="text-lg font-black text-white font-mono">{reportData.avg_pace_str}</div>
+                          <span className="text-[9px] text-zinc-500">有效巡航</span>
+                        </div>
+                        <div className="bg-white/[0.04] border border-white/[0.07] rounded-xl p-3 space-y-0.5">
+                          <span className="text-[10px] text-zinc-400">累计爬升</span>
+                          <div className="text-lg font-black text-white">+{reportData.total_elevation_gain_m}m</div>
+                          <span className="text-[9px] text-zinc-500">克服重力</span>
+                        </div>
+                        <div className="bg-white/[0.04] border border-white/[0.07] rounded-xl p-3 space-y-0.5">
+                          <span className="text-[10px] text-zinc-400">打卡人次</span>
+                          <div className="text-lg font-black text-white">{reportData.total_activities_count} 次</div>
+                          <span className="text-[9px] text-zinc-500">坚持印记</span>
+                        </div>
+                      </div>
+
+                      {/* 🏆 Podium Top 3 */}
+                      <div className="bg-white/[0.03] border border-amber-500/25 rounded-2xl p-4 space-y-2.5">
+                        <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                          <Trophy className="w-4 h-4" />
+                          <span>荣誉三甲领奖台</span>
+                        </div>
+                        {reportData.podium && reportData.podium.length > 0 ? (
+                          <div className="space-y-2">
+                            {reportData.podium.map((p: any, idx: number) => (
+                              <div
+                                key={p.user_id}
+                                className={`flex items-center justify-between p-2.5 rounded-xl border ${
+                                  idx === 0
+                                    ? "bg-amber-500/10 border-amber-500/40 shadow-sm"
+                                    : idx === 1
+                                    ? "bg-slate-400/10 border-slate-400/30"
+                                    : "bg-amber-700/10 border-amber-700/30"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <span className="text-base font-black">
+                                    {idx === 0 ? "🥇 冠军" : idx === 1 ? "🥈 亚军" : "🥉 季军"}
+                                  </span>
+                                  <img
+                                    src={
+                                      p.avatar_url ||
+                                      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
+                                    }
+                                    alt=""
+                                    className="w-7 h-7 rounded-full object-cover"
+                                  />
+                                  <div>
+                                    <div className="text-xs font-black text-white">{p.display_name}</div>
+                                    <div className="text-[10px] text-zinc-400">
+                                      {p.runs_count} 次打卡 · 均速 {p.avg_pace_str}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-sm font-black text-[#fc4c02] font-mono">{p.distance_km}</span>
+                                  <span className="text-[10px] text-zinc-500 ml-1">km</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-3 text-xs text-zinc-500">本周期暂无打卡记录</div>
+                        )}
+                      </div>
+
+                      {/* 🌟 Highlights */}
+                      {(reportData.hardcore_runner || reportData.longest_run) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {reportData.hardcore_runner && (
+                            <div className="bg-sky-500/[0.06] border border-sky-500/25 rounded-xl p-3 space-y-0.5">
+                              <span className="text-[10px] font-bold text-sky-400">🌟 毅力先锋</span>
+                              <div className="text-xs font-black text-white">{reportData.hardcore_runner.display_name}</div>
                               <div className="text-[10px] text-zinc-400">
-                                {p.runs_count} 次打卡 · 均速 {p.avg_pace_str}
+                                打卡 {reportData.hardcore_runner.runs_count} 次 · {reportData.hardcore_runner.distance_km} km
                               </div>
                             </div>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-sm font-black text-white">{p.distance_km}</span>
-                            <span className="text-[10px] text-zinc-500 ml-1">km</span>
-                          </div>
+                          )}
+                          {reportData.longest_run && (
+                            <div className="bg-sky-500/[0.06] border border-sky-500/25 rounded-xl p-3 space-y-0.5">
+                              <span className="text-[10px] font-bold text-sky-400">🚀 最长突破</span>
+                              <div className="text-xs font-black text-white">{reportData.longest_run.runner_name}</div>
+                              <div className="text-[10px] text-zinc-400">
+                                单次 {reportData.longest_run.distance_km} km · {reportData.longest_run.avg_pace_str}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4 text-xs text-zinc-500">本周期暂无打卡记录</div>
-                  )}
-                </div>
+                      )}
 
-                {/* 🌟 Highlights */}
-                {(reportData.hardcore_runner || reportData.longest_run) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {reportData.hardcore_runner && (
-                      <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                        <span className="text-[11px] font-bold text-sky-400">🌟 毅力先锋</span>
-                        <div className="text-xs font-black text-white">{reportData.hardcore_runner.display_name}</div>
-                        <div className="text-[10px] text-zinc-400">
-                          打卡 {reportData.hardcore_runner.runs_count} 次 · 共 {reportData.hardcore_runner.distance_km} km
+                      {/* 💡 Renato Canova Review */}
+                      <div className="bg-gradient-to-br from-purple-500/10 via-[#181624] to-[#181624] border border-purple-500/35 rounded-2xl p-4 space-y-1.5">
+                        <div className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" />
+                          <span>Renato Canova 科学耐力团队复盘</span>
                         </div>
+                        <p className="text-xs text-zinc-300 leading-relaxed italic">“{reportData.canova_critique}”</p>
                       </div>
-                    )}
-                    {reportData.longest_run && (
-                      <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
-                        <span className="text-[11px] font-bold text-sky-400">🚀 最长突破</span>
-                        <div className="text-xs font-black text-white">{reportData.longest_run.runner_name}</div>
-                        <div className="text-[10px] text-zinc-400">
-                          单次 {reportData.longest_run.distance_km} km · {reportData.longest_run.avg_pace_str}
+
+                      {/* Bottom Stamp */}
+                      <div className="flex items-center justify-between pt-4 border-t border-white/10">
+                        <div>
+                          <div className="text-xs font-black text-white tracking-wider">RGM RUNNING MATRIX</div>
+                          <div className="text-[10px] text-zinc-500">跑者成长矩阵 · 科学耐力训练与跑团系统</div>
                         </div>
+                        <span className="px-2.5 py-1 rounded-md text-[10px] font-black tracking-wider text-amber-400 border border-amber-400 -rotate-3">
+                          官方认证战报
+                        </span>
                       </div>
-                    )}
+                    </div>
+                  </div>
+                ) : (
+                  /* ── TEXT VIEW ── */
+                  <div className="bg-[#0e0e11] border border-emerald-500/30 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                        <MessageCircle className="w-4 h-4" />
+                        微信群转发排版预览
+                      </span>
+                      <span className="text-[10px] text-zinc-500 font-mono">支持直接复制</span>
+                    </div>
+                    <pre className="p-3 bg-black/60 rounded-xl text-[11px] text-zinc-200 font-mono whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto custom-scrollbar border border-white/5">
+                      {reportData.forward_text}
+                    </pre>
                   </div>
                 )}
-
-                {/* 💡 Renato Canova Review */}
-                <div className="bg-gradient-to-br from-purple-500/10 via-[#18181b] to-[#18181b] border border-purple-500/30 rounded-2xl p-4 space-y-2">
-                  <div className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4" />
-                    <span>Renato Canova 科学耐力团队复盘</span>
-                  </div>
-                  <p className="text-xs text-zinc-300 leading-relaxed">{reportData.canova_critique}</p>
-                </div>
-
-                {/* 💬 WeChat Forwarding Preview */}
-                <div className="bg-[#0e0e11] border border-emerald-500/30 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                      <MessageCircle className="w-4 h-4" />
-                      微信群转发排版预览
-                    </span>
-                    <span className="text-[10px] text-zinc-500 font-mono">支持直接复制</span>
-                  </div>
-                  <pre className="p-3 bg-black/60 rounded-xl text-[11px] text-zinc-200 font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar border border-white/5">
-                    {reportData.forward_text}
-                  </pre>
-                </div>
               </div>
             ) : (
               <div className="py-12 text-center text-xs text-zinc-500">无法加载战报数据</div>
             )}
 
             {/* Footer Actions */}
-            <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-white/10">
-              <button
-                onClick={handleCopyReportText}
-                disabled={!reportData}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-2xl text-xs font-black transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {copiedReportText ? (
-                  <>
-                    <Check className="w-4 h-4 text-white" />
-                    <span>已复制到剪贴板，可直接发微信群！</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    <span>📋 一键复制微信群转发文本</span>
-                  </>
-                )}
-              </button>
-              <button
-                onClick={handleExportReportFile}
-                disabled={!reportData}
-                className="py-3 px-5 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-zinc-200 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
-              >
-                <Download className="w-4 h-4" />
-                <span>📥 导出战报文件</span>
-              </button>
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-3 border-t border-white/10">
+              {reportViewMode === "poster" ? (
+                <>
+                  <button
+                    onClick={handleDownloadPosterImage}
+                    disabled={!reportData}
+                    className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 text-black rounded-2xl text-xs font-black transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                    <span>🖼️ 下载海报长图 (PNG)</span>
+                  </button>
+                  <button
+                    onClick={handleCopyReportText}
+                    disabled={!reportData}
+                    className="py-3 px-4 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedReportText ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    <span>{copiedReportText ? "已复制！" : "📋 复制文本"}</span>
+                  </button>
+                  <button
+                    onClick={handleExportReportFile}
+                    disabled={!reportData}
+                    className="py-3 px-4 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-zinc-200 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border border-white/10"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>导出</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleCopyReportText}
+                    disabled={!reportData}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-2xl text-xs font-black transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {copiedReportText ? (
+                      <>
+                        <Check className="w-4 h-4 text-white" />
+                        <span>已复制到剪贴板，可直接发微信群！</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>📋 一键复制微信群转发文本</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleExportReportFile}
+                    disabled={!reportData}
+                    className="py-3 px-5 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-zinc-200 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>📥 导出战报文本</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -1055,6 +1055,24 @@
           </view>
         </view>
 
+        <!-- View mode tabs: 🎨 战报海报图片 vs 💬 微信群文本 -->
+        <view class="report-view-mode-tabs">
+          <view
+            class="report-view-tab"
+            :class="{ active: reportViewMode === 'poster' }"
+            @click="reportViewMode = 'poster'"
+          >
+            🎨 战报海报图片样式
+          </view>
+          <view
+            class="report-view-tab"
+            :class="{ active: reportViewMode === 'text' }"
+            @click="reportViewMode = 'text'"
+          >
+            💬 微信群转发文本
+          </view>
+        </view>
+
         <!-- Loading State -->
         <view v-if="loadingReport" class="report-loading-box">
           <text class="loading-spinner">⏳</text>
@@ -1063,113 +1081,172 @@
 
         <!-- Report Body -->
         <scroll-view v-else-if="reportData" scroll-y class="modal-body modal-scroll report-scroll-body">
-          <!-- Banner / Period Tag -->
-          <view class="report-period-banner">
-            <text class="rpb-title">{{ reportData.period_label }}</text>
-            <text class="rpb-dates">{{ reportData.date_range_str }}</text>
-          </view>
-
-          <!-- Key Metrics Grid -->
-          <view class="report-metrics-grid">
-            <view class="rmg-card">
-              <text class="rmg-label">🏃 团队总跑量</text>
-              <view class="rmg-val-row">
-                <text class="rmg-val highlight">{{ reportData.total_distance_km }}</text>
-                <text class="rmg-unit">km</text>
-              </view>
-            </view>
-            <view class="rmg-card">
-              <text class="rmg-label">👥 队员出勤率</text>
-              <view class="rmg-val-row">
-                <text class="rmg-val">{{ reportData.attendance_rate_pct }}</text>
-                <text class="rmg-unit">% ({{ reportData.active_members_count }}/{{ reportData.total_members_count }}人)</text>
-              </view>
-            </view>
-            <view class="rmg-card">
-              <text class="rmg-label">⏱️ 全团均速</text>
-              <view class="rmg-val-row">
-                <text class="rmg-val">{{ reportData.avg_pace_str }}</text>
-              </view>
-            </view>
-            <view class="rmg-card">
-              <text class="rmg-label">⛰️ 累计爬升</text>
-              <view class="rmg-val-row">
-                <text class="rmg-val">+{{ reportData.total_elevation_gain_m }}</text>
-                <text class="rmg-unit">m</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 🏆 跑团领奖台 Top 3 -->
-          <view class="report-section-box">
-            <text class="rsb-title">🏆 荣誉榜单 Top 3</text>
-            <view v-if="reportData.podium && reportData.podium.length > 0" class="podium-list">
-              <view
-                v-for="(p, idx) in reportData.podium"
-                :key="p.user_id"
-                class="podium-item"
-                :class="'podium-' + (idx + 1)"
-              >
-                <text class="podium-medal">{{ idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉' }}</text>
-                <image class="podium-avatar" :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'" mode="aspectFill" />
-                <view class="podium-info">
-                  <text class="podium-name">{{ p.display_name }}</text>
-                  <text class="podium-sub">{{ p.runs_count }}次打卡 · 均速 {{ p.avg_pace_str }}</text>
+          <!-- ── POSTER VIEW (图片海报样式) ── -->
+          <view v-if="reportViewMode === 'poster'" class="poster-card-wrapper">
+            <view class="report-poster-card">
+              <!-- Top Branding Header -->
+              <view class="poster-card-header">
+                <view class="poster-brand-row">
+                  <image
+                    class="poster-club-logo"
+                    :src="currentClub?.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=200&auto=format&fit=crop&q=80'"
+                    mode="aspectFill"
+                  />
+                  <view class="poster-club-titles">
+                    <text class="poster-club-name">{{ reportData.club_name || currentClub?.name }}</text>
+                    <text class="poster-tagline">👑 跑团官方战报 · 荣誉榜</text>
+                  </view>
                 </view>
-                <view class="podium-right">
-                  <text class="podium-km">{{ p.distance_km }}</text>
-                  <text class="podium-km-unit">km</text>
+                <view class="poster-period-pill">
+                  <text class="poster-period-name">{{ reportData.period_label }}</text>
+                  <text class="poster-period-date">{{ reportData.date_range_str }}</text>
                 </view>
               </view>
-            </view>
-            <view v-else class="empty-podium-text">
-              本周期暂无打卡记录，快号召大家启动跑步吧！
+
+              <!-- Hero Total Mileage Box -->
+              <view class="poster-hero-mileage">
+                <text class="phm-label">全团累计奔跑总里程</text>
+                <view class="phm-num-row">
+                  <text class="phm-num">{{ reportData.total_distance_km }}</text>
+                  <text class="phm-unit">KM</text>
+                </view>
+                <text class="phm-sub">汇聚全员热血汗水 · 每一步都在突破极限</text>
+              </view>
+
+              <!-- 4-Tile Metrics Bar -->
+              <view class="poster-grid-stats">
+                <view class="pg-item">
+                  <text class="pg-label">出勤率</text>
+                  <text class="pg-val">{{ reportData.attendance_rate_pct }}%</text>
+                  <text class="pg-sub">{{ reportData.active_members_count }}/{{ reportData.total_members_count }}人</text>
+                </view>
+                <view class="pg-item">
+                  <text class="pg-label">全团均速</text>
+                  <text class="pg-val font-mono">{{ reportData.avg_pace_str }}</text>
+                  <text class="pg-sub">有效巡航</text>
+                </view>
+                <view class="pg-item">
+                  <text class="pg-label">累计爬升</text>
+                  <text class="pg-val">+{{ reportData.total_elevation_gain_m }}m</text>
+                  <text class="pg-sub">克服重力</text>
+                </view>
+                <view class="pg-item">
+                  <text class="pg-label">打卡人次</text>
+                  <text class="pg-val">{{ reportData.total_activities_count }}次</text>
+                  <text class="pg-sub">坚持印记</text>
+                </view>
+              </view>
+
+              <!-- 🏆 Top 3 Podium Cards -->
+              <view class="poster-podium-box">
+                <view class="ppb-header">
+                  <text class="ppb-icon">🏆</text>
+                  <text class="ppb-title">荣誉三甲领奖台</text>
+                </view>
+                <view v-if="reportData.podium && reportData.podium.length > 0" class="poster-podium-cards">
+                  <view
+                    v-for="(p, idx) in reportData.podium"
+                    :key="p.user_id"
+                    class="ppc-row"
+                    :class="'podium-rank-' + (idx + 1)"
+                  >
+                    <view class="ppc-rank-badge">{{ idx === 0 ? '🥇 冠军' : idx === 1 ? '🥈 亚军' : '🥉 季军' }}</view>
+                    <image
+                      class="ppc-avatar"
+                      :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                      mode="aspectFill"
+                    />
+                    <view class="ppc-name-col">
+                      <text class="ppc-name">{{ p.display_name }}</text>
+                      <text class="ppc-detail">{{ p.runs_count }}次打卡 · 均速 {{ p.avg_pace_str }}</text>
+                    </view>
+                    <view class="ppc-km-col">
+                      <text class="ppc-km">{{ p.distance_km }}</text>
+                      <text class="ppc-km-u">km</text>
+                    </view>
+                  </view>
+                </view>
+                <view v-else class="empty-podium-text">本周期暂无打卡记录</view>
+              </view>
+
+              <!-- 🌟 Highlights (毅力先锋 & 最长突破) -->
+              <view v-if="reportData.hardcore_runner || reportData.longest_run" class="poster-highlights-box">
+                <view v-if="reportData.hardcore_runner" class="phb-item">
+                  <text class="phb-tag">🌟 毅力先锋</text>
+                  <text class="phb-name">{{ reportData.hardcore_runner.display_name }}</text>
+                  <text class="phb-sub">打卡 {{ reportData.hardcore_runner.runs_count }} 次 · {{ reportData.hardcore_runner.distance_km }} km</text>
+                </view>
+                <view v-if="reportData.longest_run" class="phb-item">
+                  <text class="phb-tag">🚀 最长突破</text>
+                  <text class="phb-name">{{ reportData.longest_run.runner_name }}</text>
+                  <text class="phb-sub">单次 {{ reportData.longest_run.distance_km }} km · {{ reportData.longest_run.avg_pace_str }}</text>
+                </view>
+              </view>
+
+              <!-- 💡 Canova Quote Card -->
+              <view class="poster-canova-quote">
+                <view class="pcq-header">
+                  <text class="pcq-icon">💡</text>
+                  <text class="pcq-title">Renato Canova 科学耐力团队复盘</text>
+                </view>
+                <text class="pcq-text">“{{ reportData.canova_critique }}”</text>
+              </view>
+
+              <!-- Bottom Watermark & Stamp -->
+              <view class="poster-footer-stamp">
+                <view class="pfs-left">
+                  <text class="pfs-brand">RGM RUNNING MATRIX</text>
+                  <text class="pfs-slogan">跑者成长矩阵 · 科学耐力训练与跑团系统</text>
+                </view>
+                <view class="pfs-stamp-badge">
+                  <text class="pfs-stamp-txt">认证战报</text>
+                </view>
+              </view>
             </view>
           </view>
 
-          <!-- 🌟 亮点突破 -->
-          <view v-if="reportData.hardcore_runner || reportData.longest_run" class="report-highlights-row">
-            <view v-if="reportData.hardcore_runner" class="highlight-card">
-              <text class="hc-tag">🌟 毅力先锋</text>
-              <text class="hc-name">{{ reportData.hardcore_runner.display_name }}</text>
-              <text class="hc-detail">打卡 {{ reportData.hardcore_runner.runs_count }} 次 · {{ reportData.hardcore_runner.distance_km }} km</text>
-            </view>
-            <view v-if="reportData.longest_run" class="highlight-card">
-              <text class="hc-tag">🚀 最长突破</text>
-              <text class="hc-name">{{ reportData.longest_run.runner_name }}</text>
-              <text class="hc-detail">单次 {{ reportData.longest_run.distance_km }} km · {{ reportData.longest_run.avg_pace_str }}</text>
-            </view>
-          </view>
-
-          <!-- 💡 Canova 科学复盘 -->
-          <view class="report-section-box canova-box">
-            <view class="canova-header">
-              <text class="canova-icon">💡</text>
-              <text class="canova-title">Renato Canova 科学耐力团队复盘</text>
-            </view>
-            <text class="canova-critique-text">{{ reportData.canova_critique }}</text>
-          </view>
-
-          <!-- 💬 微信群专属转发排版文本 -->
-          <view class="report-section-box forward-box">
-            <view class="forward-header">
-              <text class="forward-title">💬 微信群转发排版预览</text>
-              <text class="forward-hint">包含完整Emoji排版</text>
-            </view>
-            <view class="forward-preview-card">
-              <text class="forward-preview-text" :selectable="true">{{ reportData.forward_text }}</text>
+          <!-- ── TEXT VIEW (微信群纯文本预览) ── -->
+          <view v-else class="text-mode-container">
+            <view class="report-section-box forward-box">
+              <view class="forward-header">
+                <text class="forward-title">💬 微信群转发排版预览</text>
+                <text class="forward-hint">包含完整Emoji排版</text>
+              </view>
+              <view class="forward-preview-card">
+                <text class="forward-preview-text" :selectable="true">{{ reportData.forward_text }}</text>
+              </view>
             </view>
           </view>
         </scroll-view>
 
-        <!-- Footer Actions: 一键复制转发文本 & 导出文件 -->
+        <!-- Hidden Canvas for high-res 2x export -->
+        <canvas
+          canvas-id="reportPosterCanvas"
+          id="reportPosterCanvas"
+          style="width: 750px; height: 1320px; position: fixed; left: -9999px; top: -9999px;"
+        ></canvas>
+
+        <!-- Footer Actions -->
         <view class="report-footer-actions" v-if="reportData">
-          <button class="btn-copy-forward" @click="handleCopyReportForwardText">
-            📋 一键复制微信群转发文本
-          </button>
-          <button class="btn-download-report" @click="handleDownloadReportFile">
-            📥 下载战报文件
-          </button>
+          <template v-if="reportViewMode === 'poster'">
+            <button class="btn-preview-poster" @click="handlePreviewPosterImage">
+              🖼️ 预览/转发海报
+            </button>
+            <button class="btn-save-album" @click="handleSavePosterToAlbum">
+              💾 保存到相册
+            </button>
+            <button class="btn-sub-copy" @click="handleCopyReportForwardText">
+              📋 复制文本
+            </button>
+          </template>
+          <template v-else>
+            <button class="btn-copy-forward" @click="handleCopyReportForwardText">
+              📋 一键复制微信群转发文本
+            </button>
+            <button class="btn-download-report" @click="handleDownloadReportFile">
+              📥 下载战报文本
+            </button>
+          </template>
         </view>
       </view>
     </view>
@@ -1233,6 +1310,7 @@ const clubJoinCodeInput = ref("");
 const showReportModal = ref(false);
 const reportPeriodType = ref<"week" | "month">("week");
 const reportPeriodOffset = ref(0);
+const reportViewMode = ref<"poster" | "text">("poster");
 const loadingReport = ref(false);
 const reportData = ref<any>(null);
 
@@ -1736,6 +1814,326 @@ function handleDownloadReportFile() {
     handleCopyReportForwardText();
   }
   // #endif
+}
+
+function drawRoundedRect(ctx: any, x: number, y: number, width: number, height: number, radius: number, fillStyle?: string, strokeStyle?: string) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.arcTo(x + width, y, x + width, y + radius, radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+  ctx.lineTo(x + radius, y + height);
+  ctx.arcTo(x, y + height, x, y + height - radius, radius);
+  ctx.lineTo(x, y + radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.closePath();
+  if (fillStyle) {
+    ctx.setFillStyle(fillStyle);
+    ctx.fill();
+  }
+  if (strokeStyle) {
+    ctx.setStrokeStyle(strokeStyle);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawWrappedText(ctx: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 4) {
+  let line = "";
+  let lineCount = 0;
+  for (let i = 0; i < text.length; i++) {
+    const testLine = line + text[i];
+    if (ctx.measureText(testLine).width > maxWidth && i > 0) {
+      ctx.fillText(line, x, y);
+      line = text[i];
+      y += lineHeight;
+      lineCount++;
+      if (lineCount >= maxLines - 1) {
+        const remaining = text.substring(i);
+        let lastLine = "";
+        for (let j = 0; j < remaining.length; j++) {
+          if (ctx.measureText(lastLine + remaining[j] + "...").width > maxWidth) {
+            break;
+          }
+          lastLine += remaining[j];
+        }
+        ctx.fillText(lastLine + "...", x, y);
+        return y + lineHeight;
+      }
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, y);
+  return y + lineHeight;
+}
+
+function generatePosterImage(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!reportData.value) {
+      reject(new Error("战报数据为空"));
+      return;
+    }
+
+    const rep = reportData.value;
+    const ctx = uni.createCanvasContext("reportPosterCanvas");
+
+    const W = 750;
+    const H = 1320;
+
+    // 1. Background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, "#0e1017");
+    bgGrad.addColorStop(0.5, "#131620");
+    bgGrad.addColorStop(1, "#0a0b10");
+    ctx.setFillStyle(bgGrad);
+    ctx.fillRect(0, 0, W, H);
+
+    // Outer decorative border
+    drawRoundedRect(ctx, 16, 16, W - 32, H - 32, 24, undefined, "rgba(255, 215, 0, 0.25)");
+
+    // 2. Header Area
+    drawRoundedRect(ctx, 40, 42, 190, 42, 21, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText("👑 跑团专属战报", 52, 71);
+
+    // Club Name
+    ctx.setFontSize(36);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(rep.club_name || "跑团战报", 40, 130);
+
+    // Period Label & Date range
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText(`${rep.period_label} · ${rep.date_range_str}`, 40, 172);
+
+    // Decorative separator line
+    ctx.beginPath();
+    ctx.moveTo(40, 195);
+    ctx.lineTo(W - 40, 195);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.12)");
+    ctx.stroke();
+
+    // 3. Hero Total Distance Box
+    drawRoundedRect(ctx, 40, 215, W - 80, 155, 20, "#181b26", "rgba(252, 76, 2, 0.35)");
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("全团累计奔跑总里程", 64, 252);
+
+    ctx.setFontSize(72);
+    ctx.setFillStyle("#fc4c02");
+    ctx.fillText(`${rep.total_distance_km}`, 64, 326);
+
+    const kmWidth = ctx.measureText(`${rep.total_distance_km}`).width;
+    ctx.setFontSize(30);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("KM", 64 + kmWidth + 12, 324);
+
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#71717a");
+    ctx.fillText("汇聚全员热血汗水 · 每一步都在突破极限", 64, 355);
+
+    // 4. 4-Metrics Grid
+    const gW = (W - 80 - 18) / 2;
+    const gH = 92;
+
+    // Item 1: 出勤率
+    drawRoundedRect(ctx, 40, 390, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("队员出勤率", 56, 422);
+    ctx.setFontSize(30);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(`${rep.attendance_rate_pct}%`, 56, 462);
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#6b7280");
+    ctx.fillText(`(${rep.active_members_count}/${rep.total_members_count}人)`, 160, 460);
+
+    // Item 2: 全团均速
+    drawRoundedRect(ctx, 40 + gW + 18, 390, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("全团平均配速", 56 + gW + 18, 422);
+    ctx.setFontSize(30);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(`${rep.avg_pace_str}`, 56 + gW + 18, 462);
+
+    // Item 3: 累计爬升
+    drawRoundedRect(ctx, 40, 498, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("累计爬升克服", 56, 530);
+    ctx.setFontSize(30);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(`+${rep.total_elevation_gain_m}m`, 56, 570);
+
+    // Item 4: 打卡人次
+    drawRoundedRect(ctx, 40 + gW + 18, 498, gW, gH, 16, "#151722", "rgba(255, 255, 255, 0.08)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("累计打卡总人次", 56 + gW + 18, 530);
+    ctx.setFontSize(30);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(`${rep.total_activities_count} 次`, 56 + gW + 18, 570);
+
+    // 5. 🏆 Top 3 Podium
+    drawRoundedRect(ctx, 40, 606, W - 80, 235, 20, "#151722", "rgba(255, 215, 0, 0.3)");
+    ctx.setFontSize(24);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText("🏆 荣誉榜单 Top 3", 60, 642);
+
+    const podium = rep.podium || [];
+    const medals = ["🥇 冠军", "🥈 亚军", "🥉 季军"];
+    const medalBgs = ["rgba(255, 215, 0, 0.12)", "rgba(192, 192, 192, 0.10)", "rgba(205, 127, 50, 0.10)"];
+    const medalStrokes = ["rgba(255, 215, 0, 0.35)", "rgba(192, 192, 192, 0.3)", "rgba(205, 127, 50, 0.3)"];
+
+    for (let i = 0; i < 3; i++) {
+      const pY = 660 + i * 55;
+      if (podium[i]) {
+        drawRoundedRect(ctx, 60, pY, W - 120, 48, 12, medalBgs[i], medalStrokes[i]);
+        ctx.setFontSize(22);
+        ctx.setFillStyle("#ffd700");
+        ctx.fillText(medals[i], 76, pY + 32);
+
+        ctx.setFontSize(22);
+        ctx.setFillStyle("#ffffff");
+        ctx.fillText(podium[i].display_name || "跑者", 185, pY + 32);
+
+        ctx.setFontSize(22);
+        ctx.setFillStyle("#fc4c02");
+        ctx.fillText(`${podium[i].distance_km} km`, W - 250, pY + 32);
+
+        ctx.setFontSize(18);
+        ctx.setFillStyle("#9ca3af");
+        ctx.fillText(podium[i].avg_pace_str || "—", W - 145, pY + 32);
+      } else {
+        ctx.setFontSize(18);
+        ctx.setFillStyle("#52525b");
+        ctx.fillText(`席位待定`, 76, pY + 32);
+      }
+    }
+
+    // 6. 🌟 Highlights Row
+    const hY = 858;
+    const hW = (W - 80 - 18) / 2;
+    if (rep.hardcore_runner) {
+      drawRoundedRect(ctx, 40, hY, hW, 82, 14, "#151722", "rgba(56, 189, 248, 0.25)");
+      ctx.setFontSize(18);
+      ctx.setFillStyle("#38bdf8");
+      ctx.fillText("🌟 毅力先锋", 54, hY + 28);
+      ctx.setFontSize(20);
+      ctx.setFillStyle("#ffffff");
+      ctx.fillText(`${rep.hardcore_runner.display_name}`, 54, hY + 54);
+      ctx.setFontSize(16);
+      ctx.setFillStyle("#9ca3af");
+      ctx.fillText(`打卡 ${rep.hardcore_runner.runs_count} 次 · ${rep.hardcore_runner.distance_km}km`, 54, hY + 74);
+    }
+    if (rep.longest_run) {
+      drawRoundedRect(ctx, 40 + hW + 18, hY, hW, 82, 14, "#151722", "rgba(56, 189, 248, 0.25)");
+      ctx.setFontSize(18);
+      ctx.setFillStyle("#38bdf8");
+      ctx.fillText("🚀 最长突破", 54 + hW + 18, hY + 28);
+      ctx.setFontSize(20);
+      ctx.setFillStyle("#ffffff");
+      ctx.fillText(`${rep.longest_run.runner_name}`, 54 + hW + 18, hY + 54);
+      ctx.setFontSize(16);
+      ctx.setFillStyle("#9ca3af");
+      ctx.fillText(`单次 ${rep.longest_run.distance_km}km · ${rep.longest_run.avg_pace_str}`, 54 + hW + 18, hY + 74);
+    }
+
+    // 7. 💡 Renato Canova Coach Critique Box
+    const cY = 955;
+    drawRoundedRect(ctx, 40, cY, W - 80, 215, 18, "#181624", "rgba(191, 90, 242, 0.35)");
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#bf5af2");
+    ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
+
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#d1d5db");
+    drawWrappedText(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 28, 4);
+
+    // 8. Bottom Brand Stamp
+    const fY = 1195;
+    ctx.beginPath();
+    ctx.moveTo(40, fY);
+    ctx.lineTo(W - 40, fY);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.1)");
+    ctx.stroke();
+
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText("RGM RUNNING MATRIX", 40, fY + 40);
+
+    ctx.setFontSize(16);
+    ctx.setFillStyle("#71717a");
+    ctx.fillText("跑者成长矩阵 · 科学耐力训练与跑团系统 · 官方认证战报", 40, fY + 68);
+
+    drawRoundedRect(ctx, W - 160, fY + 20, 120, 48, 12, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText("官方战报", W - 138, fY + 50);
+
+    // Draw and export
+    ctx.draw(false, () => {
+      setTimeout(() => {
+        uni.canvasToTempFilePath({
+          canvasId: "reportPosterCanvas",
+          destWidth: 1500, // 2x retina
+          destHeight: 2640,
+          success: (res) => {
+            resolve(res.tempFilePath);
+          },
+          fail: (err) => {
+            reject(err);
+          }
+        });
+      }, 250);
+    });
+  });
+}
+
+async function handlePreviewPosterImage() {
+  uni.showLoading({ title: "正在渲染长图海报..." });
+  try {
+    const tempPath = await generatePosterImage();
+    uni.hideLoading();
+    uni.previewImage({
+      current: tempPath,
+      urls: [tempPath]
+    });
+    uni.showToast({ title: "长按图片可直接发送给朋友或保存", icon: "none", duration: 3500 });
+  } catch (err: any) {
+    uni.hideLoading();
+    console.error("handlePreviewPosterImage fail:", err);
+    uni.showToast({ title: "渲染海报失败，请重试", icon: "none" });
+  }
+}
+
+async function handleSavePosterToAlbum() {
+  uni.showLoading({ title: "正在生成并保存..." });
+  try {
+    const tempPath = await generatePosterImage();
+    uni.saveImageToPhotosAlbum({
+      filePath: tempPath,
+      success: () => {
+        uni.hideLoading();
+        uni.showToast({ title: "海报已成功保存到手机相册！", icon: "success", duration: 2500 });
+      },
+      fail: (saveErr) => {
+        uni.hideLoading();
+        console.warn("saveImageToPhotosAlbum fail:", saveErr);
+        uni.previewImage({ current: tempPath, urls: [tempPath] });
+        uni.showToast({ title: "长按图片即可直接保存到相册", icon: "none", duration: 3500 });
+      }
+    });
+  } catch (err: any) {
+    uni.hideLoading();
+    console.error("handleSavePosterToAlbum fail:", err);
+    uni.showToast({ title: "保存失败，请重试", icon: "none" });
+  }
 }
 
 async function handleJoinClub() {
@@ -4562,6 +4960,436 @@ onPullDownRefresh(async () => {
   background: #27272a;
   color: #e4e4e7;
   font-size: 22rpx;
+  font-weight: bold;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  line-height: 1.4;
+}
+
+/* ── Poster Card & View Mode Styles ── */
+.report-view-mode-tabs {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.report-view-tab {
+  flex: 1;
+  text-align: center;
+  padding: 12rpx 0;
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #9ca3af;
+  background: #18181c;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.report-view-tab.active {
+  color: #000000;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  border-color: #f59e0b;
+  box-shadow: 0 4rpx 14rpx rgba(245, 158, 11, 0.25);
+}
+
+.poster-card-wrapper {
+  padding: 8rpx 0 20rpx 0;
+}
+
+.report-poster-card {
+  background: linear-gradient(180deg, #11141d 0%, #151824 50%, #0c0d14 100%);
+  border: 2rpx solid rgba(255, 215, 0, 0.35);
+  border-radius: 28rpx;
+  padding: 30rpx 26rpx;
+  box-shadow: 0 12rpx 36rpx rgba(0, 0, 0, 0.6), inset 0 0 40rpx rgba(255, 215, 0, 0.04);
+}
+
+.poster-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24rpx;
+  padding-bottom: 18rpx;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.poster-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.poster-club-logo {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  border: 2rpx solid #ffd700;
+}
+
+.poster-club-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.poster-club-name {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.poster-tagline {
+  font-size: 18rpx;
+  color: #ffd700;
+  font-weight: bold;
+}
+
+.poster-period-pill {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.poster-period-name {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.poster-period-date {
+  font-size: 18rpx;
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+/* Hero Mileage */
+.poster-hero-mileage {
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%);
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+  border-radius: 22rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+  text-align: center;
+}
+
+.phm-label {
+  font-size: 20rpx;
+  color: #9ca3af;
+  font-weight: bold;
+  letter-spacing: 2rpx;
+  text-transform: uppercase;
+}
+
+.phm-num-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8rpx;
+  margin: 6rpx 0;
+}
+
+.phm-num {
+  font-size: 72rpx;
+  font-weight: 900;
+  color: #fc4c02;
+  line-height: 1;
+  font-family: monospace;
+}
+
+.phm-unit {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #f59e0b;
+}
+
+.phm-sub {
+  font-size: 18rpx;
+  color: #71717a;
+}
+
+/* 4-Metrics Bar */
+.poster-grid-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+}
+
+.pg-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid rgba(255, 255, 255, 0.07);
+  border-radius: 16rpx;
+  padding: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.pg-label {
+  font-size: 18rpx;
+  color: #9ca3af;
+}
+
+.pg-val {
+  font-size: 28rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.pg-sub {
+  font-size: 16rpx;
+  color: #71717a;
+}
+
+/* Podium Cards */
+.poster-podium-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 215, 0, 0.25);
+  border-radius: 20rpx;
+  padding: 18rpx;
+  margin-bottom: 20rpx;
+}
+
+.ppb-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 14rpx;
+}
+
+.ppb-icon {
+  font-size: 24rpx;
+}
+
+.ppb-title {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #ffd700;
+}
+
+.poster-podium-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.ppc-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+  padding: 12rpx 16rpx;
+}
+
+.ppc-row.podium-rank-1 {
+  background: rgba(255, 215, 0, 0.08);
+  border-color: rgba(255, 215, 0, 0.4);
+}
+
+.ppc-row.podium-rank-2 {
+  background: rgba(192, 192, 192, 0.06);
+  border-color: rgba(192, 192, 192, 0.3);
+}
+
+.ppc-row.podium-rank-3 {
+  background: rgba(205, 127, 50, 0.06);
+  border-color: rgba(205, 127, 50, 0.3);
+}
+
+.ppc-rank-badge {
+  font-size: 20rpx;
+  font-weight: 900;
+  min-width: 80rpx;
+  color: #ffd700;
+}
+
+.ppc-avatar {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+}
+
+.ppc-name-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ppc-name {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.ppc-detail {
+  font-size: 16rpx;
+  color: #9ca3af;
+}
+
+.ppc-km-col {
+  display: flex;
+  align-items: baseline;
+  gap: 4rpx;
+}
+
+.ppc-km {
+  font-size: 26rpx;
+  font-weight: 900;
+  color: #fc4c02;
+  font-family: monospace;
+}
+
+.ppc-km-u {
+  font-size: 16rpx;
+  color: #71717a;
+}
+
+/* Highlights Box */
+.poster-highlights-box {
+  display: flex;
+  gap: 10rpx;
+  margin-bottom: 20rpx;
+}
+
+.phb-item {
+  flex: 1;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1rpx solid rgba(56, 189, 248, 0.25);
+  border-radius: 16rpx;
+  padding: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.phb-tag {
+  font-size: 18rpx;
+  color: #38bdf8;
+  font-weight: bold;
+}
+
+.phb-name {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.phb-sub {
+  font-size: 16rpx;
+  color: #9ca3af;
+}
+
+/* Canova Quote */
+.poster-canova-quote {
+  background: linear-gradient(135deg, rgba(191, 90, 242, 0.1) 0%, rgba(191, 90, 242, 0.03) 100%);
+  border: 1rpx solid rgba(191, 90, 242, 0.35);
+  border-radius: 18rpx;
+  padding: 18rpx;
+  margin-bottom: 20rpx;
+}
+
+.pcq-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 8rpx;
+}
+
+.pcq-icon {
+  font-size: 22rpx;
+}
+
+.pcq-title {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #bf5af2;
+}
+
+.pcq-text {
+  font-size: 18rpx;
+  color: #d1d5db;
+  line-height: 1.6;
+  font-style: italic;
+}
+
+/* Bottom Stamp */
+.poster-footer-stamp {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.pfs-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.pfs-brand {
+  font-size: 18rpx;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 2rpx;
+}
+
+.pfs-slogan {
+  font-size: 14rpx;
+  color: #71717a;
+}
+
+.pfs-stamp-badge {
+  border: 2rpx solid #ffd700;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  transform: rotate(-5deg);
+}
+
+.pfs-stamp-txt {
+  font-size: 16rpx;
+  font-weight: bold;
+  color: #ffd700;
+  letter-spacing: 2rpx;
+}
+
+/* Buttons in Poster View */
+.btn-preview-poster {
+  flex: 1.5;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  color: #000000;
+  font-size: 24rpx;
+  font-weight: 900;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+  box-shadow: 0 4rpx 14rpx rgba(245, 158, 11, 0.3);
+}
+
+.btn-save-album {
+  flex: 1.3;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: bold;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+}
+
+.btn-sub-copy {
+  flex: 1;
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 20rpx;
   font-weight: bold;
   border-radius: 16rpx;
   padding: 16rpx 0;
