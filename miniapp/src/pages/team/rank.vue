@@ -118,7 +118,10 @@
                 mode="aspectFill"
               />
               <view class="feed-user-meta">
-                <text class="feed-author">{{ act.display_name }}</text>
+                <view class="feed-author-row">
+                  <text class="feed-author">{{ act.display_name }}</text>
+                  <text v-if="act.start_time" class="feed-date-chip">{{ formatFeedDate(act.start_time) }}</text>
+                </view>
                 <text class="feed-act-name">
                   {{ act.name }} · 配速 {{ act.avg_pace_str }} · 心率 {{ act.average_heartrate || '—' }} bpm · TRIMP {{ act.trimp || 50 }}{{ (act.elevation_gain_meters && act.elevation_gain_meters > 0) ? ` · ⛰️ +${Math.round(act.elevation_gain_meters)}m` : '' }}
                 </text>
@@ -622,6 +625,25 @@ async function handleSendComment() {
   }
 }
 
+function formatFeedDate(isoStr?: string): string {
+  if (!isoStr) return "";
+  try {
+    const s = isoStr.replace("T", " ");
+    if (s.length >= 16) {
+      return s.slice(5, 16);
+    }
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return s;
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${m}-${day} ${h}:${min}`;
+  } catch {
+    return isoStr || "";
+  }
+}
+
 onShow(() => {
   syncTabBarIndex(3);
   loadRankData();
@@ -1110,11 +1132,22 @@ onPullDownRefresh(async () => {
   flex: 1;
 }
 
+.feed-author-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
 .feed-author {
   font-size: 26rpx;
   font-weight: bold;
   color: #ffffff;
-  display: block;
+}
+
+.feed-date-chip {
+  font-size: 20rpx;
+  color: #8e8e93;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
 }
 
 .feed-act-name {

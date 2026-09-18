@@ -2072,12 +2072,21 @@ async function handleInstantSync() {
 
 function formatTime(isoStr?: string): string {
   if (!isoStr) return "";
-  const d = new Date(isoStr);
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const h = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  return `${m}-${day} ${h}:${min}`;
+  try {
+    const s = isoStr.replace("T", " ");
+    if (s.length >= 16) {
+      return s.slice(5, 16);
+    }
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return s;
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${m}-${day} ${h}:${min}`;
+  } catch {
+    return isoStr || "";
+  }
 }
 
 function goToActivities() {
