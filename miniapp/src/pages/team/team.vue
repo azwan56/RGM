@@ -208,6 +208,22 @@
           </view>
           <text class="arrow-right">›</text>
         </view>
+
+        <view class="owner-tool-item" @click="openReportModal">
+          <view class="tool-icon-box bg-gold">
+            <text class="tool-icon">📊</text>
+          </view>
+          <view class="tool-content">
+            <view class="tool-title-row">
+              <text class="tool-main-title">跑团周报与月报</text>
+              <text class="mode-badge-pill mode-report">专属战报</text>
+            </view>
+            <text class="tool-sub-desc">
+              生成本周/本月团队战报与Canova复盘，一键复制微信群转发格式并下载
+            </text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
       </view>
     </view>
 
@@ -991,6 +1007,172 @@
         </view>
       </view>
     </view>
+
+    <!-- ── 6. Club Periodic Report Modal (跑团周报/月报专属战报弹窗) ── -->
+    <view v-if="showReportModal" class="modal-mask" @click="showReportModal = false" @touchmove.stop.prevent>
+      <view class="modal-content large-modal report-modal-content" @click.stop>
+        <view class="modal-header">
+          <view class="title-with-pill">
+            <text class="modal-title">📊 跑团战报与复盘</text>
+            <text class="count-pill report-owner-pill">👑 团长专属</text>
+          </view>
+          <text class="close-btn" @click="showReportModal = false">✕</text>
+        </view>
+
+        <!-- Period tabs: 周报 vs 月报 -->
+        <view class="modal-tab-row">
+          <view
+            class="modal-tab-segment"
+            :class="{ active: reportPeriodType === 'week' }"
+            @click="handleSwitchReportPeriod('week')"
+          >
+            📅 周报 (Weekly)
+          </view>
+          <view
+            class="modal-tab-segment"
+            :class="{ active: reportPeriodType === 'month' }"
+            @click="handleSwitchReportPeriod('month')"
+          >
+            🗓️ 月报 (Monthly)
+          </view>
+        </view>
+
+        <!-- Period selector: 本周/本月 vs 上周/上月 -->
+        <view class="report-sub-tabs">
+          <view
+            class="report-sub-tab"
+            :class="{ active: reportPeriodOffset === 0 }"
+            @click="handleSwitchReportOffset(0)"
+          >
+            {{ reportPeriodType === 'week' ? '本周战报' : '本月战报' }}
+          </view>
+          <view
+            class="report-sub-tab"
+            :class="{ active: reportPeriodOffset === -1 }"
+            @click="handleSwitchReportOffset(-1)"
+          >
+            {{ reportPeriodType === 'week' ? '上周战报' : '上月战报' }}
+          </view>
+        </view>
+
+        <!-- Loading State -->
+        <view v-if="loadingReport" class="report-loading-box">
+          <text class="loading-spinner">⏳</text>
+          <text class="loading-text">正在汇算团队跑步大数据...</text>
+        </view>
+
+        <!-- Report Body -->
+        <scroll-view v-else-if="reportData" scroll-y class="modal-body modal-scroll report-scroll-body">
+          <!-- Banner / Period Tag -->
+          <view class="report-period-banner">
+            <text class="rpb-title">{{ reportData.period_label }}</text>
+            <text class="rpb-dates">{{ reportData.date_range_str }}</text>
+          </view>
+
+          <!-- Key Metrics Grid -->
+          <view class="report-metrics-grid">
+            <view class="rmg-card">
+              <text class="rmg-label">🏃 团队总跑量</text>
+              <view class="rmg-val-row">
+                <text class="rmg-val highlight">{{ reportData.total_distance_km }}</text>
+                <text class="rmg-unit">km</text>
+              </view>
+            </view>
+            <view class="rmg-card">
+              <text class="rmg-label">👥 队员出勤率</text>
+              <view class="rmg-val-row">
+                <text class="rmg-val">{{ reportData.attendance_rate_pct }}</text>
+                <text class="rmg-unit">% ({{ reportData.active_members_count }}/{{ reportData.total_members_count }}人)</text>
+              </view>
+            </view>
+            <view class="rmg-card">
+              <text class="rmg-label">⏱️ 全团均速</text>
+              <view class="rmg-val-row">
+                <text class="rmg-val">{{ reportData.avg_pace_str }}</text>
+              </view>
+            </view>
+            <view class="rmg-card">
+              <text class="rmg-label">⛰️ 累计爬升</text>
+              <view class="rmg-val-row">
+                <text class="rmg-val">+{{ reportData.total_elevation_gain_m }}</text>
+                <text class="rmg-unit">m</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 🏆 跑团领奖台 Top 3 -->
+          <view class="report-section-box">
+            <text class="rsb-title">🏆 荣誉榜单 Top 3</text>
+            <view v-if="reportData.podium && reportData.podium.length > 0" class="podium-list">
+              <view
+                v-for="(p, idx) in reportData.podium"
+                :key="p.user_id"
+                class="podium-item"
+                :class="'podium-' + (idx + 1)"
+              >
+                <text class="podium-medal">{{ idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉' }}</text>
+                <image class="podium-avatar" :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'" mode="aspectFill" />
+                <view class="podium-info">
+                  <text class="podium-name">{{ p.display_name }}</text>
+                  <text class="podium-sub">{{ p.runs_count }}次打卡 · 均速 {{ p.avg_pace_str }}</text>
+                </view>
+                <view class="podium-right">
+                  <text class="podium-km">{{ p.distance_km }}</text>
+                  <text class="podium-km-unit">km</text>
+                </view>
+              </view>
+            </view>
+            <view v-else class="empty-podium-text">
+              本周期暂无打卡记录，快号召大家启动跑步吧！
+            </view>
+          </view>
+
+          <!-- 🌟 亮点突破 -->
+          <view v-if="reportData.hardcore_runner || reportData.longest_run" class="report-highlights-row">
+            <view v-if="reportData.hardcore_runner" class="highlight-card">
+              <text class="hc-tag">🌟 毅力先锋</text>
+              <text class="hc-name">{{ reportData.hardcore_runner.display_name }}</text>
+              <text class="hc-detail">打卡 {{ reportData.hardcore_runner.runs_count }} 次 · {{ reportData.hardcore_runner.distance_km }} km</text>
+            </view>
+            <view v-if="reportData.longest_run" class="highlight-card">
+              <text class="hc-tag">🚀 最长突破</text>
+              <text class="hc-name">{{ reportData.longest_run.runner_name }}</text>
+              <text class="hc-detail">单次 {{ reportData.longest_run.distance_km }} km · {{ reportData.longest_run.avg_pace_str }}</text>
+            </view>
+          </view>
+
+          <!-- 💡 Canova 科学复盘 -->
+          <view class="report-section-box canova-box">
+            <view class="canova-header">
+              <text class="canova-icon">💡</text>
+              <text class="canova-title">Renato Canova 科学耐力团队复盘</text>
+            </view>
+            <text class="canova-critique-text">{{ reportData.canova_critique }}</text>
+          </view>
+
+          <!-- 💬 微信群专属转发排版文本 -->
+          <view class="report-section-box forward-box">
+            <view class="forward-header">
+              <text class="forward-title">💬 微信群转发排版预览</text>
+              <text class="forward-hint">包含完整Emoji排版</text>
+            </view>
+            <view class="forward-preview-card">
+              <text class="forward-preview-text" :selectable="true">{{ reportData.forward_text }}</text>
+            </view>
+          </view>
+        </scroll-view>
+
+        <!-- Footer Actions: 一键复制转发文本 & 导出文件 -->
+        <view class="report-footer-actions" v-if="reportData">
+          <button class="btn-copy-forward" @click="handleCopyReportForwardText">
+            📋 一键复制微信群转发文本
+          </button>
+          <button class="btn-download-report" @click="handleDownloadReportFile">
+            📥 下载战报文件
+          </button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -1046,6 +1228,13 @@ const savingJoinMode = ref(false);
 const showClubCodeModal = ref(false);
 const targetClubForCodeJoin = ref<any>(null);
 const clubJoinCodeInput = ref("");
+
+// ── Club Periodic Report State ──
+const showReportModal = ref(false);
+const reportPeriodType = ref<"week" | "month">("week");
+const reportPeriodOffset = ref(0);
+const loadingReport = ref(false);
+const reportData = ref<any>(null);
 
 const orgJoinForm = ref({
   invite_code: "",
@@ -1419,6 +1608,134 @@ async function saveClubJoinMode() {
   } finally {
     savingJoinMode.value = false;
   }
+}
+
+// ── Club Periodic Report Handlers ──
+function openReportModal() {
+  if (!isOwnerOrDev.value) {
+    uni.showToast({ title: "仅跑团团长有权查看与导出战报", icon: "none" });
+    return;
+  }
+  reportPeriodType.value = "week";
+  reportPeriodOffset.value = 0;
+  showReportModal.value = true;
+  fetchClubReport();
+}
+
+async function fetchClubReport() {
+  const clubId = currentClub.value?.id;
+  const uid = user.value?.id;
+  if (!clubId || !uid) return;
+
+  loadingReport.value = true;
+  try {
+    let url = `/api/team/${clubId}/reports?operator_uid=${uid}&period_type=${reportPeriodType.value}`;
+    
+    if (reportPeriodOffset.value === -1) {
+      const now = new Date();
+      if (reportPeriodType.value === "week") {
+        // Compute last week's ISO week
+        const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const target = new Date(d.valueOf());
+        const dayNr = (d.getDay() + 6) % 7;
+        target.setDate(target.getDate() - dayNr + 3);
+        const firstThursday = target.valueOf();
+        target.setMonth(0, 1);
+        if (target.getDay() !== 4) {
+          target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+        }
+        const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+        url += `&year=${d.getFullYear()}&period_index=${weekNum}`;
+      } else {
+        // Last month
+        const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+        const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        url += `&year=${prevYear}&period_index=${prevMonth}`;
+      }
+    }
+
+    const res = await request(url);
+    reportData.value = res;
+  } catch (err: any) {
+    console.error("fetchClubReport error:", err);
+    uni.showToast({ title: err?.message || "获取战报失败", icon: "none" });
+  } finally {
+    loadingReport.value = false;
+  }
+}
+
+function handleSwitchReportPeriod(type: "week" | "month") {
+  if (reportPeriodType.value === type) return;
+  reportPeriodType.value = type;
+  reportPeriodOffset.value = 0;
+  fetchClubReport();
+}
+
+function handleSwitchReportOffset(offset: number) {
+  if (reportPeriodOffset.value === offset) return;
+  reportPeriodOffset.value = offset;
+  fetchClubReport();
+}
+
+function handleCopyReportForwardText() {
+  const text = reportData.value?.forward_text;
+  if (!text) {
+    uni.showToast({ title: "战报内容为空", icon: "none" });
+    return;
+  }
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({ title: "战报已复制，可直接粘贴发群！", icon: "success", duration: 2500 });
+    }
+  });
+}
+
+function handleDownloadReportFile() {
+  const clubId = currentClub.value?.id;
+  const uid = user.value?.id;
+  if (!clubId || !uid) return;
+
+  const url = `https://rgm.vanpower.net/api/team/${clubId}/reports/export?operator_uid=${uid}&period_type=${reportPeriodType.value}`;
+  
+  // #ifdef MP-WEIXIN
+  uni.showLoading({ title: "正在生成文件..." });
+  uni.downloadFile({
+    url: url,
+    success: (res) => {
+      uni.hideLoading();
+      if (res.statusCode === 200) {
+        uni.openDocument({
+          filePath: res.tempFilePath,
+          fileType: "txt",
+          showMenu: true,
+          success: () => {
+            uni.showToast({ title: "战报已打开，右上角可转发或保存", icon: "none", duration: 3000 });
+          },
+          fail: (openErr) => {
+            console.warn("openDocument fail:", openErr);
+            handleCopyReportForwardText();
+          }
+        });
+      } else {
+        uni.showToast({ title: "下载失败", icon: "none" });
+      }
+    },
+    fail: (dlErr) => {
+      uni.hideLoading();
+      console.warn("downloadFile fail:", dlErr);
+      uni.showToast({ title: "下载失败，请直接点击一键复制", icon: "none" });
+    }
+  });
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank");
+  } else {
+    handleCopyReportForwardText();
+  }
+  // #endif
 }
 
 async function handleJoinClub() {
@@ -3884,5 +4201,372 @@ onPullDownRefresh(async () => {
   border-radius: 16rpx;
   width: 80rpx;
   height: 80rpx;
+}
+
+/* ── Club Report Modal Styles ── */
+.tool-icon-box.bg-gold {
+  background-color: rgba(255, 215, 0, 0.2);
+}
+
+.mode-badge-pill.mode-report {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.15);
+  border: 1rpx solid rgba(255, 215, 0, 0.4);
+}
+
+.count-pill.report-owner-pill {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.15);
+  border: 1rpx solid rgba(255, 215, 0, 0.35);
+}
+
+.report-modal-content {
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-sub-tabs {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 14rpx;
+  margin-bottom: 16rpx;
+}
+
+.report-sub-tab {
+  flex: 1;
+  text-align: center;
+  padding: 12rpx 0;
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #9ca3af;
+  background: #1c1c1e;
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.report-sub-tab.active {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.12);
+  border-color: rgba(255, 215, 0, 0.4);
+}
+
+.report-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60rpx 0;
+  gap: 16rpx;
+}
+
+.loading-spinner {
+  font-size: 40rpx;
+}
+
+.loading-text {
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.report-scroll-body {
+  max-height: 56vh;
+  padding-right: 4rpx;
+}
+
+.report-period-banner {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.12) 0%, rgba(252, 76, 2, 0.08) 100%);
+  border: 1rpx solid rgba(255, 215, 0, 0.25);
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rpb-title {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.rpb-dates {
+  font-size: 20rpx;
+  color: #ffd700;
+}
+
+.report-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14rpx;
+  margin-bottom: 20rpx;
+}
+
+.rmg-card {
+  background: #18181b;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+  padding: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.rmg-label {
+  font-size: 20rpx;
+  color: #9ca3af;
+}
+
+.rmg-val-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6rpx;
+}
+
+.rmg-val {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.rmg-val.highlight {
+  color: #fc4c02;
+}
+
+.rmg-unit {
+  font-size: 20rpx;
+  color: #71717a;
+}
+
+.report-section-box {
+  background: #18181b;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  padding: 18rpx;
+  margin-bottom: 20rpx;
+}
+
+.rsb-title {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffd700;
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.podium-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.podium-item {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background: #202024;
+  border-radius: 12rpx;
+  padding: 12rpx 16rpx;
+  border-left: 6rpx solid #71717a;
+}
+
+.podium-item.podium-1 {
+  border-left-color: #ffd700;
+  background: rgba(255, 215, 0, 0.06);
+}
+
+.podium-item.podium-2 {
+  border-left-color: #c0c0c0;
+  background: rgba(192, 192, 192, 0.06);
+}
+
+.podium-item.podium-3 {
+  border-left-color: #cd7f32;
+  background: rgba(205, 127, 50, 0.06);
+}
+
+.podium-medal {
+  font-size: 28rpx;
+}
+
+.podium-avatar {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+}
+
+.podium-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.podium-name {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.podium-sub {
+  font-size: 18rpx;
+  color: #9ca3af;
+}
+
+.podium-right {
+  display: flex;
+  align-items: baseline;
+  gap: 4rpx;
+}
+
+.podium-km {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.podium-km-unit {
+  font-size: 18rpx;
+  color: #71717a;
+}
+
+.empty-podium-text {
+  font-size: 20rpx;
+  color: #71717a;
+  text-align: center;
+  padding: 16rpx 0;
+}
+
+.report-highlights-row {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+}
+
+.highlight-card {
+  flex: 1;
+  background: #18181b;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+  padding: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.hc-tag {
+  font-size: 18rpx;
+  color: #38bdf8;
+  font-weight: bold;
+}
+
+.hc-name {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.hc-detail {
+  font-size: 18rpx;
+  color: #9ca3af;
+}
+
+.canova-box {
+  border-color: rgba(191, 90, 242, 0.3);
+  background: linear-gradient(135deg, rgba(191, 90, 242, 0.06) 0%, #18181b 100%);
+}
+
+.canova-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 10rpx;
+}
+
+.canova-icon {
+  font-size: 24rpx;
+}
+
+.canova-title {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #bf5af2;
+}
+
+.canova-critique-text {
+  font-size: 20rpx;
+  color: #d1d5db;
+  line-height: 1.6;
+}
+
+.forward-box {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: #121214;
+}
+
+.forward-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+
+.forward-title {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #22c55e;
+}
+
+.forward-hint {
+  font-size: 18rpx;
+  color: #71717a;
+}
+
+.forward-preview-card {
+  background: #0a0a0c;
+  border-radius: 12rpx;
+  padding: 16rpx;
+  border: 1rpx dashed rgba(255, 255, 255, 0.15);
+}
+
+.forward-preview-text {
+  font-size: 20rpx;
+  color: #e4e4e7;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: monospace;
+}
+
+.report-footer-actions {
+  display: flex;
+  gap: 12rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.btn-copy-forward {
+  flex: 1.8;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: bold;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+}
+
+.btn-download-report {
+  flex: 1;
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 22rpx;
+  font-weight: bold;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  line-height: 1.4;
 }
 </style>

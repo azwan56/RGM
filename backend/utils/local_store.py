@@ -6,6 +6,7 @@ import random
 import string
 import logging
 import time
+import calendar
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, date, timedelta
 from utils.encryption import encrypt_pii, decrypt_pii, compute_age_group
@@ -2313,6 +2314,356 @@ class LocalStore:
             item["rank"] = i + 1
 
         return board
+
+    @staticmethod
+    def is_club_owner(club_id: str, operator_uid: Optional[str]) -> bool:
+        if not operator_uid or not club_id:
+            return False
+        club = LocalStore.get_club(club_id)
+        if not club:
+            return False
+        if club.get("owner_id") == operator_uid:
+            return True
+        members = LocalStore.get_club_members(club_id)
+        return any(m["user_id"] == operator_uid and m["role"] == "owner" for m in members)
+
+    @staticmethod
+    def _generate_team_canova_critique(
+        club_name: str,
+        period_type: str,
+        period_label: str,
+        total_km: float,
+        avg_pace_str: str,
+        attendance_rate: float,
+        total_acts_count: int,
+        podium: List[Dict[str, Any]],
+        longest_run: Optional[Dict[str, Any]] = None
+    ) -> str:
+        if total_km == 0:
+            return "本周期全团处于休整调整期，建议下周期安排短程激活与低心率慢跑，循序渐进唤醒肌神经募集。"
+        
+        cycle_name = "周度" if period_type == "week" else "月度"
+        
+        # Determine team volume evaluation
+        if total_km >= 500 or (period_type == "week" and total_km >= 200):
+            volume_eval = f"全团累计推进 {total_km}km，团队有氧底座储备极其扎实。庞大的基础有氧里程有效促进全员微血管增生与线粒体氧化酶活性深度发展。"
+        else:
+            volume_eval = f"全团累计完成 {total_km}km，打卡 {total_acts_count} 次。稳步积累基础有氧支撑，队员出勤率达 {attendance_rate}%。"
+
+        # Top performer praise
+        top_mention = ""
+        if podium:
+            c = podium[0]
+            top_mention = f"领头跑者【{c['display_name']}】完成 {c['distance_km']}km，有效发挥了中坚榜样拉动效应。"
+
+        # Longest run mention
+        long_mention = ""
+        if longest_run and longest_run.get("distance_km", 0) >= 15:
+            long_mention = f"【{longest_run['runner_name']}】斩获单次 {longest_run['distance_km']}km 长距离刺激，为团队长耐力突破树立标杆。"
+
+        # Advice for next period based on Canova philosophy
+        if period_type == "week":
+            coach_advice = "教练建议：大跑量后全员注意 48 小时结缔组织超量恢复，下周课表严格遵循 80/20 极化法则，低心率慢跑稳固微循环，切忌连续冲击大负荷。"
+        else:
+            coach_advice = "教练建议：进入新月份后，逐步向马拉松专项配速收敛推进，强化半马与全马巡航节律，同时确保赛前至少 2 周安排科学减量调整。"
+
+        parts = [volume_eval]
+        if top_mention:
+            parts.append(top_mention)
+        if long_mention:
+            parts.append(long_mention)
+        parts.append(coach_advice)
+        return " ".join(parts)
+
+    @staticmethod
+    def get_club_periodic_report(
+        club_id: str,
+        period_type: str = "week",
+        year: Optional[int] = None,
+        period_index: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Generates comprehensive weekly or monthly training report for a club.
+        period_type: 'week' or 'month'
+        period_index: week number (1..53) or month number (1..12)
+        """
+        club = LocalStore.get_club(club_id)
+        if not club:
+            return {"error": "跑团不存在"}
+
+        today = get_beijing_today()
+        now_year = today.year
+        now_month = today.month
+        target_year = year or now_year
+
+        if period_type == "month":
+            target_month = period_index or now_month
+            if target_month < 1 or target_month > 12:
+                target_month = now_month
+            
+            start_date_obj = date(target_year, target_month, 1)
+            _, last_day = calendar.monthrange(target_year, target_month)
+            end_date_obj = date(target_year, target_month, last_day)
+            
+            start_iso = f"{start_date_obj.isoformat()}T00:00:00"
+            if target_month == 12:
+                next_month_start = f"{target_year + 1:04d}-01-01T00:00:00"
+            else:
+                next_month_start = f"{target_year:04d}-{target_month + 1:02d}-01T00:00:00"
+            end_iso = next_month_start
+            
+            period_label = f"{target_year}年{target_month}月月报"
+            date_range_str = f"{start_date_obj.strftime('%Y.%m.%d')} ~ {end_date_obj.strftime('%Y.%m.%d')}"
+        else:
+            # period_type == 'week'
+            iso_year, iso_week, _ = today.isocalendar()
+            target_week = period_index or iso_week
+            if target_week < 1 or target_week > 53:
+                target_week = iso_week
+                
+            try:
+                start_date_obj = date.fromisocalendar(target_year, target_week, 1) # Monday
+                end_date_obj = date.fromisocalendar(target_year, target_week, 7)   # Sunday
+            except Exception:
+                start_date_obj = today - timedelta(days=today.weekday())
+                end_date_obj = start_date_obj + timedelta(days=6)
+                
+            start_iso = f"{start_date_obj.isoformat()}T00:00:00"
+            end_iso = f"{(end_date_obj + timedelta(days=1)).isoformat()}T00:00:00"
+            
+            period_label = f"{target_year}年第{target_week}周周报"
+            date_range_str = f"{start_date_obj.strftime('%m月%d日')} ~ {end_date_obj.strftime('%m月%d日')}"
+
+        members = LocalStore.get_club_members(club_id)
+        uids = [m["user_id"] for m in members]
+        club_name = club.get("name", "跑团")
+        if not uids:
+            return {
+                "club_id": club_id,
+                "club_name": club_name,
+                "period_type": period_type,
+                "period_label": period_label,
+                "date_range_str": date_range_str,
+                "total_distance_km": 0.0,
+                "total_activities_count": 0,
+                "active_members_count": 0,
+                "total_members_count": 0,
+                "attendance_rate_pct": 0.0,
+                "avg_pace_str": "—",
+                "total_elevation_gain_m": 0,
+                "total_trimp": 0.0,
+                "leaderboard": [],
+                "podium": [],
+                "hardcore_runner": None,
+                "longest_run": None,
+                "canova_critique": "暂无队员运动打卡数据。",
+                "forward_text": f"🏃‍♂️ 【{club_name}】{period_label}暂无打卡数据。"
+            }
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            placeholders = ["?"] * len(uids)
+            query = f"""
+                SELECT a.*, COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url
+                FROM activities a
+                LEFT JOIN profiles p ON a.user_id = p.id
+                WHERE a.user_id IN ({','.join(placeholders)})
+                  AND a.start_time >= ? AND a.start_time < ?
+                ORDER BY a.start_time DESC
+            """
+            cursor.execute(query, uids + [start_iso, end_iso])
+            act_rows = [dict(r) for r in cursor.fetchall()]
+
+        # Aggregate team stats
+        total_distance_m = sum(float(a.get("distance_meters") or 0) for a in act_rows)
+        total_moving_s = sum(int(a.get("moving_time_seconds") or 0) for a in act_rows)
+        total_elev_m = sum(float(a.get("elevation_gain_meters") or 0) for a in act_rows)
+        total_trimp = sum(float(a.get("trimp") or 0) for a in act_rows)
+        total_acts_count = len(act_rows)
+
+        total_distance_km = round(total_distance_m / 1000.0, 1)
+        total_elev_int = int(round(total_elev_m))
+        total_trimp_round = round(total_trimp, 1)
+
+        # Team average pace
+        if total_distance_m > 0 and total_moving_s > 0:
+            sec_km = int(round(total_moving_s / (total_distance_m / 1000.0)))
+            avg_pace_str = f"{sec_km // 60}:{sec_km % 60:02d} /km"
+        else:
+            avg_pace_str = "—"
+
+        # Member-level stats
+        member_stats_map = {}
+        for m in members:
+            uid = m["user_id"]
+            member_stats_map[uid] = {
+                "user_id": uid,
+                "display_name": m["display_name"],
+                "avatar_url": m["avatar_url"],
+                "role": m["role"],
+                "distance_m": 0.0,
+                "moving_s": 0,
+                "activities_count": 0,
+                "run_days": set(),
+                "elevation_m": 0.0,
+                "longest_m": 0.0,
+                "trimp": 0.0,
+            }
+
+        for a in act_rows:
+            uid = a["user_id"]
+            if uid in member_stats_map:
+                dm = float(a.get("distance_meters") or 0)
+                ms = int(a.get("moving_time_seconds") or 0)
+                el = float(a.get("elevation_gain_meters") or 0)
+                tr = float(a.get("trimp") or 0)
+                day_str = str(a.get("start_time") or "")[:10]
+
+                member_stats_map[uid]["distance_m"] += dm
+                member_stats_map[uid]["moving_s"] += ms
+                member_stats_map[uid]["activities_count"] += 1
+                if day_str:
+                    member_stats_map[uid]["run_days"].add(day_str)
+                member_stats_map[uid]["elevation_m"] += el
+                member_stats_map[uid]["trimp"] += tr
+                if dm > member_stats_map[uid]["longest_m"]:
+                    member_stats_map[uid]["longest_m"] = dm
+
+        # Format leaderboard
+        leaderboard = []
+        active_uids = set()
+        for uid, stat in member_stats_map.items():
+            km = round(stat["distance_m"] / 1000.0, 1)
+            if stat["activities_count"] > 0:
+                active_uids.add(uid)
+            if stat["distance_m"] > 0 and stat["moving_s"] > 0:
+                s_km = int(round(stat["moving_s"] / (stat["distance_m"] / 1000.0)))
+                p_str = f"{s_km // 60}:{s_km % 60:02d} /km"
+            else:
+                p_str = "—"
+            
+            leaderboard.append({
+                "user_id": uid,
+                "display_name": stat["display_name"],
+                "avatar_url": stat["avatar_url"],
+                "role": stat["role"],
+                "distance_km": km,
+                "runs_count": stat["activities_count"],
+                "active_days_count": len(stat["run_days"]),
+                "avg_pace_str": p_str,
+                "elevation_gain_m": int(round(stat["elevation_m"])),
+                "trimp": round(stat["trimp"], 1),
+                "longest_km": round(stat["longest_m"] / 1000.0, 2)
+            })
+
+        # Sort leaderboard by distance descending, then by runs_count
+        leaderboard.sort(key=lambda x: (x["distance_km"], x["runs_count"]), reverse=True)
+        for i, item in enumerate(leaderboard):
+            item["rank"] = i + 1
+
+        active_count = len(active_uids)
+        total_members_count = len(members)
+        attendance_rate = round(active_count / total_members_count * 100, 1) if total_members_count > 0 else 0.0
+
+        # Podium (Top 3 with distance > 0)
+        podium = [item for item in leaderboard if item["distance_km"] > 0][:3]
+
+        # Highlights: Hardcore runner (most runs) & Longest single run
+        hardcore_runner = None
+        active_items = [item for item in leaderboard if item["runs_count"] > 0]
+        if active_items:
+            hardcore_runner = max(active_items, key=lambda x: (x["runs_count"], x["active_days_count"]))
+
+        longest_run = None
+        if act_rows:
+            best_act = max(act_rows, key=lambda x: float(x.get("distance_meters") or 0))
+            best_act_km = round(float(best_act.get("distance_meters") or 0) / 1000.0, 2)
+            if best_act_km > 0:
+                longest_run = {
+                    "user_id": best_act.get("user_id"),
+                    "runner_name": best_act.get("display_name"),
+                    "activity_name": best_act.get("name"),
+                    "distance_km": best_act_km,
+                    "avg_pace_str": best_act.get("avg_pace_str"),
+                    "start_time": best_act.get("start_time")
+                }
+
+        # Renato Canova team critique
+        canova_critique = LocalStore._generate_team_canova_critique(
+            club_name=club_name,
+            period_type=period_type,
+            period_label=period_label,
+            total_km=total_distance_km,
+            avg_pace_str=avg_pace_str,
+            attendance_rate=attendance_rate,
+            total_acts_count=total_acts_count,
+            podium=podium,
+            longest_run=longest_run
+        )
+
+        # Ready-to-copy WeChat group forwarding text
+        forward_lines = [
+            f"🏃‍♂️ 【{club_name}】{period_label}战报出炉！🔥",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"📅 统计周期：{date_range_str}",
+            f"📊 全团总跑量：{total_distance_km} km",
+            f"🎯 打卡总人次：{total_acts_count} 次",
+            f"👥 队员出勤率：{active_count}/{total_members_count} 人 ({attendance_rate}%)",
+            f"⏱️ 全团平均配速：{avg_pace_str}",
+            f"⛰️ 累计爬升克服：+{total_elev_int} m",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🏆 【荣耀榜单 Top 3】"
+        ]
+
+        medals = ["🥇 冠军", "🥈 亚军", "🥉 季军"]
+        for i, p in enumerate(podium):
+            forward_lines.append(f"{medals[i]}：{p['display_name']} —— {p['distance_km']} km (均速 {p['avg_pace_str']})")
+        if not podium:
+            forward_lines.append("本周期暂无打卡队员，期待大家的启动！")
+
+        if len(leaderboard) > 3:
+            forward_lines.append("\n🎖️ 【跑团前十精英】")
+            for item in leaderboard[3:10]:
+                if item["distance_km"] > 0:
+                    forward_lines.append(f"第{item['rank']}名：{item['display_name']} · {item['distance_km']} km")
+
+        forward_lines.append("━━━━━━━━━━━━━━━━━━")
+        if hardcore_runner and hardcore_runner.get("runs_count", 0) > 0:
+            forward_lines.append(f"🌟 毅力先锋：{hardcore_runner['display_name']} (打卡 {hardcore_runner['runs_count']} 次)")
+        if longest_run:
+            forward_lines.append(f"🚀 最长突破：{longest_run['runner_name']} ({longest_run['distance_km']} km · {longest_run['avg_pace_str']})")
+
+        forward_lines.append("━━━━━━━━━━━━━━━━━━")
+        forward_lines.append(f"💡 【Renato Canova 科学耐力团队复盘】\n{canova_critique}")
+        forward_lines.append("━━━━━━━━━━━━━━━━━━")
+        forward_lines.append("各位跑友请紧扣耐力周期，注意超量恢复，健康奔跑，下周继续刷新更好的自己！💪")
+
+        forward_text = "\n".join(forward_lines)
+
+        return {
+            "club_id": club_id,
+            "club_name": club_name,
+            "period_type": period_type,
+            "period_label": period_label,
+            "date_range_str": date_range_str,
+            "start_date": start_date_obj.isoformat(),
+            "end_date": end_date_obj.isoformat(),
+            "total_distance_km": total_distance_km,
+            "total_activities_count": total_acts_count,
+            "active_members_count": active_count,
+            "total_members_count": total_members_count,
+            "attendance_rate_pct": attendance_rate,
+            "avg_pace_str": avg_pace_str,
+            "total_elevation_gain_m": total_elev_int,
+            "total_trimp": total_trimp_round,
+            "leaderboard": leaderboard,
+            "podium": podium,
+            "hardcore_runner": hardcore_runner,
+            "longest_run": longest_run,
+            "canova_critique": canova_critique,
+            "forward_text": forward_text
+        }
 
     @staticmethod
     def generate_canova_critique(activity: Dict[str, Any], profile: Optional[Dict[str, Any]] = None) -> str:

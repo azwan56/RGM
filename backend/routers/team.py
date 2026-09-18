@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
@@ -456,4 +457,87 @@ async def upload_team_logo(file: UploadFile = File(...)):
         "url": logo_url,
         "message": "跑团 Logo 上传成功！"
     }
+
+
+@router.get("/{club_id}/reports")
+def get_club_periodic_report(
+    club_id: str,
+    operator_uid: str = Query(..., description="操作人用户ID，必须为团长"),
+    period_type: str = Query("week", pattern="^(week|month)$", description="统计周期: week 或 month"),
+    year: Optional[int] = Query(None, description="年份，如 2026"),
+    period_index: Optional[int] = Query(None, description="周序号(1-53)或月份(1-12)")
+):
+    """
+    专属跑团周报与月报查询。
+    权限：仅限跑团团长(Owner)有权查询。
+    """
+    if not operator_uid:
+        raise HTTPException(status_code=400, detail="缺少 operator_uid 参数")
+
+    # 校验团长权限
+    if not LocalStore.is_club_owner(club_id, operator_uid):
+        raise HTTPException(
+            status_code=403,
+            detail="只有跑团团长有权查看与导出跑团周报/月报！"
+        )
+
+    try:
+        report = LocalStore.get_club_periodic_report(
+            club_id=club_id,
+            period_type=period_type,
+            year=year,
+            period_index=period_index
+        )
+        return report
+    except Exception as e:
+        logger.error(f"[team] Error generating club report: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成跑团报表失败: {str(e)}")
+
+
+@router.get("/{club_id}/reports/export")
+def export_club_periodic_report(
+    club_id: str,
+    operator_uid: str = Query(..., description="操作人用户ID，必须为团长"),
+    period_type: str = Query("week", pattern="^(week|month)$", description="统计周期: week 或 month"),
+    year: Optional[int] = Query(None, description="年份，如 2026"),
+    period_index: Optional[int] = Query(None, description="周序号(1-53)或月份(1-12)")
+):
+    """
+    导出跑团周报与月报微信转发格式文本。
+    权限：仅限跑团团长(Owner)有权下载。
+    """
+    if not operator_uid:
+        raise HTTPException(status_code=400, detail="缺少 operator_uid 参数")
+
+    # 校验团长权限
+    if not LocalStore.is_club_owner(club_id, operator_uid):
+        raise HTTPException(
+            status_code=403,
+            detail="只有跑团团长有权查看与导出跑团周报/月报！"
+        )
+
+    try:
+        report = LocalStore.get_club_periodic_report(
+            club_id=club_id,
+            period_type=period_type,
+            year=year,
+            period_index=period_index
+        )
+        forward_text = report.get("forward_text", "")
+        club_name = report.get("club_name", club_id)
+        display = report.get("period_display", period_type).replace(" ", "_")
+        filename = f"{club_name}_{display}_战报.txt"
+
+        import urllib.parse
+        encoded_filename = urllib.parse.quote(filename)
+
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
+        return PlainTextResponse(content=forward_text, headers=headers)
+    except Exception as e:
+        logger.error(f"[team] Error exporting club report: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"导出跑团报表失败: {str(e)}")
+
 

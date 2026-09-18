@@ -40,7 +40,9 @@ import {
   EyeOff,
   Lock,
   Loader2,
-  Clock
+  Clock,
+  Download,
+  BarChart3
 } from "lucide-react";
 
 export default function TeamPage() {
@@ -97,6 +99,14 @@ export default function TeamPage() {
   const [allClubs, setAllClubs] = useState<any[]>([]);
   const [loadingAllClubs, setLoadingAllClubs] = useState(false);
   const [joiningClubId, setJoiningClubId] = useState<string | null>(null);
+
+  // Club Report states (Owner only)
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportPeriodType, setReportPeriodType] = useState<"week" | "month">("week");
+  const [reportPeriodOffset, setReportPeriodOffset] = useState<number>(0);
+  const [reportData, setReportData] = useState<any>(null);
+  const [loadingReport, setLoadingReport] = useState<boolean>(false);
+  const [copiedReportText, setCopiedReportText] = useState<boolean>(false);
 
   const [inviteCodeInput, setInviteCodeInput] = useState("");
 
@@ -233,6 +243,92 @@ export default function TeamPage() {
     } catch (e: any) {
       alert(e.response?.data?.detail || "更新入团规则失败，请重试！");
     }
+  }
+
+  async function fetchClubReport(periodType: "week" | "month" = reportPeriodType, offset: number = reportPeriodOffset) {
+    if (!currentClub?.id || !user?.id) return;
+    setLoadingReport(true);
+    try {
+      let url = `/api/team/${currentClub.id}/reports?operator_uid=${user.id}&period_type=${periodType}`;
+      if (offset === -1) {
+        const now = new Date();
+        if (periodType === "week") {
+          const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const target = new Date(d.valueOf());
+          const dayNr = (d.getDay() + 6) % 7;
+          target.setDate(target.getDate() - dayNr + 3);
+          const firstThursday = target.valueOf();
+          target.setMonth(0, 1);
+          if (target.getDay() !== 4) {
+            target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+          }
+          const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+          url += `&year=${d.getFullYear()}&period_index=${weekNum}`;
+        } else {
+          const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+          const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+          url += `&year=${prevYear}&period_index=${prevMonth}`;
+        }
+      }
+      const res = await apiClient.get(url);
+      setReportData(res.data);
+    } catch (err: any) {
+      console.error("fetchClubReport error:", err);
+      alert(err.response?.data?.detail || "获取跑团报表失败");
+    } finally {
+      setLoadingReport(false);
+    }
+  }
+
+  function openClubReportModal() {
+    setReportPeriodType("week");
+    setReportPeriodOffset(0);
+    setShowReportModal(true);
+    fetchClubReport("week", 0);
+  }
+
+  function handleSwitchReportPeriod(type: "week" | "month") {
+    setReportPeriodType(type);
+    setReportPeriodOffset(0);
+    fetchClubReport(type, 0);
+  }
+
+  function handleSwitchReportOffset(offset: number) {
+    setReportPeriodOffset(offset);
+    fetchClubReport(reportPeriodType, offset);
+  }
+
+  function handleCopyReportText() {
+    if (!reportData?.forward_text) return;
+    navigator.clipboard.writeText(reportData.forward_text);
+    setCopiedReportText(true);
+    setTimeout(() => setCopiedReportText(false), 2500);
+  }
+
+  function handleExportReportFile() {
+    if (!currentClub?.id || !user?.id) return;
+    let url = `/api/team/${currentClub.id}/reports/export?operator_uid=${user.id}&period_type=${reportPeriodType}`;
+    if (reportPeriodOffset === -1) {
+      const now = new Date();
+      if (reportPeriodType === "week") {
+        const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const target = new Date(d.valueOf());
+        const dayNr = (d.getDay() + 6) % 7;
+        target.setDate(target.getDate() - dayNr + 3);
+        const firstThursday = target.valueOf();
+        target.setMonth(0, 1);
+        if (target.getDay() !== 4) {
+          target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+        }
+        const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+        url += `&year=${d.getFullYear()}&period_index=${weekNum}`;
+      } else {
+        const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+        const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        url += `&year=${prevYear}&period_index=${prevMonth}`;
+      }
+    }
+    window.open(url, "_blank");
   }
 
   async function loadUserClubs(uid: string) {
@@ -1246,6 +1342,37 @@ export default function TeamPage() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Club Weekly & Monthly Report Center (Only Owner & Admin) */}
+            {(currentRole === "owner" || user?.is_admin) && (
+              <div className="bg-gradient-to-br from-amber-500/10 via-[#121215] to-[#121215] border border-amber-500/30 rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 rounded-2xl bg-amber-500/20 text-amber-300">
+                        <BarChart3 className="w-5 h-5 text-amber-400" />
+                      </span>
+                      <h2 className="text-lg font-black text-white">
+                        跑团周报与月报 · 战报转发中心
+                      </h2>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        👑 团长专属
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      自动聚合全团跑量、队员出勤率、荣耀前三领奖台与 Renato Canova 科学复盘，支持一键复制微信群排版与下载文本
+                    </p>
+                  </div>
+                  <button
+                    onClick={openClubReportModal}
+                    className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs rounded-2xl shadow-lg shadow-amber-500/20 transition flex items-center gap-2 cursor-pointer self-start sm:self-auto"
+                  >
+                    <FileText className="w-4 h-4" />
+                    查看与生成战报
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2332,6 +2459,275 @@ export default function TeamPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Club Weekly & Monthly Report Modal (Owner Only) ── */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-[#141416] border border-amber-500/30 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl space-y-6 my-8 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2">
+                    跑团专属战报与复盘
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      👑 团长专属
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-400">仅跑团主理人有权查看与导出，方便一键转发微信群</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="p-2 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Period Selector Tabs */}
+            <div className="space-y-3">
+              <div className="flex gap-2 p-1 bg-white/5 rounded-2xl border border-white/10">
+                <button
+                  onClick={() => handleSwitchReportPeriod("week")}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    reportPeriodType === "week"
+                      ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>周报 (Weekly)</span>
+                </button>
+                <button
+                  onClick={() => handleSwitchReportPeriod("month")}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    reportPeriodType === "month"
+                      ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>月报 (Monthly)</span>
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleSwitchReportOffset(0)}
+                  className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition ${
+                    reportPeriodOffset === 0
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10"
+                  }`}
+                >
+                  {reportPeriodType === "week" ? "本周战报" : "本月战报"}
+                </button>
+                <button
+                  onClick={() => handleSwitchReportOffset(-1)}
+                  className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition ${
+                    reportPeriodOffset === -1
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10"
+                  }`}
+                >
+                  {reportPeriodType === "week" ? "上周战报" : "上月战报"}
+                </button>
+              </div>
+            </div>
+
+            {/* Content Area */}
+            {loadingReport ? (
+              <div className="py-16 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+                <span className="text-xs text-zinc-400">正在汇算团队跑步大数据...</span>
+              </div>
+            ) : reportData ? (
+              <div className="flex-1 overflow-y-auto space-y-5 pr-1 custom-scrollbar">
+                {/* Period banner */}
+                <div className="flex items-center justify-between bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/30 rounded-2xl p-4">
+                  <div className="font-black text-white text-sm">{reportData.period_label}</div>
+                  <div className="text-xs text-amber-400 font-mono">{reportData.date_range_str}</div>
+                </div>
+
+                {/* Overview Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
+                      <Flame className="w-3.5 h-3.5 text-[#FC4C02]" />
+                      全团跑量
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-black text-[#FC4C02]">{reportData.total_distance_km}</span>
+                      <span className="text-[10px] text-zinc-500">km</span>
+                    </div>
+                  </div>
+                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5 text-blue-400" />
+                      队员出勤率
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-black text-white">{reportData.attendance_rate_pct}%</span>
+                      <span className="text-[10px] text-zinc-500">
+                        ({reportData.active_members_count}/{reportData.total_members_count})
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                      全团平均配速
+                    </span>
+                    <div className="text-lg font-black text-white font-mono">{reportData.avg_pace_str}</div>
+                  </div>
+                  <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                    <span className="text-[11px] text-zinc-400 flex items-center gap-1">
+                      <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
+                      累计爬升
+                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-black text-white">+{reportData.total_elevation_gain_m}</span>
+                      <span className="text-[10px] text-zinc-500">m</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🏆 Podium Top 3 */}
+                <div className="bg-[#18181b] border border-white/5 rounded-2xl p-4 space-y-3">
+                  <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                    <Trophy className="w-4 h-4" />
+                    <span>荣誉榜单 Top 3</span>
+                  </div>
+                  {reportData.podium && reportData.podium.length > 0 ? (
+                    <div className="space-y-2">
+                      {reportData.podium.map((p: any, idx: number) => (
+                        <div
+                          key={p.user_id}
+                          className={`flex items-center justify-between p-2.5 rounded-xl border ${
+                            idx === 0
+                              ? "bg-amber-500/10 border-amber-500/30"
+                              : idx === 1
+                              ? "bg-slate-400/10 border-slate-400/30"
+                              : "bg-amber-700/10 border-amber-700/30"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg font-bold">
+                              {idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"}
+                            </span>
+                            <img
+                              src={
+                                p.avatar_url ||
+                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
+                              }
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover"
+                            />
+                            <div>
+                              <div className="text-xs font-black text-white">{p.display_name}</div>
+                              <div className="text-[10px] text-zinc-400">
+                                {p.runs_count} 次打卡 · 均速 {p.avg_pace_str}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-black text-white">{p.distance_km}</span>
+                            <span className="text-[10px] text-zinc-500 ml-1">km</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-xs text-zinc-500">本周期暂无打卡记录</div>
+                  )}
+                </div>
+
+                {/* 🌟 Highlights */}
+                {(reportData.hardcore_runner || reportData.longest_run) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {reportData.hardcore_runner && (
+                      <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                        <span className="text-[11px] font-bold text-sky-400">🌟 毅力先锋</span>
+                        <div className="text-xs font-black text-white">{reportData.hardcore_runner.display_name}</div>
+                        <div className="text-[10px] text-zinc-400">
+                          打卡 {reportData.hardcore_runner.runs_count} 次 · 共 {reportData.hardcore_runner.distance_km} km
+                        </div>
+                      </div>
+                    )}
+                    {reportData.longest_run && (
+                      <div className="bg-[#18181b] border border-white/5 rounded-2xl p-3.5 space-y-1">
+                        <span className="text-[11px] font-bold text-sky-400">🚀 最长突破</span>
+                        <div className="text-xs font-black text-white">{reportData.longest_run.runner_name}</div>
+                        <div className="text-[10px] text-zinc-400">
+                          单次 {reportData.longest_run.distance_km} km · {reportData.longest_run.avg_pace_str}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 💡 Renato Canova Review */}
+                <div className="bg-gradient-to-br from-purple-500/10 via-[#18181b] to-[#18181b] border border-purple-500/30 rounded-2xl p-4 space-y-2">
+                  <div className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Renato Canova 科学耐力团队复盘</span>
+                  </div>
+                  <p className="text-xs text-zinc-300 leading-relaxed">{reportData.canova_critique}</p>
+                </div>
+
+                {/* 💬 WeChat Forwarding Preview */}
+                <div className="bg-[#0e0e11] border border-emerald-500/30 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <MessageCircle className="w-4 h-4" />
+                      微信群转发排版预览
+                    </span>
+                    <span className="text-[10px] text-zinc-500 font-mono">支持直接复制</span>
+                  </div>
+                  <pre className="p-3 bg-black/60 rounded-xl text-[11px] text-zinc-200 font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar border border-white/5">
+                    {reportData.forward_text}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-xs text-zinc-500">无法加载战报数据</div>
+            )}
+
+            {/* Footer Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-white/10">
+              <button
+                onClick={handleCopyReportText}
+                disabled={!reportData}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-2xl text-xs font-black transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {copiedReportText ? (
+                  <>
+                    <Check className="w-4 h-4 text-white" />
+                    <span>已复制到剪贴板，可直接发微信群！</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>📋 一键复制微信群转发文本</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleExportReportFile}
+                disabled={!reportData}
+                className="py-3 px-5 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-zinc-200 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+              >
+                <Download className="w-4 h-4" />
+                <span>📥 导出战报文件</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
