@@ -1223,7 +1223,7 @@
         <canvas
           canvas-id="reportPosterCanvas"
           id="reportPosterCanvas"
-          style="width: 750px; height: 1320px; position: fixed; left: -9999px; top: -9999px;"
+          style="width: 750px; height: 1340px; position: fixed; left: -9999px; top: -9999px;"
         ></canvas>
 
         <!-- Footer Actions -->
@@ -1840,7 +1840,7 @@ function drawRoundedRect(ctx: any, x: number, y: number, width: number, height: 
   ctx.restore();
 }
 
-function drawWrappedText(ctx: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 4) {
+function drawWrappedText(ctx: any, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 5) {
   let line = "";
   let lineCount = 0;
   for (let i = 0; i < text.length; i++) {
@@ -1853,13 +1853,14 @@ function drawWrappedText(ctx: any, text: string, x: number, y: number, maxWidth:
       if (lineCount >= maxLines - 1) {
         const remaining = text.substring(i);
         let lastLine = "";
+        const suffix = text.startsWith("“") ? "…”" : "...";
         for (let j = 0; j < remaining.length; j++) {
-          if (ctx.measureText(lastLine + remaining[j] + "...").width > maxWidth) {
+          if (ctx.measureText(lastLine + remaining[j] + suffix).width > maxWidth) {
             break;
           }
           lastLine += remaining[j];
         }
-        ctx.fillText(lastLine + "...", x, y);
+        ctx.fillText(lastLine + suffix, x, y);
         return y + lineHeight;
       }
     } else {
@@ -1881,7 +1882,7 @@ function generatePosterImage(): Promise<string> {
     const ctx = uni.createCanvasContext("reportPosterCanvas");
 
     const W = 750;
-    const H = 1320;
+    const H = 1340;
 
     // 1. Background
     const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
@@ -2046,17 +2047,17 @@ function generatePosterImage(): Promise<string> {
 
     // 7. 💡 Renato Canova Coach Critique Box
     const cY = 955;
-    drawRoundedRect(ctx, 40, cY, W - 80, 215, 18, "#181624", "rgba(191, 90, 242, 0.35)");
+    drawRoundedRect(ctx, 40, cY, W - 80, 225, 18, "#181624", "rgba(191, 90, 242, 0.35)");
     ctx.setFontSize(22);
     ctx.setFillStyle("#bf5af2");
     ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
 
-    ctx.setFontSize(18);
+    ctx.setFontSize(17);
     ctx.setFillStyle("#d1d5db");
-    drawWrappedText(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 28, 4);
+    drawWrappedText(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 26, 5);
 
     // 8. Bottom Brand Stamp
-    const fY = 1195;
+    const fY = 1205;
     ctx.beginPath();
     ctx.moveTo(40, fY);
     ctx.lineTo(W - 40, fY);

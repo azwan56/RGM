@@ -47,6 +47,8 @@ export default function ProfilePage() {
   const [unbindingCoros, setUnbindingCoros] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
+  const [savingNickname, setSavingNickname] = useState(false);
+  const [nicknameSavedSuccess, setNicknameSavedSuccess] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [gender, setGender] = useState("male");
@@ -659,15 +661,54 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSaveNicknameOnly() {
+    if (!user?.id) return;
+    const name = displayName.trim();
+    if (!name) {
+      alert("跑者昵称不能为空！");
+      return;
+    }
+    setSavingNickname(true);
+    try {
+      await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}`, {
+        display_name: name,
+      });
+
+      // Update session in localStorage
+      try {
+        const raw = localStorage.getItem("rgm_auth_session");
+        if (raw) {
+          const sess = JSON.parse(raw);
+          if (sess?.user) {
+            sess.user.display_name = name;
+            localStorage.setItem("rgm_auth_session", JSON.stringify(sess));
+          }
+        }
+      } catch (e) {}
+
+      // Update local user state
+      setUser((prev: any) => (prev ? { ...prev, display_name: name } : prev));
+
+      setNicknameSavedSuccess(true);
+      setTimeout(() => setNicknameSavedSuccess(false), 3000);
+      alert(`✅ 跑者昵称已成功更新并保存为「${name}」！`);
+    } catch (err: any) {
+      alert("保存昵称失败: " + (err?.response?.data?.detail || err?.message || err));
+    } finally {
+      setSavingNickname(false);
+    }
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
 
     setSaving(true);
     try {
+      const cleanName = displayName.trim();
       // 1. Update Profile
       await apiClient.put(`/api/profile/${user.id}`, {
-        display_name: displayName.trim() || undefined,
+        display_name: cleanName || undefined,
         avatar_url: avatarUrl || undefined,
         gender,
         real_name: realName.trim() || null,
@@ -698,6 +739,21 @@ export default function ProfilePage() {
         if (r.name.trim()) {
           await apiClient.post(`/api/profile/${user.id}/races`, r);
         }
+      }
+
+      // Update session in localStorage
+      if (cleanName) {
+        try {
+          const raw = localStorage.getItem("rgm_auth_session");
+          if (raw) {
+            const sess = JSON.parse(raw);
+            if (sess?.user) {
+              sess.user.display_name = cleanName;
+              localStorage.setItem("rgm_auth_session", JSON.stringify(sess));
+            }
+          }
+        } catch (e) {}
+        setUser((prev: any) => (prev ? { ...prev, display_name: cleanName } : prev));
       }
 
       alert("🎉 个人资料、比赛计划与跑量目标保存成功！");
@@ -880,15 +936,46 @@ export default function ProfilePage() {
               <div className="flex-1 w-full space-y-3">
                 <div>
                   <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称 (Display Name)</label>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="例如: Alex Wan / 珍珍"
-                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSaveNicknameOnly();
+                        }
+                      }}
+                      placeholder="例如: Alex Wan / 珍珍"
+                      className="flex-1 bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingNickname}
+                      onClick={handleSaveNicknameOnly}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] text-white hover:bg-[#ff5d1a] transition active:scale-95 shadow-md shadow-[#FC4C02]/20 shrink-0 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {savingNickname ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>保存中...</span>
+                        </>
+                      ) : nicknameSavedSuccess ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-white" />
+                          <span>已保存</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5" />
+                          <span>保存昵称</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <p className="text-[11px] text-zinc-500 mt-1">
-                    该昵称将展示在跑团花名册、大盘排行榜与 Renato Canova 科学训练档案中
+                    该昵称将展示在跑团花名册、大盘排行榜与 Renato Canova 科学训练档案中（支持直接回车保存）
                   </p>
                 </div>
 

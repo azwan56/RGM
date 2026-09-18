@@ -387,7 +387,7 @@ def sync_device_profile(uid: str):
                 for k in ["date_of_birth", "gender", "height_cm", "weight_kg", "vo2max", "max_heart_rate", "resting_heart_rate", "avatar_url"]:
                     if g_info.get(k) is not None:
                         updates[k] = g_info[k]
-                if g_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                if g_info.get("display_name") and not user.get("display_name"):
                     updates["display_name"] = g_info["display_name"]
                 sources.append("Garmin")
         except Exception as ge:
@@ -408,7 +408,7 @@ def sync_device_profile(uid: str):
                         updates[k] = c_info[k]
                 if c_info.get("avatar_url") and not updates.get("avatar_url") and not user.get("avatar_url"):
                     updates["avatar_url"] = c_info["avatar_url"]
-                if c_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                if c_info.get("display_name") and not user.get("display_name"):
                     updates["display_name"] = c_info["display_name"]
                 sources.append("COROS")
         except Exception as ce:

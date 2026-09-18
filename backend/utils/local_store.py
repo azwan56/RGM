@@ -591,6 +591,7 @@ class LocalStore:
 
     @staticmethod
     def upsert_profile(uid: str, data: Dict[str, Any]):
+        eff_uid = LocalStore.resolve_user_id(uid)
         data = dict(data)
         # Encrypt sensitive personal privacy fields before saving
         for pii in ["id_card", "date_of_birth", "phone", "real_name"]:
@@ -611,7 +612,7 @@ class LocalStore:
                     except Exception:
                         pass
 
-            cursor.execute("SELECT * FROM profiles WHERE id = ?", (uid,))
+            cursor.execute("SELECT * FROM profiles WHERE id = ?", (eff_uid,))
             existing = cursor.fetchone()
             if existing:
                 fields = []
@@ -621,10 +622,10 @@ class LocalStore:
                         fields.append(f"{k} = ?")
                         values.append(v)
                 if fields:
-                    values.append(uid)
+                    values.append(eff_uid)
                     cursor.execute(f"UPDATE profiles SET {', '.join(fields)} WHERE id = ?", values)
             else:
-                data["id"] = uid
+                data["id"] = eff_uid
                 if "created_at" not in data:
                     data["created_at"] = datetime.utcnow().isoformat() + "Z"
                 valid_data = {k: v for k, v in data.items() if k in existing_cols or k == "id"}
@@ -2344,34 +2345,31 @@ class LocalStore:
         
         cycle_name = "周度" if period_type == "week" else "月度"
         
-        # Determine team volume evaluation
+        # Determine team volume evaluation (concise: ~35-40 chars)
         if total_km >= 500 or (period_type == "week" and total_km >= 200):
-            volume_eval = f"全团累计推进 {total_km}km，团队有氧底座储备极其扎实。庞大的基础有氧里程有效促进全员微血管增生与线粒体氧化酶活性深度发展。"
+            volume_eval = f"全团推进 {total_km}km (出勤率 {attendance_rate}%)，有氧底座储备扎实，微血管增生充分。"
         else:
-            volume_eval = f"全团累计完成 {total_km}km，打卡 {total_acts_count} 次。稳步积累基础有氧支撑，队员出勤率达 {attendance_rate}%。"
+            volume_eval = f"全团完成 {total_km}km，打卡 {total_acts_count} 次 (出勤率 {attendance_rate}%)，基础有氧稳步筑牢。"
 
-        # Top performer praise
-        top_mention = ""
+        # Top performer & longest run mention (concise: ~30-40 chars)
+        highlights = []
         if podium:
             c = podium[0]
-            top_mention = f"领头跑者【{c['display_name']}】完成 {c['distance_km']}km，有效发挥了中坚榜样拉动效应。"
-
-        # Longest run mention
-        long_mention = ""
+            highlights.append(f"领跑【{c['display_name']}】({c['distance_km']}km)")
         if longest_run and longest_run.get("distance_km", 0) >= 15:
-            long_mention = f"【{longest_run['runner_name']}】斩获单次 {longest_run['distance_km']}km 长距离刺激，为团队长耐力突破树立标杆。"
+            highlights.append(f"最长突破【{longest_run['runner_name']}】({longest_run['distance_km']}km)")
+        
+        highlight_str = f"{'与'.join(highlights)}树立中坚榜样。" if highlights else ""
 
-        # Advice for next period based on Canova philosophy
+        # Advice for next period based on Canova philosophy (~40-50 chars)
         if period_type == "week":
-            coach_advice = "教练建议：大跑量后全员注意 48 小时结缔组织超量恢复，下周课表严格遵循 80/20 极化法则，低心率慢跑稳固微循环，切忌连续冲击大负荷。"
+            coach_advice = "教练建议：大负荷后保证48小时结缔组织超量恢复，严格遵循80/20极化法则，低心率慢跑稳固微循环。"
         else:
-            coach_advice = "教练建议：进入新月份后，逐步向马拉松专项配速收敛推进，强化半马与全马巡航节律，同时确保赛前至少 2 周安排科学减量调整。"
+            coach_advice = "教练建议：进入新月度后逐步向专项配速收敛，强化巡航节律与抗疲劳韧性，赛前安排科学减量。"
 
         parts = [volume_eval]
-        if top_mention:
-            parts.append(top_mention)
-        if long_mention:
-            parts.append(long_mention)
+        if highlight_str:
+            parts.append(highlight_str)
         parts.append(coach_advice)
         return " ".join(parts)
 

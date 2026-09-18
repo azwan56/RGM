@@ -357,7 +357,7 @@ export default function TeamPage() {
     ctx.restore();
   }
 
-  function drawWrappedTextWeb(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 4) {
+  function drawWrappedTextWeb(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 5) {
     let line = "";
     let lineCount = 0;
     for (let i = 0; i < text.length; i++) {
@@ -370,13 +370,14 @@ export default function TeamPage() {
         if (lineCount >= maxLines - 1) {
           const remaining = text.substring(i);
           let lastLine = "";
+          const suffix = text.startsWith("“") ? "…”" : "...";
           for (let j = 0; j < remaining.length; j++) {
-            if (ctx.measureText(lastLine + remaining[j] + "...").width > maxWidth) {
+            if (ctx.measureText(lastLine + remaining[j] + suffix).width > maxWidth) {
               break;
             }
             lastLine += remaining[j];
           }
-          ctx.fillText(lastLine + "...", x, y);
+          ctx.fillText(lastLine + suffix, x, y);
           return y + lineHeight;
         }
       } else {
@@ -391,7 +392,7 @@ export default function TeamPage() {
     if (!reportData) return;
     const canvas = document.createElement("canvas");
     const W = 750;
-    const H = 1320;
+    const H = 1340;
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext("2d");
@@ -551,17 +552,17 @@ export default function TeamPage() {
 
     // Canova Quote Box
     const cY = 955;
-    drawRoundedRectWeb(ctx, 40, cY, W - 80, 215, 18, "#181624", "rgba(191, 90, 242, 0.35)");
+    drawRoundedRectWeb(ctx, 40, cY, W - 80, 225, 18, "#181624", "rgba(191, 90, 242, 0.35)");
     ctx.font = "bold 22px sans-serif";
     ctx.fillStyle = "#bf5af2";
     ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
 
-    ctx.font = "italic 18px sans-serif";
+    ctx.font = "italic 17px sans-serif";
     ctx.fillStyle = "#d1d5db";
-    drawWrappedTextWeb(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 28, 4);
+    drawWrappedTextWeb(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 26, 5);
 
     // Footer
-    const fY = 1195;
+    const fY = 1205;
     ctx.beginPath();
     ctx.moveTo(40, fY);
     ctx.lineTo(W - 40, fY);

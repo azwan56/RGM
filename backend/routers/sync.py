@@ -70,7 +70,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         g_info = garmin_adapter.fetch_user_profile_info()
                         if g_info.get("avatar_url") and not profile_updates.get("avatar_url"):
                             profile_updates["avatar_url"] = g_info["avatar_url"]
-                        if g_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                        if g_info.get("display_name") and not user.get("display_name"):
                             profile_updates["display_name"] = g_info["display_name"]
                         if g_info.get("weight_kg") and not user.get("weight_kg") and not user.get("weight"):
                             profile_updates["weight_kg"] = g_info["weight_kg"]
@@ -127,7 +127,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         c_info = coros_adapter.fetch_user_profile_info()
                         if c_info.get("avatar_url") and not profile_updates.get("avatar_url"):
                             profile_updates["avatar_url"] = c_info["avatar_url"]
-                        if c_info.get("display_name") and (not user.get("display_name") or user.get("display_name") in ["跑者", "Alex", "微信跑者"]):
+                        if c_info.get("display_name") and not user.get("display_name"):
                             profile_updates["display_name"] = c_info["display_name"]
                         if c_info.get("weight_kg"):
                             profile_updates["weight_kg"] = c_info["weight_kg"]
