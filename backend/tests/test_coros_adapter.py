@@ -10,8 +10,12 @@ from utils.local_store import LocalStore, init_db
 def test_pace_str():
     # 10,000 meters in 3,000 seconds = 300 sec/km = 5:00 /km
     assert pace_str(10000, 3000) == "5:00 /km"
-    # 5,000 meters in 1,164 seconds = 232.8 sec/km = 3:52 /km
-    assert pace_str(5000, 1164) == "3:52 /km"
+    # 5,000 meters in 1,164 seconds = 232.8 sec/km -> rounded to 233s = 3:53 /km
+    assert pace_str(5000, 1164) == "3:53 /km"
+    # 5,000 meters in 1,161 seconds = 232.2 sec/km -> rounded to 232s = 3:52 /km
+    assert pace_str(5000, 1161) == "3:52 /km"
+    # Target case: 15,344.27 meters in 3,803 seconds = 247.85 sec/km -> 4:08 /km
+    assert pace_str(15344.27, 3803) == "4:08 /km"
     # Edge cases
     assert pace_str(0, 0) == "—"
     assert pace_str(1000, 0) == "—"
@@ -81,7 +85,7 @@ def test_coros_adapter_workout_time_pause_rest_exclusion():
     # Coros activity where the user paused/stopped the watch to rest
     # 10.01 km (10010m):
     # totalTime is 4635 seconds (~77 min, which would mistakenly yield 7:43 /km if used for pace)
-    # workoutTime is 3280 seconds (~54 min 40 sec, giving true active pace of 5:27 /km)
+    # workoutTime is 3280 seconds (~54 min 40 sec, giving true active pace of 5:28 /km rounded)
     raw_coros_act = {
         "labelId": "1122334455",
         "sportType": 100,
@@ -103,10 +107,34 @@ def test_coros_adapter_workout_time_pause_rest_exclusion():
     # moving_time_seconds must use workoutTime (excluding paused rest)
     assert norm["moving_time_seconds"] == 3280
     assert norm["elapsed_time_seconds"] == 4635
-    # Average pace must be 5:27 /km, NOT 7:43 /km!
-    assert norm["avg_pace_str"] == "5:27 /km"
+    # Average pace must be 5:28 /km (3280 / 10.01 = 327.67s -> 328s), NOT 7:43 /km!
+    assert norm["avg_pace_str"] == "5:28 /km"
     # Average speed must be calculated using moving time (3280s), not total time (4635s)
     assert norm["average_speed_mps"] == round(10010.0 / 3280, 3)
+
+    # Activity matching user report: 15.34km with pauses
+    user_report_act = {
+        "labelId": "480279389475471569",
+        "sportType": 100,
+        "name": "上海市 跑步",
+        "distance": 15344.27,
+        "totalTime": 5169,      # 1h 26m 09s including rest/pause
+        "workoutTime": 3803,    # 1h 03m 23s moving time
+        "avgSpeed": 247.84,     # Coros pace in sec/km
+        "startTime": 1757629035,
+        "avgHeartRate": 151,
+        "maxHeartRate": 172,
+        "avgCadence": 180,
+        "elevationGain": 25.0,
+        "calorie": 980
+    }
+    norm_user = adapter._normalize_activity(user_report_act)
+    assert norm_user is not None
+    assert norm_user["distance_meters"] == 15344.27
+    assert norm_user["moving_time_seconds"] == 3803
+    assert norm_user["elapsed_time_seconds"] == 5169
+    # Must match official COROS app: 4'08" /km, NOT 5:36 /km and NOT 4:07 /km!
+    assert norm_user["avg_pace_str"] == "4:08 /km"
 
 def test_coros_token_persistence(tmp_path):
     adapter = CorosAdapter("test_runner_cache@coros.com", "mypassword")

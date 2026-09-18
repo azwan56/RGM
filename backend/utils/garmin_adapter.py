@@ -35,9 +35,9 @@ def pace_str(distance_m: float, moving_time_s: int) -> str:
     km = distance_m / 1000.0
     if km <= 0 or moving_time_s <= 0:
         return "—"
-    sec_per_km = moving_time_s / km
-    mins = int(sec_per_km // 60)
-    secs = int(sec_per_km % 60)
+    total_sec = int(round(moving_time_s / km))
+    mins = total_sec // 60
+    secs = total_sec % 60
     return f"{mins}:{secs:02d} /km"
 
 class GarminAdapter:

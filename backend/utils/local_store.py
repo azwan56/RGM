@@ -644,8 +644,15 @@ class LocalStore:
                 "ai_journal", "laps_data", "splits_data", "gps_track_data", "map_image_url"
             ]
             act_id = act.get("id")
-            cursor.execute("SELECT id FROM activities WHERE id = ?", (act_id,))
-            is_new = cursor.fetchone() is None
+            cursor.execute("SELECT id, gps_track_data, map_image_url FROM activities WHERE id = ?", (act_id,))
+            existing_row = cursor.fetchone()
+            is_new = existing_row is None
+
+            if not is_new and existing_row:
+                if not act.get("gps_track_data") and existing_row[1]:
+                    act["gps_track_data"] = existing_row[1]
+                if not act.get("map_image_url") and existing_row[2]:
+                    act["map_image_url"] = existing_row[2]
 
             # Ensure elevation_gain_meters is robustly captured from any common adapter key
             if act.get("elevation_gain_meters") is None:

@@ -22,9 +22,9 @@ def pace_str(distance_m: float, moving_time_s: int) -> str:
     km = distance_m / 1000.0
     if km <= 0 or moving_time_s <= 0:
         return "—"
-    sec_per_km = moving_time_s / km
-    mins = int(sec_per_km // 60)
-    secs = int(sec_per_km % 60)
+    total_sec = int(round(moving_time_s / km))
+    mins = total_sec // 60
+    secs = total_sec % 60
     return f"{mins}:{secs:02d} /km"
 
 
@@ -456,6 +456,17 @@ class CorosAdapter:
         aerobic_te = act.get("aerobicEffect") or act.get("trainingLoad")
         anaerobic_te = act.get("anaerobicEffect")
 
+        pace_display = pace_str(distance_m, moving_s)
+        coros_avg_speed = act.get("avgSpeed")
+        if sport_type_code in [100, 101, 102, 103] and coros_avg_speed is not None:
+            try:
+                speed_sec = float(coros_avg_speed)
+                if speed_sec > 0:
+                    tot_s = int(round(speed_sec))
+                    pace_display = f"{tot_s // 60}:{tot_s % 60:02d} /km"
+            except (ValueError, TypeError):
+                pass
+
         return {
             "id": f"coros_{raw_id}",
             "source": f"coros_{'cn' if self.is_cn else 'global'}",
@@ -468,7 +479,7 @@ class CorosAdapter:
             "elapsed_time_seconds": duration_s,
             "average_speed_mps": avg_speed,
             "max_speed_mps": max_speed,
-            "avg_pace_str": pace_str(distance_m, moving_s),
+            "avg_pace_str": pace_display,
             "average_heartrate": int(avg_hr) if avg_hr else None,
             "max_heartrate": int(max_hr) if max_hr else None,
             "average_cadence": int(avg_cadence) if avg_cadence else None,
