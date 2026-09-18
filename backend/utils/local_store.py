@@ -6,7 +6,7 @@ import random
 import string
 import logging
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, date, timedelta
 from utils.encryption import encrypt_pii, decrypt_pii, compute_age_group
 
@@ -855,6 +855,43 @@ class LocalStore:
             cursor.execute("SELECT SUM(distance_meters) FROM activities WHERE user_id = ? AND start_time >= ?", (uid, month_start))
             res = cursor.fetchone()
             return float(res[0]) if res and res[0] is not None else 0.0
+
+    @staticmethod
+    def get_month_activities(uid: str, year: Optional[int] = None, month: Optional[int] = None) -> List[Dict[str, Any]]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        today = get_beijing_today()
+        target_year = year or today.year
+        target_month = month or today.month
+
+        start_date = f"{target_year:04d}-{target_month:02d}-01"
+        if target_month == 12:
+            end_date = f"{target_year + 1:04d}-01-01"
+        else:
+            end_date = f"{target_year:04d}-{target_month + 1:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM activities 
+                WHERE user_id = ? AND start_time >= ? AND start_time < ? 
+                ORDER BY start_time DESC
+            """, (canonical_uid, start_date, end_date))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        # Generate Canova critiques if missing
+        for r in rows:
+            if not r.get("ai_journal") or not str(r["ai_journal"]).strip():
+                try:
+                    critique = LocalStore.generate_canova_critique(r)
+                    r["ai_journal"] = critique
+                    with sqlite3.connect(DB_PATH) as conn:
+                        conn.cursor().execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (critique, r["id"]))
+                        conn.commit()
+                except Exception as ex:
+                    logger.warning(f"Generate critique in get_month_activities failed: {ex}")
+
+        return rows
 
     @staticmethod
     def get_weekly_stats(uid: str, target_km: Optional[float] = None) -> Dict[str, Any]:
@@ -2483,25 +2520,45 @@ class LocalStore:
             }
 
     @staticmethod
-    def get_club_recent_activities(club_id: str, current_uid: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_club_recent_activities(
+        club_id: str,
+        current_uid: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+        before_time: Optional[str] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
         members = LocalStore.get_club_members(club_id)
         uids = [m["user_id"] for m in members]
         if not uids:
-            return []
+            return [], 0
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             placeholders = ["?"] * len(uids)
+
+            # Get total count of club activities for pagination
+            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)})", uids)
+            total_row = cursor.fetchone()
+            total = total_row[0] if total_row else 0
+
+            params = list(uids)
+            time_filter = ""
+            if before_time:
+                time_filter = "AND a.start_time < ?"
+                params.append(before_time)
+
+            params.extend([max(1, limit), max(0, offset)])
             query = f"""
-                SELECT a.*, p.display_name, p.avatar_url 
+                SELECT a.*, COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url 
                 FROM activities a
-                JOIN profiles p ON a.user_id = p.id
+                LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
+                {time_filter}
                 ORDER BY a.start_time DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
             """
-            cursor.execute(query, uids + [limit])
+            cursor.execute(query, params)
             rows = [dict(r) for r in cursor.fetchall()]
 
         # Ensure AI critique and attach social data
@@ -2523,7 +2580,87 @@ class LocalStore:
             act["comments"] = social["comments"]
             enriched.append(act)
 
-        return enriched
+        return enriched, total
+
+    @staticmethod
+    def get_club_month_activities(
+        club_id: str,
+        current_uid: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
+        """
+        Returns all activities of the specified (or current) month for the club.
+        Returns (enriched_activities, month_total, total_all_time).
+        """
+        members = LocalStore.get_club_members(club_id)
+        uids = [m["user_id"] for m in members]
+        if not uids:
+            return [], 0, 0
+
+        today = get_beijing_today()
+        target_year = year or today.year
+        target_month = month or today.month
+
+        month_start = f"{target_year:04d}-{target_month:02d}-01"
+        if target_month == 12:
+            next_month_start = f"{target_year + 1:04d}-01-01"
+        else:
+            next_month_start = f"{target_year:04d}-{target_month + 1:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            placeholders = ["?"] * len(uids)
+
+            # Total count all time
+            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)})", uids)
+            total_row = cursor.fetchone()
+            total_all_time = total_row[0] if total_row else 0
+
+            # Total count for the month
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM activities 
+                WHERE user_id IN ({','.join(placeholders)})
+                  AND start_time >= ? AND start_time < ?
+            """, uids + [month_start, next_month_start])
+            month_row = cursor.fetchone()
+            month_total = month_row[0] if month_row else 0
+
+            # Fetch all activities for the month (ordered by start_time DESC)
+            query = f"""
+                SELECT a.*, COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url 
+                FROM activities a
+                LEFT JOIN profiles p ON a.user_id = p.id
+                WHERE a.user_id IN ({','.join(placeholders)})
+                  AND a.start_time >= ? AND a.start_time < ?
+                ORDER BY a.start_time DESC
+            """
+            cursor.execute(query, uids + [month_start, next_month_start])
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        # Ensure AI critique and attach social data
+        enriched = []
+        for act in rows:
+            act_id = act["id"]
+            ai_journal = act.get("ai_journal")
+            if not ai_journal or not ai_journal.strip():
+                try:
+                    ai_journal = LocalStore.generate_canova_critique(act)
+                    act["ai_journal"] = ai_journal
+                    with sqlite3.connect(DB_PATH) as conn:
+                        conn.cursor().execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (ai_journal, act_id))
+                        conn.commit()
+                except Exception as ex:
+                    logger.warning(f"Generate critique in get_club_month_activities failed: {ex}")
+
+            social = LocalStore.get_activity_social(act_id, current_uid)
+            act["likes_count"] = social["likes_count"]
+            act["has_liked"] = social["has_liked"]
+            act["comments"] = social["comments"]
+            enriched.append(act)
+
+        return enriched, month_total, total_all_time
 
     @staticmethod
     def get_all_garmin_connected_users() -> List[Dict[str, Any]]:

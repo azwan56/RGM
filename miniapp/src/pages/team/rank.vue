@@ -109,7 +109,7 @@
         </view>
 
         <view v-if="feed.length" class="feed-list">
-          <view v-for="act in feed" :key="act.id" class="feed-card">
+          <view v-for="act in visibleFeed" :key="act.id" class="feed-card">
             <!-- Member & Run Header -->
             <view class="feed-header">
               <image
@@ -190,6 +190,51 @@
                 <text class="cmt-author">{{ c.author_name }}: </text>
                 <text class="cmt-content">{{ c.content }}</text>
               </view>
+            </view>
+          </view>
+
+          <!-- Load more / Pagination Footer -->
+          <view class="feed-load-more-box">
+            <!-- 1. More than 20 records in current month, currently folded -->
+            <button
+              v-if="!isFeedExpanded && feed.length > 20"
+              class="load-more-btn expand-month-btn"
+              @click="isFeedExpanded = true"
+            >
+              🔥 加载更多（展开当月全部打卡 · 还有 {{ feed.length - 20 }} 条）
+            </button>
+
+            <!-- 2. More than 20 records in current month, currently expanded -->
+            <view v-else-if="isFeedExpanded && feed.length > 20" class="month-expanded-container">
+              <view class="month-summary-bar">
+                <text class="month-summary-text">已展示当月全部打卡记录（共 {{ feed.length }} 条）</text>
+                <text class="collapse-action" @click="isFeedExpanded = false">收起折叠 ⌃</text>
+              </view>
+              <button
+                v-if="hasMoreFeed"
+                class="load-more-btn older-feed-btn"
+                :loading="loadingMoreFeed"
+                :disabled="loadingMoreFeed"
+                @click="handleLoadMoreFeed"
+              >
+                {{ loadingMoreFeed ? '正在加载更早打卡...' : `加载更早历史月份打卡（跑团共 ${feedTotal} 条）` }}
+              </button>
+            </view>
+
+            <!-- 3. Current month has 20 or fewer records -->
+            <view v-else class="month-complete-container">
+              <view v-if="feed.length > 0" class="no-more-text">
+                已展示当月全部打卡记录（共 {{ feed.length }} 条）
+              </view>
+              <button
+                v-if="hasMoreFeed"
+                class="load-more-btn older-feed-btn"
+                :loading="loadingMoreFeed"
+                :disabled="loadingMoreFeed"
+                @click="handleLoadMoreFeed"
+              >
+                {{ loadingMoreFeed ? '正在加载更早打卡...' : `加载更早历史月份打卡（跑团共 ${feedTotal} 条）` }}
+              </button>
             </view>
           </view>
         </view>
@@ -300,7 +345,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
 import GpsTrackModal from "../../components/GpsTrackModal.vue";
 import {
@@ -414,6 +459,16 @@ const showSwitchModal = ref(false);
 
 const leaderboard = ref<any[]>([]);
 const feed = ref<any[]>([]);
+const feedTotal = ref(0);
+const hasMoreFeed = ref(false);
+const loadingMoreFeed = ref(false);
+const isFeedExpanded = ref(false);
+const visibleFeed = computed(() => {
+  if (isFeedExpanded.value || feed.value.length <= 20) {
+    return feed.value;
+  }
+  return feed.value.slice(0, 20);
+});
 
 const showCommentModal = ref(false);
 const activeCommentActivityId = ref<string | null>(null);
@@ -461,16 +516,45 @@ async function loadRankData(preferredClubId?: string) {
       ]);
 
       leaderboard.value = lbRes?.leaderboard || [];
-      feed.value = feedRes?.feed || [];
+      const newFeed = feedRes?.feed || [];
+      feed.value = newFeed;
+      feedTotal.value = feedRes?.total ?? newFeed.length;
+      hasMoreFeed.value = feedRes?.has_more ?? false;
+      isFeedExpanded.value = false;
     } else {
       setActiveClubId("");
       currentClub.value = null;
       currentRole.value = "member";
       leaderboard.value = [];
       feed.value = [];
+      feedTotal.value = 0;
+      hasMoreFeed.value = false;
+      isFeedExpanded.value = false;
     }
   } catch (e) {
     console.warn("Load rank data error:", e);
+  }
+}
+
+async function handleLoadMoreFeed() {
+  if (!currentClub.value?.id || loadingMoreFeed.value || !hasMoreFeed.value) return;
+  const uid = user.value?.id;
+  if (!uid) return;
+
+  loadingMoreFeed.value = true;
+  try {
+    const res = await request(
+      `/api/team/${currentClub.value.id}/feed?uid=${uid}&scope=all&limit=20&offset=${feed.value.length}`
+    );
+    const moreItems = res?.feed || [];
+    feed.value = [...feed.value, ...moreItems];
+    feedTotal.value = res?.total ?? feed.value.length;
+    hasMoreFeed.value = res?.has_more ?? false;
+    isFeedExpanded.value = true;
+  } catch (e) {
+    console.warn("Load more feed error:", e);
+  } finally {
+    loadingMoreFeed.value = false;
   }
 }
 
@@ -1344,5 +1428,69 @@ onPullDownRefresh(async () => {
   height: 72rpx;
   line-height: 72rpx;
   border-radius: 36rpx;
+}
+
+.feed-load-more-box {
+  padding-top: 16rpx;
+  padding-bottom: 12rpx;
+}
+
+.load-more-btn {
+  background-color: #16161a;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+  font-size: 24rpx;
+  font-weight: bold;
+  height: 76rpx;
+  line-height: 76rpx;
+  border-radius: 38rpx;
+}
+
+.no-more-text {
+  text-align: center;
+  font-size: 22rpx;
+  color: #71717a;
+  padding: 16rpx 0;
+}
+
+.expand-month-btn {
+  background: #141416;
+  border-color: rgba(252, 76, 2, 0.4);
+  color: #ff6426;
+}
+
+.month-expanded-container,
+.month-complete-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.month-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 16rpx 24rpx;
+}
+
+.month-summary-text {
+  font-size: 22rpx;
+  color: #a1a1aa;
+}
+
+.collapse-action {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  padding: 4rpx 10rpx;
+}
+
+.older-feed-btn {
+  background-color: #121214;
+  color: #71717a;
+  font-size: 22rpx;
 }
 </style>

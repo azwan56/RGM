@@ -355,10 +355,66 @@ def delete_comment_endpoint(activity_id: str, comment_id: str, user_id: Optional
 
 
 @router.get("/{club_id}/feed")
-def get_club_activity_feed(club_id: str, uid: Optional[str] = None):
-    """Returns recent group workout feed for the club with AI critique, likes, and comments."""
-    activities = LocalStore.get_club_recent_activities(club_id, current_uid=uid, limit=20)
-    return {"feed": activities}
+def get_club_activity_feed(
+    club_id: str,
+    uid: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    before_time: Optional[str] = None,
+    scope: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None
+):
+    """
+    Returns group workout feed for the club.
+    - Default (when limit is None or scope="month"): Returns all check-in activities of the current month.
+    - If limit & offset are explicitly provided for pagination: Returns paginated records.
+    """
+    today = LocalStore.get_beijing_today()
+    target_year = year or today.year
+    target_month = month or today.month
+
+    # If explicit pagination is requested (e.g. limit is given and scope != "month", or offset > 0, or before_time)
+    if (limit is not None and scope != "month") or offset > 0 or before_time or scope == "all":
+        eff_limit = limit or 20
+        activities, total = LocalStore.get_club_recent_activities(
+            club_id, current_uid=uid, limit=eff_limit, offset=offset, before_time=before_time
+        )
+        return {
+            "feed": activities,
+            "total": total,
+            "limit": eff_limit,
+            "offset": offset,
+            "has_more": (offset + len(activities)) < total,
+            "scope": "paginated"
+        }
+
+    # Default: Return all activities for the current month
+    month_acts, month_total, total_all = LocalStore.get_club_month_activities(
+        club_id, current_uid=uid, year=target_year, month=target_month
+    )
+
+    # Fallback if current month has 0 activities so far
+    is_fallback = False
+    if month_total == 0 and not before_time:
+        fallback_acts, _ = LocalStore.get_club_recent_activities(
+            club_id, current_uid=uid, limit=20, offset=0
+        )
+        if fallback_acts:
+            month_acts = fallback_acts
+            is_fallback = True
+
+    return {
+        "feed": month_acts,
+        "total": total_all,
+        "month_total": month_total,
+        "is_current_month": (target_year == today.year and target_month == today.month) and not is_fallback,
+        "current_month": f"{target_year}-{target_month:02d}",
+        "month_label": f"{target_year}年{target_month}月",
+        "has_more": total_all > len(month_acts),
+        "limit": len(month_acts),
+        "offset": 0
+    }
 
 
 # Backward compatibility route for legacy client

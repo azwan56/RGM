@@ -403,9 +403,25 @@ class CorosAdapter:
         mapped_type = type_map.get(sport_type_code, "Run")
 
         distance_m = float(act.get("distance", 0.0))
-        # Total time / duration in seconds
+        # Total elapsed time (including pauses / rest intervals) in seconds
         duration_s = int(act.get("totalTime") or act.get("duration") or 0)
-        moving_s = int(act.get("movingTime") or duration_s)
+        # Active workout / moving time (excluding pauses / rest intervals) in seconds:
+        # COROS API returns 'workoutTime' for active exercise duration.
+        # Fallbacks: 'movingTime', 'sportTime', 'activeTime', and finally duration_s.
+        raw_moving_time = (
+            act.get("workoutTime")
+            or act.get("movingTime")
+            or act.get("sportTime")
+            or act.get("activeTime")
+        )
+        if raw_moving_time is not None and int(raw_moving_time) > 0:
+            moving_s = int(raw_moving_time)
+            if duration_s > 0 and moving_s > duration_s:
+                moving_s = duration_s
+        else:
+            moving_s = duration_s
+        if duration_s == 0 and moving_s > 0:
+            duration_s = moving_s
 
         # Parse start time: COROS returns Unix timestamp (either seconds or ms) or date string
         start_val = act.get("startTime") or act.get("date") or act.get("createTime")

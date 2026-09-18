@@ -9,7 +9,7 @@ import json
 import calendar
 import logging
 from datetime import datetime, date, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException
 
 from db import supabase_admin
@@ -71,14 +71,15 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
         monthly_trend = LocalStore.get_monthly_trend(eff_uid, num_months=6)
         yearly_stats = LocalStore.get_yearly_stats(eff_uid, year=2026)
 
-        # 4. Recent activities
-        recent_activities = []
-        local_acts = LocalStore.get_recent_activities(eff_uid, limit=100)
-        for a in local_acts[:10]:
+        # 4. Current Month Activities (All activities for current month)
+        today = LocalStore.get_beijing_today()
+        month_acts = LocalStore.get_month_activities(eff_uid, today.year, today.month)
+        formatted_month_acts = []
+        for a in month_acts:
             dist_m = float(a.get("distance_meters") or 0)
             dist_km = round(dist_m / 1000.0, 2)
             has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or (str(a.get("id")).startswith("garmin_") and a.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]))
-            recent_activities.append({
+            formatted_month_acts.append({
                 "id": a["id"],
                 "name": a["name"],
                 "start_time": a["start_time"],
@@ -93,6 +94,32 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "has_gps_track": has_gps,
                 "map_image_url": a.get("map_image_url")
             })
+
+        # Recent activities (for fitness form and fallback)
+        local_acts = LocalStore.get_recent_activities(eff_uid, limit=100)
+        fallback_recent = []
+        if not formatted_month_acts:
+            for a in local_acts[:10]:
+                dist_m = float(a.get("distance_meters") or 0)
+                dist_km = round(dist_m / 1000.0, 2)
+                has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or (str(a.get("id")).startswith("garmin_") and a.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]))
+                fallback_recent.append({
+                    "id": a["id"],
+                    "name": a["name"],
+                    "start_time": a["start_time"],
+                    "distance_meters": dist_m,
+                    "distance_km": dist_km,
+                    "moving_time_seconds": a.get("moving_time_seconds") or 0,
+                    "avg_pace_str": a.get("avg_pace_str") or "—",
+                    "average_heartrate": a.get("average_heartrate"),
+                    "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
+                    "trimp": a.get("trimp"),
+                    "ai_journal": a.get("ai_journal"),
+                    "has_gps_track": has_gps,
+                    "map_image_url": a.get("map_image_url")
+                })
+
+        recent_activities = formatted_month_acts if formatted_month_acts else fallback_recent
 
         # 5. Today's Health Snapshot (4-grid card data)
         is_coros = bool(profile.get("coros_connected")) and not bool(profile.get("garmin_connected"))
@@ -229,6 +256,14 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
             "today_workout": weekly_progress.get("today_workout") if weekly_progress else None,
             "monthly_trend": monthly_trend,
             "yearly_stats": yearly_stats,
+            "current_month_activities": formatted_month_acts,
+            "current_month_info": {
+                "year": today.year,
+                "month": today.month,
+                "month_label": f"{today.year}年{today.month}月",
+                "total_count": len(formatted_month_acts),
+                "total_km": round(sum(a["distance_km"] for a in formatted_month_acts), 1),
+            },
             "recent_activities": recent_activities,
             "today_health": today_health,
             "ai_coach_tip": "保持耐心，专注有氧节奏构建，专项能力水到渠成。"
@@ -283,7 +318,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "recent_3_months": []
             },
             "yearly_stats": {
-                "year": now.year,
+                "year": today.year,
                 "total_km": 0.0,
                 "total_runs": 0,
                 "avg_monthly_km": 0.0,
@@ -291,7 +326,7 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "target_year_km": 2400.0,
                 "progress_pct": 0.0,
                 "best_month": {
-                    "name": f"{now.month}月",
+                    "name": f"{today.month}月",
                     "distance_km": 0.0,
                     "avg_pace": "—"
                 }
@@ -326,6 +361,48 @@ def get_miniapp_activities(uid: str, limit: int = 50) -> Dict[str, Any]:
             "map_image_url": a.get("map_image_url")
         })
     return {"activities": formatted}
+
+
+@router.get("/activities/month/{uid}")
+def get_user_month_activities(uid: str, year: Optional[int] = None, month: Optional[int] = None) -> Dict[str, Any]:
+    """Returns all running activities for a specific month with summary statistics."""
+    eff_uid = LocalStore.resolve_user_id(uid)
+    today = LocalStore.get_beijing_today()
+    target_year = year or today.year
+    target_month = month or today.month
+
+    acts = LocalStore.get_month_activities(eff_uid, target_year, target_month)
+    formatted = []
+    total_meters = 0.0
+    for a in acts:
+        dist_m = float(a.get("distance_meters") or 0)
+        total_meters += dist_m
+        dist_km = round(dist_m / 1000.0, 2)
+        has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or (str(a.get("id")).startswith("garmin_") and a.get("sport_type") in ["Run", "Ride", "Hike", "Walk"]))
+        formatted.append({
+            "id": a["id"],
+            "name": a["name"],
+            "start_time": a["start_time"],
+            "distance_meters": dist_m,
+            "distance_km": dist_km,
+            "moving_time_seconds": a.get("moving_time_seconds") or 0,
+            "avg_pace_str": a.get("avg_pace_str") or "—",
+            "average_heartrate": a.get("average_heartrate"),
+            "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
+            "trimp": a.get("trimp"),
+            "ai_journal": a.get("ai_journal"),
+            "has_gps_track": has_gps,
+            "map_image_url": a.get("map_image_url")
+        })
+
+    return {
+        "year": target_year,
+        "month": target_month,
+        "month_label": f"{target_year}年{target_month}月",
+        "total_count": len(formatted),
+        "total_km": round(total_meters / 1000.0, 1),
+        "activities": formatted
+    }
 
 
 @router.get("/activities/{act_id}/track")

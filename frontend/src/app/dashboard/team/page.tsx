@@ -14,6 +14,7 @@ import {
   Shield,
   Sparkles,
   ChevronDown,
+  ChevronUp,
   Copy,
   Check,
   Flame,
@@ -38,7 +39,8 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Loader2
+  Loader2,
+  Clock
 } from "lucide-react";
 
 export default function TeamPage() {
@@ -59,6 +61,11 @@ export default function TeamPage() {
   const [coachCockpit, setCoachCockpit] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [feed, setFeed] = useState<any[]>([]);
+  const [feedTotal, setFeedTotal] = useState<number>(0);
+  const [hasMoreFeed, setHasMoreFeed] = useState<boolean>(false);
+  const [loadingMoreFeed, setLoadingMoreFeed] = useState<boolean>(false);
+  const [isFeedExpanded, setIsFeedExpanded] = useState<boolean>(false);
+  const [feedMonthInfo, setFeedMonthInfo] = useState<any>(null);
 
   // Social interaction state
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
@@ -260,6 +267,8 @@ export default function TeamPage() {
         setCoachCockpit(null);
         setEvents([]);
         setFeed([]);
+        setFeedTotal(0);
+        setHasMoreFeed(false);
       }
     } catch (e) {
       console.error("Fetch user clubs error:", e);
@@ -286,9 +295,40 @@ export default function TeamPage() {
       setMembers(memRes.data?.members || []);
       setCoachCockpit(coachRes.data || null);
       setEvents(evtRes.data?.events || []);
-      setFeed(feedRes.data?.feed || []);
+      const newFeed = feedRes.data?.feed || [];
+      setFeed(newFeed);
+      setFeedTotal(feedRes.data?.total ?? newFeed.length);
+      setHasMoreFeed(feedRes.data?.has_more ?? false);
+      setIsFeedExpanded(false);
+      setFeedMonthInfo({
+        month_total: feedRes.data?.month_total ?? newFeed.length,
+        month_label: feedRes.data?.month_label || "当月",
+        is_current_month: feedRes.data?.is_current_month ?? true
+      });
     } catch (e) {
       console.error("Load club details error:", e);
+    }
+  }
+
+  async function handleLoadMoreFeed() {
+    if (!currentClub?.id || loadingMoreFeed || !hasMoreFeed) return;
+    const effUid = user?.id;
+    if (!effUid) return;
+
+    setLoadingMoreFeed(true);
+    try {
+      const res = await apiClient.get(
+        `/api/team/${currentClub.id}/feed?uid=${effUid}&scope=all&limit=20&offset=${feed.length}`
+      );
+      const moreItems = res.data?.feed || [];
+      setFeed((prev) => [...prev, ...moreItems]);
+      setFeedTotal(res.data?.total ?? (feed.length + moreItems.length));
+      setHasMoreFeed(res.data?.has_more ?? false);
+      setIsFeedExpanded(true);
+    } catch (e) {
+      console.error("Load more feed error:", e);
+    } finally {
+      setLoadingMoreFeed(false);
     }
   }
 
@@ -501,6 +541,8 @@ export default function TeamPage() {
       alert("发布或修改失败");
     }
   }
+
+  const visibleFeed = isFeedExpanded || feed.length <= 20 ? feed : feed.slice(0, 20);
 
   return (
     <div className="min-h-screen bg-[#070708] text-white">
@@ -910,7 +952,7 @@ export default function TeamPage() {
 
               {feed.length > 0 ? (
                 <div className="space-y-6">
-                  {feed.map((act) => (
+                  {visibleFeed.map((act) => (
                     <div
                       key={act.id}
                       className="p-6 bg-[#18181c] border border-white/10 rounded-3xl space-y-4 hover:border-white/20 transition shadow-xl"
@@ -1058,6 +1100,80 @@ export default function TeamPage() {
                       </div>
                     </div>
                   ))}
+
+                  {/* Load more / Pagination Footer */}
+                  <div className="pt-2 pb-2 text-center space-y-3">
+                    {!isFeedExpanded && feed.length > 20 ? (
+                      <button
+                        onClick={() => setIsFeedExpanded(true)}
+                        className="w-full py-3.5 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-bold text-zinc-300 hover:text-white transition flex items-center justify-center gap-2 shadow-lg shadow-black/20"
+                      >
+                        <Flame className="w-4 h-4 text-[#FC4C02]" />
+                        <span>加载更多（展开当月全部打卡 · 还有 {feed.length - 20} 条）</span>
+                      </button>
+                    ) : isFeedExpanded && feed.length > 20 ? (
+                      <div className="space-y-3">
+                        <div className="py-3 px-4 rounded-2xl bg-white/[0.02] border border-white/5 text-[11px] text-zinc-400 flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 text-emerald-500/80" />
+                            已展示当月全部打卡记录（共 {feed.length} 条）
+                          </span>
+                          <button
+                            onClick={() => setIsFeedExpanded(false)}
+                            className="text-[#FC4C02] hover:underline flex items-center gap-1 font-bold text-xs"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                            收起折叠
+                          </button>
+                        </div>
+                        {hasMoreFeed && (
+                          <button
+                            onClick={handleLoadMoreFeed}
+                            disabled={loadingMoreFeed}
+                            className="w-full py-3 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-bold text-zinc-400 hover:text-white transition flex items-center justify-center gap-2"
+                          >
+                            {loadingMoreFeed ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin text-[#FC4C02]" />
+                                <span>正在加载更早历史打卡...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock className="w-4 h-4 text-zinc-400" />
+                                <span>加载更早历史月份打卡（跑团共 {feedTotal} 条记录）</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="py-3 px-4 rounded-2xl bg-white/[0.02] border border-white/5 text-[11px] text-zinc-500 flex items-center justify-center gap-1.5">
+                          <Check className="w-3.5 h-3.5 text-emerald-500/80" />
+                          <span>已展示当月全部打卡记录（共 {feed.length} 条）</span>
+                        </div>
+                        {hasMoreFeed && (
+                          <button
+                            onClick={handleLoadMoreFeed}
+                            disabled={loadingMoreFeed}
+                            className="w-full py-2.5 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-medium text-zinc-400 hover:text-white transition flex items-center justify-center gap-2"
+                          >
+                            {loadingMoreFeed ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FC4C02]" />
+                                <span>正在加载更早历史打卡...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                                <span>加载更早历史月份打卡（跑团共 {feedTotal} 条记录）</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <p className="text-xs text-zinc-500 text-center py-8">暂无队员近期打卡，快去完成今日跑步吧！</p>

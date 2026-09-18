@@ -75,6 +75,39 @@ def test_coros_adapter_normalize_activity():
     assert trimp > 0
     assert round(trimp, 1) > 40.0
 
+def test_coros_adapter_workout_time_pause_rest_exclusion():
+    adapter = CorosAdapter("runner@example.com", "password123")
+
+    # Coros activity where the user paused/stopped the watch to rest
+    # 10.01 km (10010m):
+    # totalTime is 4635 seconds (~77 min, which would mistakenly yield 7:43 /km if used for pace)
+    # workoutTime is 3280 seconds (~54 min 40 sec, giving true active pace of 5:27 /km)
+    raw_coros_act = {
+        "labelId": "1122334455",
+        "sportType": 100,
+        "name": "上海市 跑步",
+        "distance": 10010.0,
+        "totalTime": 4635,
+        "workoutTime": 3280,
+        "startTime": 1741219200,
+        "avgHeartRate": 140,
+        "maxHeartRate": 160,
+        "avgCadence": 178,
+        "elevationGain": 0.0,
+        "calorie": 650
+    }
+
+    norm = adapter._normalize_activity(raw_coros_act)
+    assert norm is not None
+    assert norm["distance_meters"] == 10010.0
+    # moving_time_seconds must use workoutTime (excluding paused rest)
+    assert norm["moving_time_seconds"] == 3280
+    assert norm["elapsed_time_seconds"] == 4635
+    # Average pace must be 5:27 /km, NOT 7:43 /km!
+    assert norm["avg_pace_str"] == "5:27 /km"
+    # Average speed must be calculated using moving time (3280s), not total time (4635s)
+    assert norm["average_speed_mps"] == round(10010.0 / 3280, 3)
+
 def test_coros_token_persistence(tmp_path):
     adapter = CorosAdapter("test_runner_cache@coros.com", "mypassword")
     adapter.token_path = str(tmp_path / "test_coros_token.json")

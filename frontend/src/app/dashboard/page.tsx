@@ -19,6 +19,9 @@ import {
   Award,
   Trophy,
   ChevronRight,
+  ChevronLeft,
+  Clock,
+  Loader2,
   Flame,
   Calendar,
   Compass,
@@ -53,6 +56,12 @@ export default function DashboardPage() {
   const [garminModalOpen, setGarminModalOpen] = useState(false);
   const [modalBrand, setModalBrand] = useState<"garmin" | "coros">("garmin");
 
+  // Month activities states
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+  const [monthActivities, setMonthActivities] = useState<any[]>([]);
+  const [loadingMonthActs, setLoadingMonthActs] = useState<boolean>(false);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const u = data?.session?.user;
@@ -74,11 +83,59 @@ export default function DashboardPage() {
       ]);
       setDashboardData(dashRes.data);
       setScienceData(sciRes.data);
+
+      const acts = dashRes.data?.current_month_activities || dashRes.data?.recent_activities || [];
+      setMonthActivities(acts);
+      if (dashRes.data?.current_month_info) {
+        setSelectedYear(dashRes.data.current_month_info.year);
+        setSelectedMonth(dashRes.data.current_month_info.month);
+      }
     } catch (e) {
       console.error("Dashboard fetch error:", e);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSwitchMonth(offset: number) {
+    let newMonth = selectedMonth + offset;
+    let newYear = selectedYear;
+    if (newMonth > 12) {
+      newMonth = 1;
+      newYear += 1;
+    } else if (newMonth < 1) {
+      newMonth = 12;
+      newYear -= 1;
+    }
+
+    const now = new Date();
+    const currentYear = dashboardData?.current_month_info?.year || now.getFullYear();
+    const currentMonth = dashboardData?.current_month_info?.month || (now.getMonth() + 1);
+    if (newYear > currentYear || (newYear === currentYear && newMonth > currentMonth)) {
+      return;
+    }
+
+    setSelectedYear(newYear);
+    setSelectedMonth(newMonth);
+    if (!user?.id) return;
+    setLoadingMonthActs(true);
+    try {
+      const res = await apiClient.get(`/api/miniapp/activities/month/${user.id}?year=${newYear}&month=${newMonth}`);
+      setMonthActivities(res.data?.activities || []);
+    } catch (e) {
+      console.error("Fetch month activities error:", e);
+    } finally {
+      setLoadingMonthActs(false);
+    }
+  }
+
+  async function handleResetToCurrentMonth() {
+    const currentYear = dashboardData?.current_month_info?.year || new Date().getFullYear();
+    const currentMonth = dashboardData?.current_month_info?.month || (new Date().getMonth() + 1);
+    if (selectedYear === currentYear && selectedMonth === currentMonth) return;
+    setSelectedYear(currentYear);
+    setSelectedMonth(currentMonth);
+    setMonthActivities(dashboardData?.current_month_activities || dashboardData?.recent_activities || []);
   }
 
   async function handleSync() {
@@ -135,6 +192,54 @@ export default function DashboardPage() {
   const todayHealth = dashboardData?.today_health || {};
   const weeklyProgress = dashboardData?.weekly_progress || {};
   const todayWorkout = dashboardData?.today_workout || weeklyProgress?.today_workout;
+
+  const currentYearNow = dashboardData?.current_month_info?.year || new Date().getFullYear();
+  const currentMonthNow = dashboardData?.current_month_info?.month || (new Date().getMonth() + 1);
+  const isViewingCurrentMonth = selectedYear === currentYearNow && selectedMonth === currentMonthNow;
+
+  const totalMonthKm = Math.round(monthActivities.reduce((acc, a) => acc + (Number(a.distance_km) || 0), 0) * 10) / 10;
+  const totalMonthTrimp = Math.round(monthActivities.reduce((acc, a) => acc + (Number(a.trimp) || 0), 0));
+  const runsWithPace = monthActivities.filter(a => (a.moving_time_seconds || 0) > 0 && (a.distance_km || 0) > 0);
+  let avgMonthPaceStr = "—";
+  if (runsWithPace.length > 0) {
+    const totalSec = runsWithPace.reduce((acc, a) => acc + (a.moving_time_seconds || 0), 0);
+    const totalKm = runsWithPace.reduce((acc, a) => acc + (a.distance_km || 0), 0);
+    if (totalKm > 0) {
+      const secPerKm = Math.round(totalSec / totalKm);
+      const pm = Math.floor(secPerKm / 60);
+      const ps = secPerKm % 60;
+      avgMonthPaceStr = `${pm}:${ps < 10 ? '0' : ''}${ps} /km`;
+    }
+  }
+
+  function formatActivityTime(timeStr?: string) {
+    if (!timeStr) return "—";
+    try {
+      const clean = timeStr.replace(" ", "T");
+      const d = new Date(clean);
+      if (isNaN(d.getTime())) return timeStr.slice(0, 16).replace("T", " ");
+      const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+      const m = d.getMonth() + 1;
+      const date = d.getDate();
+      const hours = String(d.getHours()).padStart(2, "0");
+      const mins = String(d.getMinutes()).padStart(2, "0");
+      const dayName = days[d.getDay()];
+      return `${m}月${date}日 ${hours}:${mins} ${dayName}`;
+    } catch {
+      return timeStr.slice(0, 16).replace("T", " ");
+    }
+  }
+
+  function formatDurationSeconds(seconds?: number) {
+    if (!seconds || seconds <= 0) return "—";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${h}h ${String(m).padStart(2, "0")}m`;
+    }
+    return `${m}m ${String(s).padStart(2, "0")}s`;
+  }
 
   return (
     <div className="min-h-screen bg-[#070708] text-white">
@@ -799,35 +904,136 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── CARD 5: 近期训练明细 ── */}
-        <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
+        {/* ── CARD 5: 当月运动记录明细 ── */}
+        <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">近期训练明细</h2>
-              <p className="text-xs text-zinc-400 mt-1">Garmin / 高驰自动同步记录与 TRIMP 负荷</p>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">
+                  {selectedYear}年{selectedMonth}月 运动记录明细
+                </h2>
+                {isViewingCurrentMonth ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
+                    当月
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleResetToCurrentMonth}
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white/10 hover:bg-[#FC4C02]/20 text-zinc-300 hover:text-[#FC4C02] transition border border-white/10"
+                  >
+                    回到当月
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                {isViewingCurrentMonth ? "完整展示当月全部跑步打卡、配速用时与教练点评" : `展示 ${selectedYear}年${selectedMonth}月 全部跑步打卡记录`}
+              </p>
+            </div>
+
+            {/* Month Switcher Controls */}
+            <div className="flex items-center gap-2 self-start md:self-auto bg-[#18181c] border border-white/10 rounded-2xl p-1.5 shadow-inner">
+              <button
+                onClick={() => handleSwitchMonth(-1)}
+                disabled={loadingMonthActs}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-white transition disabled:opacity-30"
+                title="查看上一个月"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="px-3 text-xs font-bold text-white tracking-wide min-w-[90px] text-center">
+                {selectedYear}年{selectedMonth}月
+              </div>
+              <button
+                onClick={() => handleSwitchMonth(1)}
+                disabled={isViewingCurrentMonth || loadingMonthActs}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed"
+                title="查看下一个月"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
+          {/* Quick Month Stats Chips */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#18181c]/60 border border-white/5 rounded-2xl p-3.5">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-orange-500/10 text-[#FC4C02] flex items-center justify-center font-bold text-sm">
+                🏃
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block">跑步次数</span>
+                <span className="text-sm font-bold text-white">{monthActivities.length} 次</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-sm">
+                📏
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block">累计跑量</span>
+                <span className="text-sm font-bold text-emerald-400">{totalMonthKm} km</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-bold text-sm">
+                ⏱️
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block">平均配速</span>
+                <span className="text-sm font-bold text-cyan-400">{avgMonthPaceStr}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold text-sm">
+                ⚡
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block">累计TRIMP负荷</span>
+                <span className="text-sm font-bold text-amber-400">{totalMonthTrimp}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Activities List */}
           <div className="divide-y divide-white/5">
-            {(!dashboardData?.recent_activities || dashboardData.recent_activities.length === 0) ? (
-              <div className="py-8 text-center text-zinc-500 text-xs sm:text-sm">
-                暂无近期跑步记录，绑定 Garmin 或高驰账号并点击【一键同步数据】后即可自动呈现。
+            {loadingMonthActs ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-3 text-zinc-400 text-xs">
+                <Loader2 className="w-5 h-5 text-[#FC4C02] animate-spin" />
+                <span>正在加载 {selectedYear}年{selectedMonth}月 运动记录...</span>
+              </div>
+            ) : monthActivities.length === 0 ? (
+              <div className="py-12 text-center text-zinc-500 text-xs sm:text-sm space-y-2">
+                <div className="text-2xl">👟</div>
+                <div>{selectedYear}年{selectedMonth}月 暂无跑步运动记录</div>
+                {isViewingCurrentMonth && (
+                  <p className="text-[11px] text-zinc-600">完成跑步后点击右上角【一键同步数据】即可自动呈现当月所有打卡记录。</p>
+                )}
               </div>
             ) : (
-              dashboardData.recent_activities.map((act: any) => (
-                <div key={act.id} className="py-4 border-b border-white/5 last:border-none">
+              monthActivities.map((act: any) => (
+                <div key={act.id} className="py-4 border-b border-white/5 last:border-none space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3.5">
-                      <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02]">
+                      <div className="w-10 h-10 rounded-2xl bg-[#1e1e24] flex items-center justify-center text-[#FC4C02] flex-shrink-0">
                         🏃
                       </div>
                       <div>
-                        <div className="font-bold text-sm sm:text-base text-white">{act.name}</div>
-                        <div className="text-xs text-zinc-500 mt-0.5">{act.start_time?.replace("T", " ")?.slice(0, 16)}</div>
+                        <div className="font-bold text-sm sm:text-base text-white flex items-center gap-2">
+                          <span>{act.name}</span>
+                          {act.elevation_gain_meters > 0 && (
+                            <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-white/5 text-zinc-400">
+                              ⛰️ +{Math.round(act.elevation_gain_meters)}m
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-zinc-500 mt-0.5 flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 text-zinc-500" />
+                          <span>{formatActivityTime(act.start_time)}</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm">
+                    <div className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm flex-wrap">
                       <div>
                         <span className="text-zinc-500 block text-[10px]">距离</span>
                         <span className="font-bold text-white text-base">{act.distance_km} km</span>
@@ -837,8 +1043,12 @@ export default function DashboardPage() {
                         <span className="font-bold text-cyan-400">{act.avg_pace_str}</span>
                       </div>
                       <div>
+                        <span className="text-zinc-500 block text-[10px]">用时</span>
+                        <span className="font-bold text-zinc-300">{formatDurationSeconds(act.moving_time_seconds)}</span>
+                      </div>
+                      <div>
                         <span className="text-zinc-500 block text-[10px]">心率</span>
-                        <span className="font-bold text-rose-400">{act.average_heartrate || "—"} bpm</span>
+                        <span className="font-bold text-rose-400">{act.average_heartrate ? `${act.average_heartrate} bpm` : "—"}</span>
                       </div>
                       <div>
                         <span className="text-zinc-500 block text-[10px]">TRIMP</span>
@@ -859,6 +1069,18 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* Canova AI Critique if available */}
+                  {act.ai_journal && (
+                    <div className="bg-[#18181c]/80 border border-white/5 rounded-2xl px-4 py-2.5 text-xs text-zinc-300 flex items-start gap-2.5">
+                      <span className="text-base flex-shrink-0">👨‍🏫</span>
+                      <div className="flex-1">
+                        <span className="font-semibold text-zinc-200 text-[11px] block text-[#FC4C02]">Canova 教练复盘：</span>
+                        <span className="leading-relaxed text-zinc-400">{act.ai_journal}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expanded GPS Track */}
                   {expandedTrackId === act.id && (
                     <div className="mt-3 pt-3 border-t border-white/5 animate-in fade-in duration-200">
                       <RouteMapPreview

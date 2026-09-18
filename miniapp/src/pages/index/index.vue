@@ -575,16 +575,21 @@
       </view>
     </view>
 
-    <!-- ── CARD 2: 近期跑步记录 (最近 3 次) ── -->
+    <!-- ── CARD 2: 当月运动记录明细 ── -->
     <view class="section-container">
       <view class="section-header-row">
-        <text class="section-title">近期跑步记录</text>
-        <text class="sub-date">最近 3 次训练</text>
+        <view class="title-with-pill">
+          <text class="section-title">当月运动记录</text>
+          <text class="month-active-badge">当月</text>
+        </view>
+        <text class="sub-date">
+          本月共 {{ monthActivitiesList.length }} 次打卡 · {{ dashboardData?.current_month_info?.total_km || dashboardData?.progress?.current_month_km || 0 }} km
+        </text>
       </view>
 
-      <view v-if="dashboardData?.recent_activities?.length" class="activity-list">
+      <view v-if="displayedActivities.length" class="activity-list">
         <view
-          v-for="act in dashboardData.recent_activities.slice(0, 3)"
+          v-for="act in displayedActivities"
           :key="act.id"
           class="activity-card"
         >
@@ -627,9 +632,16 @@
             </view>
           </view>
         </view>
+
+        <!-- Expand / Collapse Button if > 20 activities -->
+        <view v-if="monthActivitiesList.length > 20" class="expand-acts-toggle" @click="showAllMonthActs = !showAllMonthActs">
+          <text class="expand-acts-text">
+            {{ showAllMonthActs ? '收起部分记录 ▴' : `展开当月全部 ${monthActivitiesList.length} 次运动打卡 ▾` }}
+          </text>
+        </view>
       </view>
       <view v-else class="empty-act-box">
-        <text class="empty-act-text">暂无运动记录，请在【我的】页面绑定 Garmin 或高驰手表自动同步</text>
+        <text class="empty-act-text">当月暂无运动记录，请在【我的】页面绑定 Garmin 或高驰手表自动同步</text>
       </view>
     </view>
 
@@ -1442,6 +1454,19 @@ const defaultMonthlyBreakdown = [
 
 const user = ref<UserProfile | null>(null);
 const dashboardData = ref<any>(emptyData);
+
+const showAllMonthActs = ref(false);
+const monthActivitiesList = computed(() => {
+  return dashboardData.value?.current_month_activities || dashboardData.value?.recent_activities || [];
+});
+const displayedActivities = computed(() => {
+  const acts = monthActivitiesList.value;
+  if (showAllMonthActs.value || acts.length <= 20) {
+    return acts;
+  }
+  return acts.slice(0, 20);
+});
+
 const activeGoalTab = ref<'week' | 'month'>('week');
 const syncing = ref(false);
 const currentMonth = ref(new Date().getMonth() + 1);
@@ -2874,6 +2899,33 @@ onPullDownRefresh(async () => {
   font-size: 30rpx;
   font-weight: bold;
   color: #ffffff;
+}
+
+.title-with-pill {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.month-active-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #fc4c02;
+  background: rgba(252, 76, 2, 0.15);
+  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  padding: 2rpx 12rpx;
+  border-radius: 16rpx;
+}
+
+.expand-acts-toggle {
+  text-align: center;
+  padding: 20rpx 0 8rpx 0;
+}
+
+.expand-acts-text {
+  font-size: 24rpx;
+  color: #a1a1aa;
+  font-weight: 500;
 }
 
 .sub-date {
