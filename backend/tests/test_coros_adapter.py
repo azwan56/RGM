@@ -326,3 +326,139 @@ def test_coros_fetch_profile_and_daily_health(monkeypatch):
     assert h_06["vo2_max"] == 61.0
 
 
+def test_coros_mobile_encryption_and_sleep_data(monkeypatch):
+    from utils.coros_adapter import _encrypt_mobile_param
+
+    # 1. Test encryption deterministic output
+    encrypted = _encrypt_mobile_param("test@example.com", "1234567890123456")
+    assert encrypted == "G5jn3WY5dtqcmiYdTZEWSbaFTodE1gLa3msMUW5cYQE="
+
+    # 2. Test mobile sleep parsing & consolidation
+    adapter = CorosAdapter("test@coros.com", "mypassword")
+    adapter.mobile_access_token = "mock_mobile_token"
+    adapter.access_token = "mock_web_token"
+    adapter.user_id = "12345"
+
+    mock_sleep_api_resp = {
+        "result": "0000",
+        "data": {
+            "statisticData": {
+                "dayDataList": [
+                    {
+                        "happenDay": 20260918,
+                        "performance": -1,
+                        "sleepData": {
+                            "totalSleepTime": 515,
+                            "deepTime": 101,
+                            "eyeTime": 99,
+                            "lightTime": 315,
+                            "wakeTime": 26,
+                            "minHeartRate": 44,
+                            "avgHeartRate": 55,
+                            "maxHeartRate": 89
+                        }
+                    },
+                    {
+                        "happenDay": 20260917,
+                        "performance": 85,
+                        "sleepData": {
+                            "totalSleepTime": 420,
+                            "deepTime": 80,
+                            "eyeTime": 70,
+                            "lightTime": 270,
+                            "wakeTime": 15,
+                            "minHeartRate": 48,
+                            "avgHeartRate": 58,
+                            "maxHeartRate": 92
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    mock_analyse_resp = {
+        "result": "0000",
+        "data": {
+            "dayList": [
+                {
+                    "happenDay": 20260918,
+                    "rhr": 48,
+                    "staminaLevel": 91.7,
+                    "avgSleepHrv": 41,
+                    "sleepHrvBase": 64,
+                    "vo2max": 62
+                },
+                {
+                    "happenDay": 20260917,
+                    "rhr": 41,
+                    "staminaLevel": 85.0,
+                    "avgSleepHrv": 69,
+                    "sleepHrvBase": 64,
+                    "vo2max": 62
+                }
+            ]
+        }
+    }
+
+    class MockResp:
+        def __init__(self, json_data):
+            self._json = json_data
+            self.status_code = 200
+        def json(self):
+            return self._json
+
+    def mock_post(url, *args, **kwargs):
+        if "data/statistic/daily" in url:
+            return MockResp(mock_sleep_api_resp)
+        return MockResp({"result": "0000"})
+
+    def mock_get(url, *args, **kwargs):
+        if "analyse/query" in url:
+            return MockResp(mock_analyse_resp)
+        return MockResp({"result": "0000"})
+
+    import requests
+    monkeypatch.setattr(requests, "post", mock_post)
+    monkeypatch.setattr(requests, "get", mock_get)
+
+    # Test fetch_sleep_data directly
+    sleeps = adapter.fetch_sleep_data("2026-09-17", "2026-09-18")
+    assert "2026-09-18" in sleeps
+    s18 = sleeps["2026-09-18"]
+    assert s18["sleep_duration_seconds"] == 515 * 60
+    assert s18["sleep_duration_hours"] == 8.6
+    assert s18["deep_sleep_seconds"] == 101 * 60
+    assert s18["rem_sleep_seconds"] == 99 * 60
+    assert s18["min_heart_rate"] == 44
+    assert s18["sleep_score"] > 80  # Calculated realistic score
+
+    s17 = sleeps["2026-09-17"]
+    assert s17["sleep_duration_seconds"] == 420 * 60
+    assert s17["sleep_duration_hours"] == 7.0
+    assert s17["sleep_score"] == 85  # Taken from performance
+
+    # Test consolidated fetch_daily_health_metrics
+    m18 = adapter.fetch_daily_health_metrics("2026-09-18")
+    assert m18["date"] == "2026-09-18"
+    assert m18["sleep_duration_seconds"] == 515 * 60
+    assert m18["sleep_duration_hours"] == 8.6
+    assert m18["sleep_score"] == s18["sleep_score"]
+    assert m18["resting_heart_rate"] == 48  # From EvoLab daily rhr
+    assert m18["body_battery_max"] == 92    # From staminaLevel 91.7 rounded
+    assert m18["hrv_last_night_avg"] == 41
+    assert m18["hrv_weekly_avg"] == 64
+    assert m18["vo2_max"] == 62.0
+    assert m18["hrv_status"] == "low"       # 41 / 64 = 0.64 < 0.85
+
+    m17 = adapter.fetch_daily_health_metrics("2026-09-17")
+    assert m17["date"] == "2026-09-17"
+    assert m17["sleep_duration_seconds"] == 420 * 60
+    assert m17["sleep_score"] == 85
+    assert m17["resting_heart_rate"] == 41
+    assert m17["body_battery_max"] == 85
+    assert m17["hrv_last_night_avg"] == 69
+    assert m17["hrv_status"] == "balanced"  # 69 / 64 = 1.07 within 0.85~1.15
+
+
+

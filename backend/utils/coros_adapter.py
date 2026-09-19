@@ -8,6 +8,8 @@ import os
 import json
 import time
 import hashlib
+import random
+import base64
 import logging
 import requests
 from datetime import datetime, date, timedelta
@@ -16,6 +18,37 @@ from typing import Dict, List, Optional, Any
 logger = logging.getLogger("coros_adapter")
 
 TOKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tokens")
+
+_MOBILE_AES_IV = b"weloop3_2015_03#"
+
+def _encrypt_mobile_param(plain_text: str, app_key: str) -> str:
+    """
+    Encrypt a string for the Coros mobile login API.
+    Scheme reverse-engineered from libencrypt-lib.so in Coros APK:
+      1. XOR plaintext bytes with appKey bytes cyclically
+      2. PKCS7-pad the XOR'd result to 16-byte boundary
+      3. AES-128-CBC encrypt: key = appKey.encode('ascii'), IV = b'weloop3_2015_03#'
+      4. Base64-encode ciphertext
+    Supports both cryptography and PyCryptodome libraries.
+    """
+    key_bytes = app_key.encode("ascii")
+    data_bytes = plain_text.encode("utf-8")
+    xored = bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(data_bytes))
+    pad_len = 16 - (len(xored) % 16)
+    padded = xored + bytes([pad_len] * pad_len)
+
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+        cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(_MOBILE_AES_IV), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(padded) + encryptor.finalize()
+    except ImportError:
+        from Crypto.Cipher import AES
+        cipher = AES.new(key_bytes, AES.MODE_CBC, _MOBILE_AES_IV)
+        ciphertext = cipher.encrypt(padded)
+
+    return base64.b64encode(ciphertext).decode("ascii")
 
 def pace_str(distance_m: float, moving_time_s: int) -> str:
     """Returns average pace as 'M:SS /km'."""
@@ -34,19 +67,35 @@ class CorosAdapter:
         self.password = password
         self.domain = domain.lower().strip()
         self.is_cn = ("cn" in self.domain or "teamcnapi" in self.domain)
-        self.base_url = "https://teamcnapi.coros.com" if self.is_cn else "https://teamapi.coros.com"
+        self.is_eu = ("eu" in self.domain or "teameuapi" in self.domain)
+        
+        if self.is_cn:
+            self.base_url = "https://teamcnapi.coros.com"
+            self.mobile_base_url = "https://apicn.coros.com"
+        elif self.is_eu:
+            self.base_url = "https://teameuapi.coros.com"
+            self.mobile_base_url = "https://apieu.coros.com"
+        else:
+            self.base_url = "https://teamapi.coros.com"
+            self.mobile_base_url = "https://api.coros.com"
+
         self.last_error: Optional[str] = None
         self.access_token: Optional[str] = None
+        self.mobile_access_token: Optional[str] = None
         self.user_id: Optional[str] = None
         self.nick_name: Optional[str] = None
         self.avatar_url: Optional[str] = None
         self._analyse_cache: Optional[Dict[str, Any]] = None
         self._analyse_cache_time: float = 0
+        self._sleep_cache: Dict[str, Dict[str, Any]] = {}
 
         os.makedirs(TOKEN_DIR, exist_ok=True)
         safe_acc = self.account.replace("@", "_at_").replace(".", "_").replace("+", "_")
-        self.token_path = os.path.join(TOKEN_DIR, f"tokens_coros_{safe_acc}_{'cn' if self.is_cn else 'global'}.json")
+        region_str = "cn" if self.is_cn else ("eu" if self.is_eu else "global")
+        self.token_path = os.path.join(TOKEN_DIR, f"tokens_coros_{safe_acc}_{region_str}.json")
+        self.mobile_token_path = os.path.join(TOKEN_DIR, f"tokens_coros_mobile_{safe_acc}_{region_str}.json")
         self._load_cached_token()
+        self._load_cached_mobile_token()
 
     def _load_cached_token(self) -> bool:
         """Attempts to load cached access token if file exists and has not expired."""
@@ -83,6 +132,98 @@ class CorosAdapter:
                 }, f)
         except Exception as e:
             logger.warning(f"[coros] Failed to save token cache: {e}")
+
+    def _load_cached_mobile_token(self) -> bool:
+        """Attempts to load cached mobile access token."""
+        if not os.path.exists(self.mobile_token_path):
+            return False
+        try:
+            with open(self.mobile_token_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                token = data.get("access_token")
+                saved_at = data.get("saved_at", 0)
+                if token and (time.time() - saved_at < 14 * 86400):
+                    self.mobile_access_token = token
+                    return True
+        except Exception as e:
+            logger.warning(f"[coros] Failed to read mobile cached token: {e}")
+        return False
+
+    def _save_cached_mobile_token(self):
+        """Persists mobile access token to disk."""
+        if not self.mobile_access_token:
+            return
+        try:
+            with open(self.mobile_token_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "access_token": self.mobile_access_token,
+                    "saved_at": time.time()
+                }, f)
+        except Exception as e:
+            logger.warning(f"[coros] Failed to save mobile token cache: {e}")
+
+    def mobile_login(self) -> bool:
+        """
+        Logs into COROS Mobile API using AES-encrypted credentials.
+        Required for daily sleep statistics and other mobile-only wellness data.
+        """
+        if self.mobile_access_token:
+            logger.info(f"[coros] Using cached mobile token for {self.account}")
+            return True
+
+        login_url = f"{self.mobile_base_url}/coros/user/login"
+        app_key = str(random.randint(1_000_000_000_000_000, 9_999_999_999_999_999))
+        pwd_md5 = hashlib.md5(self.password.encode("utf-8")).hexdigest()
+
+        payload = {
+            "account": _encrypt_mobile_param(self.account, app_key) + "\n",
+            "accountType": 2,
+            "appKey": app_key,
+            "clientType": 1,
+            "hasHrCalibrated": 0,
+            "kbValidity": 0,
+            "pwd": _encrypt_mobile_param(pwd_md5, app_key) + "\n",
+            "region": "460|Asia/Shanghai|CN" if self.is_cn else "840|America/New_York|US",
+            "skipValidation": False,
+        }
+
+        yfheader = json.dumps({
+            "appVersion": 1125917087236096,
+            "clientType": 1,
+            "language": "zh-CN" if self.is_cn else "en-US",
+            "mobileName": "sdk_gphone64_arm64,google,Google",
+            "releaseType": 1,
+            "systemVersion": "13",
+            "timezone": 8 if self.is_cn else -5,
+            "versionCode": "404080400",
+        }, separators=(",", ":"))
+
+        headers = {
+            "content-type": "application/json",
+            "accept-encoding": "gzip",
+            "user-agent": "okhttp/4.12.0",
+            "request-time": str(int(time.time() * 1000)),
+            "yfheader": yfheader,
+        }
+
+        try:
+            logger.info(f"[coros] Attempting mobile login for {self.account} ({self.mobile_base_url})...")
+            resp = requests.post(login_url, json=payload, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if str(res_json.get("result")) == "0000":
+                    data = res_json.get("data") or {}
+                    self.mobile_access_token = data.get("accessToken")
+                    if self.mobile_access_token:
+                        self._save_cached_mobile_token()
+                        logger.info(f"[coros] Mobile login success for {self.account}")
+                        return True
+                logger.warning(f"[coros] Mobile login rejected: {res_json.get('result')} {res_json.get('message')}")
+            else:
+                logger.warning(f"[coros] Mobile login HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"[coros] Mobile login exception for {self.account}: {e}")
+        return False
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -494,23 +635,147 @@ class CorosAdapter:
             "raw_garmin_data": act, # Compatible key for DB/LocalStore JSONB storage
         }
 
+    def fetch_sleep_data(self, start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetches sleep statistics between start_date and end_date (inclusive, YYYY-MM-DD).
+        Returns a dict mapping "YYYY-MM-DD" to normalized sleep metrics.
+        Caches results in self._sleep_cache.
+        """
+        if not self.mobile_access_token and not self.mobile_login():
+            return self._sleep_cache
+
+        try:
+            start_int = int(start_date.replace("-", "")[:8])
+            end_int = int(end_date.replace("-", "")[:8])
+        except Exception:
+            today = date.today()
+            start_int = int((today - timedelta(days=14)).strftime("%Y%m%d"))
+            end_int = int(today.strftime("%Y%m%d"))
+
+        url = f"{self.mobile_base_url}/coros/data/statistic/daily?accessToken={self.mobile_access_token}"
+        payload = {
+            "allDeviceSleep": 1,
+            "dataType": [5],
+            "dataVersion": 0,
+            "startTime": start_int,
+            "endTime": end_int,
+            "statisticType": 1,
+        }
+        headers = {
+            "content-type": "application/json",
+            "accesstoken": self.mobile_access_token,
+            "user-agent": "okhttp/4.12.0",
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=12)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                # If mobile token expired, refresh and retry once
+                if str(res_json.get("result")) in ["1019", "401", "1001"]:
+                    logger.info(f"[coros] Mobile token expired, re-authenticating...")
+                    self.mobile_access_token = None
+                    if self.mobile_login():
+                        url = f"{self.mobile_base_url}/coros/data/statistic/daily?accessToken={self.mobile_access_token}"
+                        headers["accesstoken"] = self.mobile_access_token
+                        resp = requests.post(url, json=payload, headers=headers, timeout=12)
+                        res_json = resp.json()
+
+                if str(res_json.get("result")) == "0000":
+                    stat_data = res_json.get("data") or {}
+                    day_list = (
+                        stat_data.get("statisticData", {}).get("dayDataList")
+                        or stat_data.get("dayDataList")
+                        or []
+                    )
+                    for day_item in day_list:
+                        day_int = day_item.get("happenDay") or day_item.get("date")
+                        if not day_int:
+                            continue
+                        day_str = str(day_int)
+                        if len(day_str) == 8:
+                            date_key = f"{day_str[:4]}-{day_str[4:6]}-{day_str[6:]}"
+                        else:
+                            continue
+
+                        sleep_data = day_item.get("sleepData") or {}
+                        tot_minutes = int(sleep_data.get("totalSleepTime") or 0)
+                        if tot_minutes <= 0:
+                            continue
+
+                        dur_seconds = tot_minutes * 60
+                        dur_hours = round(tot_minutes / 60.0, 1)
+
+                        deep_min = int(sleep_data.get("deepTime") or 0)
+                        rem_min = int(sleep_data.get("eyeTime") or 0)
+                        light_min = int(sleep_data.get("lightTime") or 0)
+                        wake_min = int(sleep_data.get("wakeTime") or 0)
+
+                        perf = day_item.get("performance")
+                        if perf is not None and int(perf) > 0:
+                            sleep_score = int(perf)
+                        else:
+                            # Realistic baseline sleep score based on duration & sleep phases
+                            base_score = (min(tot_minutes, 480) / 480.0) * 75.0
+                            deep_bonus = min(15.0, (deep_min / 60.0) * 15.0)
+                            rem_bonus = min(10.0, (rem_min / 60.0) * 10.0)
+                            wake_penalty = min(15.0, (wake_min / 30.0) * 10.0) if wake_min > 20 else 0.0
+                            calc_score = int(round(base_score + deep_bonus + rem_bonus - wake_penalty))
+                            sleep_score = max(45, min(99, calc_score))
+
+                        self._sleep_cache[date_key] = {
+                            "date": date_key,
+                            "sleep_duration_seconds": dur_seconds,
+                            "sleep_duration_hours": dur_hours,
+                            "sleep_score": sleep_score,
+                            "deep_sleep_seconds": deep_min * 60,
+                            "rem_sleep_seconds": rem_min * 60,
+                            "light_sleep_seconds": light_min * 60,
+                            "awake_seconds": wake_min * 60,
+                            "min_heart_rate": sleep_data.get("minHeartRate"),
+                            "avg_heart_rate": sleep_data.get("avgHeartRate"),
+                            "max_heart_rate": sleep_data.get("maxHeartRate"),
+                        }
+                    logger.info(f"[coros] Parsed and cached {len(self._sleep_cache)} sleep days for {self.account}")
+        except Exception as e:
+            logger.warning(f"[coros] Error fetching sleep data for {self.account}: {e}")
+
+        return self._sleep_cache
+
     def fetch_daily_health_metrics(self, target_date: Optional[str] = None) -> Dict[str, Any]:
         """
         Fetches daily health metrics from COROS.
-        Extracts resting HR, VO2Max, and night sleep HRV (avgSleepHrv & sleepHrvBase) from EvoLab.
+        Combines:
+        1. Mobile API sleep duration, stages, and sleep score
+        2. EvoLab daily dynamic resting HR (rhr), stamina recovery (staminaLevel -> body_battery_max),
+           VO2Max, and night sleep HRV (avgSleepHrv & sleepHrvBase)
         """
         date_str = target_date or date.today().isoformat()
         metrics: Dict[str, Any] = {
             "date": date_str,
             "source": f"coros_{'cn' if self.is_cn else 'global'}",
         }
-        try:
-            profile_info = self.fetch_user_profile_info()
-            if profile_info.get("resting_heart_rate"):
-                metrics["resting_heart_rate"] = profile_info["resting_heart_rate"]
-            if profile_info.get("vo2max"):
-                metrics["vo2_max"] = profile_info["vo2max"]
 
+        # 1. Fetch sleep data from mobile API (pre-fill cache with 14-day window)
+        try:
+            if date_str not in self._sleep_cache:
+                t_dt = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+                s_window = (t_dt - timedelta(days=14)).isoformat()
+                e_window = (t_dt + timedelta(days=1)).isoformat()
+                self.fetch_sleep_data(s_window, e_window)
+
+            s_info = self._sleep_cache.get(date_str)
+            if s_info:
+                metrics["sleep_duration_seconds"] = s_info.get("sleep_duration_seconds")
+                metrics["sleep_duration_hours"] = s_info.get("sleep_duration_hours")
+                metrics["sleep_score"] = s_info.get("sleep_score")
+                if s_info.get("min_heart_rate"):
+                    metrics["resting_heart_rate"] = int(s_info["min_heart_rate"])
+        except Exception as se:
+            logger.warning(f"[coros] Failed to fetch sleep for {date_str}: {se}")
+
+        # 2. EvoLab daily analysis (rhr, staminaLevel, HRV, VO2Max)
+        try:
             a_data = self._get_analyse_data()
             if a_data:
                 day_list = a_data.get("dayList") or a_data.get("t7dayList") or []
@@ -528,16 +793,53 @@ class CorosAdapter:
                             break
 
                 # Fallback to latest item if matching today and today's day record isn't generated yet
-                if not matched_item and day_list:
+                if not matched_item and day_list and date_str == date.today().isoformat():
                     matched_item = day_list[-1]
 
                 if matched_item:
+                    # Daily measured resting HR (more accurate than static profile)
+                    if matched_item.get("rhr") and int(matched_item["rhr"]) > 0:
+                        metrics["resting_heart_rate"] = int(matched_item["rhr"])
+                    elif not metrics.get("resting_heart_rate") and matched_item.get("testRhr"):
+                        metrics["resting_heart_rate"] = int(matched_item["testRhr"])
+
+                    # Stamina level (0-100) maps directly to body battery / recovery
+                    if matched_item.get("staminaLevel") is not None:
+                        try:
+                            stamina = float(matched_item["staminaLevel"])
+                            if stamina >= 0:
+                                metrics["body_battery_max"] = min(100, max(0, int(round(stamina))))
+                        except (ValueError, TypeError):
+                            pass
+
                     if matched_item.get("avgSleepHrv"):
                         metrics["hrv_last_night_avg"] = int(matched_item["avgSleepHrv"])
                     if matched_item.get("sleepHrvBase"):
                         metrics["hrv_weekly_avg"] = int(matched_item["sleepHrvBase"])
                     if matched_item.get("vo2max") and float(matched_item["vo2max"]) > 0:
                         metrics["vo2_max"] = round(float(matched_item["vo2max"]), 1)
-        except Exception as e:
-            logger.warning(f"[coros] Error fetching profile metrics for daily health: {e}")
+
+                    # HRV Status
+                    if metrics.get("hrv_last_night_avg") and metrics.get("hrv_weekly_avg"):
+                        ratio = metrics["hrv_last_night_avg"] / float(metrics["hrv_weekly_avg"])
+                        if 0.85 <= ratio <= 1.15:
+                            metrics["hrv_status"] = "balanced"
+                        elif ratio < 0.85:
+                            metrics["hrv_status"] = "low"
+                        else:
+                            metrics["hrv_status"] = "unbalanced"
+        except Exception as ae:
+            logger.warning(f"[coros] Error fetching EvoLab analyse data for {date_str}: {ae}")
+
+        # 3. Fallback to profile metrics if resting_heart_rate or vo2_max still missing
+        try:
+            if not metrics.get("resting_heart_rate") or not metrics.get("vo2_max"):
+                profile_info = self.fetch_user_profile_info()
+                if not metrics.get("resting_heart_rate") and profile_info.get("resting_heart_rate"):
+                    metrics["resting_heart_rate"] = profile_info["resting_heart_rate"]
+                if not metrics.get("vo2_max") and profile_info.get("vo2max"):
+                    metrics["vo2_max"] = profile_info["vo2max"]
+        except Exception as pe:
+            logger.warning(f"[coros] Error fetching fallback profile info: {pe}")
+
         return metrics

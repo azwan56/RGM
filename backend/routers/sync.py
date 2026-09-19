@@ -152,11 +152,21 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         c_acts = coros_adapter.fetch_recent_activities(limit=100)
                     all_activities.extend(c_acts)
 
-                    for i in range(7):
+                    try:
+                        t_end = date.today().isoformat()
+                        t_start = (date.today() - timedelta(days=14)).isoformat()
+                        coros_adapter.fetch_sleep_data(t_start, t_end)
+                    except Exception as s_err:
+                        logger.warning(f"[sync] COROS sleep prefetch error: {s_err}")
+
+                    for i in range(14):
                         d = (date.today() - timedelta(days=i)).isoformat()
                         try:
                             h_metrics = coros_adapter.fetch_daily_health_metrics(d)
-                            if h_metrics and any(h_metrics.get(k) is not None for k in ["resting_heart_rate", "sleep_score", "vo2_max", "hrv_last_night_avg"]):
+                            if h_metrics and any(h_metrics.get(k) is not None for k in [
+                                "resting_heart_rate", "sleep_score", "sleep_duration_seconds",
+                                "body_battery_max", "vo2_max", "hrv_last_night_avg"
+                            ]):
                                 LocalStore.upsert_daily_health(uid, h_metrics)
                                 synced_health = True
                         except Exception as he:
