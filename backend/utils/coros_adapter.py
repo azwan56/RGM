@@ -162,22 +162,40 @@ class CorosAdapter:
         except Exception as e:
             logger.warning(f"[coros] Failed to save mobile token cache: {e}")
 
-    def mobile_login(self) -> bool:
+    def mobile_login(self, override_account: Optional[str] = None, override_type: Optional[int] = None) -> bool:
         """
         Logs into COROS Mobile API using AES-encrypted credentials.
         Required for daily sleep statistics and other mobile-only wellness data.
+        Handles both email (accountType=2) and mobile numbers (accountType=1, requires +86- for CN).
         """
         if self.mobile_access_token:
             logger.info(f"[coros] Using cached mobile token for {self.account}")
             return True
+
+        target_acc = (override_account or self.account).strip()
+        if override_type is not None:
+            account_type = override_type
+            mobile_acc = target_acc
+        elif "@" in target_acc:
+            mobile_acc = target_acc
+            account_type = 2
+        elif target_acc.isdigit() and len(target_acc) == 11 and self.is_cn:
+            mobile_acc = f"+86-{target_acc}"
+            account_type = 1
+        elif target_acc.startswith("+"):
+            mobile_acc = target_acc
+            account_type = 1
+        else:
+            mobile_acc = target_acc
+            account_type = 1 if target_acc.replace("-", "").isdigit() else 2
 
         login_url = f"{self.mobile_base_url}/coros/user/login"
         app_key = str(random.randint(1_000_000_000_000_000, 9_999_999_999_999_999))
         pwd_md5 = hashlib.md5(self.password.encode("utf-8")).hexdigest()
 
         payload = {
-            "account": _encrypt_mobile_param(self.account, app_key) + "\n",
-            "accountType": 2,
+            "account": _encrypt_mobile_param(mobile_acc, app_key) + "\n",
+            "accountType": account_type,
             "appKey": app_key,
             "clientType": 1,
             "hasHrCalibrated": 0,
@@ -207,7 +225,7 @@ class CorosAdapter:
         }
 
         try:
-            logger.info(f"[coros] Attempting mobile login for {self.account} ({self.mobile_base_url})...")
+            logger.info(f"[coros] Attempting mobile login for {mobile_acc} (type={account_type}, {self.mobile_base_url})...")
             resp = requests.post(login_url, json=payload, headers=headers, timeout=12)
             if resp.status_code == 200:
                 res_json = resp.json()
@@ -218,6 +236,32 @@ class CorosAdapter:
                         self._save_cached_mobile_token()
                         logger.info(f"[coros] Mobile login success for {self.account}")
                         return True
+
+                # If account not registered (1029) and we haven't overridden yet, try fallback via training hub
+                res_code = str(res_json.get("result"))
+                if res_code == "1029" and override_account is None:
+                    try:
+                        if not self.access_token:
+                            self.login()
+                        if self.access_token and self.user_id:
+                            acc_resp = requests.get(
+                                f"{self.base_url}/account/query?userId={self.user_id}",
+                                headers=self._get_headers(),
+                                timeout=8
+                            )
+                            if acc_resp.status_code == 200:
+                                p_data = acc_resp.json().get("data") or {}
+                                alt_email = p_data.get("email")
+                                alt_mobile = p_data.get("mobile")
+                                if alt_email and alt_email != self.account:
+                                    logger.info(f"[coros] Retrying mobile login with profile email: {alt_email}")
+                                    return self.mobile_login(override_account=alt_email, override_type=2)
+                                elif alt_mobile and alt_mobile != self.account:
+                                    logger.info(f"[coros] Retrying mobile login with profile mobile: {alt_mobile}")
+                                    return self.mobile_login(override_account=alt_mobile, override_type=1)
+                    except Exception as fe:
+                        logger.warning(f"[coros] Mobile fallback query failed: {fe}")
+
                 logger.warning(f"[coros] Mobile login rejected: {res_json.get('result')} {res_json.get('message')}")
             else:
                 logger.warning(f"[coros] Mobile login HTTP {resp.status_code}")

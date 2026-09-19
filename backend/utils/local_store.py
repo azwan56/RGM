@@ -1296,7 +1296,9 @@ class LocalStore:
                         "resting_heart_rate": int(rhr) if rhr is not None else None,
                         "hrv": int(hrv) if hrv is not None else None,
                         "body_battery": int(bb) if bb is not None else None,
-                        "sleep_score": int(sleep_score) if sleep_score is not None else None
+                        "sleep_score": int(sleep_score) if sleep_score is not None else None,
+                        "sleep_duration_hours": float(item.get("sleep_duration_hours")) if item.get("sleep_duration_hours") is not None else None,
+                        "sleep_duration_seconds": int(item.get("sleep_duration_seconds")) if item.get("sleep_duration_seconds") is not None else None
                     })
 
             return trend
