@@ -180,3 +180,81 @@ def test_estimate_vo2max_api():
     # Cleanup
     LocalStore.delete_profile(test_uid)
 
+
+def test_profile_runner_credentials_and_org_autosync():
+    init_db()
+    import time
+    ts = int(time.time() * 1000)
+    runner_uid = f"u_prof_runner_{ts}"
+    owner_uid = f"u_org_lead_{ts}"
+    invite_code = f"SYNC_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "群主", "email": f"lead_{ts}@test.cn"})
+    LocalStore.upsert_profile(runner_uid, {"display_name": "跑者档案测试", "email": f"r_{ts}@test.cn"})
+
+    # 1. Create org with gobi_experience and emergency_contact required
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试院_{ts}",
+        "invite_code": invite_code,
+        "description": "测试档案联动",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    rules = LocalStore.get_org_field_rules(org_id)
+    for r in rules:
+        if r["field"] in ("gobi_experience", "emergency_contact"):
+            r["required"] = True
+    LocalStore.update_org_field_rules(org_id, rules)
+
+    # 2. Runner joins org with missing gobi_experience -> temporary
+    join_res = client.post("/api/org/join", json={
+        "user_id": runner_uid,
+        "invite_code": invite_code,
+        "real_name": "李测试",
+        "gender": "female",
+        "date_of_birth": "1991-01-01",
+        "program": "中文EMBA",
+        "class_detail": "23秋"
+        # missing gobi_experience & emergency_contact
+    })
+    assert join_res.status_code == 200
+    assert join_res.json()["membership"]["status"] == "temporary"
+
+    # 3. Runner updates profile via PUT /api/profile/{uid}
+    put_res = client.put(f"/api/profile/{runner_uid}", json={
+        "program": "中文EMBA",
+        "class_detail": "23秋",
+        "class_name": "中文EMBA 23秋",
+        "gobi_experience": "戈20 A组",
+        "emergency_contact": "张教练 13900001111",
+        "clothing_size": "M",
+        "shoe_size": "41",
+        "health_declaration": True
+    })
+    assert put_res.status_code == 200
+
+    # 4. Verify GET /api/profile/{uid} returns all these fields
+    get_res = client.get(f"/api/profile/{runner_uid}")
+    assert get_res.status_code == 200
+    p = get_res.json()["profile"]
+    assert p["program"] == "中文EMBA"
+    assert p["class_detail"] == "23秋"
+    assert p["class_name"] == "中文EMBA 23秋"
+    assert p["gobi_experience"] == "戈20 A组"
+    assert p["emergency_contact"] == "张教练 13900001111"
+    assert p["clothing_size"] == "M"
+    assert p["shoe_size"] == "41"
+
+    # 5. Verify org membership status was automatically upgraded to pending!
+    status_info = LocalStore.check_org_member_status(org_id, runner_uid)
+    assert status_info["status"] == "pending"
+    assert len(status_info["missing_fields"]) == 0
+
+    # Cleanup
+    LocalStore.delete_profile(runner_uid)
+    LocalStore.delete_profile(owner_uid)
+
+

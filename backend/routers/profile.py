@@ -38,6 +38,14 @@ class ProfileUpdateRequest(BaseModel):
     ten_k_pb: Optional[int] = None
     five_k_pb: Optional[int] = None
     wecom_webhook_url: Optional[str] = None
+    program: Optional[str] = None
+    class_detail: Optional[str] = None
+    class_name: Optional[str] = None
+    gobi_experience: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    clothing_size: Optional[str] = None
+    shoe_size: Optional[str] = None
+    health_declaration: Optional[Any] = None
 
 class EstimateVo2maxRequest(BaseModel):
     five_k_pb: Optional[Any] = None

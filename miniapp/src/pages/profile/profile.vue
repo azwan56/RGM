@@ -795,6 +795,207 @@
       </view>
     </view>
 
+    <!-- ── CARD: 商学院项目与戈友认证 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🏫</text>
+          <text class="card-title">商学院项目与戈友认证</text>
+        </view>
+        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+          大群自动同步
+        </text>
+      </view>
+
+      <text class="desc-text">
+        在此填写的项目、班级与戈壁经历，将自动同步至您已加入的所有商学院跑团大群（如复旦戈友会）实名花名册，自动流转审核状态。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 所属项目 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">商学院项目</text>
+            <text class="field-sec-tag">大群必填</text>
+          </view>
+          <view class="program-pill-grid">
+            <view
+              v-for="prog in ORG_PROGRAM_OPTIONS"
+              :key="prog"
+              class="program-pill"
+              :class="{ active: profile?.program === prog }"
+              @click="onSelectProgram(prog)"
+            >
+              <text>{{ prog }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 班级 / 届别 -->
+        <view class="form-group full-width-group">
+          <text class="label">所在班级 / 届别 (自由输入)</text>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如: 23春、21级、18班、2022秋"
+            :value="profile?.class_detail || ''"
+            @input="onInputClassDetail"
+          />
+          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: #fbbf24;">
+            名册组合预览：{{ profile.program }} {{ profile.class_detail }}
+          </text>
+        </view>
+
+        <!-- 戈壁经历 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">戈壁经历 (戈赛经验)</text>
+            <text class="field-sec-tag">{{ gobiType === 'new' ? '🌱 新戈' : `🏅 ${gobiEdition} ${gobiGroup}` }}</text>
+          </view>
+
+          <view class="gobi-type-selector">
+            <view
+              class="gobi-type-btn"
+              :class="{ active: gobiType === 'new' }"
+              @click="onSelectGobiType('new')"
+            >
+              <text class="gobi-icon">🌱</text>
+              <view class="gobi-info">
+                <text class="gobi-main-title">新戈跑者</text>
+                <text class="gobi-sub-title">首次备赛 / 暂无往届</text>
+              </view>
+            </view>
+            <view
+              class="gobi-type-btn"
+              :class="{ active: gobiType === 'vet' }"
+              @click="onSelectGobiType('vet')"
+            >
+              <text class="gobi-icon">🏅</text>
+              <view class="gobi-info">
+                <text class="gobi-main-title">往届老戈友</text>
+                <text class="gobi-sub-title">参加过戈1至戈21</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 往届老戈友详情选择 -->
+          <view v-if="gobiType === 'vet'" class="gobi-vet-box">
+            <view class="vet-row">
+              <text class="vet-label">参加届数：</text>
+              <picker
+                mode="selector"
+                :range="GOBI_EDITIONS"
+                :value="GOBI_EDITIONS.indexOf(gobiEdition) >= 0 ? GOBI_EDITIONS.indexOf(gobiEdition) : 0"
+                @change="onGobiEditionChange"
+                class="vet-picker-flex"
+              >
+                <view class="picker-input-box">
+                  <text>{{ gobiEdition || '请选择届数' }}</text>
+                  <text class="picker-arrow">▼</text>
+                </view>
+              </picker>
+            </view>
+
+            <view class="vet-row" style="margin-top: 16rpx;">
+              <text class="vet-label">参赛组别：</text>
+              <view class="grp-pill-group">
+                <view
+                  v-for="grp in GOBI_GROUPS"
+                  :key="grp"
+                  class="grp-pill"
+                  :class="{ active: gobiGroup === grp }"
+                  @click="onSelectGobiGroup(grp)"
+                >
+                  <text>{{ grp }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── CARD: 赛事活动与装备保障 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🎽</text>
+          <text class="card-title">赛事活动与装备保障</text>
+        </view>
+        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.3);">
+          物资发放 · 保险
+        </text>
+      </view>
+
+      <text class="desc-text">
+        用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 紧急联系人及电话 -->
+        <view class="form-group full-width-group">
+          <text class="label">紧急联系人及电话</text>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如: 张三 13900001111"
+            :value="profile?.emergency_contact || ''"
+            @input="onInputEmergencyContact"
+          />
+          <text class="field-privacy-subtip">建议填写直系亲属或紧急联络人姓名与电话</text>
+        </view>
+
+        <!-- 队服尺码 -->
+        <view class="form-group">
+          <text class="label">队服尺码 (Clothing)</text>
+          <picker
+            mode="selector"
+            :range="CLOTHING_SIZES"
+            :value="CLOTHING_SIZES.indexOf(profile?.clothing_size) >= 0 ? CLOTHING_SIZES.indexOf(profile?.clothing_size) : 0"
+            @change="onClothingSizeChange"
+          >
+            <view class="picker-input-box">
+              <text :class="{ 'placeholder-text': !profile?.clothing_size }">
+                {{ profile?.clothing_size || '请选择尺码' }}
+              </text>
+              <text class="picker-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 跑鞋尺码 -->
+        <view class="form-group">
+          <text class="label">跑鞋尺码 (Shoe EUR)</text>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如 42 或 42.5"
+            :value="profile?.shoe_size || ''"
+            @input="onInputShoeSize"
+          />
+        </view>
+
+        <!-- 健康状况声明 -->
+        <view class="form-group full-width-group">
+          <view
+            class="health-decl-box"
+            :class="{ active: profile?.health_declaration !== false }"
+            @click="onToggleHealthDeclaration"
+          >
+            <view class="health-checkbox">
+              <text class="check-mark">{{ profile?.health_declaration !== false ? '✓' : '' }}</text>
+            </view>
+            <view class="health-decl-texts">
+              <text class="health-title">健康状况与免责声明确认</text>
+              <text class="health-desc">
+                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
+              </text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- ── CARD 4: 个人2026年度跑量规划 ── -->
     <view class="section-card">
       <view class="card-title-row">
@@ -1921,6 +2122,14 @@ const defaultProfile = {
   real_name: "",
   phone: "",
   id_card: "",
+  program: "",
+  class_detail: "",
+  class_name: "",
+  gobi_experience: "新戈",
+  emergency_contact: "",
+  clothing_size: "",
+  shoe_size: "",
+  health_declaration: true,
   vo2max: null,
   years_running: 3,
   height: 175,
@@ -1928,6 +2137,11 @@ const defaultProfile = {
   max_heart_rate: 190,
   resting_heart_rate: 56,
 };
+
+const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
+const GOBI_EDITIONS = Array.from({ length: 21 }, (_, i) => `戈${21 - i}`);
+const GOBI_GROUPS = ["A组", "B组", "C组"];
+const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
 const user = ref<UserProfile | null>(null);
 const profile = ref<any>(defaultProfile);
@@ -1939,6 +2153,10 @@ const showRealName = ref(false);
 const showPhone = ref(false);
 const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
+
+const gobiType = ref<"new" | "vet">("new");
+const gobiEdition = ref("戈21");
+const gobiGroup = ref("A组");
 
 // ── WeChat Subscribe Message State & Handlers ──
 const WECHAT_SUBSCRIBE_TEMPLATE_ID = "I8K67iHNWQB0on15Z01rxKinP18DAuIPgaz7LSXIqT0";
@@ -2528,6 +2746,16 @@ async function loadProfileData() {
 
     if (res?.profile) {
       profile.value = res.profile;
+      if (res.profile.gobi_experience) {
+        if (res.profile.gobi_experience === "新戈") {
+          gobiType.value = "new";
+        } else {
+          gobiType.value = "vet";
+          const parts = res.profile.gobi_experience.split(" ");
+          if (parts[0]) gobiEdition.value = parts[0];
+          if (parts[1]) gobiGroup.value = parts[1];
+        }
+      }
       if (!user.value) user.value = {} as any;
       user.value.id = res.profile.id || uid;
       if (res.profile.avatar_url) user.value.avatar_url = res.profile.avatar_url;
@@ -3352,6 +3580,54 @@ function onInputIdCard(e: any) {
   profile.value.id_card = e.detail?.value || "";
 }
 
+function onSelectProgram(prog: string) {
+  if (!profile.value) profile.value = {};
+  profile.value.program = prog;
+}
+
+function onInputClassDetail(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.class_detail = e.detail?.value || "";
+}
+
+function onSelectGobiType(type: "new" | "vet") {
+  gobiType.value = type;
+}
+
+function onGobiEditionChange(e: any) {
+  const idx = Number(e.detail?.value);
+  if (!isNaN(idx) && GOBI_EDITIONS[idx]) {
+    gobiEdition.value = GOBI_EDITIONS[idx];
+  }
+}
+
+function onSelectGobiGroup(grp: string) {
+  gobiGroup.value = grp;
+}
+
+function onInputEmergencyContact(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.emergency_contact = e.detail?.value || "";
+}
+
+function onClothingSizeChange(e: any) {
+  const idx = Number(e.detail?.value);
+  if (!isNaN(idx) && CLOTHING_SIZES[idx]) {
+    if (!profile.value) profile.value = {};
+    profile.value.clothing_size = CLOTHING_SIZES[idx];
+  }
+}
+
+function onInputShoeSize(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.shoe_size = e.detail?.value || "";
+}
+
+function onToggleHealthDeclaration() {
+  if (!profile.value) profile.value = {};
+  profile.value.health_declaration = !(profile.value.health_declaration !== false);
+}
+
 async function handleSyncDeviceProfile() {
   const uid = user.value?.id;
   if (!uid) {
@@ -3436,6 +3712,11 @@ async function handleSaveAll() {
   }
   saving.value = true;
   try {
+    const effGobiExp = gobiType.value === "new" ? "新戈" : `${gobiEdition.value} ${gobiGroup.value}`;
+    const effClassName = profile.value?.program
+      ? `${profile.value.program} ${profile.value?.class_detail || ""}`.trim()
+      : (profile.value?.class_name?.trim() || null);
+
     await request(`/api/profile/${uid}`, "PUT", {
       max_heart_rate: profile.value?.max_heart_rate,
       resting_heart_rate: profile.value?.resting_heart_rate,
@@ -3446,6 +3727,14 @@ async function handleSaveAll() {
       real_name: profile.value?.real_name,
       phone: profile.value?.phone,
       id_card: profile.value?.id_card,
+      program: profile.value?.program || null,
+      class_detail: profile.value?.class_detail || null,
+      class_name: effClassName,
+      gobi_experience: effGobiExp,
+      emergency_contact: profile.value?.emergency_contact || null,
+      clothing_size: profile.value?.clothing_size || null,
+      shoe_size: profile.value?.shoe_size || null,
+      health_declaration: profile.value?.health_declaration !== undefined ? profile.value?.health_declaration : true,
       vo2max: profile.value?.vo2max !== undefined && profile.value?.vo2max !== null && profile.value?.vo2max !== "" ? Number(profile.value.vo2max) : null,
       years_running: profile.value?.years_running,
     });
@@ -5155,6 +5444,181 @@ onShow(() => {
   border-color: #fc4c02;
   color: #fc4c02;
   font-weight: bold;
+}
+
+/* 商学院项目选择 Pills */
+.program-pill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 8rpx;
+}
+
+.program-pill {
+  padding: 12rpx 20rpx;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 16rpx;
+  font-size: 22rpx;
+  color: #8e8e93;
+  transition: all 0.2s;
+}
+
+.program-pill.active {
+  background-color: #f59e0b;
+  border-color: #f59e0b;
+  color: #000000;
+  font-weight: bold;
+}
+
+/* 戈壁经历选择卡片 */
+.gobi-type-selector {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 8rpx;
+}
+
+.gobi-type-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 18rpx;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.gobi-type-btn.active {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.gobi-icon {
+  font-size: 36rpx;
+}
+
+.gobi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.gobi-main-title {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.gobi-sub-title {
+  font-size: 18rpx;
+  color: #8e8e93;
+  margin-top: 4rpx;
+}
+
+/* 往届老戈友展开框 */
+.gobi-vet-box {
+  background-color: #141416;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 20rpx;
+  margin-top: 16rpx;
+}
+
+.vet-row {
+  display: flex;
+  align-items: center;
+}
+
+.vet-label {
+  font-size: 22rpx;
+  color: #8e8e93;
+  width: 140rpx;
+  shrink: 0;
+}
+
+.vet-picker-flex {
+  flex: 1;
+}
+
+.grp-pill-group {
+  display: flex;
+  gap: 12rpx;
+  flex: 1;
+}
+
+.grp-pill {
+  flex: 1;
+  text-align: center;
+  padding: 12rpx 0;
+  background-color: #1a1a1e;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 14rpx;
+  font-size: 22rpx;
+  color: #8e8e93;
+}
+
+.grp-pill.active {
+  background-color: #f59e0b;
+  border-color: #f59e0b;
+  color: #000000;
+  font-weight: bold;
+}
+
+/* 健康状况声明勾选卡片 */
+.health-decl-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 20rpx;
+  background-color: #141416;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+}
+
+.health-decl-box.active {
+  border-color: rgba(99, 102, 241, 0.4);
+  background-color: rgba(99, 102, 241, 0.05);
+}
+
+.health-checkbox {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 8rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4rpx;
+  flex-shrink: 0;
+}
+
+.health-decl-box.active .health-checkbox {
+  background-color: #6366f1;
+  border-color: #6366f1;
+}
+
+.check-mark {
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: bold;
+}
+
+.health-decl-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.health-title {
+  font-size: 24rpx;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 6rpx;
+}
+
+.health-desc {
+  font-size: 20rpx;
+  color: #8e8e93;
+  line-height: 1.4;
 }
 
 /* Target & Goal Planning */

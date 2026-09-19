@@ -588,7 +588,33 @@ class LocalStore:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
                 d["coros_connected"] = bool(d.get("coros_connected"))
-                return LocalStore._decrypt_profile_dict(d)
+                res = LocalStore._decrypt_profile_dict(d)
+                if not res:
+                    return res
+
+                # Check if organization_members has extra fields to enrich profile
+                try:
+                    cursor.execute("""
+                        SELECT class_name, extra_data FROM organization_members 
+                        WHERE user_id = ? ORDER BY joined_at DESC LIMIT 1
+                    """, (eff_uid,))
+                    om_row = cursor.fetchone()
+                    if om_row:
+                        om = dict(om_row)
+                        if not res.get("class_name") and om.get("class_name"):
+                            res["class_name"] = om["class_name"]
+                        if om.get("extra_data"):
+                            try:
+                                om_extra = json.loads(om["extra_data"])
+                                for k in ["program", "class_detail", "gobi_experience", "emergency_contact", "clothing_size", "shoe_size", "health_declaration"]:
+                                    if not res.get(k) and om_extra.get(k) is not None:
+                                        res[k] = om_extra[k]
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                return res
             return None
 
     @staticmethod
@@ -703,6 +729,31 @@ class LocalStore:
                 placeholders = ["?"] * len(cols)
                 cursor.execute(f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({', '.join(placeholders)})", list(valid_data.values()))
             conn.commit()
+
+        # Synchronize relevant runner credentials to any organizations joined
+        org_sync_keys = {"real_name", "gender", "date_of_birth", "phone", "id_card", "class_name",
+                         "program", "class_detail", "gobi_experience", "emergency_contact",
+                         "clothing_size", "shoe_size", "health_declaration"}
+        if any(k in data for k in org_sync_keys):
+            try:
+                LocalStore.sync_profile_to_org_memberships(eff_uid, data)
+            except Exception as e:
+                logger.warning(f"Error auto-syncing profile to orgs for {eff_uid}: {e}")
+
+    @staticmethod
+    def sync_profile_to_org_memberships(uid: str, raw_data: Dict[str, Any]):
+        eff_uid = LocalStore.resolve_user_id(uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT org_id FROM organization_members WHERE user_id = ?", (eff_uid,))
+            rows = cursor.fetchall()
+            for r in rows:
+                oid = r["org_id"]
+                try:
+                    LocalStore.update_org_member_profile(oid, eff_uid, raw_data)
+                except Exception as e:
+                    logger.warning(f"Failed to sync profile update to org {oid} for user {eff_uid}: {e}")
 
     @staticmethod
     def upsert_activity(act: Dict[str, Any]):
@@ -4165,6 +4216,10 @@ class LocalStore:
                 merged_extra["gobi_experience"] = clean_gobi
             else:
                 clean_gobi = merged_extra.get("gobi_experience", "")
+
+            for extra_k in ["emergency_contact", "clothing_size", "shoe_size", "health_declaration"]:
+                if data.get(extra_k) is not None:
+                    merged_extra[extra_k] = data[extra_k]
 
             clean_class = data.get("class_name")
             if clean_program:

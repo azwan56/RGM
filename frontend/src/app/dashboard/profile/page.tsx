@@ -62,10 +62,29 @@ export default function ProfilePage() {
   const [age, setAge] = useState<number | null>(null);
   const [syncingDeviceProfile, setSyncingDeviceProfile] = useState(false);
 
+const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
+const GOBI_EDITIONS = Array.from({ length: 21 }, (_, i) => `戈${21 - i}`);
+const GOBI_GROUPS = ["A组", "B组", "C组"];
+const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
+
   // ── Privacy & Sensitive Identity Fields ──
   const [realName, setRealName] = useState("");
   const [idCard, setIdCard] = useState("");
   const [phone, setPhone] = useState("");
+
+  // ── 商学院与戈友身份认证 ──
+  const [program, setProgram] = useState("");
+  const [classDetail, setClassDetail] = useState("");
+  const [className, setClassName] = useState("");
+  const [gobiType, setGobiType] = useState<"new" | "vet">("new");
+  const [gobiEdition, setGobiEdition] = useState("戈21");
+  const [gobiGroup, setGobiGroup] = useState("A组");
+
+  // ── 赛事活动与装备保障 ──
+  const [emergencyContact, setEmergencyContact] = useState("");
+  const [clothingSize, setClothingSize] = useState("");
+  const [shoeSize, setShoeSize] = useState("");
+  const [healthDeclaration, setHealthDeclaration] = useState(true);
 
   const [showRealName, setShowRealName] = useState(false);
   const [showIdCard, setShowIdCard] = useState(false);
@@ -184,6 +203,25 @@ export default function ProfilePage() {
         if (profile.real_name) setRealName(profile.real_name);
         if (profile.id_card) setIdCard(profile.id_card);
         if (profile.phone) setPhone(profile.phone);
+        if (profile.program) setProgram(profile.program);
+        if (profile.class_detail) setClassDetail(profile.class_detail);
+        if (profile.class_name) setClassName(profile.class_name);
+        if (profile.gobi_experience) {
+          if (profile.gobi_experience === "新戈") {
+            setGobiType("new");
+          } else {
+            setGobiType("vet");
+            const parts = profile.gobi_experience.split(" ");
+            if (parts[0]) setGobiEdition(parts[0]);
+            if (parts[1]) setGobiGroup(parts[1]);
+          }
+        }
+        if (profile.emergency_contact) setEmergencyContact(profile.emergency_contact);
+        if (profile.clothing_size) setClothingSize(profile.clothing_size);
+        if (profile.shoe_size) setShoeSize(profile.shoe_size);
+        if (profile.health_declaration !== undefined && profile.health_declaration !== null) {
+          setHealthDeclaration(Boolean(profile.health_declaration));
+        }
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.date_of_birth) {
@@ -706,6 +744,9 @@ export default function ProfilePage() {
     setSaving(true);
     try {
       const cleanName = displayName.trim();
+      const effGobiExp = gobiType === "new" ? "新戈" : `${gobiEdition} ${gobiGroup}`;
+      const effClassName = program ? `${program} ${classDetail}`.trim() : (className.trim() || null);
+
       // 1. Update Profile
       await apiClient.put(`/api/profile/${user.id}`, {
         display_name: cleanName || undefined,
@@ -714,6 +755,14 @@ export default function ProfilePage() {
         real_name: realName.trim() || null,
         id_card: idCard.trim() || null,
         phone: phone.trim() || null,
+        program: program || null,
+        class_detail: classDetail.trim() || null,
+        class_name: effClassName,
+        gobi_experience: effGobiExp,
+        emergency_contact: emergencyContact.trim() || null,
+        clothing_size: clothingSize.trim() || null,
+        shoe_size: shoeSize.trim() || null,
+        health_declaration: healthDeclaration,
         date_of_birth: dateOfBirth || null,
         vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
@@ -1911,6 +1960,238 @@ export default function ProfilePage() {
                   className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* ── CARD: 商学院项目与戈友认证 (Gobi & Business School Credentials) ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-amber-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">商学院项目与戈友认证</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 self-start sm:self-auto">
+                🏫 大组织审核资格 · 实时双向自动同步
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              在此填写的商学院项目、班级与戈壁经历，将自动同步至您已加入的所有商学院大群（如复旦戈友会）实名花名册。当群管理员设置必须字段时，在此补齐即可自动流转为正式/待审核状态，无需重复填报。
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              {/* 商学院项目与班级 */}
+              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <span>商学院项目与班级</span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大组织必填项</span>
+                  </label>
+                </div>
+                
+                <div>
+                  <span className="text-xs text-zinc-400 block mb-2">选择所属项目：</span>
+                  <div className="flex flex-wrap gap-2">
+                    {ORG_PROGRAM_OPTIONS.map((prog) => (
+                      <button
+                        key={prog}
+                        type="button"
+                        onClick={() => setProgram(prog)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                          program === prog
+                            ? "bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold"
+                            : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/5"
+                        }`}
+                      >
+                        {prog}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-xs text-zinc-400 block mb-1.5">所在班级 / 届别 (自由输入)：</span>
+                  <input
+                    type="text"
+                    value={classDetail}
+                    onChange={(e) => setClassDetail(e.target.value)}
+                    placeholder="例如: 23春、21级、18班、2022秋"
+                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+                  />
+                  {program && classDetail && (
+                    <div className="mt-2 text-xs text-amber-300 flex items-center gap-1.5 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
+                      <span>名册显示组合：</span>
+                      <span className="font-bold">{program} {classDetail}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 戈壁经历 */}
+              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <span>戈壁经历 (戈赛经验)</span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">分组与荣誉铭牌</span>
+                  </label>
+                  <span className="text-xs text-zinc-400">{gobiType === "new" ? "🌱 新戈跑者" : `🏅 ${gobiEdition} ${gobiGroup}`}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setGobiType("new")}
+                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                      gobiType === "new"
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md shadow-emerald-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🌱</span>
+                    <div>
+                      <div className="font-bold text-xs text-white">新戈</div>
+                      <div className="text-[10px] text-zinc-400">首次备赛/无往届</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGobiType("vet")}
+                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                      gobiType === "vet"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-md shadow-amber-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🏅</span>
+                    <div>
+                      <div className="font-bold text-xs text-white">往届老戈友</div>
+                      <div className="text-[10px] text-zinc-400">戈1至戈21</div>
+                    </div>
+                  </button>
+                </div>
+
+                {gobiType === "vet" && (
+                  <div className="p-3.5 bg-black/40 border border-white/10 rounded-xl space-y-3">
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数 (戈1 ~ 戈21)：</span>
+                      <select
+                        value={gobiEdition}
+                        onChange={(e) => setGobiEdition(e.target.value)}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+                      >
+                        {GOBI_EDITIONS.map((ed) => (
+                          <option key={ed} value={ed}>{ed}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参赛组别：</span>
+                      <div className="flex gap-2">
+                        {GOBI_GROUPS.map((grp) => (
+                          <button
+                            key={grp}
+                            type="button"
+                            onClick={() => setGobiGroup(grp)}
+                            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
+                              gobiGroup === grp
+                                ? "bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20"
+                                : "bg-white/5 text-zinc-400 hover:text-white border border-white/5"
+                            }`}
+                          >
+                            {grp}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-amber-300 flex items-center gap-1.5 pt-1">
+                      <span>认证经历展示：</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
+                        🏅 {gobiEdition} {gobiGroup}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── CARD: 赛事活动与装备保障 (Race Gear & Emergency) ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">赛事活动与装备保障</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 self-start sm:self-auto">
+                🎽 物资发放 · 安全保险
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+              {/* 紧急联系人及电话 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  紧急联系人及电话
+                </label>
+                <input
+                  type="text"
+                  value={emergencyContact}
+                  onChange={(e) => setEmergencyContact(e.target.value)}
+                  placeholder="例如: 张三 13900001111"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[11px] text-zinc-500 mt-1 block">建议填写直系亲属或紧急联络人姓名与电话</span>
+              </div>
+
+              {/* 队服尺码 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  队服尺码 (Clothing Size)
+                </label>
+                <select
+                  value={clothingSize}
+                  onChange={(e) => setClothingSize(e.target.value)}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">请选择尺码</option>
+                  {CLOTHING_SIZES.map((sz) => (
+                    <option key={sz} value={sz}>{sz}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-zinc-500 mt-1 block">用于团队赛事战袍、训练T恤订制与发放</span>
+              </div>
+
+              {/* 跑鞋尺码 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  跑鞋尺码 (Shoe Size)
+                </label>
+                <input
+                  type="text"
+                  value={shoeSize}
+                  onChange={(e) => setShoeSize(e.target.value)}
+                  placeholder="例如: 42 或 42.5"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[11px] text-zinc-500 mt-1 block">欧洲码 (EUR)，如 40、41、42、42.5、43</span>
+              </div>
+            </div>
+
+            {/* 健康状况声明 */}
+            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-3 mt-2">
+              <input
+                type="checkbox"
+                id="health-decl-check"
+                checked={healthDeclaration}
+                onChange={(e) => setHealthDeclaration(e.target.checked)}
+                className="mt-1 w-4 h-4 rounded border-white/20 text-[#FC4C02] focus:ring-[#FC4C02] bg-[#18181c] cursor-pointer"
+              />
+              <label htmlFor="health-decl-check" className="text-xs text-zinc-300 leading-relaxed cursor-pointer select-none">
+                <span className="font-bold text-white block mb-0.5">健康状况与免责声明确认</span>
+                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
+              </label>
             </div>
           </div>
 
