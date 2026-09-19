@@ -18,11 +18,23 @@ logger = logging.getLogger("local_store")
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 DB_PATH = os.path.join(DB_DIR, "rgm.db")
 
+DEFAULT_ORG_PROGRAMS = [
+    "中文EMBA",
+    "台大班",
+    "复旦-BI（挪威）",
+    "奥林班",
+    "港大班"
+]
+
+GOBI_EDITIONS = [f"戈{i}" for i in range(1, 22)]
+GOBI_GROUPS = ["A组", "B组", "C组"]
+
 DEFAULT_ORG_FIELD_RULES = [
     {"field": "real_name", "label": "真实姓名", "required": True, "type": "text"},
     {"field": "gender", "label": "性别", "required": True, "type": "select", "options": ["male", "female"]},
     {"field": "date_of_birth", "label": "出生日期", "required": True, "type": "date"},
-    {"field": "class_name", "label": "班级/届别", "required": True, "type": "text"},
+    {"field": "class_name", "label": "商学院项目与班级", "required": True, "type": "text"},
+    {"field": "gobi_experience", "label": "戈壁经历(新戈/戈1-戈21)", "required": False, "type": "select"},
     {"field": "phone", "label": "手机号码", "required": False, "type": "phone"},
     {"field": "id_card", "label": "证件号码(身份证/护照)", "required": False, "type": "id_card"},
     {"field": "emergency_contact", "label": "紧急联系人及电话", "required": False, "type": "text"},
@@ -444,7 +456,7 @@ def init_db():
                 datetime.utcnow().isoformat() + "Z"
             ))
 
-        # Seed default field rules for organizations if settings or field_rules missing
+        # Seed default field rules for organizations if settings or field_rules missing or missing gobi_experience
         cursor.execute("SELECT id, settings FROM organizations")
         for org_row in cursor.fetchall():
             oid = org_row[0]
@@ -460,6 +472,11 @@ def init_db():
                     s_dict = {}
                 s_dict["field_rules"] = copy.deepcopy(DEFAULT_ORG_FIELD_RULES)
                 cursor.execute("UPDATE organizations SET settings = ? WHERE id = ?", (json.dumps(s_dict, ensure_ascii=False), oid))
+            else:
+                fr_keys = {r.get("field") for r in s_dict["field_rules"]}
+                if "gobi_experience" not in fr_keys:
+                    s_dict["field_rules"].insert(4, {"field": "gobi_experience", "label": "戈壁经历(新戈/戈1-戈21)", "required": False, "type": "select"})
+                    cursor.execute("UPDATE organizations SET settings = ? WHERE id = ?", (json.dumps(s_dict, ensure_ascii=False), oid))
 
         # Associate any club named like '复旦戈' or '闵文' to org_fudan_gobi
         cursor.execute("UPDATE clubs SET org_id = 'org_fudan_gobi' WHERE (name LIKE '%复旦戈%' OR name LIKE '%闵文%') AND (org_id IS NULL OR org_id = '')")
@@ -3908,7 +3925,10 @@ class LocalStore:
         class_name: Optional[str] = None,
         phone: Optional[str] = None,
         id_card: Optional[str] = None,
-        extra_data: Optional[Dict[str, Any]] = None
+        extra_data: Optional[Dict[str, Any]] = None,
+        program: Optional[str] = None,
+        class_detail: Optional[str] = None,
+        gobi_experience: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Validates invite code, registers member into organization_members with encrypted sensitive fields,
@@ -3919,7 +3939,13 @@ class LocalStore:
         clean_dob = (date_of_birth or "").strip()
         clean_phone = (phone or "").strip()
         clean_id_card = (id_card or "").strip()
-        clean_class = (class_name or "").strip()
+        clean_program = (program or (extra_data.get("program") if extra_data else None) or "").strip()
+        clean_class_detail = (class_detail or (extra_data.get("class_detail") if extra_data else None) or "").strip()
+        if clean_program:
+            clean_class = f"{clean_program} {clean_class_detail}".strip()
+        else:
+            clean_class = (class_name or "").strip()
+        clean_gobi = (gobi_experience or (extra_data.get("gobi_experience") if extra_data else None) or "").strip()
         clean_gender = (gender or "male").strip()
 
         with sqlite3.connect(DB_PATH) as conn:
@@ -3968,6 +3994,15 @@ class LocalStore:
             if extra_data:
                 merged_extra.update(extra_data)
 
+            if clean_program:
+                merged_extra["program"] = clean_program
+            if clean_class_detail:
+                merged_extra["class_detail"] = clean_class_detail
+            if clean_gobi:
+                merged_extra["gobi_experience"] = clean_gobi
+            elif not clean_gobi and merged_extra.get("gobi_experience"):
+                clean_gobi = str(merged_extra["gobi_experience"]).strip()
+
             # Check field rules
             rules = LocalStore.get_org_field_rules(org_id)
             field_values = {
@@ -3975,6 +4010,7 @@ class LocalStore:
                 "gender": clean_gender,
                 "date_of_birth": clean_dob,
                 "class_name": clean_class,
+                "gobi_experience": clean_gobi or merged_extra.get("gobi_experience", ""),
                 "phone": clean_phone,
                 "id_card": clean_id_card,
                 **merged_extra
@@ -4046,6 +4082,9 @@ class LocalStore:
                 "org_logo": org["logo_url"],
                 "real_name": clean_name,
                 "class_name": clean_class,
+                "program": merged_extra.get("program", ""),
+                "class_detail": merged_extra.get("class_detail", ""),
+                "gobi_experience": clean_gobi or merged_extra.get("gobi_experience", ""),
                 "gender": clean_gender,
                 "date_of_birth": clean_dob,
                 "phone": clean_phone,
@@ -4097,8 +4136,40 @@ class LocalStore:
             else:
                 clean_id_card = decrypt_pii(member.get("id_card")) or ""
 
+            merged_extra = {}
+            if member.get("extra_data"):
+                try:
+                    merged_extra = json.loads(member["extra_data"])
+                except Exception:
+                    merged_extra = {}
+            if data.get("extra_data"):
+                merged_extra.update(data["extra_data"])
+
+            clean_program = data.get("program")
+            if clean_program is not None:
+                clean_program = clean_program.strip()
+                merged_extra["program"] = clean_program
+            else:
+                clean_program = merged_extra.get("program", "")
+
+            clean_class_detail = data.get("class_detail")
+            if clean_class_detail is not None:
+                clean_class_detail = clean_class_detail.strip()
+                merged_extra["class_detail"] = clean_class_detail
+            else:
+                clean_class_detail = merged_extra.get("class_detail", "")
+
+            clean_gobi = data.get("gobi_experience")
+            if clean_gobi is not None:
+                clean_gobi = clean_gobi.strip()
+                merged_extra["gobi_experience"] = clean_gobi
+            else:
+                clean_gobi = merged_extra.get("gobi_experience", "")
+
             clean_class = data.get("class_name")
-            if clean_class is not None:
+            if clean_program:
+                clean_class = f"{clean_program} {clean_class_detail}".strip()
+            elif clean_class is not None:
                 clean_class = clean_class.strip()
             else:
                 clean_class = member.get("class_name") or ""
@@ -4109,21 +4180,13 @@ class LocalStore:
             else:
                 clean_gender = member.get("gender") or "male"
 
-            merged_extra = {}
-            if member.get("extra_data"):
-                try:
-                    merged_extra = json.loads(member["extra_data"])
-                except Exception:
-                    merged_extra = {}
-            if data.get("extra_data"):
-                merged_extra.update(data["extra_data"])
-
             rules = LocalStore.get_org_field_rules(org_id)
             field_values = {
                 "real_name": clean_name,
                 "gender": clean_gender,
                 "date_of_birth": clean_dob,
                 "class_name": clean_class,
+                "gobi_experience": clean_gobi or merged_extra.get("gobi_experience", ""),
                 "phone": clean_phone,
                 "id_card": clean_id_card,
                 **merged_extra
@@ -4178,6 +4241,9 @@ class LocalStore:
                 "user_id": user_id,
                 "real_name": clean_name,
                 "class_name": clean_class,
+                "program": merged_extra.get("program", ""),
+                "class_detail": merged_extra.get("class_detail", ""),
+                "gobi_experience": clean_gobi or merged_extra.get("gobi_experience", ""),
                 "gender": clean_gender,
                 "date_of_birth": clean_dob,
                 "phone": clean_phone,
@@ -4256,6 +4322,9 @@ class LocalStore:
                     except Exception:
                         pass
                 d["extra_data"] = extra
+                d["program"] = extra.get("program", "")
+                d["class_detail"] = extra.get("class_detail", "")
+                d["gobi_experience"] = extra.get("gobi_experience", "")
 
                 result.append(d)
             return result
@@ -4360,13 +4429,18 @@ class LocalStore:
                     except Exception:
                         pass
                 d["extra_data"] = extra
+                d["program"] = extra.get("program", "")
+                d["class_detail"] = extra.get("class_detail", "")
+                d["gobi_experience"] = extra.get("gobi_experience", "")
 
                 if search:
                     s = search.strip().lower()
                     rn = (d.get("real_name") or "").lower()
                     cn = (d.get("class_name") or "").lower()
                     dn = (d.get("display_name") or "").lower()
-                    if s not in rn and s not in cn and s not in dn:
+                    ge = (d.get("gobi_experience") or "").lower()
+                    pr = (d.get("program") or "").lower()
+                    if s not in rn and s not in cn and s not in dn and s not in ge and s not in pr:
                         continue
 
                 cursor.execute("""

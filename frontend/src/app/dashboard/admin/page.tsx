@@ -574,6 +574,8 @@ export default function AdminPage() {
     return (
       (m.real_name && m.real_name.toLowerCase().includes(q)) ||
       (m.class_name && m.class_name.toLowerCase().includes(q)) ||
+      (m.program && m.program.toLowerCase().includes(q)) ||
+      (m.gobi_experience && m.gobi_experience.toLowerCase().includes(q)) ||
       (m.display_name && m.display_name.toLowerCase().includes(q)) ||
       (m.phone && m.phone.includes(q))
     );
@@ -1767,7 +1769,7 @@ export default function AdminPage() {
                   type="text"
                   value={rosterSearch}
                   onChange={(e) => setRosterSearch(e.target.value)}
-                  placeholder="搜索戈友真实姓名、班级届别、手机号或昵称..."
+                  placeholder="搜索戈友真实姓名、商学院项目、班级、戈壁经历(如戈20/新戈)、手机号或昵称..."
                   className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-orange-500"
                 />
               </div>
@@ -1789,6 +1791,7 @@ export default function AdminPage() {
                       <tr className="border-b border-white/10 bg-white/[0.02] text-zinc-400 font-semibold">
                         <th className="p-3.5">实名 / 跑者</th>
                         <th className="p-3.5">商学院班级</th>
+                        <th className="p-3.5">戈壁经历</th>
                         <th className="p-3.5">生理资料 (脱敏)</th>
                         <th className="p-3.5">联系手机</th>
                         <th className="p-3.5">加入分跑团</th>
@@ -1815,8 +1818,36 @@ export default function AdminPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="p-3.5 font-medium text-amber-300">
-                            {m.class_name || "复旦商学院"}
+                          <td className="p-3.5">
+                            {m.program ? (
+                              <div className="space-y-1">
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 text-[11px] font-semibold inline-block border border-amber-500/20">
+                                  {m.program}
+                                </span>
+                                <span className="text-zinc-300 text-xs font-medium block">
+                                  {m.class_detail || (m.class_name ? m.class_name.replace(m.program, '').trim() : '') || "在读/毕业"}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="font-medium text-amber-300">
+                                {m.class_name || "复旦商学院"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            {m.gobi_experience ? (
+                              m.gobi_experience === "新戈" ? (
+                                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                                  🌱 新戈
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                  🏅 {m.gobi_experience}
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-zinc-600 text-[11px]">未登记</span>
+                            )}
                           </td>
                           <td className="p-3.5 text-zinc-300">
                             <div className="flex items-center gap-1.5 flex-wrap">

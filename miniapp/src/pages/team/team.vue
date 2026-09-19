@@ -31,6 +31,9 @@
       <view class="org-meta-pill-row">
         <text class="org-meta-pill">👤 {{ currentOrg.real_name || '未填实名' }}</text>
         <text class="org-meta-pill highlight">🎓 {{ currentOrg.class_name || '商学院班级' }}</text>
+        <text v-if="currentOrg.gobi_experience" class="org-meta-pill gobi-pill" :class="{ veteran: currentOrg.gobi_experience !== '新戈' }">
+          {{ currentOrg.gobi_experience === '新戈' ? '🌱 新戈' : '🏅 ' + currentOrg.gobi_experience }}
+        </text>
         <text class="org-meta-pill">🏅 {{ currentOrg.age_group || getAgeGroup(currentOrg.date_of_birth) }}</text>
         <text class="org-meta-pill">🚻 {{ currentOrg.gender === 'female' ? '女' : '男' }}</text>
       </view>
@@ -773,14 +776,97 @@
             <text class="field-hint">默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向第三方暴露</text>
           </view>
 
+          <!-- 商学院项目与自由班级 -->
           <view class="form-group">
-            <text class="input-label">所在班级 / 届别 <text class="req-star">*</text></text>
+            <text class="input-label">商学院项目 <text class="req-star">*</text></text>
+            <view class="program-chips-grid">
+              <view
+                v-for="p in ORG_PROGRAM_OPTIONS"
+                :key="p"
+                class="program-chip"
+                :class="{ active: orgJoinForm.program === p }"
+                @click="orgJoinForm.program = p"
+              >
+                {{ p }}
+              </view>
+            </view>
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">所在班级 / 届别 (自由输入) <text class="req-star">*</text></text>
             <input
               class="text-input"
               type="text"
-              placeholder="例如: EMBA 23春 / MBA 21级 / 复旦硕博"
-              v-model="orgJoinForm.class_name"
+              placeholder="例如: 23春 / 21级 / 18班 / 2022秋"
+              v-model="orgJoinForm.class_detail"
             />
+            <text v-if="orgJoinForm.program && orgJoinForm.class_detail" class="field-preview-tag">
+              班级组合预览：{{ orgJoinForm.program }} {{ orgJoinForm.class_detail }}
+            </text>
+          </view>
+
+          <!-- 戈壁经历体系 (新戈 / 戈1-戈21 + A/B/C组) -->
+          <view class="form-group">
+            <view class="label-with-icon-row">
+              <text class="input-label">戈壁经历 (戈赛经验) <text class="req-star">*</text></text>
+              <text class="field-security-pill">🏅 戈友身份</text>
+            </view>
+            <view class="gobi-type-segmented-row">
+              <view
+                class="gobi-type-pill"
+                :class="{ active: orgJoinForm.gobi_type === 'new' }"
+                @click="orgJoinForm.gobi_type = 'new'"
+              >
+                🌱 新戈 (首次参赛)
+              </view>
+              <view
+                class="gobi-type-pill"
+                :class="{ active: orgJoinForm.gobi_type === 'vet' }"
+                @click="orgJoinForm.gobi_type = 'vet'"
+              >
+                🏅 往届戈友 (老戈)
+              </view>
+            </view>
+
+            <!-- 老戈友届数与组别选择器 -->
+            <view v-if="orgJoinForm.gobi_type === 'vet'" class="vet-gobi-box">
+              <view class="vet-row">
+                <text class="vet-label">参赛届数：</text>
+                <picker
+                  mode="selector"
+                  :range="GOBI_EDITION_OPTIONS"
+                  :value="selectedGobiEditionIndex"
+                  @change="onGobiEditionChange"
+                  class="vet-picker"
+                >
+                  <view class="vet-picker-box">
+                    <text class="vpb-value">{{ orgJoinForm.gobi_edition || '选择届数' }}</text>
+                    <text class="vpb-arrow">▼</text>
+                  </view>
+                </picker>
+              </view>
+
+              <view class="vet-row">
+                <text class="vet-label">参赛组别：</text>
+                <view class="group-pills-row">
+                  <view
+                    v-for="grp in GOBI_GROUP_OPTIONS"
+                    :key="grp"
+                    class="grp-pill"
+                    :class="{ active: orgJoinForm.gobi_group === grp }"
+                    @click="orgJoinForm.gobi_group = grp"
+                  >
+                    {{ grp }}
+                  </view>
+                </view>
+              </view>
+
+              <view class="vet-summary-row">
+                <text class="vet-summary-text">
+                  经历勋章：<text class="vst-badge">🏅 {{ orgJoinForm.gobi_edition }} {{ orgJoinForm.gobi_group }}</text>
+                </text>
+              </view>
+            </view>
           </view>
 
           <view class="form-group">
@@ -938,7 +1024,7 @@
           type="text"
           :adjust-position="false"
           :cursor-spacing="30"
-          placeholder="🔍 搜索戈友姓名或班级..."
+          placeholder="🔍 搜索戈友姓名、班级或戈壁经历(如戈20/新戈)..."
           v-model="orgMemberSearch"
         />
 
@@ -950,6 +1036,9 @@
                 <view class="m-name-line">
                   <text class="m-name">{{ m.real_name || m.display_name }}</text>
                   <text class="m-class-tag">{{ m.class_name || '未设班级' }}</text>
+                  <text v-if="m.gobi_experience" class="m-gobi-tag" :class="{ 'is-new': m.gobi_experience === '新戈' }">
+                    {{ m.gobi_experience === '新戈' ? '🌱 新戈' : '🏅 ' + m.gobi_experience }}
+                  </text>
                   <text class="m-status-pill" :class="m.status">{{ m.status === 'confirmed' ? '已核验' : '待核对' }}</text>
                 </view>
                 <text class="m-sub-text">
@@ -1390,12 +1479,28 @@ const reportViewMode = ref<"poster" | "text">("poster");
 const loadingReport = ref(false);
 const reportData = ref<any>(null);
 
+const ORG_PROGRAM_OPTIONS = [
+  "中文EMBA",
+  "台大班",
+  "复旦-BI（挪威）",
+  "奥林班",
+  "港大班"
+];
+const GOBI_EDITION_OPTIONS = Array.from({ length: 21 }, (_, i) => `戈${21 - i}`);
+const GOBI_GROUP_OPTIONS = ["A组", "B组", "C组"];
+
 const orgJoinForm = ref({
   invite_code: "",
   real_name: "",
   gender: "male",
   date_of_birth: "1988-08-08",
+  program: "中文EMBA",
+  class_detail: "",
   class_name: "",
+  gobi_type: "new",
+  gobi_edition: "戈20",
+  gobi_group: "A组",
+  gobi_experience: "新戈",
   phone: "",
   id_card: "",
   emergency_contact: "",
@@ -1405,6 +1510,18 @@ const orgJoinForm = ref({
   health_declaration: "本人确认身体健康，无不适合高强度跑步的疾病。"
 });
 const isUpdatingOrgProfile = ref(false);
+
+const selectedGobiEditionIndex = computed(() => {
+  const idx = GOBI_EDITION_OPTIONS.indexOf(orgJoinForm.value.gobi_edition);
+  return idx >= 0 ? idx : 0;
+});
+
+function onGobiEditionChange(e: any) {
+  const idx = parseInt(e.detail.value, 10);
+  if (!isNaN(idx) && GOBI_EDITION_OPTIONS[idx]) {
+    orgJoinForm.value.gobi_edition = GOBI_EDITION_OPTIONS[idx];
+  }
+}
 
 const showOrgRealName = ref(false);
 const showOrgDob = ref(false);
@@ -1439,6 +1556,13 @@ function openOrgJoinModal() {
     orgJoinForm.value.jersey_size = "";
     orgJoinForm.value.full_marathon_pb = "";
     orgJoinForm.value.health_declaration = "本人确认身体健康，无不适合高强度跑步的疾病。";
+    orgJoinForm.value.program = "中文EMBA";
+    orgJoinForm.value.class_detail = "";
+    orgJoinForm.value.class_name = "";
+    orgJoinForm.value.gobi_type = "new";
+    orgJoinForm.value.gobi_edition = "戈20";
+    orgJoinForm.value.gobi_group = "A组";
+    orgJoinForm.value.gobi_experience = "新戈";
   }
   showOrgJoinModal.value = true;
 }
@@ -1450,7 +1574,27 @@ function openOrgEditProfileModal() {
   orgJoinForm.value.real_name = currentOrg.value.real_name || "";
   orgJoinForm.value.gender = currentOrg.value.gender || "male";
   orgJoinForm.value.date_of_birth = currentOrg.value.date_of_birth || "1988-08-08";
-  orgJoinForm.value.class_name = currentOrg.value.class_name || "";
+
+  const rawClass = currentOrg.value.class_name || "";
+  const existingProg = currentOrg.value.program || ORG_PROGRAM_OPTIONS.find(p => rawClass.includes(p)) || "中文EMBA";
+  orgJoinForm.value.program = existingProg;
+  orgJoinForm.value.class_detail = currentOrg.value.class_detail || rawClass.replace(existingProg, "").trim();
+  orgJoinForm.value.class_name = rawClass;
+
+  const rawGobi = currentOrg.value.gobi_experience || "";
+  if (!rawGobi || rawGobi === "新戈") {
+    orgJoinForm.value.gobi_type = "new";
+    orgJoinForm.value.gobi_edition = "戈20";
+    orgJoinForm.value.gobi_group = "A组";
+    orgJoinForm.value.gobi_experience = "新戈";
+  } else {
+    orgJoinForm.value.gobi_type = "vet";
+    const parts = rawGobi.split(" ");
+    orgJoinForm.value.gobi_edition = parts[0] || "戈20";
+    orgJoinForm.value.gobi_group = parts[1] || "A组";
+    orgJoinForm.value.gobi_experience = rawGobi;
+  }
+
   orgJoinForm.value.phone = currentOrg.value.phone || "";
   orgJoinForm.value.id_card = currentOrg.value.id_card || "";
   orgJoinForm.value.emergency_contact = currentOrg.value.emergency_contact || "";
@@ -1476,6 +1620,16 @@ async function submitOrgJoin() {
     return;
   }
 
+  const computedGobi = orgJoinForm.value.gobi_type === "new" ? "新戈" : `${orgJoinForm.value.gobi_edition} ${orgJoinForm.value.gobi_group}`;
+  const computedClass = orgJoinForm.value.program
+    ? `${orgJoinForm.value.program} ${orgJoinForm.value.class_detail}`.trim()
+    : orgJoinForm.value.class_name.trim();
+
+  if (!computedClass) {
+    uni.showToast({ title: "请填写班级信息", icon: "none" });
+    return;
+  }
+
   joiningOrg.value = true;
   try {
     if (isUpdatingOrgProfile.value && currentOrg.value) {
@@ -1484,7 +1638,10 @@ async function submitOrgJoin() {
         real_name: orgJoinForm.value.real_name.trim(),
         gender: orgJoinForm.value.gender,
         date_of_birth: orgJoinForm.value.date_of_birth.trim(),
-        class_name: orgJoinForm.value.class_name.trim(),
+        class_name: computedClass,
+        program: orgJoinForm.value.program,
+        class_detail: orgJoinForm.value.class_detail.trim(),
+        gobi_experience: computedGobi,
         phone: orgJoinForm.value.phone.trim(),
         id_card: orgJoinForm.value.id_card.trim(),
         emergency_contact: orgJoinForm.value.emergency_contact.trim(),
@@ -1505,7 +1662,10 @@ async function submitOrgJoin() {
         real_name: orgJoinForm.value.real_name.trim(),
         gender: orgJoinForm.value.gender,
         date_of_birth: orgJoinForm.value.date_of_birth.trim(),
-        class_name: orgJoinForm.value.class_name.trim(),
+        class_name: computedClass,
+        program: orgJoinForm.value.program,
+        class_detail: orgJoinForm.value.class_detail.trim(),
+        gobi_experience: computedGobi,
         phone: orgJoinForm.value.phone.trim(),
         id_card: orgJoinForm.value.id_card.trim(),
         emergency_contact: orgJoinForm.value.emergency_contact.trim(),
@@ -1567,6 +1727,8 @@ const filteredOrgMembers = computed(() => {
   return orgMembers.value.filter((m: any) =>
     (m.real_name || "").toLowerCase().includes(q) ||
     (m.class_name || "").toLowerCase().includes(q) ||
+    (m.program || "").toLowerCase().includes(q) ||
+    (m.gobi_experience || "").toLowerCase().includes(q) ||
     (m.display_name || "").toLowerCase().includes(q)
   );
 });
@@ -4120,6 +4282,20 @@ onPullDownRefresh(async () => {
   font-weight: bold;
 }
 
+.org-meta-pill.gobi-pill {
+  color: #34c759;
+  background: rgba(52, 199, 89, 0.12);
+  border-color: rgba(52, 199, 89, 0.3);
+  font-weight: bold;
+}
+
+.org-meta-pill.gobi-pill.veteran {
+  color: #ff9f0a;
+  background: rgba(255, 159, 10, 0.12);
+  border-color: rgba(255, 159, 10, 0.3);
+  font-weight: bold;
+}
+
 /* ── 🏃 自由跑者独立训练模式专属卡片 ── */
 .solo-runner-card {
   background: linear-gradient(135deg, rgba(16, 36, 26, 0.95) 0%, rgba(14, 24, 20, 0.95) 100%);
@@ -4452,6 +4628,159 @@ onPullDownRefresh(async () => {
   padding: 2rpx 12rpx;
   border-radius: 10rpx;
   background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  font-weight: bold;
+}
+
+.m-gobi-tag {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  border: 1rpx solid rgba(255, 159, 10, 0.3);
+  margin-left: 6rpx;
+}
+
+.m-gobi-tag.is-new {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+  border-color: rgba(52, 199, 89, 0.3);
+}
+
+.program-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 8rpx;
+}
+
+.program-chip {
+  padding: 12rpx 20rpx;
+  border-radius: 14rpx;
+  background: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+  font-size: 23rpx;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.program-chip.active {
+  background: rgba(255, 159, 10, 0.15);
+  border-color: #ff9f0a;
+  color: #ff9f0a;
+  font-weight: bold;
+}
+
+.field-preview-tag {
+  font-size: 21rpx;
+  color: #ff9f0a;
+  margin-top: 8rpx;
+  display: block;
+}
+
+.gobi-type-segmented-row {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 8rpx;
+}
+
+.gobi-type-pill {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  background: #18181c;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 18rpx;
+  color: #a1a1aa;
+  font-size: 24rpx;
+  font-weight: bold;
+}
+
+.gobi-type-pill.active {
+  background: rgba(252, 76, 2, 0.15);
+  border-color: #fc4c02;
+  color: #fc4c02;
+}
+
+.vet-gobi-box {
+  background: #121215;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 18rpx;
+  padding: 18rpx;
+  margin-top: 14rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.vet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vet-label {
+  font-size: 23rpx;
+  color: #d1d5db;
+  font-weight: 500;
+}
+
+.vet-picker-box {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  background: #1c1c22;
+  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  padding: 8rpx 18rpx;
+  border-radius: 12rpx;
+}
+
+.vpb-value {
+  font-size: 24rpx;
+  color: #ff9f0a;
+  font-weight: bold;
+}
+
+.vpb-arrow {
+  font-size: 18rpx;
+  color: #9ca3af;
+}
+
+.group-pills-row {
+  display: flex;
+  gap: 10rpx;
+}
+
+.grp-pill {
+  padding: 8rpx 20rpx;
+  border-radius: 12rpx;
+  background: #1c1c22;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: #9ca3af;
+  font-size: 22rpx;
+  font-weight: bold;
+}
+
+.grp-pill.active {
+  background: rgba(255, 159, 10, 0.2);
+  border-color: #ff9f0a;
+  color: #ff9f0a;
+}
+
+.vet-summary-row {
+  border-top: 1rpx dashed rgba(255, 255, 255, 0.1);
+  padding-top: 10rpx;
+}
+
+.vet-summary-text {
+  font-size: 21rpx;
+  color: #9ca3af;
+}
+
+.vst-badge {
   color: #ff9f0a;
   font-weight: bold;
 }

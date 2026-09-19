@@ -257,3 +257,132 @@ def test_14_days_expiration_and_access_block():
     re_membership = rejoin_res.json()["membership"]
     assert re_membership["status"] == "pending"
     assert re_membership["days_remaining"] == 14
+
+
+def test_org_program_and_gobi_experience():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_gobi_{ts}"
+    runner_new_uid = f"u_runner_newbie_{ts}"
+    runner_vet_uid = f"u_runner_veteran_{ts}"
+    invite_code = f"FD_GOBI_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "复旦戈测试管理员", "email": "gobi_admin@test.com"})
+    LocalStore.upsert_profile(runner_new_uid, {"display_name": "新戈小明", "email": "xiaoming@test.com"})
+    LocalStore.upsert_profile(runner_vet_uid, {"display_name": "老戈老王", "email": "laowang@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试院_{ts}",
+        "invite_code": invite_code,
+        "description": "测试商学院项目与戈壁经历",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Check default rules include gobi_experience
+    rules_res = client.get(f"/api/org/{org_id}/field-rules")
+    assert rules_res.status_code == 200
+    rules = rules_res.json()["field_rules"]
+    gobi_rule = next((r for r in rules if r["field"] == "gobi_experience"), None)
+    assert gobi_rule is not None
+    assert gobi_rule["required"] is False
+
+    # 3. Join with program + class_detail and gobi_experience = "新戈"
+    join_res1 = client.post("/api/org/join", json={
+        "user_id": runner_new_uid,
+        "invite_code": invite_code,
+        "real_name": "张小明",
+        "gender": "male",
+        "date_of_birth": "1995-05-15",
+        "program": "中文EMBA",
+        "class_detail": "23春",
+        "gobi_experience": "新戈"
+    })
+    assert join_res1.status_code == 200
+    m1 = join_res1.json()["membership"]
+    assert m1["class_name"] == "中文EMBA 23春"
+    assert m1["program"] == "中文EMBA"
+    assert m1["class_detail"] == "23春"
+    assert m1["gobi_experience"] == "新戈"
+    assert m1["status"] == "pending"
+
+    # 4. Join with program + class_detail and veteran gobi_experience = "戈20 A组"
+    join_res2 = client.post("/api/org/join", json={
+        "user_id": runner_vet_uid,
+        "invite_code": invite_code,
+        "real_name": "王戈老",
+        "gender": "male",
+        "date_of_birth": "1988-08-18",
+        "program": "复旦-BI（挪威）",
+        "class_detail": "18班",
+        "gobi_experience": "戈20 A组"
+    })
+    assert join_res2.status_code == 200
+    m2 = join_res2.json()["membership"]
+    assert m2["class_name"] == "复旦-BI（挪威） 18班"
+    assert m2["program"] == "复旦-BI（挪威）"
+    assert m2["class_detail"] == "18班"
+    assert m2["gobi_experience"] == "戈20 A组"
+
+    # 5. Verify get_user_organizations returns structured fields
+    user_orgs = client.get(f"/api/org/my-orgs/{runner_vet_uid}").json()["organizations"]
+    target_org = next(o for o in user_orgs if o["id"] == org_id)
+    assert target_org["program"] == "复旦-BI（挪威）"
+    assert target_org["class_detail"] == "18班"
+    assert target_org["gobi_experience"] == "戈20 A组"
+
+    # 6. Set gobi_experience as REQUIRED and test temporary status
+    for r in rules:
+        if r["field"] == "gobi_experience":
+            r["required"] = True
+    client.put(f"/api/org/{org_id}/field-rules", json={"field_rules": rules, "operator_uid": owner_uid})
+
+    runner3_uid = f"u_runner_empty_{ts}"
+    LocalStore.upsert_profile(runner3_uid, {"display_name": "未填经历者", "email": "empty@test.com"})
+    join_res3 = client.post("/api/org/join", json={
+        "user_id": runner3_uid,
+        "invite_code": invite_code,
+        "real_name": "李空空",
+        "gender": "female",
+        "date_of_birth": "1993-03-03",
+        "program": "台大班",
+        "class_detail": "2022秋"
+        # gobi_experience omitted
+    })
+    assert join_res3.status_code == 200
+    m3 = join_res3.json()["membership"]
+    assert m3["status"] == "temporary"
+    missing = [mf["field"] for mf in m3["missing_fields"]]
+    assert "gobi_experience" in missing
+
+    # Update profile to complete gobi_experience
+    up_res = client.post(f"/api/org/{org_id}/members/update-profile", json={
+        "user_id": runner3_uid,
+        "gobi_experience": "戈19 B组"
+    })
+    assert up_res.status_code == 200
+    up_m = up_res.json()["membership"]
+    assert up_m["status"] == "pending"
+    assert up_m["gobi_experience"] == "戈19 B组"
+
+    # 7. Test roster search by gobi_experience and program
+    members_res1 = client.get(f"/api/org/{org_id}/members?operator_uid={owner_uid}&search=戈20")
+    assert members_res1.status_code == 200
+    m_list1 = members_res1.json()["members"]
+    assert len(m_list1) == 1
+    assert m_list1[0]["user_id"] == runner_vet_uid
+
+    members_res2 = client.get(f"/api/org/{org_id}/members?operator_uid={owner_uid}&search=新戈")
+    assert members_res2.status_code == 200
+    m_list2 = members_res2.json()["members"]
+    assert len(m_list2) == 1
+    assert m_list2[0]["user_id"] == runner_new_uid
+
+    members_res3 = client.get(f"/api/org/{org_id}/members?operator_uid={owner_uid}&search=挪威")
+    assert members_res3.status_code == 200
+    m_list3 = members_res3.json()["members"]
+    assert len(m_list3) == 1
+    assert m_list3[0]["user_id"] == runner_vet_uid
+

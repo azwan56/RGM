@@ -18,6 +18,9 @@ class JoinOrganizationRequest(BaseModel):
     gender: Optional[str] = "male"
     date_of_birth: Optional[str] = None
     class_name: Optional[str] = None
+    program: Optional[str] = None
+    class_detail: Optional[str] = None
+    gobi_experience: Optional[str] = None
     phone: Optional[str] = None
     id_card: Optional[str] = None
     emergency_contact: Optional[str] = None
@@ -37,6 +40,9 @@ class UpdateMemberProfileRequest(BaseModel):
     gender: Optional[str] = None
     date_of_birth: Optional[str] = None
     class_name: Optional[str] = None
+    program: Optional[str] = None
+    class_detail: Optional[str] = None
+    gobi_experience: Optional[str] = None
     phone: Optional[str] = None
     id_card: Optional[str] = None
     emergency_contact: Optional[str] = None
@@ -125,7 +131,10 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
             class_name=req.class_name,
             phone=req.phone,
             id_card=req.id_card,
-            extra_data=extra
+            extra_data=extra,
+            program=req.program,
+            class_detail=req.class_detail,
+            gobi_experience=req.gobi_experience
         )
         status_cn = {
             "confirmed": "正式戈友已认证",
@@ -209,6 +218,9 @@ def update_org_member_profile_endpoint(org_id: str, req: UpdateMemberProfileRequ
                 "gender": req.gender,
                 "date_of_birth": req.date_of_birth,
                 "class_name": req.class_name,
+                "program": req.program,
+                "class_detail": req.class_detail,
+                "gobi_experience": req.gobi_experience,
                 "phone": req.phone,
                 "id_card": req.id_card,
                 "extra_data": extra

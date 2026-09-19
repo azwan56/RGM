@@ -46,6 +46,10 @@ import {
   Image as ImageIcon
 } from "lucide-react";
 
+const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
+const GOBI_EDITIONS = Array.from({ length: 21 }, (_, i) => `戈${21 - i}`);
+const GOBI_GROUPS = ["A组", "B组", "C组"];
+
 export default function TeamPage() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -88,7 +92,12 @@ export default function TeamPage() {
   const [orgRealName, setOrgRealName] = useState("");
   const [orgGender, setOrgGender] = useState<"male" | "female">("male");
   const [orgDob, setOrgDob] = useState("");
+  const [orgProgram, setOrgProgram] = useState("中文EMBA");
+  const [orgClassDetail, setOrgClassDetail] = useState("");
   const [orgClassName, setOrgClassName] = useState("");
+  const [orgGobiType, setOrgGobiType] = useState<"new" | "vet">("new");
+  const [orgGobiEdition, setOrgGobiEdition] = useState("戈20");
+  const [orgGobiGroup, setOrgGobiGroup] = useState("A组");
   const [orgPhone, setOrgPhone] = useState("");
   const [orgIdCard, setOrgIdCard] = useState("");
 
@@ -201,14 +210,17 @@ export default function TeamPage() {
       alert("请填写真实姓名以便管理员核对确认");
       return;
     }
-    if (!orgClassName.trim()) {
-      alert("请填写所在班级或届别（例如 EMBA 23春、MBA 21级）");
+    const finalClass = orgProgram ? `${orgProgram} ${orgClassDetail}`.trim() : orgClassName.trim();
+    if (!finalClass) {
+      alert("请选择商学院项目并填写具体班级（例如 23春、21级）");
       return;
     }
     if (!orgDob.trim()) {
       alert("请选择出生日期");
       return;
     }
+
+    const finalGobi = orgGobiType === "new" ? "新戈" : `${orgGobiEdition} ${orgGobiGroup}`;
 
     setOrgJoining(true);
     try {
@@ -218,7 +230,10 @@ export default function TeamPage() {
         real_name: orgRealName.trim(),
         gender: orgGender,
         date_of_birth: orgDob.trim(),
-        class_name: orgClassName.trim(),
+        class_name: finalClass,
+        program: orgProgram,
+        class_detail: orgClassDetail.trim(),
+        gobi_experience: finalGobi,
         phone: orgPhone.trim(),
         id_card: orgIdCard.trim(),
       });
@@ -2400,19 +2415,130 @@ export default function TeamPage() {
                 </p>
               </div>
 
-              {/* 所在班级 / 届别 */}
-              <div>
+              {/* 商学院项目与班级 */}
+              <div className="space-y-2">
                 <label className="text-zinc-400 block mb-1 font-semibold">
-                  所在班级 / 届别 <span className="text-rose-400">*</span>
+                  商学院项目与班级 <span className="text-rose-400">*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={orgClassName}
-                  onChange={(e) => setOrgClassName(e.target.value)}
-                  placeholder="例如: EMBA 23春、MBA 21级"
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-amber-500"
-                />
+                <div>
+                  <span className="text-xs text-zinc-500 block mb-1.5">选择项目：</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ORG_PROGRAM_OPTIONS.map((prog) => (
+                      <button
+                        key={prog}
+                        type="button"
+                        onClick={() => setOrgProgram(prog)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                          orgProgram === prog
+                            ? "bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold"
+                            : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/5"
+                        }`}
+                      >
+                        {prog}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-xs text-zinc-500 block mb-1.5">所在班级 / 届别 (自由输入)：</span>
+                  <input
+                    type="text"
+                    required
+                    value={orgClassDetail}
+                    onChange={(e) => setOrgClassDetail(e.target.value)}
+                    placeholder="例如: 23春、21级、18班、2022秋"
+                    className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-amber-500 text-sm"
+                  />
+                  {orgProgram && orgClassDetail && (
+                    <p className="text-[11px] text-amber-400/80 mt-1">
+                      组合显示预览：<span className="font-semibold text-amber-300">{orgProgram} {orgClassDetail}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* 戈壁经历 */}
+              <div className="space-y-2">
+                <label className="text-zinc-400 block mb-1 font-semibold flex items-center justify-between">
+                  <span>戈壁经历 (戈赛经验)</span>
+                  <span className="text-[11px] text-zinc-500">新戈 / 戈1-戈21</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrgGobiType("new")}
+                    className={`p-3 rounded-2xl border text-left transition flex items-center gap-2.5 ${
+                      orgGobiType === "new"
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-lg shadow-emerald-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🌱</span>
+                    <div>
+                      <div className="font-bold text-sm">新戈</div>
+                      <div className="text-[10px] text-zinc-500">首次备赛，暂无往届经历</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrgGobiType("vet")}
+                    className={`p-3 rounded-2xl border text-left transition flex items-center gap-2.5 ${
+                      orgGobiType === "vet"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-lg shadow-amber-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🏅</span>
+                    <div>
+                      <div className="font-bold text-sm">往届戈友</div>
+                      <div className="text-[10px] text-zinc-500">参加过戈1至戈21</div>
+                    </div>
+                  </button>
+                </div>
+
+                {orgGobiType === "vet" && (
+                  <div className="p-3 bg-black/40 border border-white/10 rounded-2xl space-y-2.5 mt-2">
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数 (戈1 ~ 戈21)：</span>
+                      <select
+                        value={orgGobiEdition}
+                        onChange={(e) => setOrgGobiEdition(e.target.value)}
+                        className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+                      >
+                        {GOBI_EDITIONS.map((ed) => (
+                          <option key={ed} value={ed}>
+                            {ed}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参赛组别：</span>
+                      <div className="flex gap-2">
+                        {GOBI_GROUPS.map((grp) => (
+                          <button
+                            key={grp}
+                            type="button"
+                            onClick={() => setOrgGobiGroup(grp)}
+                            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
+                              orgGobiGroup === grp
+                                ? "bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20"
+                                : "bg-white/5 text-zinc-400 hover:text-white border border-white/5"
+                            }`}
+                          >
+                            {grp}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="pt-1 text-[11px] text-amber-300 flex items-center gap-1.5">
+                      <span>经历标识：</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
+                        🏅 {orgGobiEdition} {orgGobiGroup}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* 身份证号码 / 证件号 */}
