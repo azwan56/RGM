@@ -100,11 +100,15 @@ def join_club_by_id(req: JoinClubByIdRequest):
 @router.post("/join")
 def join_club_by_invite(req: JoinClubRequest):
     """Joins a running club using a 6-digit invite code."""
-    club = LocalStore.join_club_by_code(
-        user_id=req.user_id,
-        invite_code=req.invite_code,
-        privacy_consent=req.privacy_consent if req.privacy_consent is not None else True
-    )
+    try:
+        club = LocalStore.join_club_by_code(
+            user_id=req.user_id,
+            invite_code=req.invite_code,
+            privacy_consent=req.privacy_consent if req.privacy_consent is not None else True
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not club:
         code = (req.invite_code or "").strip().upper()
         org = LocalStore.get_organization_by_code(code)

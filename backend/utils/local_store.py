@@ -7,14 +7,48 @@ import string
 import logging
 import time
 import calendar
+import copy
+import math
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from utils.encryption import encrypt_pii, decrypt_pii, compute_age_group
 
 logger = logging.getLogger("local_store")
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 DB_PATH = os.path.join(DB_DIR, "rgm.db")
+
+DEFAULT_ORG_FIELD_RULES = [
+    {"field": "real_name", "label": "真实姓名", "required": True, "type": "text"},
+    {"field": "gender", "label": "性别", "required": True, "type": "select", "options": ["male", "female"]},
+    {"field": "date_of_birth", "label": "出生日期", "required": True, "type": "date"},
+    {"field": "class_name", "label": "班级/届别", "required": True, "type": "text"},
+    {"field": "phone", "label": "手机号码", "required": False, "type": "phone"},
+    {"field": "id_card", "label": "证件号码(身份证/护照)", "required": False, "type": "id_card"},
+    {"field": "emergency_contact", "label": "紧急联系人及电话", "required": False, "type": "text"},
+    {"field": "clothing_size", "label": "队服尺码", "required": False, "type": "text"},
+    {"field": "shoe_size", "label": "跑鞋尺码", "required": False, "type": "text"},
+    {"field": "marathon_pb", "label": "全马PB成绩", "required": False, "type": "text"},
+    {"field": "health_declaration", "label": "健康状况声明", "required": False, "type": "boolean"},
+]
+
+def parse_iso_datetime(dt_str: Optional[str]) -> Optional[datetime]:
+    if not dt_str:
+        return None
+    try:
+        clean = dt_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(clean)
+    except Exception:
+        try:
+            clean_str = dt_str.split(".")[0].replace("Z", "")
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(clean_str, fmt).replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return None
 
 def generate_invite_code(length: int = 6) -> str:
     chars = string.ascii_uppercase + string.digits
@@ -382,6 +416,8 @@ def init_db():
         org_mem_cols = {row[1] for row in cursor.fetchall()}
         if "id_card" not in org_mem_cols:
             cursor.execute("ALTER TABLE organization_members ADD COLUMN id_card TEXT")
+        if "extra_data" not in org_mem_cols:
+            cursor.execute("ALTER TABLE organization_members ADD COLUMN extra_data TEXT")
 
         # Dynamic migration for clubs table
         cursor.execute("PRAGMA table_info(clubs)")
@@ -407,6 +443,23 @@ def init_db():
                 "u_df65d9a588c9",
                 datetime.utcnow().isoformat() + "Z"
             ))
+
+        # Seed default field rules for organizations if settings or field_rules missing
+        cursor.execute("SELECT id, settings FROM organizations")
+        for org_row in cursor.fetchall():
+            oid = org_row[0]
+            settings_str = org_row[1]
+            s_dict = {}
+            if settings_str:
+                try:
+                    s_dict = json.loads(settings_str)
+                except Exception:
+                    s_dict = {}
+            if not isinstance(s_dict, dict) or "field_rules" not in s_dict:
+                if not isinstance(s_dict, dict):
+                    s_dict = {}
+                s_dict["field_rules"] = copy.deepcopy(DEFAULT_ORG_FIELD_RULES)
+                cursor.execute("UPDATE organizations SET settings = ? WHERE id = ?", (json.dumps(s_dict, ensure_ascii=False), oid))
 
         # Associate any club named like '复旦戈' or '闵文' to org_fudan_gobi
         cursor.execute("UPDATE clubs SET org_id = 'org_fudan_gobi' WHERE (name LIKE '%复旦戈%' OR name LIKE '%闵文%') AND (org_id IS NULL OR org_id = '')")
@@ -1824,6 +1877,8 @@ class LocalStore:
                 return None
             
             club_dict = dict(club)
+            LocalStore.validate_sub_club_join_eligibility(club_dict, user_id)
+
             club_id = club_dict["id"]
             membership_id = f"{club_id}_{user_id}"
             joined_at = datetime.utcnow().isoformat() + "Z"
@@ -1847,6 +1902,8 @@ class LocalStore:
                 return None
             
             club_dict = dict(club)
+            LocalStore.validate_sub_club_join_eligibility(club_dict, user_id)
+
             # If club requires invite code, validate it
             if club_dict.get("join_mode") == "invite":
                 provided_code = (invite_code or "").strip().upper()
@@ -3599,6 +3656,196 @@ class LocalStore:
     # ── Grand Community / Organization Hierarchy Methods ──
 
     @staticmethod
+    def get_org_field_rules(org_id: str) -> List[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT settings FROM organizations WHERE id = ?", (org_id,))
+            row = cursor.fetchone()
+            if not row:
+                return copy.deepcopy(DEFAULT_ORG_FIELD_RULES)
+            settings_str = row["settings"]
+            if settings_str:
+                try:
+                    s_dict = json.loads(settings_str)
+                    if isinstance(s_dict, dict) and "field_rules" in s_dict and isinstance(s_dict["field_rules"], list):
+                        return s_dict["field_rules"]
+                except Exception:
+                    pass
+            return copy.deepcopy(DEFAULT_ORG_FIELD_RULES)
+
+    @staticmethod
+    def update_org_field_rules(org_id: str, field_rules: List[Dict[str, Any]]) -> bool:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT settings FROM organizations WHERE id = ?", (org_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            s_dict = {}
+            if row[0]:
+                try:
+                    s_dict = json.loads(row[0])
+                except Exception:
+                    s_dict = {}
+            if not isinstance(s_dict, dict):
+                s_dict = {}
+            s_dict["field_rules"] = field_rules
+            cursor.execute("UPDATE organizations SET settings = ? WHERE id = ?", (json.dumps(s_dict, ensure_ascii=False), org_id))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def check_org_member_status(org_id: str, user_id: str) -> Dict[str, Any]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+            row = cursor.fetchone()
+            if not row:
+                return {
+                    "is_member": False,
+                    "status": "none",
+                    "is_valid": False,
+                    "days_remaining": 0,
+                    "missing_fields": []
+                }
+
+            member = dict(row)
+            status = member.get("status") or "temporary"
+            role = member.get("role") or "member"
+            joined_at_str = member.get("joined_at")
+
+            dec_name = decrypt_pii(member.get("real_name")) or ""
+            dec_dob = decrypt_pii(member.get("date_of_birth")) or ""
+            dec_phone = decrypt_pii(member.get("phone")) or ""
+            dec_id_card = decrypt_pii(member.get("id_card")) or ""
+            gender = member.get("gender") or ""
+            class_name = member.get("class_name") or ""
+
+            extra_data = {}
+            if member.get("extra_data"):
+                try:
+                    extra_data = json.loads(member["extra_data"])
+                except Exception:
+                    extra_data = {}
+
+            field_values = {
+                "real_name": dec_name,
+                "gender": gender,
+                "date_of_birth": dec_dob,
+                "class_name": class_name,
+                "phone": dec_phone,
+                "id_card": dec_id_card,
+                **extra_data
+            }
+
+            rules = LocalStore.get_org_field_rules(org_id)
+            missing_fields = []
+            for r in rules:
+                if r.get("required"):
+                    f = r["field"]
+                    val = field_values.get(f)
+                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                        missing_fields.append({"field": f, "label": r.get("label", f)})
+
+            if role in ("owner", "admin"):
+                if status != "confirmed":
+                    cursor.execute("UPDATE organization_members SET status = 'confirmed' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                    conn.commit()
+                    status = "confirmed"
+                return {
+                    "is_member": True,
+                    "status": "confirmed",
+                    "role": role,
+                    "is_valid": True,
+                    "days_remaining": None,
+                    "missing_fields": missing_fields
+                }
+
+            if status == "confirmed":
+                return {
+                    "is_member": True,
+                    "status": "confirmed",
+                    "role": role,
+                    "is_valid": True,
+                    "days_remaining": None,
+                    "missing_fields": missing_fields
+                }
+
+            joined_at_dt = None
+            if joined_at_str:
+                joined_at_dt = parse_iso_datetime(joined_at_str)
+
+            now_utc = datetime.now(timezone.utc)
+            if joined_at_dt:
+                if joined_at_dt.tzinfo is None:
+                    joined_at_dt = joined_at_dt.replace(tzinfo=timezone.utc)
+                elapsed_seconds = (now_utc - joined_at_dt).total_seconds()
+                elapsed_days = elapsed_seconds / 86400.0
+                remaining_days = max(0, math.ceil(14.0 - elapsed_days))
+                is_expired = elapsed_days >= 14.0
+            else:
+                elapsed_days = 0
+                remaining_days = 14
+                is_expired = False
+
+            if is_expired:
+                if status != "expired":
+                    cursor.execute("UPDATE organization_members SET status = 'expired' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                    conn.commit()
+                return {
+                    "is_member": True,
+                    "status": "expired",
+                    "role": role,
+                    "is_valid": False,
+                    "days_remaining": 0,
+                    "missing_fields": missing_fields
+                }
+
+            current_status = "temporary" if len(missing_fields) > 0 else "pending"
+            if member.get("status") != current_status:
+                cursor.execute("UPDATE organization_members SET status = ? WHERE org_id = ? AND user_id = ?", (current_status, org_id, user_id))
+                conn.commit()
+
+            return {
+                "is_member": True,
+                "status": current_status,
+                "role": role,
+                "is_valid": True,
+                "days_remaining": remaining_days,
+                "missing_fields": missing_fields
+            }
+
+    @staticmethod
+    def validate_sub_club_join_eligibility(club_dict: Dict[str, Any], user_id: str):
+        org_id = club_dict.get("org_id")
+        if not org_id:
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM organizations WHERE id = ?", (org_id,))
+            org_row = cursor.fetchone()
+            org_name = org_row["name"] if org_row else "大群体"
+
+        status_info = LocalStore.check_org_member_status(org_id, user_id)
+        if not status_info.get("is_member"):
+            raise ValueError(f"加入【{club_dict.get('name')}】失败：该跑团隶属于【{org_name}】大群。您尚未加入该大群，请先加入大群并完成实名资料审核！")
+
+        status = status_info.get("status")
+        if status == "expired":
+            raise ValueError(f"加入【{club_dict.get('name')}】失败：您在【{org_name}】大群的临时身份已过期（超过2周未获审核）。无法加入下属跑团，请联系管理员或重新认证！")
+        elif status == "temporary":
+            missing = "、".join([m["label"] for m in status_info.get("missing_fields", [])]) or "必填资料"
+            raise ValueError(f"加入【{club_dict.get('name')}】失败：该跑团隶属于【{org_name}】大群。您当前为临时人员，尚未填写全部必填资料（缺少：{missing}）并获得管理员审核批准，暂无法加入下属跑团！")
+        elif status == "pending":
+            raise ValueError(f"加入【{club_dict.get('name')}】失败：该跑团隶属于【{org_name}】大群。您的入群资料已提交，正等待大群管理员审核批准，审批通过后方可加入下属跑团！")
+        elif status != "confirmed":
+            raise ValueError(f"加入【{club_dict.get('name')}】失败：根据【{org_name}】群规，必须在完成全部必填资料并获得管理员核验批准后方可加入下属跑团（当前状态：{status}）。")
+
+    @staticmethod
     def get_organization(org_id: str) -> Optional[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -3608,6 +3855,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d.pop("invite_code", None)
+                d["field_rules"] = LocalStore.get_org_field_rules(org_id)
                 return d
             return None
 
@@ -3628,7 +3876,11 @@ class LocalStore:
                 WHERE o.id = ?
             """, (org_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if row:
+                d = dict(row)
+                d["field_rules"] = LocalStore.get_org_field_rules(org_id)
+                return d
+            return None
 
     @staticmethod
     def get_organization_by_code(code: str) -> Optional[Dict[str, Any]]:
@@ -3642,6 +3894,7 @@ class LocalStore:
             if row:
                 d = dict(row)
                 d.pop("invite_code", None)
+                d["field_rules"] = LocalStore.get_org_field_rules(d["id"])
                 return d
             return None
 
@@ -3649,56 +3902,126 @@ class LocalStore:
     def join_organization(
         user_id: str,
         invite_code: str,
-        real_name: str,
-        gender: str,
-        date_of_birth: str,
-        class_name: str,
+        real_name: Optional[str] = None,
+        gender: Optional[str] = "male",
+        date_of_birth: Optional[str] = None,
+        class_name: Optional[str] = None,
         phone: Optional[str] = None,
-        id_card: Optional[str] = None
+        id_card: Optional[str] = None,
+        extra_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Validates invite code, registers member into organization_members with encrypted real name,
-        gender, date_of_birth, class_name, phone, id_card, and synchronizes profile basics.
+        Validates invite code, registers member into organization_members with encrypted sensitive fields,
+        and dynamically determines status (temporary / pending / confirmed) based on field rules.
         """
         clean_code = (invite_code or "").strip().upper()
         clean_name = (real_name or "").strip()
         clean_dob = (date_of_birth or "").strip()
         clean_phone = (phone or "").strip()
         clean_id_card = (id_card or "").strip()
-
-        enc_real_name = encrypt_pii(clean_name)
-        enc_dob = encrypt_pii(clean_dob)
-        enc_phone = encrypt_pii(clean_phone) if clean_phone else ""
-        enc_id_card = encrypt_pii(clean_id_card) if clean_id_card else ""
+        clean_class = (class_name or "").strip()
+        clean_gender = (gender or "male").strip()
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM organizations WHERE UPPER(invite_code) = ?", (clean_code,))
-            org = cursor.fetchone()
-            if not org:
+            org_row = cursor.fetchone()
+            if not org_row:
                 raise ValueError("无效的大组织邀请码，请向组织管理员核实后重新输入！")
+            org = dict(org_row)
 
             org_id = org["id"]
             membership_id = f"{org_id}_{user_id}"
             now = datetime.utcnow().isoformat() + "Z"
 
             cursor.execute("SELECT * FROM organization_members WHERE id = ?", (membership_id,))
-            existing = cursor.fetchone()
-            role = existing["role"] if existing else "member"
-            status = "confirmed"
+            existing_row = cursor.fetchone()
+            existing = dict(existing_row) if existing_row else None
+
+            if not clean_name and existing:
+                clean_name = decrypt_pii(existing["real_name"]) or ""
+            if not clean_dob and existing:
+                clean_dob = decrypt_pii(existing["date_of_birth"]) or ""
+            if not clean_phone and existing:
+                clean_phone = decrypt_pii(existing["phone"]) or ""
+            if not clean_id_card and existing:
+                clean_id_card = decrypt_pii(existing["id_card"]) or ""
+            if not clean_class and existing:
+                clean_class = existing["class_name"] or ""
+            if not clean_gender and existing:
+                clean_gender = existing["gender"] or "male"
+
+            if not clean_name:
+                cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (user_id,))
+                p_tmp = cursor.fetchone()
+                clean_name = p_tmp["display_name"] if p_tmp and p_tmp["display_name"] else "跑友"
+
+            role = "owner" if org.get("owner_id") == user_id else (existing["role"] if existing else "member")
+
+            merged_extra = {}
+            if existing and existing["extra_data"]:
+                try:
+                    merged_extra = json.loads(existing["extra_data"])
+                except Exception:
+                    merged_extra = {}
+            if extra_data:
+                merged_extra.update(extra_data)
+
+            # Check field rules
+            rules = LocalStore.get_org_field_rules(org_id)
+            field_values = {
+                "real_name": clean_name,
+                "gender": clean_gender,
+                "date_of_birth": clean_dob,
+                "class_name": clean_class,
+                "phone": clean_phone,
+                "id_card": clean_id_card,
+                **merged_extra
+            }
+            missing_fields = []
+            for r in rules:
+                if r.get("required"):
+                    f = r["field"]
+                    val = field_values.get(f)
+                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                        missing_fields.append({"field": f, "label": r.get("label", f)})
+
+            if role in ("owner", "admin") or (existing and existing["status"] == "confirmed"):
+                status = "confirmed"
+            elif len(missing_fields) > 0:
+                status = "temporary"
+            else:
+                status = "pending"
+
+            # If rejoining after expiry, give fresh joined_at
+            if existing and existing["status"] == "expired":
+                joined_at = now
+            elif existing and existing["joined_at"]:
+                joined_at = existing["joined_at"]
+            else:
+                joined_at = now
+
+            confirmed_at = now if status == "confirmed" else (existing["confirmed_at"] if existing and status == "confirmed" else None)
+            confirmed_by = (org.get("owner_id") or "admin") if status == "confirmed" else (existing["confirmed_by"] if existing and status == "confirmed" else None)
+
+            enc_real_name = encrypt_pii(clean_name)
+            enc_dob = encrypt_pii(clean_dob)
+            enc_phone = encrypt_pii(clean_phone) if clean_phone else ""
+            enc_id_card = encrypt_pii(clean_id_card) if clean_id_card else ""
+            extra_str = json.dumps(merged_extra, ensure_ascii=False)
 
             cursor.execute("""
                 INSERT OR REPLACE INTO organization_members (
-                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, id_card, role, status, joined_at, confirmed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT joined_at FROM organization_members WHERE id = ?), ?), ?)
+                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, id_card, role, status, joined_at, confirmed_at, confirmed_by, extra_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                membership_id, org_id, user_id, enc_real_name, gender, enc_dob, class_name.strip(),
-                enc_phone, enc_id_card, role, status, membership_id, now, now
+                membership_id, org_id, user_id, enc_real_name, clean_gender, enc_dob, clean_class,
+                enc_phone, enc_id_card, role, status, joined_at, confirmed_at, confirmed_by, extra_str
             ))
 
             # Sync real_name, gender, date_of_birth, phone, id_card into profiles table
-            cursor.execute("SELECT display_name, gender, date_of_birth, phone, id_card, real_name FROM profiles WHERE id = ?", (user_id,))
+            cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (user_id,))
             p_row = cursor.fetchone()
             if p_row:
                 cur_name = p_row["display_name"]
@@ -3709,23 +4032,189 @@ class LocalStore:
                         phone = CASE WHEN ? != '' THEN ? ELSE phone END,
                         id_card = CASE WHEN ? != '' THEN ? ELSE id_card END
                     WHERE id = ?
-                """, (new_name, gender, enc_dob, enc_real_name, enc_phone, enc_phone, enc_id_card, enc_id_card, user_id))
+                """, (new_name, clean_gender, enc_dob, enc_real_name, enc_phone, enc_phone, enc_id_card, enc_id_card, user_id))
 
             conn.commit()
+
+            joined_dt = parse_iso_datetime(joined_at)
+            elapsed_days = (datetime.now(timezone.utc) - joined_dt).total_seconds() / 86400.0 if joined_dt else 0
+            remaining_days = max(0, math.ceil(14.0 - elapsed_days)) if status in ("temporary", "pending") else None
 
             return {
                 "org_id": org_id,
                 "org_name": org["name"],
                 "org_logo": org["logo_url"],
                 "real_name": clean_name,
-                "class_name": class_name.strip(),
-                "gender": gender,
+                "class_name": clean_class,
+                "gender": clean_gender,
                 "date_of_birth": clean_dob,
                 "phone": clean_phone,
                 "id_card": clean_id_card,
                 "status": status,
-                "role": role
+                "role": role,
+                "days_remaining": remaining_days,
+                "missing_fields": missing_fields,
+                "extra_data": merged_extra
             }
+
+    @staticmethod
+    def update_org_member_profile(org_id: str, user_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            membership_id = f"{org_id}_{user_id}"
+            cursor.execute("SELECT * FROM organization_members WHERE id = ?", (membership_id,))
+            existing = cursor.fetchone()
+            if not existing:
+                raise ValueError("您尚未加入该大群体")
+
+            member = dict(existing)
+            status_info = LocalStore.check_org_member_status(org_id, user_id)
+            if status_info.get("status") == "expired":
+                raise ValueError("您在大群体的临时访问权限已过期（超过2周未完成审核）。如需继续参与，请联系管理员或重新输入邀请码加入！")
+
+            clean_name = data.get("real_name")
+            if clean_name is not None:
+                clean_name = clean_name.strip()
+            else:
+                clean_name = decrypt_pii(member.get("real_name")) or ""
+
+            clean_dob = data.get("date_of_birth")
+            if clean_dob is not None:
+                clean_dob = clean_dob.strip()
+            else:
+                clean_dob = decrypt_pii(member.get("date_of_birth")) or ""
+
+            clean_phone = data.get("phone")
+            if clean_phone is not None:
+                clean_phone = clean_phone.strip()
+            else:
+                clean_phone = decrypt_pii(member.get("phone")) or ""
+
+            clean_id_card = data.get("id_card")
+            if clean_id_card is not None:
+                clean_id_card = clean_id_card.strip()
+            else:
+                clean_id_card = decrypt_pii(member.get("id_card")) or ""
+
+            clean_class = data.get("class_name")
+            if clean_class is not None:
+                clean_class = clean_class.strip()
+            else:
+                clean_class = member.get("class_name") or ""
+
+            clean_gender = data.get("gender")
+            if clean_gender is not None:
+                clean_gender = clean_gender.strip()
+            else:
+                clean_gender = member.get("gender") or "male"
+
+            merged_extra = {}
+            if member.get("extra_data"):
+                try:
+                    merged_extra = json.loads(member["extra_data"])
+                except Exception:
+                    merged_extra = {}
+            if data.get("extra_data"):
+                merged_extra.update(data["extra_data"])
+
+            rules = LocalStore.get_org_field_rules(org_id)
+            field_values = {
+                "real_name": clean_name,
+                "gender": clean_gender,
+                "date_of_birth": clean_dob,
+                "class_name": clean_class,
+                "phone": clean_phone,
+                "id_card": clean_id_card,
+                **merged_extra
+            }
+            missing_fields = []
+            for r in rules:
+                if r.get("required"):
+                    f = r["field"]
+                    val = field_values.get(f)
+                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                        missing_fields.append({"field": f, "label": r.get("label", f)})
+
+            role = member.get("role") or "member"
+            current_status = member.get("status")
+            if role in ("owner", "admin") or current_status == "confirmed":
+                status = "confirmed"
+            elif len(missing_fields) > 0:
+                status = "temporary"
+            else:
+                status = "pending"
+
+            enc_real_name = encrypt_pii(clean_name)
+            enc_dob = encrypt_pii(clean_dob)
+            enc_phone = encrypt_pii(clean_phone) if clean_phone else ""
+            enc_id_card = encrypt_pii(clean_id_card) if clean_id_card else ""
+            extra_str = json.dumps(merged_extra, ensure_ascii=False)
+
+            cursor.execute("""
+                UPDATE organization_members
+                SET real_name = ?, gender = ?, date_of_birth = ?, class_name = ?,
+                    phone = ?, id_card = ?, status = ?, extra_data = ?
+                WHERE id = ?
+            """, (enc_real_name, clean_gender, enc_dob, clean_class, enc_phone, enc_id_card, status, extra_str, membership_id))
+
+            cursor.execute("""
+                UPDATE profiles
+                SET real_name = ?, gender = ?, date_of_birth = ?,
+                    phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                    id_card = CASE WHEN ? != '' THEN ? ELSE id_card END
+                WHERE id = ?
+            """, (enc_real_name, clean_gender, enc_dob, enc_phone, enc_phone, enc_id_card, enc_id_card, user_id))
+
+            conn.commit()
+
+            joined_at = member.get("joined_at")
+            joined_dt = parse_iso_datetime(joined_at)
+            elapsed_days = (datetime.now(timezone.utc) - joined_dt).total_seconds() / 86400.0 if joined_dt else 0
+            remaining_days = max(0, math.ceil(14.0 - elapsed_days)) if status in ("temporary", "pending") else None
+
+            return {
+                "org_id": org_id,
+                "user_id": user_id,
+                "real_name": clean_name,
+                "class_name": clean_class,
+                "gender": clean_gender,
+                "date_of_birth": clean_dob,
+                "phone": clean_phone,
+                "id_card": clean_id_card,
+                "status": status,
+                "days_remaining": remaining_days,
+                "missing_fields": missing_fields,
+                "extra_data": merged_extra
+            }
+
+    @staticmethod
+    def assign_member_to_sub_club(user_id: str, club_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM clubs WHERE id = ?", (club_id,))
+            club = cursor.fetchone()
+            if not club:
+                return None
+            club_dict = dict(club)
+            org_id = club_dict.get("org_id")
+            now = datetime.utcnow().isoformat() + "Z"
+            
+            # If club belongs to an org, ensure member is confirmed in that org
+            if org_id:
+                cursor.execute("SELECT * FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                om = cursor.fetchone()
+                if om:
+                    cursor.execute("UPDATE organization_members SET status = 'confirmed', confirmed_at = ?, confirmed_by = 'admin' WHERE org_id = ? AND user_id = ?", (now, org_id, user_id))
+
+            membership_id = f"{club_id}_{user_id}"
+            cursor.execute("""
+                INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
+                VALUES (?, ?, ?, COALESCE((SELECT role FROM club_memberships WHERE id = ?), 'member'), 'active', ?, 1)
+            """, (membership_id, club_id, user_id, membership_id, now))
+            conn.commit()
+            return club_dict
 
     @staticmethod
     def get_user_organizations(user_id: str) -> List[Dict[str, Any]]:
@@ -3734,7 +4223,7 @@ class LocalStore:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT o.id, o.name, o.logo_url, o.description, o.city,
-                       m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at
+                       m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at, m.extra_data
                 FROM organization_members m
                 JOIN organizations o ON m.org_id = o.id
                 WHERE m.user_id = ?
@@ -3751,6 +4240,23 @@ class LocalStore:
                 d["age_group"] = compute_age_group(d.get("date_of_birth"))
                 dob_val = d.get("date_of_birth") or ""
                 d["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
+                
+                # Check status and expiry
+                status_info = LocalStore.check_org_member_status(d["id"], user_id)
+                d["status"] = status_info.get("status")
+                d["days_remaining"] = status_info.get("days_remaining")
+                d["missing_fields"] = status_info.get("missing_fields", [])
+                d["is_valid"] = status_info.get("is_valid", True)
+                d["is_expired"] = bool(status_info.get("status") == "expired")
+
+                extra = {}
+                if d.get("extra_data"):
+                    try:
+                        extra = json.loads(d["extra_data"])
+                    except Exception:
+                        pass
+                d["extra_data"] = extra
+
                 result.append(d)
             return result
 
@@ -3776,11 +4282,35 @@ class LocalStore:
                 cursor.execute("SELECT club_id FROM club_memberships WHERE user_id = ? AND status = 'active'", (user_id,))
                 user_club_ids = {r[0] for r in cursor.fetchall()}
 
+            status_info = None
+            if user_id:
+                status_info = LocalStore.check_org_member_status(org_id, user_id)
+
             result = []
             for r in rows:
                 d = dict(r)
                 d.pop("invite_code", None)
                 d["is_member"] = d["id"] in user_club_ids
+                if status_info:
+                    st = status_info.get("status")
+                    d["can_join"] = bool(st == "confirmed")
+                    d["user_org_status"] = st
+                    d["user_org_days_remaining"] = status_info.get("days_remaining")
+                    if st != "confirmed":
+                        if st == "temporary":
+                            missing_labels = "、".join([m["label"] for m in status_info.get("missing_fields", [])]) or "必填字段"
+                            d["join_restriction_reason"] = f"临时人员，缺少必填资料（{missing_labels}）"
+                        elif st == "pending":
+                            d["join_restriction_reason"] = "已填齐资料，等待大群管理员审核中"
+                        elif st == "expired":
+                            d["join_restriction_reason"] = "大群临时权限已到期"
+                        else:
+                            d["join_restriction_reason"] = "尚未完成大群实名审核"
+                    else:
+                        d["join_restriction_reason"] = None
+                else:
+                    d["can_join"] = False
+                    d["join_restriction_reason"] = "请先加入大群"
                 result.append(d)
             return result
 
@@ -3791,7 +4321,7 @@ class LocalStore:
             cursor = conn.cursor()
             query = """
                 SELECT m.id, m.org_id, m.user_id, m.real_name, m.gender, m.date_of_birth, m.class_name,
-                       m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at,
+                       m.phone, m.id_card, m.role, m.status, m.joined_at, m.confirmed_at, m.extra_data,
                        p.avatar_url, p.display_name, p.marathon_pb, p.half_pb
                 FROM organization_members m
                 LEFT JOIN profiles p ON m.user_id = p.id
@@ -3816,6 +4346,20 @@ class LocalStore:
                 d["age_group"] = compute_age_group(d.get("date_of_birth"))
                 dob_val = d.get("date_of_birth") or ""
                 d["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
+
+                status_info = LocalStore.check_org_member_status(org_id, d["user_id"])
+                d["status"] = status_info.get("status")
+                d["days_remaining"] = status_info.get("days_remaining")
+                d["missing_fields"] = status_info.get("missing_fields", [])
+                d["is_valid"] = status_info.get("is_valid", True)
+
+                extra = {}
+                if d.get("extra_data"):
+                    try:
+                        extra = json.loads(d["extra_data"])
+                    except Exception:
+                        pass
+                d["extra_data"] = extra
 
                 if search:
                     s = search.strip().lower()

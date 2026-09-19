@@ -26,7 +26,11 @@ import {
   Search,
   CheckCircle2,
   Sparkles,
-  School
+  School,
+  ShieldCheck,
+  Clock,
+  FileText,
+  Save
 } from "lucide-react";
 
 export default function AdminPage() {
@@ -77,6 +81,10 @@ export default function AdminPage() {
   const [showEditOrgModal, setShowEditOrgModal] = useState(false);
   const [showOrgRosterModal, setShowOrgRosterModal] = useState(false);
   const [showOrgClubsModal, setShowOrgClubsModal] = useState(false);
+  const [showOrgFieldRulesModal, setShowOrgFieldRulesModal] = useState(false);
+  const [orgFieldRules, setOrgFieldRules] = useState<any[]>([]);
+  const [loadingFieldRules, setLoadingFieldRules] = useState(false);
+  const [savingFieldRules, setSavingFieldRules] = useState(false);
   const [activeOrg, setActiveOrg] = useState<any>(null);
 
   // Org Form states
@@ -316,6 +324,39 @@ export default function AdminPage() {
       setOrgSubClubs(res.data?.sub_clubs || []);
     } catch (err: any) {
       setActionErrorMsg("加载下属分跑团失败");
+    }
+  }
+
+  async function openOrgFieldRulesModal(org: any) {
+    setActiveOrg(org);
+    setShowOrgFieldRulesModal(true);
+    setLoadingFieldRules(true);
+    try {
+      const res = await axios.get(`/api/org/${org.id}/field-rules`);
+      setOrgFieldRules(res.data?.field_rules || []);
+    } catch (err: any) {
+      setActionErrorMsg("加载准入字段规则失败");
+    } finally {
+      setLoadingFieldRules(false);
+    }
+  }
+
+  async function handleSaveFieldRules() {
+    if (!adminToken || !activeOrg) return;
+    setSavingFieldRules(true);
+    try {
+      await axios.put(
+        `/api/org/${activeOrg.id}/field-rules`,
+        { field_rules: orgFieldRules },
+        { headers: { Authorization: `Bearer ${adminToken}` } }
+      );
+      setActionSuccessMsg("准入必填字段规则更新成功！");
+      setShowOrgFieldRulesModal(false);
+      loadAdminData(adminToken);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "保存准入规则失败");
+    } finally {
+      setSavingFieldRules(false);
     }
   }
 
@@ -834,6 +875,13 @@ export default function AdminPage() {
                             挂靠跑团 ({org.sub_clubs_count || 0})
                           </button>
                         </div>
+                        <button
+                          onClick={() => openOrgFieldRulesModal(org)}
+                          className="w-full py-2 px-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          准入必填字段配置
+                        </button>
                         <button
                           onClick={() => openEditOrgModal(org)}
                           className="w-full py-2 px-3 rounded-xl bg-white/5 border border-white/10 text-zinc-300 hover:text-white hover:bg-white/10 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
@@ -1797,13 +1845,37 @@ export default function AdminPage() {
                             )}
                           </td>
                           <td className="p-3.5">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              m.status === 'confirmed'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            }`}>
-                              {m.status === 'confirmed' ? '✓ 已核验确认' : '⏳ 待核对'}
-                            </span>
+                            {m.status === 'confirmed' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                ✓ 正式戈友 (已批准)
+                              </span>
+                            ) : m.status === 'pending' ? (
+                              <div className="space-y-1">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                                  ⏳ 待审核 (剩 {m.remaining_days ?? 14} 天)
+                                </span>
+                                <span className="block text-[10px] text-emerald-400">必填项已齐，待核验</span>
+                              </div>
+                            ) : m.status === 'temporary' ? (
+                              <div className="space-y-1">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                  ⚠️ 临时人员 (剩 {m.remaining_days ?? 14} 天)
+                                </span>
+                                {m.missing_required_fields && m.missing_required_fields.length > 0 && (
+                                  <span className="block text-[10px] text-rose-400">
+                                    缺: {m.missing_required_fields.join("、")}
+                                  </span>
+                                )}
+                              </div>
+                            ) : m.status === 'expired' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                🚫 已过期 (禁止进群)
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-500/20 text-zinc-400 border border-zinc-500/30">
+                                未知状态
+                              </span>
+                            )}
                           </td>
                           <td className="p-3.5 text-right">
                             {m.status !== 'confirmed' ? (
@@ -1812,12 +1884,12 @@ export default function AdminPage() {
                                 disabled={confirmingUid === m.user_id}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition disabled:opacity-50"
                               >
-                                {confirmingUid === m.user_id ? "确认中..." : "核验通过"}
+                                {confirmingUid === m.user_id ? "核验中..." : (m.status === 'expired' ? "恢复并批准" : "核验并批准")}
                               </button>
                             ) : (
                               <span className="text-zinc-600 text-xs flex items-center justify-end gap-1">
                                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                已通过
+                                正式成员
                               </span>
                             )}
                           </td>
@@ -1960,6 +2032,147 @@ export default function AdminPage() {
                         </div>
                       ))}
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Modal 8: Org Field Rules Config Modal (大群准入字段逐个自定义配置) ── */}
+        {showOrgFieldRulesModal && activeOrg && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="relative w-full max-w-2xl bg-[#141416] border border-purple-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl max-h-[90vh] flex flex-col">
+              <button
+                onClick={() => setShowOrgFieldRulesModal(false)}
+                className="absolute top-6 right-6 p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">
+                      【{activeOrg.name}】大群准入必填字段配置
+                    </h3>
+                    <span className="text-xs text-purple-300 font-medium">逐个字段自定义准入门槛与加入规则</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Policy Explanatory Box */}
+              <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/20 mb-4 space-y-1 text-xs">
+                <div className="flex items-center gap-1.5 font-bold text-purple-300">
+                  <Clock className="w-4 h-4 text-purple-400" />
+                  <span>复旦戈准入规则与 14 天临时状态说明：</span>
+                </div>
+                <p className="text-zinc-300 text-[11px] leading-relaxed">
+                  管理员可逐个字段开启为<span className="text-purple-300 font-bold">【必须】</span>或<span className="text-zinc-400 font-bold">【非必须】</span>。
+                  成员必须完成全部必须字段且获得管理员审核批准后，方可加入下属跑团；否则仅为临时人员（有效期 2 周/14天），到期该用户将被禁止进入大群。
+                </p>
+              </div>
+
+              {/* Rules List */}
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2.5">
+                {loadingFieldRules ? (
+                  <div className="p-12 text-center text-zinc-500 text-sm flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-purple-400" />
+                    <span>正在加载准入规则...</span>
+                  </div>
+                ) : (
+                  orgFieldRules.map((rule, idx) => (
+                    <div
+                      key={rule.field_key || idx}
+                      className={`flex items-center justify-between p-3.5 rounded-2xl border transition ${
+                        rule.required
+                          ? "bg-purple-500/[0.04] border-purple-500/30"
+                          : "bg-white/[0.02] border-white/5"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                            rule.required
+                              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                              : "bg-white/5 text-zinc-500"
+                          }`}
+                        >
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-sm">{rule.label}</span>
+                            <span className="font-mono text-[10px] text-zinc-500">
+                              {rule.field_key}
+                            </span>
+                            {rule.required ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                必须完成
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-500">
+                                选填项
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-0.5">
+                            {rule.description || "成员加入及资料登记字段"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Toggle Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = orgFieldRules.map((r, i) =>
+                            i === idx ? { ...r, required: !r.required } : r
+                          );
+                          setOrgFieldRules(updated);
+                        }}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                          rule.required
+                            ? "bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20"
+                            : "bg-white/10 hover:bg-white/15 text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>{rule.required ? "设为必须 (必填)" : "设为非必须 (选填)"}</span>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Bottom Actions */}
+              <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between">
+                <span className="text-xs text-zinc-500">
+                  当前必须字段数:{" "}
+                  <span className="text-purple-400 font-bold">
+                    {orgFieldRules.filter((r) => r.required).length}
+                  </span>{" "}
+                  / {orgFieldRules.length} 项
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgFieldRulesModal(false)}
+                    className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-bold transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveFieldRules}
+                    disabled={savingFieldRules || loadingFieldRules}
+                    className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-lg shadow-purple-600/25 flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{savingFieldRules ? "保存中..." : "保存准入规则"}</span>
+                  </button>
                 </div>
               </div>
             </div>

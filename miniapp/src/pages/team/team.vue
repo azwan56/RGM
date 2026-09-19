@@ -19,7 +19,7 @@
           <text class="org-badge-icon">🏛️</text>
           <text class="org-badge-title">{{ currentOrg.name }} 大群体</text>
           <text class="org-auth-status" :class="currentOrg.status">
-            {{ currentOrg.status === 'confirmed' ? '✓ 戈友已认证' : '⏳ 待核对' }}
+            {{ currentOrg.status === 'confirmed' ? '✓ 戈友已认证' : currentOrg.status === 'temporary' ? `⚠️ 临时人员 (剩${currentOrg.remaining_days ?? 14}天)` : currentOrg.status === 'pending' ? `⏳ 待审核 (剩${currentOrg.remaining_days ?? 14}天)` : currentOrg.status === 'expired' ? '🚫 已过期' : '⏳ 待核对' }}
           </text>
         </view>
         <view class="org-right-actions">
@@ -29,10 +29,36 @@
         </view>
       </view>
       <view class="org-meta-pill-row">
-        <text class="org-meta-pill">👤 {{ currentOrg.real_name || '已认证' }}</text>
-        <text class="org-meta-pill highlight">🎓 {{ currentOrg.class_name || '复旦商学院' }}</text>
+        <text class="org-meta-pill">👤 {{ currentOrg.real_name || '未填实名' }}</text>
+        <text class="org-meta-pill highlight">🎓 {{ currentOrg.class_name || '商学院班级' }}</text>
         <text class="org-meta-pill">🏅 {{ currentOrg.age_group || getAgeGroup(currentOrg.date_of_birth) }}</text>
         <text class="org-meta-pill">🚻 {{ currentOrg.gender === 'female' ? '女' : '男' }}</text>
+      </view>
+
+      <!-- 临时人员 / 待审核 / 过期 醒目标识栏 -->
+      <view v-if="currentOrg.status === 'temporary'" class="org-status-alert-strip temp-strip">
+        <view class="osas-left">
+          <text class="osas-title">⚠️ 临时人员状态（2周到期倒计时剩余 {{ currentOrg.remaining_days ?? 14 }} 天）</text>
+          <text class="osas-desc">
+            {{ currentOrg.missing_required_fields && currentOrg.missing_required_fields.length > 0 
+                ? '尚缺必填项：' + currentOrg.missing_required_fields.join('、') + '。完成所有必须字段并经审核后方可加入下属跑团，逾期将禁止进入大群。'
+                : '必填资料未完成，请尽快补齐资料并等待管理员审核批准以加入下属跑团。' }}
+          </text>
+        </view>
+        <button class="osas-btn" @click="openOrgEditProfileModal">✏️ 补齐必填资料</button>
+      </view>
+      <view v-else-if="currentOrg.status === 'pending'" class="org-status-alert-strip pending-strip">
+        <view class="osas-left">
+          <text class="osas-title">⏳ 必填资料已齐，等待管理员审核批准（剩余 {{ currentOrg.remaining_days ?? 14 }} 天）</text>
+          <text class="osas-desc">管理员审核批准后，您即可自由加入【{{ currentOrg.name }}】下属各分跑团。</text>
+        </view>
+        <button class="osas-btn outline" @click="openOrgEditProfileModal">修改资料</button>
+      </view>
+      <view v-else-if="currentOrg.status === 'expired'" class="org-status-alert-strip expired-strip">
+        <view class="osas-left">
+          <text class="osas-title">🚫 临时状态已超 14 天到期</text>
+          <text class="osas-desc">未在有效期内获得管理员批准，已被禁止访问大群。请重新凭邀请码认证申请或联系管理员。</text>
+        </view>
       </view>
     </view>
 
@@ -638,8 +664,8 @@
       <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
-            <text class="modal-title">加入大群体 · 戈友实名认证</text>
-            <text class="count-pill">凭专属码认证</text>
+            <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
+            <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "大群体") : "凭专属码认证" }}</text>
           </view>
           <text class="close-btn" @click="showOrgJoinModal = false">✕</text>
         </view>
@@ -656,7 +682,7 @@
             </text>
           </view>
 
-          <view class="form-group">
+          <view v-if="!isUpdatingOrgProfile" class="form-group">
             <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
             <input
               class="text-input"
@@ -777,8 +803,58 @@
             </view>
           </view>
 
+          <view class="form-group">
+            <text class="input-label">紧急联系人与电话 (选填)</text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="例如: 张三 13800000000"
+              v-model="orgJoinForm.emergency_contact"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">跑鞋尺码 (EUR, 选填)</text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="例如: 42 / 42.5"
+              v-model="orgJoinForm.running_shoe_size"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">队服尺码 (选填)</text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="例如: M / L / XL / 2XL"
+              v-model="orgJoinForm.jersey_size"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">全马最好成绩 (PB, 选填)</text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="例如: 3:25:00"
+              v-model="orgJoinForm.full_marathon_pb"
+            />
+          </view>
+
+          <view class="form-group">
+            <text class="input-label">健康与参赛声明 (选填)</text>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="本人确认身体健康，无不适合高强度跑步的疾病"
+              v-model="orgJoinForm.health_declaration"
+            />
+          </view>
+
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
-            提交认证资料并加入大群体
+            {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入大群体" }}
           </button>
         </view>
       </view>
@@ -1321,8 +1397,14 @@ const orgJoinForm = ref({
   date_of_birth: "1988-08-08",
   class_name: "",
   phone: "",
-  id_card: ""
+  id_card: "",
+  emergency_contact: "",
+  running_shoe_size: "",
+  jersey_size: "",
+  full_marathon_pb: "",
+  health_declaration: "本人确认身体健康，无不适合高强度跑步的疾病。"
 });
+const isUpdatingOrgProfile = ref(false);
 
 const showOrgRealName = ref(false);
 const showOrgDob = ref(false);
@@ -1343,6 +1425,7 @@ function getAgeGroup(dob?: string, fallbackGroup?: string): string {
 }
 
 function openOrgJoinModal() {
+  isUpdatingOrgProfile.value = false;
   const u = user.value || getStoredUser();
   if (u) {
     orgJoinForm.value.real_name =
@@ -1351,7 +1434,30 @@ function openOrgJoinModal() {
     orgJoinForm.value.date_of_birth = u.date_of_birth || "1988-08-08";
     orgJoinForm.value.phone = u.phone || "";
     orgJoinForm.value.id_card = u.id_card || "";
+    orgJoinForm.value.emergency_contact = "";
+    orgJoinForm.value.running_shoe_size = "";
+    orgJoinForm.value.jersey_size = "";
+    orgJoinForm.value.full_marathon_pb = "";
+    orgJoinForm.value.health_declaration = "本人确认身体健康，无不适合高强度跑步的疾病。";
   }
+  showOrgJoinModal.value = true;
+}
+
+function openOrgEditProfileModal() {
+  if (!currentOrg.value) return;
+  isUpdatingOrgProfile.value = true;
+  orgJoinForm.value.invite_code = currentOrg.value.invite_code || "";
+  orgJoinForm.value.real_name = currentOrg.value.real_name || "";
+  orgJoinForm.value.gender = currentOrg.value.gender || "male";
+  orgJoinForm.value.date_of_birth = currentOrg.value.date_of_birth || "1988-08-08";
+  orgJoinForm.value.class_name = currentOrg.value.class_name || "";
+  orgJoinForm.value.phone = currentOrg.value.phone || "";
+  orgJoinForm.value.id_card = currentOrg.value.id_card || "";
+  orgJoinForm.value.emergency_contact = currentOrg.value.emergency_contact || "";
+  orgJoinForm.value.running_shoe_size = currentOrg.value.running_shoe_size || "";
+  orgJoinForm.value.jersey_size = currentOrg.value.jersey_size || "";
+  orgJoinForm.value.full_marathon_pb = currentOrg.value.full_marathon_pb || "";
+  orgJoinForm.value.health_declaration = currentOrg.value.health_declaration || "本人确认身体健康，无不适合高强度跑步的疾病。";
   showOrgJoinModal.value = true;
 }
 
@@ -1365,44 +1471,67 @@ async function submitOrgJoin() {
     uni.showToast({ title: "请先登录", icon: "none" });
     return;
   }
-  if (!orgJoinForm.value.invite_code.trim()) {
+  if (!isUpdatingOrgProfile.value && !orgJoinForm.value.invite_code.trim()) {
     uni.showToast({ title: "请输入邀请码", icon: "none" });
-    return;
-  }
-  if (!orgJoinForm.value.real_name.trim()) {
-    uni.showToast({ title: "请填写真实姓名", icon: "none" });
-    return;
-  }
-  if (!orgJoinForm.value.class_name.trim()) {
-    uni.showToast({ title: "请填写所在班级/届别", icon: "none" });
-    return;
-  }
-  if (!orgJoinForm.value.date_of_birth.trim()) {
-    uni.showToast({ title: "请选择出生日期", icon: "none" });
     return;
   }
 
   joiningOrg.value = true;
   try {
-    const res = await request("/api/org/join", "POST", {
-      user_id: uid,
-      invite_code: orgJoinForm.value.invite_code.trim().toUpperCase(),
-      real_name: orgJoinForm.value.real_name.trim(),
-      gender: orgJoinForm.value.gender,
-      date_of_birth: orgJoinForm.value.date_of_birth.trim(),
-      class_name: orgJoinForm.value.class_name.trim(),
-      phone: orgJoinForm.value.phone.trim(),
-      id_card: orgJoinForm.value.id_card.trim()
-    });
+    if (isUpdatingOrgProfile.value && currentOrg.value) {
+      const res = await request(`/api/org/${currentOrg.value.id}/members/update-profile`, "POST", {
+        user_id: uid,
+        real_name: orgJoinForm.value.real_name.trim(),
+        gender: orgJoinForm.value.gender,
+        date_of_birth: orgJoinForm.value.date_of_birth.trim(),
+        class_name: orgJoinForm.value.class_name.trim(),
+        phone: orgJoinForm.value.phone.trim(),
+        id_card: orgJoinForm.value.id_card.trim(),
+        emergency_contact: orgJoinForm.value.emergency_contact.trim(),
+        running_shoe_size: orgJoinForm.value.running_shoe_size.trim(),
+        jersey_size: orgJoinForm.value.jersey_size.trim(),
+        full_marathon_pb: orgJoinForm.value.full_marathon_pb.trim(),
+        health_declaration: orgJoinForm.value.health_declaration.trim()
+      });
+      uni.showModal({
+        title: "资料提交成功",
+        content: res?.message || "大群体资料已成功更新！",
+        showCancel: false
+      });
+    } else {
+      const res = await request("/api/org/join", "POST", {
+        user_id: uid,
+        invite_code: orgJoinForm.value.invite_code.trim().toUpperCase(),
+        real_name: orgJoinForm.value.real_name.trim(),
+        gender: orgJoinForm.value.gender,
+        date_of_birth: orgJoinForm.value.date_of_birth.trim(),
+        class_name: orgJoinForm.value.class_name.trim(),
+        phone: orgJoinForm.value.phone.trim(),
+        id_card: orgJoinForm.value.id_card.trim(),
+        emergency_contact: orgJoinForm.value.emergency_contact.trim(),
+        running_shoe_size: orgJoinForm.value.running_shoe_size.trim(),
+        jersey_size: orgJoinForm.value.jersey_size.trim(),
+        full_marathon_pb: orgJoinForm.value.full_marathon_pb.trim(),
+        health_declaration: orgJoinForm.value.health_declaration.trim()
+      });
+      uni.showModal({
+        title: res?.status === "temporary" ? "临时人员已加入" : "加入申请已提交",
+        content: res?.message || "加入大群体成功！",
+        showCancel: false
+      });
+    }
 
-    uni.showToast({ title: res?.message || "加入大群体成功！", icon: "success" });
     showOrgJoinModal.value = false;
     await loadClubData();
     if (orgSubClubs.value.length > 0 && userClubs.value.length === 0) {
       showSubClubsModal.value = true;
     }
   } catch (e: any) {
-    uni.showToast({ title: e?.message || "认证加入失败，请核对邀请码", icon: "none" });
+    uni.showModal({
+      title: "操作提示",
+      content: e?.message || e?.data?.detail || "认证操作失败，请核对后重试",
+      showCancel: false
+    });
   } finally {
     joiningOrg.value = false;
   }
@@ -1590,6 +1719,14 @@ function handleSwitchClub(club: any) {
 
 function handleJoinClubWithCheck(club: any) {
   if (!club || !club.id) return;
+  if (club.can_join === false) {
+    uni.showModal({
+      title: "下属跑团准入限制",
+      content: club.join_restriction_reason || "该跑团属于大群体架构，只有完成所有必须字段并获得管理员审核批准的正式成员方可加入。",
+      showCancel: false
+    });
+    return;
+  }
   if (club.join_mode === "invite") {
     targetClubForCodeJoin.value = club;
     clubJoinCodeInput.value = "";
@@ -1633,7 +1770,11 @@ async function handleJoinClubDirect(clubId: string, inviteCode?: string) {
     uni.showToast({ title: res?.message || "加入跑团成功！", icon: "success" });
     await loadClubData(clubId);
   } catch (e: any) {
-    uni.showToast({ title: e?.message || "加入失败", icon: "none" });
+    uni.showModal({
+      title: "无法加入跑团",
+      content: e?.message || e?.data?.detail || "加入失败，请检查门槛与规则",
+      showCancel: false
+    });
   } finally {
     joiningClubId.value = null;
   }
@@ -3860,9 +4001,81 @@ onPullDownRefresh(async () => {
 }
 
 .org-auth-status.pending {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.org-auth-status.temporary {
   background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  border-color: rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.org-auth-status.expired {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.org-status-alert-strip {
+  margin-top: 20rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.org-status-alert-strip.temp-strip {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1rpx solid rgba(245, 158, 11, 0.35);
+}
+
+.org-status-alert-strip.pending-strip {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1rpx solid rgba(59, 130, 246, 0.35);
+}
+
+.org-status-alert-strip.expired-strip {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1rpx solid rgba(244, 63, 94, 0.35);
+}
+
+.osas-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.osas-title {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.osas-desc {
+  font-size: 21rpx;
+  color: #d1d5db;
+  line-height: 1.5;
+}
+
+.osas-btn {
+  align-self: flex-start;
+  padding: 8rpx 26rpx;
+  background: #f59e0b;
+  color: #000000;
+  font-size: 22rpx;
+  font-weight: 800;
+  border-radius: 16rpx;
+  border: none;
+  line-height: 1.6;
+}
+
+.osas-btn.outline {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border: 1rpx solid rgba(255, 255, 255, 0.25);
 }
 
 .org-right-actions {

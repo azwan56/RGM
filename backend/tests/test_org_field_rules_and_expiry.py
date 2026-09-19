@@ -1,0 +1,259 @@
+import time
+import pytest
+from datetime import datetime, timedelta
+import sqlite3
+from fastapi.testclient import TestClient
+from main import app
+from utils.local_store import LocalStore, DB_PATH
+
+client = TestClient(app)
+
+def test_field_rules_customization_and_verification():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_{ts}"
+    invite_code = f"TEST_RULE_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "复旦戈测试管理员", "email": "fudan_admin@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试分部_{ts}",
+        "invite_code": invite_code,
+        "description": "测试大群必填字段动态配置",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200, create_res.text
+    org = create_res.json()["organization"]
+    org_id = org["id"]
+
+    # 2. Get default field rules
+    rules_res = client.get(f"/api/org/{org_id}/field-rules")
+    assert rules_res.status_code == 200
+    rules = rules_res.json()["field_rules"]
+    assert any(r["field"] == "real_name" and r["required"] is True for r in rules)
+    phone_rule = next((r for r in rules if r["field"] == "phone"), None)
+    assert phone_rule is not None
+    assert phone_rule["required"] is False  # default optional
+
+    # 3. Admin customizes rules: set phone and emergency_contact as required
+    for r in rules:
+        if r["field"] in ("phone", "emergency_contact"):
+            r["required"] = True
+
+    update_res = client.put(f"/api/org/{org_id}/field-rules", json={
+        "field_rules": rules,
+        "operator_uid": owner_uid
+    })
+    assert update_res.status_code == 200
+    assert update_res.json()["success"] is True
+
+    # 4. Verify verify-code returns updated rules
+    verify_res = client.post("/api/org/verify-code", json={"invite_code": invite_code})
+    assert verify_res.status_code == 200
+    v_rules = verify_res.json()["field_rules"]
+    v_phone = next(r for r in v_rules if r["field"] == "phone")
+    v_emg = next(r for r in v_rules if r["field"] == "emergency_contact")
+    assert v_phone["required"] is True
+    assert v_emg["required"] is True
+
+
+def test_temporary_status_and_sub_club_gating_workflow():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_{ts}"
+    member_uid = f"u_runner_{ts}"
+    stranger_uid = f"u_stranger_{ts}"
+    invite_code = f"FD_GATE_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "大群主理人", "email": "gobi_lead@test.com"})
+    LocalStore.upsert_profile(member_uid, {"display_name": "戈友申请人", "email": "applicant@test.com"})
+    LocalStore.upsert_profile(stranger_uid, {"display_name": "路人跑友", "email": "stranger@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试大群_{ts}",
+        "invite_code": invite_code,
+        "description": "测试准入拦截与有效期",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Configure rules: phone and clothing_size are required
+    rules = LocalStore.get_org_field_rules(org_id)
+    for r in rules:
+        if r["field"] in ("phone", "clothing_size"):
+            r["required"] = True
+    LocalStore.update_org_field_rules(org_id, rules)
+
+    # 3. Create sub-club under this org
+    sub_club = LocalStore.create_club(
+        owner_id=owner_uid,
+        name=f"复旦戈先锋分队_{ts}",
+        description="复旦戈下属分跑团",
+        city="上海",
+        org_id=org_id,
+        join_mode="free"
+    )
+    club_id = sub_club["id"]
+    assert sub_club["org_id"] == org_id
+
+    # 4. Stranger (not joined org) tries to join sub-club -> 400 / Forbidden
+    stranger_join = client.post("/api/team/join-club", json={
+        "user_id": stranger_uid,
+        "club_id": club_id
+    })
+    assert stranger_join.status_code == 400
+    assert "尚未加入该大群" in stranger_join.json()["detail"]
+
+    # 5. Member joins org with missing required fields (phone and clothing_size omitted)
+    join_res = client.post("/api/org/join", json={
+        "user_id": member_uid,
+        "invite_code": invite_code,
+        "real_name": "王测试",
+        "gender": "male",
+        "date_of_birth": "1990-08-08",
+        "class_name": "EMBA 23春"
+    })
+    assert join_res.status_code == 200
+    m_data = join_res.json()["membership"]
+    assert m_data["status"] == "temporary"
+    assert m_data["days_remaining"] == 14
+    missing_names = [m["field"] for m in m_data["missing_fields"]]
+    assert "phone" in missing_names
+    assert "clothing_size" in missing_names
+
+    # 6. Temporary member tries to join sub-club -> 400 / Blocked
+    temp_join = client.post("/api/team/join-club", json={
+        "user_id": member_uid,
+        "club_id": club_id
+    })
+    assert temp_join.status_code == 400
+    assert "临时人员" in temp_join.json()["detail"]
+    assert "尚未填写全部必填资料" in temp_join.json()["detail"]
+
+    # 7. Member updates profile to complete required fields
+    update_profile_res = client.post(f"/api/org/{org_id}/members/update-profile", json={
+        "user_id": member_uid,
+        "phone": "13811112222",
+        "clothing_size": "L"
+    })
+    assert update_profile_res.status_code == 200
+    up_data = update_profile_res.json()["membership"]
+    assert up_data["status"] == "pending"
+    assert len(up_data["missing_fields"]) == 0
+
+    # 8. Member tries to join sub-club in pending state -> 400 / Blocked
+    pending_join = client.post("/api/team/join-club", json={
+        "user_id": member_uid,
+        "club_id": club_id
+    })
+    assert pending_join.status_code == 400
+    assert "等待大群管理员审核批准" in pending_join.json()["detail"]
+
+    # 9. Admin confirms member
+    confirm_res = client.post(f"/api/org/{org_id}/members/{member_uid}/confirm", json={
+        "operator_uid": owner_uid
+    })
+    assert confirm_res.status_code == 200
+    assert confirm_res.json()["success"] is True
+
+    # Verify status in get_user_organizations
+    my_orgs_res = client.get(f"/api/org/my-orgs/{member_uid}")
+    assert my_orgs_res.status_code == 200
+    my_org = next(o for o in my_orgs_res.json()["organizations"] if o["id"] == org_id)
+    assert my_org["status"] == "confirmed"
+
+    # 10. Member joins sub-club successfully
+    ok_join = client.post("/api/team/join-club", json={
+        "user_id": member_uid,
+        "club_id": club_id
+    })
+    assert ok_join.status_code == 200
+    assert "成功加入" in ok_join.json()["message"]
+
+
+def test_14_days_expiration_and_access_block():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_{ts}"
+    expired_runner_uid = f"u_expired_runner_{ts}"
+    invite_code = f"FD_EXP_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "大群主理人", "email": "gobi_lead2@test.com"})
+    LocalStore.upsert_profile(expired_runner_uid, {"display_name": "超期临时跑友", "email": "expired@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈过期测试大群_{ts}",
+        "invite_code": invite_code,
+        "description": "测试超期自动变为已过期并拒绝进入大群",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Member joins org
+    join_res = client.post("/api/org/join", json={
+        "user_id": expired_runner_uid,
+        "invite_code": invite_code,
+        "real_name": "赵超期",
+        "gender": "male",
+        "date_of_birth": "1992-02-02",
+        "class_name": "MBA 21级"
+    })
+    assert join_res.status_code == 200
+
+    # 3. Simulate 15 days elapsed since joined_at
+    past_15_days = (datetime.utcnow() - timedelta(days=15)).isoformat() + "Z"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE organization_members SET joined_at = ?, status = 'temporary' WHERE org_id = ? AND user_id = ?",
+                     (past_15_days, org_id, expired_runner_uid))
+        conn.commit()
+
+    # 4. Check status calculation
+    status_info = LocalStore.check_org_member_status(org_id, expired_runner_uid)
+    assert status_info["status"] == "expired"
+    assert status_info["is_valid"] is False
+    assert status_info["days_remaining"] == 0
+
+    # 5. Expired user attempts to enter org details -> 403 Forbidden
+    org_detail_res = client.get(f"/api/org/{org_id}?user_id={expired_runner_uid}")
+    assert org_detail_res.status_code == 403
+    assert "临时访问权限已到期" in org_detail_res.json()["detail"]
+
+    # 6. Expired user attempts to view org members roster -> 403 Forbidden
+    roster_res = client.get(f"/api/org/{org_id}/members?operator_uid={expired_runner_uid}")
+    assert roster_res.status_code == 403
+    assert "临时访问权限已到期" in roster_res.json()["detail"]
+
+    # 7. Create sub-club and verify expired user cannot join
+    sub_club = LocalStore.create_club(
+        owner_id=owner_uid,
+        name=f"复旦戈测试分队二_{ts}",
+        description="分跑团",
+        city="上海",
+        org_id=org_id,
+        join_mode="free"
+    )
+    fail_join = client.post("/api/team/join-club", json={
+        "user_id": expired_runner_uid,
+        "club_id": sub_club["id"]
+    })
+    assert fail_join.status_code == 400
+    assert "临时身份已过期" in fail_join.json()["detail"]
+
+    # 8. Rejoining with invite code grants a fresh start
+    rejoin_res = client.post("/api/org/join", json={
+        "user_id": expired_runner_uid,
+        "invite_code": invite_code,
+        "real_name": "赵重新激活",
+        "gender": "male",
+        "date_of_birth": "1992-02-02",
+        "class_name": "MBA 21级"
+    })
+    assert rejoin_res.status_code == 200
+    re_membership = rejoin_res.json()["membership"]
+    assert re_membership["status"] == "pending"
+    assert re_membership["days_remaining"] == 14

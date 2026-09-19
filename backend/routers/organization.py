@@ -14,12 +14,37 @@ class VerifyOrgCodeRequest(BaseModel):
 class JoinOrganizationRequest(BaseModel):
     user_id: str
     invite_code: str
-    real_name: str
-    gender: str          # 'male' / 'female'
-    date_of_birth: str   # 'YYYY-MM-DD'
-    class_name: str      # 'EMBA 23春' / 'MBA 21级'
+    real_name: Optional[str] = None
+    gender: Optional[str] = "male"
+    date_of_birth: Optional[str] = None
+    class_name: Optional[str] = None
     phone: Optional[str] = None
     id_card: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    clothing_size: Optional[str] = None
+    shoe_size: Optional[str] = None
+    marathon_pb: Optional[str] = None
+    health_declaration: Optional[bool] = None
+    extra_data: Optional[Dict[str, Any]] = None
+
+class UpdateFieldRulesRequest(BaseModel):
+    field_rules: List[Dict[str, Any]]
+    operator_uid: Optional[str] = None
+
+class UpdateMemberProfileRequest(BaseModel):
+    user_id: str
+    real_name: Optional[str] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    class_name: Optional[str] = None
+    phone: Optional[str] = None
+    id_card: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    clothing_size: Optional[str] = None
+    shoe_size: Optional[str] = None
+    marathon_pb: Optional[str] = None
+    health_declaration: Optional[bool] = None
+    extra_data: Optional[Dict[str, Any]] = None
 
 class ConfirmMemberRequest(BaseModel):
     operator_uid: Optional[str] = None
@@ -53,51 +78,71 @@ class BindClubRequest(BaseModel):
 @router.post("/verify-code")
 def verify_org_code(req: VerifyOrgCodeRequest):
     """
-    Validates organization invite code and returns basic org info.
+    Validates organization invite code and returns basic org info with field rules.
     """
     code = (req.invite_code or "").strip().upper()
     org = LocalStore.get_organization_by_code(code)
     if not org:
         raise HTTPException(status_code=404, detail="无效的大群体邀请码，请向组织管理员核对后重新输入！")
+    rules = LocalStore.get_org_field_rules(org["id"])
     return {
         "valid": True,
-        "organization": org
+        "organization": org,
+        "field_rules": rules
     }
 
 
 @router.post("/join")
 def join_organization_endpoint(req: JoinOrganizationRequest):
     """
-    Joins a grand community (e.g. 复旦戈) using invite code and mandatory personal details:
-    real_name, gender, date_of_birth, class_name.
+    Joins a grand community (e.g. 复旦戈) using invite code and personal details.
+    Assigns temporary, pending, or confirmed status based on field rules.
     """
     if not req.user_id.strip():
         raise HTTPException(status_code=400, detail="缺少跑者用户ID")
     if not req.invite_code.strip():
         raise HTTPException(status_code=400, detail="组织邀请码不能为空")
-    if not req.real_name.strip():
-        raise HTTPException(status_code=400, detail="请填写真实姓名以便管理员核对确认")
-    if req.gender not in ("male", "female"):
-        raise HTTPException(status_code=400, detail="请选择性别")
-    if not req.date_of_birth.strip() or len(req.date_of_birth.strip()) < 8:
-        raise HTTPException(status_code=400, detail="请选择正确的出生日期")
-    if not req.class_name.strip():
-        raise HTTPException(status_code=400, detail="请填写所在班级或届别（例如 EMBA 23春、MBA 21级）")
+
+    extra = dict(req.extra_data or {})
+    if req.emergency_contact:
+        extra["emergency_contact"] = req.emergency_contact.strip()
+    if req.clothing_size:
+        extra["clothing_size"] = req.clothing_size.strip()
+    if req.shoe_size:
+        extra["shoe_size"] = req.shoe_size.strip()
+    if req.marathon_pb:
+        extra["marathon_pb"] = req.marathon_pb.strip()
+    if req.health_declaration is not None:
+        extra["health_declaration"] = req.health_declaration
 
     try:
         res = LocalStore.join_organization(
             user_id=req.user_id,
             invite_code=req.invite_code,
             real_name=req.real_name,
-            gender=req.gender,
+            gender=req.gender or "male",
             date_of_birth=req.date_of_birth,
             class_name=req.class_name,
             phone=req.phone,
-            id_card=req.id_card
+            id_card=req.id_card,
+            extra_data=extra
         )
+        status_cn = {
+            "confirmed": "正式戈友已认证",
+            "pending": "已提交必填资料，待管理员审核",
+            "temporary": "临时人员（资料待补齐）",
+            "expired": "已过期"
+        }.get(res.get("status"), "临时人员")
+
+        msg = f"恭喜您成功加入【{res['org_name']}】大群体！当前状态：{status_cn}。"
+        if res.get("status") == "temporary":
+            msg += f" 您为临时人员（有效期还剩 {res.get('days_remaining', 14)} 天），请在到期前补齐必填资料并由管理员审核批准后方可加入下属跑团。"
+        elif res.get("status") == "pending":
+            msg += f" 必填资料已填齐（有效期还剩 {res.get('days_remaining', 14)} 天），正等待大群管理员审核批准后解锁下属跑团。"
+
         return {
             "success": True,
-            "message": f"恭喜您成功加入【{res['org_name']}】大群体！",
+            "message": msg,
             "membership": res
         }
     except ValueError as e:
@@ -118,14 +163,85 @@ def get_user_organizations_endpoint(uid: str):
     return {"organizations": orgs}
 
 
-@router.get("/{org_id}")
-def get_organization_endpoint(org_id: str):
+@router.get("/{org_id}/field-rules")
+def get_org_field_rules_endpoint(org_id: str):
     """
-    Returns detail of a specific grand community.
+    Returns field requirements configuration for this organization.
+    """
+    rules = LocalStore.get_org_field_rules(org_id)
+    return {"field_rules": rules}
+
+
+@router.put("/{org_id}/field-rules")
+def update_org_field_rules_endpoint(org_id: str, req: UpdateFieldRulesRequest):
+    """
+    Allows admin to update field requirements (required/optional) for this organization.
+    """
+    ok = LocalStore.update_org_field_rules(org_id, req.field_rules)
+    if not ok:
+        raise HTTPException(status_code=404, detail="组织不存在")
+    return {"success": True, "message": "大群准入必填字段要求已更新！", "field_rules": req.field_rules}
+
+
+@router.post("/{org_id}/members/update-profile")
+def update_org_member_profile_endpoint(org_id: str, req: UpdateMemberProfileRequest):
+    """
+    Allows temporary or active members to complete/update their profile fields.
+    """
+    extra = dict(req.extra_data or {})
+    if req.emergency_contact is not None:
+        extra["emergency_contact"] = req.emergency_contact.strip()
+    if req.clothing_size is not None:
+        extra["clothing_size"] = req.clothing_size.strip()
+    if req.shoe_size is not None:
+        extra["shoe_size"] = req.shoe_size.strip()
+    if req.marathon_pb is not None:
+        extra["marathon_pb"] = req.marathon_pb.strip()
+    if req.health_declaration is not None:
+        extra["health_declaration"] = req.health_declaration
+
+    try:
+        updated = LocalStore.update_org_member_profile(
+            org_id=org_id,
+            user_id=req.user_id,
+            data={
+                "real_name": req.real_name,
+                "gender": req.gender,
+                "date_of_birth": req.date_of_birth,
+                "class_name": req.class_name,
+                "phone": req.phone,
+                "id_card": req.id_card,
+                "extra_data": extra
+            }
+        )
+        return {
+            "success": True,
+            "message": "大群体成员资料更新成功！",
+            "membership": updated
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[update_org_member_profile] failed: {e}")
+        raise HTTPException(status_code=500, detail="更新资料失败，请重试")
+
+
+@router.get("/{org_id}")
+def get_organization_endpoint(org_id: str, user_id: Optional[str] = None):
+    """
+    Returns detail of a specific grand community, rejecting expired members.
     """
     org = LocalStore.get_organization(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
+    if user_id:
+        status_info = LocalStore.check_org_member_status(org_id, user_id)
+        if status_info.get("is_member") and status_info.get("status") == "expired":
+            raise HTTPException(
+                status_code=403,
+                detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法进入大群。如需继续参与，请联系管理员或重新输入邀请码认证。"
+            )
+        org["user_membership"] = status_info
     return {"organization": org}
 
 
@@ -143,18 +259,31 @@ def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_fi
     """
     Returns verified member directory for the grand community (name, class, age_group, status, sub-clubs).
     Protects runner birth year, phone, and id_card privacy for non-admin viewers.
+    Blocks expired members from viewing roster.
     """
-    members = LocalStore.get_org_members(org_id, search, class_filter)
+    org = LocalStore.get_organization(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="组织不存在")
+
     is_admin = False
     if operator_uid:
-        org = LocalStore.get_organization(org_id)
-        if org and org.get("owner_id") == operator_uid:
+        if org.get("owner_id") == operator_uid:
             is_admin = True
         else:
-            for m in members:
-                if m.get("user_id") == operator_uid and m.get("role") in ("owner", "admin"):
-                    is_admin = True
-                    break
+            status_info = LocalStore.check_org_member_status(org_id, operator_uid)
+            if status_info.get("is_member") and status_info.get("status") == "expired":
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期，无法查看大群花名册。"
+                )
+            if status_info.get("role") in ("owner", "admin"):
+                is_admin = True
+
+    members = LocalStore.get_org_members(org_id, search, class_filter)
+    if not is_admin and not any(m.get("user_id") == operator_uid and m.get("role") in ("owner", "admin") for m in members):
+        is_admin = False
+    else:
+        is_admin = True
 
     for m in members:
         is_self = bool(operator_uid and m.get("user_id") == operator_uid)
@@ -176,6 +305,7 @@ def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_fi
             m.pop("phone", None)
             m.pop("id_card", None)
             m.pop("date_of_birth", None)
+            m.pop("extra_data", None)
     return {"members": members}
 
 
