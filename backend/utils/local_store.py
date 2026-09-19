@@ -4123,6 +4123,40 @@ class LocalStore:
 
             conn.commit()
 
+            # ── Notify org admins if member joins directly with 'pending' status ──
+            if status == "pending":
+                try:
+                    cursor.execute("""
+                        SELECT m.user_id FROM organization_members m
+                        WHERE m.org_id = ? AND m.role IN ('owner', 'admin')
+                        UNION
+                        SELECT o.owner_id FROM organizations o
+                        WHERE o.id = ? AND o.owner_id IS NOT NULL
+                    """, (org_id, org_id))
+                    admin_rows = cursor.fetchall()
+                    admin_uids = list({r[0] for r in admin_rows if r[0]})
+                    notif_id_base = int(time.time() * 1000)
+                    now_notif = datetime.utcnow().isoformat() + "Z"
+                    display_name = clean_name or user_id
+                    for i, admin_uid in enumerate(admin_uids):
+                        nid = f"notif_org_{notif_id_base + i}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO system_notifications
+                            (id, user_id, activity_id, title, content, type, wechat_sent, wechat_errmsg, is_read, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)
+                        """, (
+                            nid,
+                            admin_uid,
+                            org_id,
+                            "📋 新成员待审核",
+                            f"【{display_name}】已完整填写必填资料并加入大群，请前往后台审核确认其成员资格。",
+                            "org_review_ready",
+                            now_notif
+                        ))
+                    conn.commit()
+                except Exception as notif_err:
+                    logger.warning(f"[join_organization] admin notif failed: {notif_err}")
+
             joined_dt = parse_iso_datetime(joined_at)
             elapsed_days = (datetime.now(timezone.utc) - joined_dt).total_seconds() / 86400.0 if joined_dt else 0
             remaining_days = max(0, math.ceil(14.0 - elapsed_days)) if status in ("temporary", "pending") else None
@@ -4285,6 +4319,41 @@ class LocalStore:
             """, (enc_real_name, clean_gender, enc_dob, enc_phone, enc_phone, enc_id_card, enc_id_card, user_id))
 
             conn.commit()
+
+            # ── Notify org admins when member status upgrades temporary → pending ──
+            if current_status == "temporary" and status == "pending":
+                try:
+                    # Find org owner + admin user_ids
+                    cursor.execute("""
+                        SELECT m.user_id FROM organization_members m
+                        WHERE m.org_id = ? AND m.role IN ('owner', 'admin')
+                        UNION
+                        SELECT o.owner_id FROM organizations o
+                        WHERE o.id = ? AND o.owner_id IS NOT NULL
+                    """, (org_id, org_id))
+                    admin_rows = cursor.fetchall()
+                    admin_uids = list({r[0] for r in admin_rows if r[0]})
+                    notif_id_base = int(time.time() * 1000)
+                    now_notif = datetime.utcnow().isoformat() + "Z"
+                    display_name = clean_name or user_id
+                    for i, admin_uid in enumerate(admin_uids):
+                        nid = f"notif_org_{notif_id_base + i}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO system_notifications
+                            (id, user_id, activity_id, title, content, type, wechat_sent, wechat_errmsg, is_read, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)
+                        """, (
+                            nid,
+                            admin_uid,
+                            org_id,
+                            "📋 新成员待审核",
+                            f"【{display_name}】已补全所有必填资料，请前往大群后台审核确认其成员资格。",
+                            "org_review_ready",
+                            now_notif
+                        ))
+                    conn.commit()
+                except Exception as notif_err:
+                    logger.warning(f"[update_org_member_profile] admin notif failed: {notif_err}")
 
             joined_at = member.get("joined_at")
             joined_dt = parse_iso_datetime(joined_at)

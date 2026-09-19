@@ -1732,7 +1732,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>真实姓名 (实名认证)</span>
+                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5">*</span></span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
                     </label>
                     <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
@@ -1789,7 +1789,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>出生日期 (Date of Birth)</span>
+                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5">*</span></span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
                     </label>
                     {age !== null && (
@@ -1870,7 +1870,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
               {/* 性别 */}
               <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">生理性别</label>
+                <label className="text-xs text-zinc-400 block mb-1.5">生理性别<span className="text-red-400 ml-0.5">*</span></label>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
@@ -1983,7 +1983,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <span>商学院项目与班级</span>
+                    <span>商学院项目与班级<span className="text-red-400 ml-0.5">*</span></span>
                     <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大组织必填项</span>
                   </label>
                 </div>
@@ -2009,7 +2009,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 </div>
 
                 <div>
-                  <span className="text-xs text-zinc-400 block mb-1.5">所在班级 / 届别 (自由输入)：</span>
+                  <span className="text-xs text-zinc-400 block mb-1.5">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5">*</span>：</span>
                   <input
                     type="text"
                     value={classDetail}

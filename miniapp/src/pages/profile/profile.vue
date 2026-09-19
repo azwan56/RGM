@@ -576,7 +576,7 @@
     </view>
 
     <!-- ── CARD 3: 生理参数与身体指标 ── -->
-    <view class="section-card">
+    <view class="section-card section-card-runner-info">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">💓</text>
@@ -601,7 +601,7 @@
         <view class="form-group full-width-group">
           <view class="label-with-tag">
             <view class="label-with-sec">
-              <text class="label">出生日期 (Date of Birth)</text>
+              <text class="label">出生日期 (Date of Birth)<text class="required-star"> *</text></text>
               <text class="field-sec-tag">🔒 AES-256 加密</text>
             </view>
             <text v-if="displayAge !== null" class="age-badge-pill">
@@ -634,7 +634,7 @@
         <!-- 真实姓名 -->
         <view class="form-group">
           <view class="label-with-tag">
-            <text class="label">真实姓名</text>
+            <text class="label">真实姓名<text class="required-star"> *</text></text>
             <text class="field-sec-tag">🔒 加密存储</text>
           </view>
           <view class="secure-input-wrapper">
@@ -699,7 +699,7 @@
 
         <!-- 生理性别 -->
         <view class="form-group">
-          <text class="label">生理性别</text>
+          <text class="label">生理性别<text class="required-star"> *</text></text>
           <view class="gender-pill-group">
             <view
               class="gender-pill"
@@ -833,7 +833,10 @@
 
         <!-- 班级 / 届别 -->
         <view class="form-group full-width-group">
-          <text class="label">所在班级 / 届别 (自由输入)</text>
+          <view class="label-with-tag">
+            <text class="label">所在班级 / 届别 (自由输入)<text class="required-star"> *</text></text>
+            <text class="field-sec-tag">大群必填</text>
+          </view>
           <input
             class="form-input"
             type="text"
@@ -2794,8 +2797,43 @@ async function loadProfileData() {
     const clubs = clubRes?.clubs || [];
     userClubs.value = clubs;
     userClub.value = resolveActiveClub(clubs);
+
+    // ── Check if user has any temporary org memberships → show profile completion reminder ──
+    checkOrgMembershipReminder(uid);
   } catch (err) {
     console.error("Failed to load profile:", err);
+  }
+}
+
+// Popup reminder: if user belongs to any org with 'temporary' status (incomplete required fields)
+async function checkOrgMembershipReminder(uid: string) {
+  try {
+    const orgRes = await request(`/api/org/my-orgs/${uid}`);
+    const orgs: any[] = orgRes?.organizations || [];
+    const incompleteMemberships = orgs.filter((o: any) => o.status === "temporary");
+    if (incompleteMemberships.length > 0) {
+      const firstOrg = incompleteMemberships[0];
+      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label).join("、");
+      const orgCount = incompleteMemberships.length;
+      const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
+      const contentText = orgCount > 1
+        ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成，请立即补充以完成成员认证。`
+        : `您在【${firstOrg.name}】中${missingLabels ? '还缺少：' + missingLabels + '。' : '有必填资料尚未完成。'}请如实填写以完成成员认证。`;
+      uni.showModal({
+        title: "📋 跑者档案待完善",
+        content: contentText,
+        confirmText: "立即填写",
+        cancelText: "稍后再说",
+        success: (res) => {
+          if (res.confirm) {
+            // Scroll to the profile fields card (商学院项目 section)
+            uni.pageScrollTo({ selector: ".section-card-runner-info", duration: 400 });
+          }
+        }
+      });
+    }
+  } catch (e) {
+    // Silent fail – reminder is optional
   }
 }
 
@@ -3978,6 +4016,13 @@ onShow(() => {
   background-color: #0b0b0d;
   padding: 30rpx 30rpx 60rpx 30rpx;
   box-sizing: border-box;
+}
+
+/* Required field asterisk */
+.required-star {
+  color: #f87171;
+  font-size: inherit;
+  font-weight: bold;
 }
 
 .login-hero-card {
