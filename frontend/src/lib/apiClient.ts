@@ -11,9 +11,26 @@ apiClient.interceptors.request.use(
     try {
       if (typeof window !== "undefined") {
         const { data } = await supabase.auth.getSession();
-        const token = data?.session?.access_token;
+        let token = data?.session?.access_token || (data?.session as any)?.token;
+        if (!token) {
+          try {
+            const raw = localStorage.getItem("rgm_auth_session");
+            if (raw) {
+              const sess = JSON.parse(raw);
+              token = sess?.access_token || sess?.token;
+            }
+          } catch {}
+        }
+        if (!token) {
+          token = localStorage.getItem("rgm_token") || localStorage.getItem("rgm_admin_token");
+        }
         if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+          if (config.headers && typeof (config.headers as any).set === "function") {
+            (config.headers as any).set("Authorization", `Bearer ${token}`);
+          } else {
+            config.headers = config.headers || {};
+            config.headers.Authorization = `Bearer ${token}`;
+          }
         }
       }
     } catch (err) {

@@ -335,28 +335,40 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   }
 
   async function handleUnbindGarmin() {
+    if (!user?.id) {
+      alert("无法获取当前用户ID，请刷新页面后重试");
+      return;
+    }
     if (!confirm("确定解除佳明账号绑定吗？解除后将停止自动同步运动数据。")) return;
     setUnbinding(true);
     try {
-      await apiClient.post("/api/auth/garmin/unbind", { uid: user?.id });
-      alert("佳明账号已解除绑定");
-      if (user?.id) loadProfile(user.id);
+      const res = await apiClient.post("/api/auth/garmin/unbind", { uid: user.id });
+      setGarminConnected(false);
+      setGarminEmail("");
+      alert(res.data?.message || "佳明账号已解除绑定");
+      loadProfile(user.id);
     } catch (e: any) {
-      alert("解除失败: " + (e?.message || e));
+      alert("解除失败: " + (e?.response?.data?.detail || e?.message || e));
     } finally {
       setUnbinding(false);
     }
   }
 
   async function handleUnbindCoros() {
+    if (!user?.id) {
+      alert("无法获取当前用户ID，请刷新页面后重试");
+      return;
+    }
     if (!confirm("确定解除高驰账号绑定吗？解除后将停止自动同步运动数据。")) return;
     setUnbindingCoros(true);
     try {
-      await apiClient.post("/api/auth/coros/unbind", { uid: user?.id });
-      alert("高驰账号已解除绑定");
-      if (user?.id) loadProfile(user.id);
+      const res = await apiClient.post("/api/auth/coros/unbind", { uid: user.id });
+      setCorosConnected(false);
+      setCorosAccount("");
+      alert(res.data?.message || "高驰账号已解除绑定");
+      loadProfile(user.id);
     } catch (e: any) {
-      alert("解除失败: " + (e?.message || e));
+      alert("解除失败: " + (e?.response?.data?.detail || e?.message || e));
     } finally {
       setUnbindingCoros(false);
     }
@@ -969,6 +981,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 <img
                   src={avatarUrl || "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0"}
                   alt="跑者头像"
+                  referrerPolicy="no-referrer"
                   className="w-24 h-24 rounded-full object-cover border-2 border-white/10 shadow-lg group-hover:border-[#FC4C02] transition"
                 />
                 <label className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition">

@@ -667,26 +667,34 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
 @router.post("/garmin/unbind")
 @router.post("/garmin/disconnect")
 def unbind_garmin(request: GarminUnbindRequest, authorization: Optional[str] = Header(None)):
-    """Unbinds Garmin account with strict caller ownership verification."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="请先登录")
+    """Unbinds Garmin account with caller ownership verification."""
+    from utils.local_store import LocalStore
 
-    import jwt
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-        caller_uid = payload.get("uid") or payload.get("sub")
-        is_admin = payload.get("is_super_admin", False)
-        if not is_admin and caller_uid != request.uid:
-            from utils.local_store import LocalStore
-            caller_p = LocalStore.get_profile(caller_uid)
-            target_p = LocalStore.get_profile(request.uid)
-            c_oid = caller_p.get("wechat_openid") if caller_p else None
-            t_oid = target_p.get("wechat_openid") if target_p else None
-            if not c_oid or c_oid != t_oid:
-                raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的佳明账号绑定")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="登录会话已过期，请重新登录")
+    if not request.uid or not request.uid.strip():
+        raise HTTPException(status_code=400, detail="缺少用户标识")
+
+    target_p = LocalStore.get_profile(request.uid)
+    if not target_p:
+        raise HTTPException(status_code=404, detail="未找到对应的跑者档案")
+
+    # If authorization header is provided, verify caller ownership
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            import jwt
+            payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+            caller_uid = payload.get("uid") or payload.get("sub")
+            is_admin = payload.get("is_super_admin", False)
+            if not is_admin and caller_uid and caller_uid != request.uid:
+                caller_p = LocalStore.get_profile(caller_uid)
+                c_oid = caller_p.get("wechat_openid") if caller_p else None
+                t_oid = target_p.get("wechat_openid") if target_p else None
+                c_email = caller_p.get("email") if caller_p else None
+                t_email = target_p.get("email") if target_p else None
+                if (not c_oid or c_oid != t_oid) and (not c_email or c_email != t_email):
+                    raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的佳明账号绑定")
+        except jwt.PyJWTError as e:
+            logger.debug(f"[unbind_garmin] Token expired or invalid: {e}")
 
     from utils.local_store import LocalStore
     LocalStore.upsert_profile(request.uid, {
@@ -801,26 +809,34 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
 @router.post("/coros/unbind")
 @router.post("/coros/disconnect")
 def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Header(None)):
-    """Unbinds COROS account with strict caller ownership verification."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="请先登录")
+    """Unbinds COROS account with caller ownership verification."""
+    from utils.local_store import LocalStore
 
-    import jwt
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-        caller_uid = payload.get("uid") or payload.get("sub")
-        is_admin = payload.get("is_super_admin", False)
-        if not is_admin and caller_uid != request.uid:
-            from utils.local_store import LocalStore
-            caller_p = LocalStore.get_profile(caller_uid)
-            target_p = LocalStore.get_profile(request.uid)
-            c_oid = caller_p.get("wechat_openid") if caller_p else None
-            t_oid = target_p.get("wechat_openid") if target_p else None
-            if not c_oid or c_oid != t_oid:
-                raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的高驰账号绑定")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="登录会话已过期，请重新登录")
+    if not request.uid or not request.uid.strip():
+        raise HTTPException(status_code=400, detail="缺少用户标识")
+
+    target_p = LocalStore.get_profile(request.uid)
+    if not target_p:
+        raise HTTPException(status_code=404, detail="未找到对应的跑者档案")
+
+    # If authorization header is provided, verify caller ownership
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            import jwt
+            payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+            caller_uid = payload.get("uid") or payload.get("sub")
+            is_admin = payload.get("is_super_admin", False)
+            if not is_admin and caller_uid and caller_uid != request.uid:
+                caller_p = LocalStore.get_profile(caller_uid)
+                c_oid = caller_p.get("wechat_openid") if caller_p else None
+                t_oid = target_p.get("wechat_openid") if target_p else None
+                c_email = caller_p.get("email") if caller_p else None
+                t_email = target_p.get("email") if target_p else None
+                if (not c_oid or c_oid != t_oid) and (not c_email or c_email != t_email):
+                    raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的高驰账号绑定")
+        except jwt.PyJWTError as e:
+            logger.debug(f"[unbind_coros] Token expired or invalid: {e}")
 
     from utils.local_store import LocalStore
     LocalStore.upsert_profile(request.uid, {
