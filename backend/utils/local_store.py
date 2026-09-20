@@ -282,6 +282,7 @@ def init_db():
                 created_at TEXT,
                 settings TEXT,
                 join_mode TEXT DEFAULT 'free', -- 'free' (自由入团) or 'invite' (凭邀请码入团)
+                status TEXT DEFAULT 'active', -- 'active' (正常), 'paused' (暂停), 'locked' (锁定)
                 FOREIGN KEY(org_id) REFERENCES organizations(id),
                 FOREIGN KEY(owner_id) REFERENCES profiles(id)
             )
@@ -438,6 +439,8 @@ def init_db():
             cursor.execute("ALTER TABLE clubs ADD COLUMN org_id TEXT")
         if "join_mode" not in club_cols:
             cursor.execute("ALTER TABLE clubs ADD COLUMN join_mode TEXT DEFAULT 'free'")
+        if "status" not in club_cols:
+            cursor.execute("ALTER TABLE clubs ADD COLUMN status TEXT DEFAULT 'active'")
 
         # Seed default Fudan Gobi Organization if none exists
         cursor.execute("SELECT COUNT(*) FROM organizations WHERE id = 'org_fudan_gobi'")
@@ -1876,8 +1879,8 @@ class LocalStore:
             created_at = datetime.utcnow().isoformat() + "Z"
 
             cursor.execute("""
-                INSERT INTO clubs (id, org_id, name, logo_url, description, city, invite_code, owner_id, created_at, join_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO clubs (id, org_id, name, logo_url, description, city, invite_code, owner_id, created_at, join_mode, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
             """, (club_id, org_id, name, logo, description, city, code, owner_id, created_at, join_mode))
 
             cursor.execute("""
@@ -1896,7 +1899,8 @@ class LocalStore:
                 "invite_code": code,
                 "owner_id": owner_id,
                 "created_at": created_at,
-                "join_mode": join_mode
+                "join_mode": join_mode,
+                "status": "active"
             }
 
     @staticmethod
@@ -1945,6 +1949,12 @@ class LocalStore:
                 return None
             
             club_dict = dict(club)
+            club_status = club_dict.get("status") or "active"
+            if club_status == "paused":
+                raise ValueError(f"跑团【{club_dict.get('name')}】当前已暂停运行，暂不接受新成员加入！")
+            if club_status == "locked":
+                raise ValueError(f"跑团【{club_dict.get('name')}】已被锁定，禁止新成员加入！")
+
             LocalStore.validate_sub_club_join_eligibility(club_dict, user_id)
 
             club_id = club_dict["id"]
@@ -1970,6 +1980,12 @@ class LocalStore:
                 return None
             
             club_dict = dict(club)
+            club_status = club_dict.get("status") or "active"
+            if club_status == "paused":
+                raise ValueError(f"跑团【{club_dict.get('name')}】当前已暂停运行，暂不接受新成员加入！")
+            if club_status == "locked":
+                raise ValueError(f"跑团【{club_dict.get('name')}】已被锁定，禁止新成员加入！")
+
             LocalStore.validate_sub_club_join_eligibility(club_dict, user_id)
 
             # If club requires invite code, validate it
@@ -2036,7 +2052,16 @@ class LocalStore:
     @staticmethod
     def remove_club_member(club_id: str, user_id: str):
         with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            cursor.execute("SELECT status, name FROM clubs WHERE id = ?", (club_id,))
+            c_row = cursor.fetchone()
+            if c_row:
+                c_status = c_row["status"] or "active"
+                if c_status == "paused":
+                    raise ValueError(f"跑团【{c_row['name']}】当前处于暂停状态，禁止变更队员！")
+                if c_status == "locked":
+                    raise ValueError(f"跑团【{c_row['name']}】当前处于锁定状态，禁止变更队员！")
             cursor.execute("DELETE FROM club_memberships WHERE club_id = ? AND user_id = ?", (club_id, user_id))
             conn.commit()
 
@@ -2072,7 +2097,12 @@ class LocalStore:
         for c in raw:
             item = dict(c)
             item.pop("invite_code", None) # Strictly hide invite_code from public
-            item["is_member"] = item["id"] in user_club_ids
+            is_member = item["id"] in user_club_ids
+            item["is_member"] = is_member
+            status = item.get("status") or "active"
+            # Paused and locked clubs are hidden from external runners
+            if status in ("paused", "locked") and not is_member:
+                continue
             sanitized.append(item)
         return sanitized
 
@@ -2081,7 +2111,7 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            allowed = ["name", "description", "city", "logo_url", "invite_code", "org_id", "join_mode"]
+            allowed = ["name", "description", "city", "logo_url", "invite_code", "org_id", "join_mode", "status"]
             set_clauses = []
             params = []
             for k in allowed:
@@ -2100,6 +2130,32 @@ class LocalStore:
             cursor.execute(f"UPDATE clubs SET {', '.join(set_clauses)} WHERE id = ?", tuple(params))
             conn.commit()
             return LocalStore.get_club(club_id)
+
+    @staticmethod
+    def set_club_status(club_id: str, status: str) -> Optional[Dict[str, Any]]:
+        status = status.lower().strip()
+        if status not in ("active", "paused", "locked"):
+            raise ValueError("跑团状态仅支持: active (正常运行), paused (暂停跑团), locked (锁定跑团)")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE clubs SET status = ? WHERE id = ?", (status, club_id))
+            conn.commit()
+        return LocalStore.get_club(club_id)
+
+    @staticmethod
+    def delete_club(club_id: str) -> bool:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM clubs WHERE id = ?", (club_id,))
+            if not cursor.fetchone():
+                return False
+            cursor.execute("DELETE FROM club_events WHERE club_id = ?", (club_id,))
+            cursor.execute("DELETE FROM coach_assignments WHERE club_id = ?", (club_id,))
+            cursor.execute("DELETE FROM club_memberships WHERE club_id = ?", (club_id,))
+            cursor.execute("UPDATE training_plans SET club_id = NULL WHERE club_id = ?", (club_id,))
+            cursor.execute("DELETE FROM clubs WHERE id = ?", (club_id,))
+            conn.commit()
+            return True
 
     @staticmethod
     def set_club_owner(club_id: str, new_owner_id: str) -> Optional[Dict[str, Any]]:
@@ -4388,6 +4444,12 @@ class LocalStore:
             if not club:
                 return None
             club_dict = dict(club)
+            c_status = club_dict.get("status") or "active"
+            if c_status == "paused":
+                raise ValueError(f"跑团【{club_dict.get('name')}】当前处于暂停状态，暂不接受指派新队员！")
+            if c_status == "locked":
+                raise ValueError(f"跑团【{club_dict.get('name')}】当前处于锁定状态，禁止变更队员！")
+
             org_id = club_dict.get("org_id")
             now = datetime.utcnow().isoformat() + "Z"
             
@@ -4484,7 +4546,14 @@ class LocalStore:
                 d = dict(r)
                 d.pop("invite_code", None)
                 d["is_member"] = d["id"] in user_club_ids
-                if status_info:
+                c_status = d.get("status") or "active"
+                if c_status == "paused":
+                    d["can_join"] = False
+                    d["join_restriction_reason"] = "跑团已暂停运行，暂不接受新成员加入"
+                elif c_status == "locked":
+                    d["can_join"] = False
+                    d["join_restriction_reason"] = "跑团已锁定，禁止新成员加入"
+                elif status_info:
                     st = status_info.get("status")
                     d["can_join"] = bool(st == "confirmed")
                     d["user_org_status"] = st

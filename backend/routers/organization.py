@@ -342,7 +342,10 @@ def assign_sub_club_endpoint(org_id: str, req: AssignSubClubRequest):
     if not club or club.get("org_id") != org_id:
         raise HTTPException(status_code=400, detail="该跑团不属于当前大组织！")
     
-    joined = LocalStore.assign_member_to_sub_club(user_id=req.user_id, club_id=req.club_id)
+    try:
+        joined = LocalStore.assign_member_to_sub_club(user_id=req.user_id, club_id=req.club_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {
         "success": True,
         "message": f"成功将成员加入下属跑团【{club['name']}】！",

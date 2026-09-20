@@ -37,6 +37,10 @@ class UpdateClubAdminRequest(BaseModel):
     invite_code: Optional[str] = None
     org_id: Optional[str] = None
     join_mode: Optional[str] = None
+    status: Optional[str] = None
+
+class SetClubStatusRequest(BaseModel):
+    status: str # 'active', 'paused', 'locked'
 
 class AssignOwnerRequest(BaseModel):
     new_owner_id: str
@@ -165,6 +169,44 @@ def assign_club_owner(club_id: str, req: AssignOwnerRequest, admin_info: Dict[st
             "display_name": owner_name
         }
     }
+
+
+@router.post("/clubs/{club_id}/status")
+def set_club_status_as_admin(club_id: str, req: SetClubStatusRequest, admin_info: Dict[str, Any] = Depends(verify_super_admin)):
+    """Super Admin sets club status (active, paused, locked)."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    try:
+        updated = LocalStore.set_club_status(club_id, req.status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    status_names = {"active": "正常运行", "paused": "暂停运行", "locked": "锁定归档"}
+    status_text = status_names.get(req.status, req.status)
+    return {"message": f"跑团【{club['name']}】状态已更新为【{status_text}】", "club": updated}
+
+
+@router.delete("/clubs/{club_id}")
+def delete_club_as_admin(club_id: str, admin_info: Dict[str, Any] = Depends(verify_super_admin)):
+    """
+    Super Admin permanently dissolves / deletes a club.
+    Deletes club memberships, events, and club records, but guarantees
+    members' personal accounts, profiles, and workout history are completely preserved.
+    """
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+
+    success = LocalStore.delete_club(club_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="删除跑团失败")
+
+    return {
+        "success": True,
+        "message": f"跑团【{club['name']}】及相关数据已成功删除，队员个人历史运动数据已完整保留"
+    }
+
 
 
 @router.get("/users")

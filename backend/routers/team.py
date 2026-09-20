@@ -49,6 +49,11 @@ class CreateClubEventRequest(BaseModel):
     target_km: Optional[float] = 200.0
     rules: Optional[str] = None
 
+class SetClubStatusOwnerRequest(BaseModel):
+    operator_uid: str
+    status: str # 'active', 'paused', 'locked'
+
+
 @router.get("/my-clubs/{uid}")
 def get_user_clubs(uid: str):
     """Returns all running clubs the user has joined (invite_code visible only to owner)."""
@@ -203,6 +208,13 @@ def get_club_members_list(club_id: str):
 @router.post("/{club_id}/role")
 def update_member_role(club_id: str, req: UpdateMemberRoleRequest):
     """Allows Club Owner to appoint or revoke Coach / Admin role."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    if club.get("status") in ("paused", "locked"):
+        status_text = "暂停" if club.get("status") == "paused" else "锁定"
+        raise HTTPException(status_code=400, detail=f"该跑团当前处于【{status_text}】状态，禁止调整成员角色！")
+
     members = LocalStore.get_club_members(club_id)
     op_member = next((m for m in members if m["user_id"] == req.operator_uid), None)
     
@@ -219,9 +231,17 @@ def update_member_role(club_id: str, req: UpdateMemberRoleRequest):
 def remove_member(club_id: str, target_uid: str, operator_uid: Optional[str] = None):
     """Allows Club Owner or Super Admin to remove a member from the club."""
     club = LocalStore.get_club(club_id)
-    if club and club.get("owner_id") == target_uid:
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    if club.get("status") in ("paused", "locked"):
+        status_text = "暂停" if club.get("status") == "paused" else "锁定"
+        raise HTTPException(status_code=400, detail=f"该跑团当前处于【{status_text}】状态，禁止增删队员！")
+    if club.get("owner_id") == target_uid:
         raise HTTPException(status_code=400, detail="团长不可被直接移出跑团，请先将团长身份移交给其他成员！")
-    LocalStore.remove_club_member(club_id, target_uid)
+    try:
+        LocalStore.remove_club_member(club_id, target_uid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"message": "已将该成员移出跑团"}
 
 
@@ -260,6 +280,12 @@ def get_club_events(club_id: str):
 @router.post("/{club_id}/events")
 def create_club_event(club_id: str, req: CreateClubEventRequest):
     """Allows Club Owner or Coach to create an event / distance challenge."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    if club.get("status") == "paused":
+        raise HTTPException(status_code=400, detail="该跑团当前处于暂停状态，暂停发布新活动与消息！")
+
     event_id = LocalStore.create_club_event(club_id, {
         "title": req.title,
         "event_type": req.event_type,
@@ -274,6 +300,12 @@ def create_club_event(club_id: str, req: CreateClubEventRequest):
 @router.put("/{club_id}/events/{event_id}")
 def update_club_event_endpoint(club_id: str, event_id: str, req: CreateClubEventRequest):
     """Allows Club Owner or Coach to edit an existing event."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    if club.get("status") == "paused":
+        raise HTTPException(status_code=400, detail="该跑团当前处于暂停状态，暂停修改活动与消息！")
+
     LocalStore.update_club_event(club_id, event_id, {
         "title": req.title,
         "event_type": req.event_type,
@@ -288,8 +320,15 @@ def update_club_event_endpoint(club_id: str, event_id: str, req: CreateClubEvent
 @router.delete("/{club_id}/events/{event_id}")
 def delete_club_event_endpoint(club_id: str, event_id: str, operator_uid: Optional[str] = None):
     """Allows Club Owner or Coach to delete an event."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+    if club.get("status") == "paused":
+        raise HTTPException(status_code=400, detail="该跑团当前处于暂停状态，暂停操作活动！")
+
     LocalStore.delete_club_event(club_id, event_id)
     return {"message": "活动已成功删除"}
+
 
 
 @router.get("/{club_id}/leaderboard")
@@ -543,5 +582,50 @@ def export_club_periodic_report(
     except Exception as e:
         logger.error(f"[team] Error exporting club report: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"导出跑团报表失败: {str(e)}")
+
+
+@router.post("/{club_id}/status")
+def set_club_status_by_owner(club_id: str, req: SetClubStatusOwnerRequest):
+    """Allows Club Owner (团长) to switch club status between 'active', 'paused', 'locked'."""
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+
+    if not LocalStore.is_club_owner(club_id, req.operator_uid):
+        raise HTTPException(status_code=403, detail="只有跑团团长有权调整跑团运行状态！")
+
+    try:
+        updated = LocalStore.set_club_status(club_id, req.status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    status_names = {"active": "正常运行", "paused": "暂停运行", "locked": "锁定归档"}
+    status_text = status_names.get(req.status, req.status)
+    return {"message": f"跑团【{club['name']}】状态已成功更新为【{status_text}】！", "club": updated}
+
+
+@router.delete("/{club_id}")
+def dissolve_club_by_owner(club_id: str, operator_uid: str = Query(..., description="团长用户ID")):
+    """
+    Allows Club Owner (团长) to dissolve and delete the club.
+    Deletes club record and memberships, but guarantees
+    members' personal accounts, profiles, and workout history are completely preserved.
+    """
+    club = LocalStore.get_club(club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="跑团不存在")
+
+    if not LocalStore.is_club_owner(club_id, operator_uid):
+        raise HTTPException(status_code=403, detail="只有跑团团长有权解散并删除本跑团！")
+
+    success = LocalStore.delete_club(club_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="解散跑团失败")
+
+    return {
+        "success": True,
+        "message": f"跑团【{club['name']}】已成功解散并清理，全体队员的个人历史运动数据与档案已完整保留！"
+    }
+
 
 

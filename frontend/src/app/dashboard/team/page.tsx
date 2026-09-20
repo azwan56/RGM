@@ -43,7 +43,9 @@ import {
   Clock,
   Download,
   BarChart3,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Pause,
+  Play
 } from "lucide-react";
 
 const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
@@ -121,9 +123,16 @@ export default function TeamPage() {
 
   const [inviteCodeInput, setInviteCodeInput] = useState("");
 
+  // Club Lifecycle Management states
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [showDissolveModal, setShowDissolveModal] = useState(false);
+  const [dissolveConfirmName, setDissolveConfirmName] = useState("");
+  const [dissolving, setDissolving] = useState(false);
+
   const [eventTitle, setEventTitle] = useState("");
   const [eventTargetKm, setEventTargetKm] = useState(200);
   const [eventRules, setEventRules] = useState("");
+
 
   const router = useRouter();
 
@@ -261,6 +270,53 @@ export default function TeamPage() {
       alert(e.response?.data?.detail || "更新入团规则失败，请重试！");
     }
   }
+
+  async function handleSetClubStatus(newStatus: "active" | "paused" | "locked") {
+    if (!currentClub?.id || !user?.id) return;
+    setStatusUpdating(true);
+    try {
+      const res = await apiClient.post(`/api/team/${currentClub.id}/status`, {
+        operator_uid: user.id,
+        status: newStatus,
+      });
+      alert(res.data?.message || "跑团运行状态已更新！");
+      setCurrentClub((prev: any) => ({ ...prev, status: newStatus }));
+      setClubs(clubs.map((c) => (c.id === currentClub.id ? { ...c, status: newStatus } : c)));
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "更新跑团状态失败，请重试！");
+    } finally {
+      setStatusUpdating(false);
+    }
+  }
+
+  async function handleDissolveClub(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentClub?.id || !user?.id) return;
+    if (dissolveConfirmName.trim() !== currentClub.name.trim()) {
+      alert("输入的跑团名称与当前跑团不一致，请核实后重试！");
+      return;
+    }
+    setDissolving(true);
+    try {
+      const res = await apiClient.delete(`/api/team/${currentClub.id}?operator_uid=${user.id}`);
+      alert(res.data?.message || "跑团已成功解散并清理，全体队员个人数据已完整保留！");
+      setShowDissolveModal(false);
+      setDissolveConfirmName("");
+      // Refresh clubs list
+      const rem = clubs.filter((c) => c.id !== currentClub.id);
+      setClubs(rem);
+      if (rem.length > 0) {
+        handleSwitchClub(rem[0]);
+      } else {
+        setCurrentClub(null);
+      }
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "解散跑团失败，请重试！");
+    } finally {
+      setDissolving(false);
+    }
+  }
+
 
   async function fetchClubReport(periodType: "week" | "month" = reportPeriodType, offset: number = reportPeriodOffset) {
     if (!currentClub?.id || !user?.id) return;
@@ -1102,6 +1158,16 @@ export default function TeamPage() {
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
                     {currentRole === "owner" ? "👑 跑团主理人" : currentRole === "coach" ? "🧢 认证教练" : "🏃 核心团员"}
                   </span>
+                  {currentClub.status === "paused" && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      <Pause className="w-2.5 h-2.5" /> 已暂停
+                    </span>
+                  )}
+                  {currentClub.status === "locked" && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> 已锁定
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-zinc-400 mt-1 line-clamp-1 max-w-xl">
                   {currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
@@ -1155,6 +1221,39 @@ export default function TeamPage() {
               </button>
             </div>
           </div>
+
+          {/* Status Warning Banners for Paused / Locked Clubs */}
+          {currentClub.status === "paused" && (
+            <div className="bg-amber-500/15 border border-amber-500/40 rounded-3xl p-4 sm:p-5 flex items-start gap-3.5 shadow-lg shadow-amber-500/5">
+              <div className="p-2 rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                  本跑团当前处于【暂停运行】状态
+                </h3>
+                <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                  本跑团已暂停运行：暂停动态消息发布与活动、禁止新成员加入或移除队员、暂停团队数据更新，且对外完全隐藏。已有成员可继续查阅历史记录。如需恢复正常，请跑团团长前往【👥 跑团成员与管理】进行恢复。
+                </p>
+              </div>
+            </div>
+          )}
+          {currentClub.status === "locked" && (
+            <div className="bg-blue-500/15 border border-blue-500/40 rounded-3xl p-4 sm:p-5 flex items-start gap-3.5 shadow-lg shadow-blue-500/5">
+              <div className="p-2 rounded-2xl bg-blue-500/20 text-blue-400 shrink-0">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-blue-300 flex items-center gap-2">
+                  本跑团当前处于【锁定归档】状态
+                </h3>
+                <p className="text-xs text-blue-200/80 mt-1 leading-relaxed">
+                  本跑团已进入锁定归档状态：只读模式，不允许新队员加入或移除现有队员，对外隐藏。已有成员仍可正常浏览跑步数据与排行榜。
+                </p>
+              </div>
+            </div>
+          )}
+
 
         {/* 4-Tab Navigation */}
         <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
@@ -1557,6 +1656,115 @@ export default function TeamPage() {
         {/* ── TAB 2: 👥 跑团成员与管理 ── */}
         {activeTab === "president" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
+            {/* Club Lifecycle & Status Management (Only Owner & Admin) */}
+            {(currentRole === "owner" || user?.is_admin) && (
+              <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-5 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-black text-white flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-amber-400" />
+                      跑团运行状态与生命周期治理
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      管理【{currentClub?.name}】的运行状态（正常/暂停/锁定）或解散跑团
+                    </p>
+                  </div>
+
+                  {/* Status Toggle Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      disabled={statusUpdating}
+                      onClick={() => handleSetClubStatus("active")}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        (currentClub?.status || "active") === "active"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-lg shadow-emerald-500/10"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/10"
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      <span>🟢 正常运行</span>
+                      {(currentClub?.status || "active") === "active" && <span>✓</span>}
+                    </button>
+
+                    <button
+                      disabled={statusUpdating}
+                      onClick={() => handleSetClubStatus("paused")}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        currentClub?.status === "paused"
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/10"
+                      }`}
+                    >
+                      <Pause className="w-3.5 h-3.5" />
+                      <span>⏸️ 暂停跑团</span>
+                      {currentClub?.status === "paused" && <span>✓</span>}
+                    </button>
+
+                    <button
+                      disabled={statusUpdating}
+                      onClick={() => handleSetClubStatus("locked")}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 ${
+                        currentClub?.status === "locked"
+                          ? "bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-lg shadow-blue-500/10"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/10"
+                      }`}
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>🔒 锁定跑团</span>
+                      {currentClub?.status === "locked" && <span>✓</span>}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status Detailed Explanation */}
+                <div className="p-4 rounded-2xl bg-[#18181c] border border-white/5 text-xs space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400 font-medium">当前状态机制说明:</span>
+                    {(currentClub?.status || "active") === "active" && (
+                      <span className="text-emerald-400 font-bold">🟢 正常运行中</span>
+                    )}
+                    {currentClub?.status === "paused" && (
+                      <span className="text-amber-400 font-bold">⏸️ 暂停运行中</span>
+                    )}
+                    {currentClub?.status === "locked" && (
+                      <span className="text-blue-400 font-bold">🔒 锁定归档中</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    {(currentClub?.status || "active") === "active" &&
+                      "跑团各项功能全部开放，支持新队员加入与退出，队员跑步打卡与周月报实时汇总更新，对外公开可见。"}
+                    {currentClub?.status === "paused" &&
+                      "暂停跑团动态消息发布与活动挑战、暂停队员增删（禁止新成员加入或移除现有队员）、暂停数据统计更新，对外完全不可见。已有成员仍可浏览历史数据。"}
+                    {currentClub?.status === "locked" &&
+                      "只读归档状态：不允许队员增删（禁止新成员加入或移除现有队员），对外完全不可见。已有成员可正常浏览跑步数据与排行榜。"}
+                  </p>
+                </div>
+
+                {/* Danger Zone: Dissolve Club */}
+                <div className="pt-3 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-red-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-red-400" />
+                      高危操作区：解散并永久删除跑团
+                    </span>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      解散跑团将永久清理群结构。🛡️ <strong>系统严格保障：全体队员个人运动数据、历史打卡与个人档案 100% 完整保留。</strong>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setDissolveConfirmName("");
+                      setShowDissolveModal(true);
+                    }}
+                    className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    解散跑团
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Club Join Rule Settings (Only Owner & Admin) */}
             {(currentRole === "owner" || user?.is_admin) && (
               <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl">
@@ -1566,6 +1774,7 @@ export default function TeamPage() {
                       <Shield className="w-5 h-5 text-[#FC4C02]" />
                       入团规则与准入门槛
                     </h2>
+
                     <p className="text-xs text-zinc-400 mt-0.5">
                       设定成员加入【{currentClub?.name}】的方式，选择自由入团或凭专属邀请码入团
                     </p>
@@ -3193,6 +3402,100 @@ export default function TeamPage() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Dissolve Club Confirmation (Owner / Admin) ── */}
+      {showDissolveModal && currentClub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-[#141416] border border-red-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl">
+            <button
+              onClick={() => {
+                setShowDissolveModal(false);
+                setDissolveConfirmName("");
+              }}
+              className="absolute top-6 right-6 p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/5"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">解散并删除跑团</h3>
+                <p className="text-xs text-zinc-400">仅跑团团长与超级管理员有权操作</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="p-3.5 bg-white/5 border border-white/10 rounded-2xl space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">待解散跑团:</span>
+                  <span className="font-bold text-white">{currentClub.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">跑团成员数:</span>
+                  <span className="text-zinc-300">{dashboardMetrics?.members_count || members.length || 1} 人</span>
+                </div>
+              </div>
+
+              {/* Data Safety Reassurance */}
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl space-y-1.5">
+                <div className="font-bold text-emerald-400 flex items-center gap-1.5 text-xs">
+                  <Shield className="w-4 h-4 text-emerald-400" />
+                  队员个人数据安全保障
+                </div>
+                <p className="text-[11px] text-emerald-300/90 leading-relaxed">
+                  本操作仅解散跑团组织与成员从属关系。全体队员的<strong>个人账号、个人跑者档案、历史打卡记录、GPS轨迹与生理负荷数据将 100% 完整保留</strong>，不受任何影响！
+                </p>
+              </div>
+
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                <p className="text-[11px] text-red-300/90 leading-relaxed">
+                  ⚠️ 跑团解散后无法恢复，跑团活动及团队排行榜将被清理。
+                </p>
+              </div>
+
+              <form onSubmit={handleDissolveClub} className="space-y-4 pt-2">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                    请输入跑团全名 <span className="text-red-400 font-bold">"{currentClub.name}"</span> 确认解散：
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={dissolveConfirmName}
+                    onChange={(e) => setDissolveConfirmName(e.target.value)}
+                    placeholder={currentClub.name}
+                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDissolveModal(false);
+                      setDissolveConfirmName("");
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-bold transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={dissolving || dissolveConfirmName.trim() !== currentClub.name.trim()}
+                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:hover:bg-red-600 text-white text-xs font-bold transition shadow-lg shadow-red-600/30 flex items-center justify-center gap-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{dissolving ? "解散中..." : "确认解散跑团"}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
