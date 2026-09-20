@@ -35,6 +35,18 @@
       <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出登录</button>
     </view>
 
+    <!-- ── 新用户入门与操作手册入口横幅 ── -->
+    <view class="manual-entry-banner" @click="goToManual">
+      <view class="manual-entry-left">
+        <text class="manual-entry-icon">📖</text>
+        <view class="manual-entry-meta">
+          <text class="manual-entry-title">新用户入门与操作手册</text>
+          <text class="manual-entry-desc">手表直连 · 大群2周准入 · 必填资料 · 目标设定</text>
+        </view>
+      </view>
+      <text class="manual-entry-arrow">›</text>
+    </view>
+
     <!-- ── 顶部切换 Tab：个人资料 vs 训练赛事 ── -->
     <view class="profile-tabs-nav">
       <view
@@ -2278,6 +2290,12 @@ function scrollToRequiredFields() {
   }, 150);
 }
 
+function goToManual() {
+  uni.navigateTo({
+    url: "/pages/manual/manual",
+  });
+}
+
 const gobiType = ref<"new" | "vet">("new");
 const gobiEdition = ref("戈21");
 const gobiGroup = ref("A组");
@@ -4153,6 +4171,54 @@ onShow(() => {
 </script>
 
 <style scoped>
+/* ── Manual Entry Banner ── */
+.manual-entry-banner {
+  background: linear-gradient(90deg, rgba(252, 76, 2, 0.12) 0%, rgba(255, 255, 255, 0.03) 100%);
+  border: 1rpx solid rgba(252, 76, 2, 0.28);
+  border-radius: 24rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.manual-entry-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
+  flex: 1;
+}
+
+.manual-entry-icon {
+  font-size: 36rpx;
+}
+
+.manual-entry-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.manual-entry-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.manual-entry-desc {
+  font-size: 20rpx;
+  color: #a0a0a5;
+}
+
+.manual-entry-arrow {
+  font-size: 32rpx;
+  color: #fc4c02;
+  font-weight: bold;
+}
+
 /* ── Segmented Profile Tabs Nav ── */
 .profile-tabs-nav {
   display: flex;

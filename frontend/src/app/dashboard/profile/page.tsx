@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
-import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check } from "lucide-react";
+import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check, BookOpen } from "lucide-react";
 
 export interface RacePlan {
   id?: string;
@@ -879,11 +880,20 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       <Navbar />
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight">跑者档案、比赛计划与目标</h1>
-          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            完善生理指标、赛事周期倒计时与各距离 PB，驱动 Canova教练 精准配速生成
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">跑者档案、比赛计划与目标</h1>
+            <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+              完善生理指标、赛事周期倒计时与各距离 PB，驱动 Canova教练 精准配速生成
+            </p>
+          </div>
+          <Link
+            href="/dashboard/manual"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 transition self-start sm:self-auto shrink-0 shadow-sm"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-[#FC4C02]" />
+            <span>📖 新用户手册与指引 ›</span>
+          </Link>
         </div>
 
         {/* Tab Switcher */}

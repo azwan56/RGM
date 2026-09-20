@@ -77,6 +77,16 @@
         "backgroundColor": "#0b0b0d",
         "enablePullDownRefresh": true
       }
+    },
+    {
+      "path": "pages/manual/manual",
+      "style": {
+        "navigationBarTitleText": "新用户操作手册",
+        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0d",
+        "enablePullDownRefresh": false
+      }
     }
   ],
   "globalStyle": {
