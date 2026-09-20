@@ -1382,7 +1382,7 @@
               <!-- Bottom Watermark & Stamp -->
               <view class="poster-footer-stamp">
                 <view class="pfs-left">
-                  <text class="pfs-brand">RGM RUNNING MATRIX</text>
+                  <text class="pfs-brand">万跑跑团助手</text>
                   <text class="pfs-slogan">跑者成长矩阵 · 科学耐力训练与跑团系统</text>
                 </view>
                 <view class="pfs-stamp-badge">
@@ -2423,7 +2423,7 @@ function generatePosterImage(): Promise<string> {
 
     ctx.setFontSize(22);
     ctx.setFillStyle("#ffffff");
-    ctx.fillText("RGM RUNNING MATRIX", 40, fY + 40);
+    ctx.fillText("万跑跑团助手", 40, fY + 40);
 
     ctx.setFontSize(16);
     ctx.setFillStyle("#71717a");

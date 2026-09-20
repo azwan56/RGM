@@ -644,7 +644,7 @@ export default function TeamPage() {
 
     ctx.font = "900 22px sans-serif";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText("RGM RUNNING MATRIX", 40, fY + 40);
+    ctx.fillText("万跑跑团助手", 40, fY + 40);
 
     ctx.font = "16px sans-serif";
     ctx.fillStyle = "#71717a";
@@ -3394,7 +3394,7 @@ export default function TeamPage() {
                       {/* Bottom Stamp */}
                       <div className="flex items-center justify-between pt-4 border-t border-white/10">
                         <div>
-                          <div className="text-xs font-black text-white tracking-wider">RGM RUNNING MATRIX</div>
+                          <div className="text-xs font-black text-white tracking-wider">万跑跑团助手</div>
                           <div className="text-[10px] text-zinc-500">跑者成长矩阵 · 科学耐力训练与跑团系统</div>
                         </div>
                         <span className="px-2.5 py-1 rounded-md text-[10px] font-black tracking-wider text-amber-400 border border-amber-400 -rotate-3">
