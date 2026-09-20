@@ -4759,23 +4759,23 @@ onShow(() => {
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
+}
 
-  &:active {
-    background: rgba(255, 107, 0, 0.2);
-  }
+.card-add-photo-btn:active {
+  background: rgba(255, 107, 0, 0.2);
+}
 
-  .card-add-icon {
-    font-size: 28rpx;
-    line-height: 1;
-  }
+.card-add-photo-btn .card-add-icon {
+  font-size: 28rpx;
+  line-height: 1;
+}
 
-  .card-add-txt {
-    font-size: 18rpx;
-    color: #ff6b00;
-    font-weight: 600;
-    margin-top: 4rpx;
-    line-height: 1;
-  }
+.card-add-photo-btn .card-add-txt {
+  font-size: 18rpx;
+  color: #ff6b00;
+  font-weight: 600;
+  margin-top: 4rpx;
+  line-height: 1;
 }
 
 .card-photo-hint {

@@ -4377,11 +4377,11 @@ onPullDownRefresh(async () => {
   gap: 16rpx;
   cursor: pointer;
   transition: all 0.2s;
+}
 
-  &:active {
-    background: #24242c;
-    border-color: rgba(252, 76, 2, 0.4);
-  }
+.critique-run-summary-card:active {
+  background: #24242c;
+  border-color: rgba(252, 76, 2, 0.4);
 }
 
 .run-sum-top {
@@ -4436,18 +4436,18 @@ onPullDownRefresh(async () => {
   gap: 4rpx;
 }
 
-.m-val {
+.run-metric-item .m-val {
   font-size: 32rpx;
   font-weight: 900;
   color: #f4f4f5;
   line-height: 1.1;
+}
 
-  .m-unit {
-    font-size: 18rpx;
-    font-weight: normal;
-    color: #a1a1aa;
-    margin-left: 4rpx;
-  }
+.run-metric-item .m-val .m-unit {
+  font-size: 18rpx;
+  font-weight: normal;
+  color: #a1a1aa;
+  margin-left: 4rpx;
 }
 
 .m-lbl {
@@ -4500,37 +4500,37 @@ onPullDownRefresh(async () => {
 .critique-section-card.special {
   background: linear-gradient(145deg, rgba(16, 185, 129, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
   border: 1rpx solid rgba(16, 185, 129, 0.25);
+}
 
-  .sec-title {
-    color: #34d399;
-  }
+.critique-section-card.special .sec-title {
+  color: #34d399;
 }
 
 .critique-section-card.advice {
   background: linear-gradient(145deg, rgba(251, 191, 36, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
   border: 1rpx solid rgba(251, 191, 36, 0.25);
+}
 
-  .sec-title {
-    color: #fbbf24;
-  }
+.critique-section-card.advice .sec-title {
+  color: #fbbf24;
 }
 
 .critique-section-card.target {
   background: linear-gradient(145deg, rgba(249, 115, 22, 0.08) 0%, rgba(20, 20, 24, 0.9) 100%);
   border: 1rpx solid rgba(249, 115, 22, 0.25);
+}
 
-  .sec-title {
-    color: #fb923c;
-  }
+.critique-section-card.target .sec-title {
+  color: #fb923c;
 }
 
 .critique-section-card.general {
   background: #1a1a1f;
   border: 1rpx solid rgba(255, 255, 255, 0.08);
+}
 
-  .sec-title {
-    color: #f4f4f5;
-  }
+.critique-section-card.general .sec-title {
+  color: #f4f4f5;
 }
 
 .sec-header {
@@ -4581,19 +4581,19 @@ onPullDownRefresh(async () => {
   background: rgba(252, 76, 2, 0.15);
   color: #fc4c02;
   border: 1rpx solid rgba(252, 76, 2, 0.4);
+}
 
-  &:active {
-    background: rgba(252, 76, 2, 0.3);
-  }
+.critique-action-btn.track-btn:active {
+  background: rgba(252, 76, 2, 0.3);
 }
 
 .critique-action-btn.coach-btn {
   background: #27272a;
   color: #ffffff;
   border: 1rpx solid rgba(255, 255, 255, 0.15);
+}
 
-  &:active {
-    background: #3f3f46;
-  }
+.critique-action-btn.coach-btn:active {
+  background: #3f3f46;
 }
 </style>

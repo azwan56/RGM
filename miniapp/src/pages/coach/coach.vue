@@ -1781,10 +1781,10 @@ onPullDownRefresh(async () => {
   border-radius: 14rpx;
   border: none;
   margin-top: 6rpx;
+}
 
-  &:active {
-    background: #7e22ce;
-  }
+.banner-switch-btn:active {
+  background: #7e22ce;
 }
 
 /* Registered User Races */
