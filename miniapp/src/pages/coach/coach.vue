@@ -390,19 +390,6 @@
         <text class="card-title">目标赛事与专项设定</text>
       </view>
 
-      <!-- Preset Chips -->
-      <view class="presets-row">
-        <view
-          v-for="(p, idx) in racePresets"
-          :key="idx"
-          class="preset-chip"
-          :class="{ active: targetRace === p.race }"
-          @click="applyPreset(p)"
-        >
-          <text class="chip-text">{{ p.label }}</text>
-        </view>
-      </view>
-
       <!-- Registered User Races Quick Selector -->
       <view v-if="userRaces.length" class="registered-races-row">
         <text class="registered-label">🚩 您已登记的备赛日程 (点击直接切换为当前备赛)：</text>
@@ -1505,7 +1492,8 @@ onPullDownRefresh(async () => {
 .coach-page {
   min-height: 100vh;
   background-color: #0b0b0d;
-  padding: 30rpx 30rpx 60rpx 30rpx;
+  padding: 30rpx 30rpx calc(180rpx + constant(safe-area-inset-bottom)) 30rpx;
+  padding: 30rpx 30rpx calc(180rpx + env(safe-area-inset-bottom)) 30rpx;
   box-sizing: border-box;
 }
 

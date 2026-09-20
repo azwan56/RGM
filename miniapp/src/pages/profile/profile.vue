@@ -947,7 +947,14 @@
       </view>
     </view>
 
-      <!-- ── CARD 1: 比赛计划 (Race Plans) ── -->
+    <!-- Tab 2 专属保存设置 (置于跑量目标配置下方，一目了然触手可及) -->
+    <view v-if="user" class="save-box">
+      <button class="save-btn" :loading="saving" @click="handleSaveAll">
+        🎯 保存训练目标与生理参数
+      </button>
+    </view>
+
+    <!-- ── CARD 1: 比赛计划 (Race Plans) ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -1300,8 +1307,8 @@
       </view>
     </view>
 
-          <!-- Tab 2 专属保存设置 -->
-    <view v-if="user" class="save-box">
+    <!-- Tab 2 专属保存设置（底部备用） -->
+    <view v-if="user" class="save-box save-box-bottom">
       <button class="save-btn" :loading="saving" @click="handleSaveAll">
         🎯 保存训练目标与生理参数
       </button>
@@ -4266,7 +4273,8 @@ onShow(() => {
 .profile-page {
   min-height: 100vh;
   background-color: #0b0b0d;
-  padding: 30rpx 30rpx 60rpx 30rpx;
+  padding: 30rpx 30rpx calc(240rpx + constant(safe-area-inset-bottom)) 30rpx;
+  padding: 30rpx 30rpx calc(240rpx + env(safe-area-inset-bottom)) 30rpx;
   box-sizing: border-box;
 }
 
@@ -6103,25 +6111,33 @@ onShow(() => {
 }
 
 .save-box {
-  margin-top: 30rpx;
+  margin-top: 36rpx;
+  margin-bottom: 24rpx;
+}
+
+.save-box-bottom {
+  margin-top: 36rpx;
+  margin-bottom: calc(50rpx + env(safe-area-inset-bottom));
 }
 
 .save-btn {
   width: 100%;
-  height: 84rpx;
+  height: 92rpx;
   background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
   color: #ffffff;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: bold;
-  border-radius: 20rpx;
+  border-radius: 22rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
+  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.3);
 }
 
 .logout-box {
   margin-top: 40rpx;
+  margin-bottom: calc(50rpx + env(safe-area-inset-bottom));
 }
 
 .logout-btn {

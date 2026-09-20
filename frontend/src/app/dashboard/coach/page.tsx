@@ -390,28 +390,6 @@ export default function CoachPage() {
               </div>
             )}
 
-            {/* Quick Presets (Fallback or New Goal Exploration) */}
-            <div className="flex flex-wrap gap-2">
-              <span className="text-[11px] text-zinc-500 self-center mr-1">参考预设:</span>
-              {racePresets.map((p, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setTargetRace(p.race);
-                    setTargetTime(p.time);
-                    setRaceType(p.type);
-                  }}
-                  className={`text-xs px-2.5 py-1 rounded-xl border transition-all ${
-                    targetRace === p.race
-                      ? "bg-purple-600/30 border-purple-500 text-purple-200 font-bold"
-                      : "bg-[#18181c] border-white/5 text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
               <div>
                 <label className="text-[11px] text-zinc-400 block mb-1">目标赛事名称</label>

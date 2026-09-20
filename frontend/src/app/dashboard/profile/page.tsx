@@ -2099,7 +2099,19 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             )}
           </div>
 
-              {/* ── CARD 1: 比赛计划 (Race Plans) ── */}
+          {/* Tab 2 专属保存设置 (配置完生理指标与跑量目标后直接保存) */}
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
+            >
+              <Save className="w-5 h-5" />
+              {saving ? "正在保存..." : "🎯 保存训练目标与生理参数"}
+            </button>
+          </div>
+
+          {/* ── CARD 1: 比赛计划 (Race Plans) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
