@@ -35,7 +35,37 @@
       <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出登录</button>
     </view>
 
-    <!-- ── CARD: 大群体成员认证与审核状态卡 (Grand Org Membership & Expiry Status) ── -->
+    <!-- ── 顶部切换 Tab：个人资料 vs 训练赛事 ── -->
+    <view class="profile-tabs-nav">
+      <view
+        class="profile-tab-item"
+        :class="{ 'profile-tab-item-active': activeTab === 'profile' }"
+        @click="activeTab = 'profile'"
+      >
+        <text class="profile-tab-icon">👤</text>
+        <text
+          class="profile-tab-title"
+          :class="{ 'profile-tab-title-active': activeTab === 'profile' }"
+        >个人资料与账号</text>
+      </view>
+      <view
+        class="profile-tab-item"
+        :class="{ 'profile-tab-item-active': activeTab === 'training' }"
+        @click="activeTab = 'training'"
+      >
+        <text class="profile-tab-icon">🏃</text>
+        <text
+          class="profile-tab-title"
+          :class="{ 'profile-tab-title-active': activeTab === 'training' }"
+        >训练档案与赛事</text>
+      </view>
+    </view>
+
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <!-- TAB 1: 个人资料与账号 (Profile & Account)                     -->
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <template v-if="activeTab === 'profile'">
+      <!-- ── CARD: 大群体成员认证与审核状态卡 (Grand Org Membership & Expiry Status) ── -->
     <view v-if="userOrgs && userOrgs.length > 0" class="section-card org-status-section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -82,7 +112,7 @@
       </view>
     </view>
 
-    <!-- ── CARD 1: 我的跑团与管理 (Running Club Card) ── -->
+      <!-- ── CARD 1: 我的跑团与管理 (Running Club Card) ── -->
     <view class="section-card club-card-highlight">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -128,7 +158,354 @@
       </view>
     </view>
 
-    <!-- ── CARD 2: Device Connection Status Card (Garmin & COROS) ── -->
+      <!-- ── CARD: 个人实名身份与敏感信息 (AES-256 加密保护) ── -->
+    <view id="required-personal-fields" class="section-card section-card-runner-info">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🔒</text>
+          <text class="card-title">个人实名身份与敏感信息</text>
+        </view>
+        <text class="security-chip">AES-256 加密保护</text>
+      </view>
+
+      <text class="desc-text" style="margin-bottom: 20rpx;">
+        真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 出生日期 & 动态年龄 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <view class="label-with-sec">
+              <text class="label">出生日期 (Date of Birth)<text class="required-star"> *</text></text>
+              <text class="field-sec-tag req-tag">大群必填</text>
+              <text class="field-sec-tag">🔒 AES-256 加密</text>
+            </view>
+            <text v-if="displayAge !== null" class="age-badge-pill">
+              {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
+            </text>
+          </view>
+          <view class="secure-picker-row">
+            <picker
+              mode="date"
+              :value="profile?.date_of_birth || '1990-01-01'"
+              start="1940-01-01"
+              :end="todayDateStr"
+              @change="onDateOfBirthChange"
+              class="secure-picker-flex"
+            >
+              <view class="picker-input-box">
+                <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
+                  {{ showDob ? (profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)') : (profile?.date_of_birth ? '****-**-**' : '请选择出生年月日 (YYYY-MM-DD)') }}
+                </text>
+                <text class="picker-arrow">📅</text>
+              </view>
+            </picker>
+            <view class="eye-toggle-btn" @click.stop="showDob = !showDob">
+              <text class="eye-icon">{{ showDob ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
+          <text class="field-privacy-subtip">🛡️ 点击右侧眼睛符号显示/隐藏完整日期，大群体公开名册仅展示组别脱敏保护</text>
+        </view>
+
+        <!-- 真实姓名 -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">真实姓名<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
+            <text class="field-sec-tag">🔒 加密存储</text>
+          </view>
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showRealName"
+              type="text"
+              placeholder="戈友实名认证姓名"
+              :value="profile?.real_name || ''"
+              @input="onInputRealName"
+            />
+            <view class="eye-toggle-btn" @click="showRealName = !showRealName">
+              <text class="eye-icon">{{ showRealName ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 联系手机 -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">联系手机</text>
+            <text class="field-sec-tag">🔒 保密</text>
+          </view>
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showPhone"
+              type="number"
+              maxlength="11"
+              placeholder="紧急联络手机"
+              :value="profile?.phone || ''"
+              @input="onInputPhone"
+            />
+            <view class="eye-toggle-btn" @click="showPhone = !showPhone">
+              <text class="eye-icon">{{ showPhone ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 身份证号码 / 证件号 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">身份证号码 / 证件号 (选填)</text>
+            <text class="field-sec-tag">🔒 密文存储 · 非必要不暴露</text>
+          </view>
+          <view class="secure-input-wrapper">
+            <input
+              class="form-input secure-input"
+              :password="!showIdCard"
+              type="text"
+              maxlength="18"
+              placeholder="用于赛事保险投保与参赛资格核验"
+              :value="profile?.id_card || ''"
+              @input="onInputIdCard"
+            />
+            <view class="eye-toggle-btn" @click="showIdCard = !showIdCard">
+              <text class="eye-icon">{{ showIdCard ? '👁️' : '🙈' }}</text>
+            </view>
+          </view>
+          <text class="field-privacy-subtip">🛡️ 默认以 *** 隐藏，点击眼睛符号才完整显示。证件号采用 AES-256 密文存储，任何普通成员不可见。</text>
+        </view>
+
+        <!-- 生理性别 -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">生理性别<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
+          </view>
+          <view class="gender-pill-group">
+            <view
+              class="gender-pill"
+              :class="{ active: (profile?.gender || 'male') === 'male' }"
+              @click="onGenderSelect('male')"
+            >
+              <text>♂ 男 (Male)</text>
+            </view>
+            <view
+              class="gender-pill"
+              :class="{ active: profile?.gender === 'female' }"
+              @click="onGenderSelect('female')"
+            >
+              <text>♀ 女 (Female)</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD: 商学院项目与戈友认证 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🏫</text>
+          <text class="card-title">商学院项目与戈友认证</text>
+        </view>
+        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+          大群自动同步
+        </text>
+      </view>
+
+      <text class="desc-text">
+        在此填写的项目、班级与戈壁经历，将自动同步至您已加入的所有商学院跑团大群（如复旦戈友会）实名花名册，自动流转审核状态。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 所属项目 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">商学院项目<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
+          </view>
+          <view class="program-pill-grid">
+            <view
+              v-for="prog in ORG_PROGRAM_OPTIONS"
+              :key="prog"
+              class="program-pill"
+              :class="{ active: profile?.program === prog }"
+              @click="onSelectProgram(prog)"
+            >
+              <text>{{ prog }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 班级 / 届别 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">所在班级 / 届别 (自由输入)<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
+          </view>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如: 23春、21级、18班、2022秋"
+            :value="profile?.class_detail || ''"
+            @input="onInputClassDetail"
+          />
+          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: #fbbf24;">
+            名册组合预览：{{ profile.program }} {{ profile.class_detail }}
+          </text>
+        </view>
+
+        <!-- 戈壁经历 -->
+        <view class="form-group full-width-group">
+          <view class="label-with-tag">
+            <text class="label">戈壁经历 (戈赛经验)</text>
+            <text class="field-sec-tag">{{ gobiType === 'new' ? '🌱 新戈' : `🏅 ${gobiEdition} ${gobiGroup}` }}</text>
+          </view>
+
+          <view class="gobi-type-selector">
+            <view
+              class="gobi-type-btn"
+              :class="{ active: gobiType === 'new' }"
+              @click="onSelectGobiType('new')"
+            >
+              <text class="gobi-icon">🌱</text>
+              <view class="gobi-info">
+                <text class="gobi-main-title">新戈跑者</text>
+                <text class="gobi-sub-title">首次备赛 / 暂无往届</text>
+              </view>
+            </view>
+            <view
+              class="gobi-type-btn"
+              :class="{ active: gobiType === 'vet' }"
+              @click="onSelectGobiType('vet')"
+            >
+              <text class="gobi-icon">🏅</text>
+              <view class="gobi-info">
+                <text class="gobi-main-title">往届老戈友</text>
+                <text class="gobi-sub-title">参加过戈1至戈21</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 往届老戈友详情选择 -->
+          <view v-if="gobiType === 'vet'" class="gobi-vet-box">
+            <view class="vet-row">
+              <text class="vet-label">参加届数：</text>
+              <picker
+                mode="selector"
+                :range="GOBI_EDITIONS"
+                :value="GOBI_EDITIONS.indexOf(gobiEdition) >= 0 ? GOBI_EDITIONS.indexOf(gobiEdition) : 0"
+                @change="onGobiEditionChange"
+                class="vet-picker-flex"
+              >
+                <view class="picker-input-box">
+                  <text>{{ gobiEdition || '请选择届数' }}</text>
+                  <text class="picker-arrow">▼</text>
+                </view>
+              </picker>
+            </view>
+
+            <view class="vet-row" style="margin-top: 16rpx;">
+              <text class="vet-label">参赛组别：</text>
+              <view class="grp-pill-group">
+                <view
+                  v-for="grp in GOBI_GROUPS"
+                  :key="grp"
+                  class="grp-pill"
+                  :class="{ active: gobiGroup === grp }"
+                  @click="onSelectGobiGroup(grp)"
+                >
+                  <text>{{ grp }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD: 赛事活动与装备保障 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🎽</text>
+          <text class="card-title">赛事活动与装备保障</text>
+        </view>
+        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.3);">
+          物资发放 · 保险
+        </text>
+      </view>
+
+      <text class="desc-text">
+        用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 紧急联系人及电话 -->
+        <view class="form-group full-width-group">
+          <text class="label">紧急联系人及电话</text>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如: 张三 13900001111"
+            :value="profile?.emergency_contact || ''"
+            @input="onInputEmergencyContact"
+          />
+          <text class="field-privacy-subtip">建议填写直系亲属或紧急联络人姓名与电话</text>
+        </view>
+
+        <!-- 队服尺码 -->
+        <view class="form-group">
+          <text class="label">队服尺码 (Clothing)</text>
+          <picker
+            mode="selector"
+            :range="CLOTHING_SIZES"
+            :value="CLOTHING_SIZES.indexOf(profile?.clothing_size) >= 0 ? CLOTHING_SIZES.indexOf(profile?.clothing_size) : 0"
+            @change="onClothingSizeChange"
+          >
+            <view class="picker-input-box">
+              <text :class="{ 'placeholder-text': !profile?.clothing_size }">
+                {{ profile?.clothing_size || '请选择尺码' }}
+              </text>
+              <text class="picker-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 跑鞋尺码 -->
+        <view class="form-group">
+          <text class="label">跑鞋尺码 (Shoe EUR)</text>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="例如 42 或 42.5"
+            :value="profile?.shoe_size || ''"
+            @input="onInputShoeSize"
+          />
+        </view>
+
+        <!-- 健康状况声明 -->
+        <view class="form-group full-width-group">
+          <view
+            class="health-decl-box"
+            :class="{ active: profile?.health_declaration !== false }"
+            @click="onToggleHealthDeclaration"
+          >
+            <view class="health-checkbox">
+              <text class="check-mark">{{ profile?.health_declaration !== false ? '✓' : '' }}</text>
+            </view>
+            <view class="health-decl-texts">
+              <text class="health-title">健康状况与免责声明确认</text>
+              <text class="health-desc">
+                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
+              </text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD 2: Device Connection Status Card (Garmin & COROS) ── -->
     <view class="section-card">
       <view class="card-title-row">
         <text class="card-title">运动手表数据直连</text>
@@ -203,7 +580,7 @@
       </view>
     </view>
 
-    <!-- ── CARD: 🔔 微信接收 Canova教练跑后点评推送 ── -->
+      <!-- ── CARD: 🔔 微信接收 Canova教练跑后点评推送 ── -->
     <view class="section-card wechat-notif-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -230,7 +607,335 @@
       </view>
     </view>
 
-    <!-- ── CARD 1: 比赛计划 (Race Plans) ── -->
+      <!-- ── CARD: 🛡️ 个人隐私与数据安全保障 ── -->
+    <view v-if="user" class="section-card privacy-guard-card">
+      <view class="card-title-row">
+        <view class="title-with-badge">
+          <text class="card-title">🛡️ 个人隐私与数据安全保障</text>
+          <text class="security-chip">AES-256 加密保护</text>
+        </view>
+      </view>
+
+      <view class="privacy-statement-box">
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">🔒</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">敏感隐私 AES-256 高强度密文存储</text>
+            <text class="privacy-rule-desc">
+              真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
+            </text>
+          </view>
+        </view>
+
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">👁️</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">大群体名册严格自动脱敏</text>
+            <text class="privacy-rule-desc">
+              在团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
+            </text>
+          </view>
+        </view>
+
+        <view class="privacy-rule-item">
+          <text class="privacy-rule-icon">🧹</text>
+          <view class="privacy-rule-content">
+            <text class="privacy-rule-title">随时一键彻底清除个人隐私</text>
+            <text class="privacy-rule-desc">
+              您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。原有运动里程与活动记录将以匿名形式保留，以保障跑团队伍统计完整性。
+            </text>
+          </view>
+        </view>
+      </view>
+
+      <view class="privacy-actions-row">
+        <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
+          🧹 一键清除所有个人隐私数据
+        </button>
+      </view>
+    </view>
+
+          <!-- Tab 1 专属保存设置 -->
+    <view v-if="user" class="save-box">
+      <button class="save-btn" :loading="saving" @click="handleSaveAll">
+        💾 保存个人资料与账号设置
+      </button>
+    </view>
+
+      <!-- 底部退出登录（仅登录后显示） -->
+    <view v-if="user" class="logout-box">
+      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
+    </view>
+    </template>
+
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <!-- TAB 2: 训练档案与赛事 (Training Metrics & Races)              -->
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <template v-if="activeTab === 'training'">
+      <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">⚡</text>
+          <text class="card-title">个人最佳成绩 (PB)</text>
+        </view>
+        <button
+          class="import-garmin-btn"
+          :loading="importingGarmin"
+          :disabled="importingGarmin"
+          @click="handleImportGarminPb"
+        >
+          从 Garmin 导入
+        </button>
+      </view>
+
+      <view class="pb-grid">
+        <view class="pb-item">
+          <text class="pb-label">全马 (42.195k)</text>
+          <text class="pb-val">{{ formatSecs(profile?.marathon_pb) }}</text>
+        </view>
+        <view class="pb-item">
+          <text class="pb-label">半马 (21.0975k)</text>
+          <text class="pb-val">{{ formatSecs(profile?.half_pb) }}</text>
+        </view>
+        <view class="pb-item">
+          <text class="pb-label">10公里</text>
+          <text class="pb-val">{{ formatSecs(profile?.ten_k_pb) }}</text>
+        </view>
+        <view class="pb-item">
+          <text class="pb-label">5公里</text>
+          <text class="pb-val">{{ formatSecs(profile?.five_k_pb) }}</text>
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD 3: 运动体能与生理指标 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">💓</text>
+          <text class="card-title">运动体能与生理指标</text>
+        </view>
+        <button
+          class="import-garmin-btn"
+          :loading="syncingDeviceProfile"
+          :disabled="syncingDeviceProfile || (!garminConnected && !corosConnected)"
+          @click="handleSyncDeviceProfile"
+        >
+          从手表同步指标
+        </button>
+      </view>
+
+      <text class="desc-text" style="margin-bottom: 20rpx;">
+        Canova 教练根据静息心率与最大摄氧量 (VO2Max) 智能自适应训练配速区间与超量恢复。
+      </text>
+
+      <view class="form-grid-2">
+        <!-- 最大摄氧量 VO2Max -->
+        <view class="form-group">
+          <view class="label-with-tag">
+            <text class="label">最大摄氧量 (VO2Max)</text>
+            <text class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
+          </view>
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="例如 54.0"
+            :value="profile?.vo2max || ''"
+            @input="onInputVo2max"
+          />
+        </view>
+
+        <!-- 身高 -->
+        <view class="form-group">
+          <text class="label">身高 (cm)</text>
+          <input
+            class="form-input"
+            type="number"
+            placeholder="175"
+            :value="profile?.height || profile?.height_cm || ''"
+            @input="onInputHeight"
+          />
+        </view>
+
+        <!-- 体重 -->
+        <view class="form-group">
+          <text class="label">体重 (kg)</text>
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="68.0"
+            :value="profile?.weight || profile?.weight_kg || ''"
+            @input="onInputWeight"
+          />
+        </view>
+
+        <!-- 最大心率 -->
+        <view class="form-group">
+          <text class="label">最大心率 (Max HR)</text>
+          <input
+            class="form-input"
+            type="number"
+            placeholder="190"
+            :value="profile?.max_heart_rate || ''"
+            @input="onInputMaxHr"
+          />
+        </view>
+
+        <!-- 静息心率 -->
+        <view class="form-group">
+          <text class="label">静息心率 (Rest HR)</text>
+          <input
+            class="form-input"
+            type="number"
+            placeholder="56"
+            :value="profile?.resting_heart_rate || ''"
+            @input="onInputRestHr"
+          />
+        </view>
+
+        <!-- 跑龄 (年) -->
+        <view class="form-group full-width-group">
+          <text class="label">跑龄 (年)</text>
+          <input
+            class="form-input"
+            type="number"
+            placeholder="3"
+            :value="profile?.years_running || ''"
+            @input="onInputYearsRunning"
+          />
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD 4: 个人2026年度跑量规划 ── -->
+    <view class="section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🎯</text>
+          <text class="card-title">个人跑量目标规划 (2026)</text>
+        </view>
+        <view class="target-badge" :class="{ locked: goalMode === 'custom' }">
+          {{ goalMode === 'custom' ? '按月自定义' : `全年统一: ${targetDistance} km/月` }}
+        </view>
+      </view>
+
+      <text class="desc-text">
+        设定您个人的月跑量计划。支持全年统一均值设定，也可针对秋冬重点备赛期按月自定义递增规划。数据仅保存在您个人的跑者档案中。
+      </text>
+
+      <!-- Goal Mode Switcher -->
+      <view class="goal-mode-selector">
+        <view
+          class="goal-mode-btn"
+          :class="{ active: goalMode === 'uniform' }"
+          @click="setGoalMode('uniform')"
+        >
+          全年统一均值
+        </view>
+        <view
+          class="goal-mode-btn"
+          :class="{ active: goalMode === 'custom' }"
+          @click="setGoalMode('custom')"
+        >
+          按月自定义 (备赛期进阶)
+        </view>
+      </view>
+
+      <!-- Uniform Slider Controller -->
+      <view class="slider-wrapper" :class="{ disabled: goalMode === 'custom' }">
+        <slider
+          :value="targetDistance"
+          :min="50"
+          :max="600"
+          :step="10"
+          :disabled="goalMode === 'custom'"
+          activeColor="#fc4c02"
+          backgroundColor="#2c2c2e"
+          block-size="20"
+          @change="(e: any) => onTargetSliderChange(e.detail.value)"
+        />
+        <text v-if="goalMode === 'custom'" class="locked-tip">
+          💡 已开启按月自定义模式，下方可针对每个月份独立调整
+        </text>
+        <text v-else class="uniform-tip">
+          拖动滑块即可一键将您的 1~12 月跑量目标统一设为 {{ targetDistance }} km
+        </text>
+      </view>
+
+      <!-- 12 Months Grid -->
+      <view class="custom-months-section">
+        <view class="custom-months-header">
+          <text class="cm-title">各月跑量细化目标 (km)</text>
+          <text v-if="goalMode === 'custom'" class="sync-uniform-action" @click="syncUniformToAll">
+            重置为统一 {{ targetDistance }}km
+          </text>
+        </view>
+
+        <view class="months-grid">
+          <view v-for="m in 12" :key="m" class="month-cell">
+            <text class="month-label">{{ m }}月</text>
+            <input
+              class="month-input"
+              type="number"
+              :value="monthlyTargets[m - 1]"
+              @input="(e: any) => onMonthTargetInput(m - 1, e.detail.value)"
+            />
+          </view>
+        </view>
+      </view>
+
+      <!-- ── 周跑量常规计划 (Weekly Target Plan) ── -->
+      <view class="weekly-plan-section">
+        <view class="custom-months-header">
+          <view class="title-with-icon">
+            <text class="cm-title">🏃 常规周跑量计划</text>
+          </view>
+          <text class="weekly-target-badge">{{ weeklyTarget }} km / 周</text>
+        </view>
+        <text class="weekly-desc-tip">
+          周跑量计划无需按 52 周单独设定，设定常规周目标即可自动应用于全年的每周训练进度与负荷追踪。
+        </text>
+
+        <!-- Quick selection pills -->
+        <view class="weekly-quick-pills">
+          <view
+            v-for="km in [30, 40, 50, 60, 70, 80, 100]"
+            :key="km"
+            class="weekly-pill"
+            :class="{ active: weeklyTarget === km }"
+            @click="setWeeklyTarget(km)"
+          >
+            {{ km }}k
+          </view>
+        </view>
+
+        <!-- Weekly Slider -->
+        <view class="slider-wrapper">
+          <slider
+            :value="weeklyTarget"
+            :min="10"
+            :max="160"
+            :step="5"
+            activeColor="#10b981"
+            backgroundColor="#2c2c2e"
+            block-size="20"
+            @change="(e: any) => onWeeklySliderChange(e.detail.value)"
+          />
+          <text class="uniform-tip">
+            滑动调整每周常规跑步目标：{{ weeklyTarget }} km（相当于月均约 {{ Math.round(weeklyTarget * 4.3) }} km）
+          </text>
+        </view>
+
+        <view class="weekly-save-action">
+          <button class="save-weekly-btn" :loading="savingWeekly" @click="handleSaveWeeklyOnly">
+            单独保存周跑量目标 ({{ weeklyTarget }}km)
+          </button>
+        </view>
+      </view>
+    </view>
+
+      <!-- ── CARD 1: 比赛计划 (Race Plans) ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -583,659 +1288,13 @@
       </view>
     </view>
 
-
-
-    <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">⚡</text>
-          <text class="card-title">个人最佳成绩 (PB)</text>
-        </view>
-        <button
-          class="import-garmin-btn"
-          :loading="importingGarmin"
-          :disabled="importingGarmin"
-          @click="handleImportGarminPb"
-        >
-          从 Garmin 导入
-        </button>
-      </view>
-
-      <view class="pb-grid">
-        <view class="pb-item">
-          <text class="pb-label">全马 (42.195k)</text>
-          <text class="pb-val">{{ formatSecs(profile?.marathon_pb) }}</text>
-        </view>
-        <view class="pb-item">
-          <text class="pb-label">半马 (21.0975k)</text>
-          <text class="pb-val">{{ formatSecs(profile?.half_pb) }}</text>
-        </view>
-        <view class="pb-item">
-          <text class="pb-label">10公里</text>
-          <text class="pb-val">{{ formatSecs(profile?.ten_k_pb) }}</text>
-        </view>
-        <view class="pb-item">
-          <text class="pb-label">5公里</text>
-          <text class="pb-val">{{ formatSecs(profile?.five_k_pb) }}</text>
-        </view>
-      </view>
+          <!-- Tab 2 专属保存设置 -->
+    <view v-if="user" class="save-box">
+      <button class="save-btn" :loading="saving" @click="handleSaveAll">
+        🎯 保存训练目标与生理参数
+      </button>
     </view>
-
-    <!-- ── CARD 3: 生理参数与身体指标 ── -->
-    <view class="section-card section-card-runner-info">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">💓</text>
-          <text class="card-title">生理参数与身体指标</text>
-        </view>
-        <button
-          class="import-garmin-btn"
-          :loading="syncingDeviceProfile"
-          :disabled="syncingDeviceProfile || (!garminConnected && !corosConnected)"
-          @click="handleSyncDeviceProfile"
-        >
-          从手表同步指标
-        </button>
-      </view>
-
-      <text class="desc-text" style="margin-bottom: 20rpx;">
-        Canova 教练根据年龄、性别、静息心率与最大摄氧量 (VO2Max) 智能自适应训练配速区间与超量恢复。
-      </text>
-
-      <view class="form-grid-2">
-        <!-- 出生日期 & 动态年龄 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <view class="label-with-sec">
-              <text class="label">出生日期 (Date of Birth)<text class="required-star"> *</text></text>
-              <text class="field-sec-tag req-tag">大群必填</text>
-              <text class="field-sec-tag">🔒 AES-256 加密</text>
-            </view>
-            <text v-if="displayAge !== null" class="age-badge-pill">
-              {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
-            </text>
-          </view>
-          <view class="secure-picker-row">
-            <picker
-              mode="date"
-              :value="profile?.date_of_birth || '1990-01-01'"
-              start="1940-01-01"
-              :end="todayDateStr"
-              @change="onDateOfBirthChange"
-              class="secure-picker-flex"
-            >
-              <view class="picker-input-box">
-                <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
-                  {{ showDob ? (profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)') : (profile?.date_of_birth ? '****-**-**' : '请选择出生年月日 (YYYY-MM-DD)') }}
-                </text>
-                <text class="picker-arrow">📅</text>
-              </view>
-            </picker>
-            <view class="eye-toggle-btn" @click.stop="showDob = !showDob">
-              <text class="eye-icon">{{ showDob ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
-          <text class="field-privacy-subtip">🛡️ 点击右侧眼睛符号显示/隐藏完整日期，大群体公开名册仅展示组别脱敏保护</text>
-        </view>
-
-        <!-- 真实姓名 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">真实姓名<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-            <text class="field-sec-tag">🔒 加密存储</text>
-          </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showRealName"
-              type="text"
-              placeholder="戈友实名认证姓名"
-              :value="profile?.real_name || ''"
-              @input="onInputRealName"
-            />
-            <view class="eye-toggle-btn" @click="showRealName = !showRealName">
-              <text class="eye-icon">{{ showRealName ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 联系手机 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">联系手机</text>
-            <text class="field-sec-tag">🔒 保密</text>
-          </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showPhone"
-              type="number"
-              maxlength="11"
-              placeholder="紧急联络手机"
-              :value="profile?.phone || ''"
-              @input="onInputPhone"
-            />
-            <view class="eye-toggle-btn" @click="showPhone = !showPhone">
-              <text class="eye-icon">{{ showPhone ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 身份证号码 / 证件号 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">身份证号码 / 证件号 (选填)</text>
-            <text class="field-sec-tag">🔒 密文存储 · 非必要不暴露</text>
-          </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showIdCard"
-              type="text"
-              maxlength="18"
-              placeholder="用于赛事保险投保与参赛资格核验"
-              :value="profile?.id_card || ''"
-              @input="onInputIdCard"
-            />
-            <view class="eye-toggle-btn" @click="showIdCard = !showIdCard">
-              <text class="eye-icon">{{ showIdCard ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
-          <text class="field-privacy-subtip">🛡️ 默认以 *** 隐藏，点击眼睛符号才完整显示。证件号采用 AES-256 密文存储，任何普通成员不可见。</text>
-        </view>
-
-        <!-- 生理性别 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">生理性别<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <view class="gender-pill-group">
-            <view
-              class="gender-pill"
-              :class="{ active: (profile?.gender || 'male') === 'male' }"
-              @click="onGenderSelect('male')"
-            >
-              <text>♂ 男 (Male)</text>
-            </view>
-            <view
-              class="gender-pill"
-              :class="{ active: profile?.gender === 'female' }"
-              @click="onGenderSelect('female')"
-            >
-              <text>♀ 女 (Female)</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 最大摄氧量 VO2Max -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">最大摄氧量 (VO2Max)</text>
-            <text class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
-          </view>
-          <input
-            class="form-input"
-            type="digit"
-            placeholder="例如 54.0"
-            :value="profile?.vo2max || ''"
-            @input="onInputVo2max"
-          />
-        </view>
-
-        <!-- 身高 -->
-        <view class="form-group">
-          <text class="label">身高 (cm)</text>
-          <input
-            class="form-input"
-            type="number"
-            placeholder="175"
-            :value="profile?.height || profile?.height_cm || ''"
-            @input="onInputHeight"
-          />
-        </view>
-
-        <!-- 体重 -->
-        <view class="form-group">
-          <text class="label">体重 (kg)</text>
-          <input
-            class="form-input"
-            type="digit"
-            placeholder="68.0"
-            :value="profile?.weight || profile?.weight_kg || ''"
-            @input="onInputWeight"
-          />
-        </view>
-
-        <!-- 最大心率 -->
-        <view class="form-group">
-          <text class="label">最大心率 (Max HR)</text>
-          <input
-            class="form-input"
-            type="number"
-            placeholder="190"
-            :value="profile?.max_heart_rate || ''"
-            @input="onInputMaxHr"
-          />
-        </view>
-
-        <!-- 静息心率 -->
-        <view class="form-group">
-          <text class="label">静息心率 (Rest HR)</text>
-          <input
-            class="form-input"
-            type="number"
-            placeholder="56"
-            :value="profile?.resting_heart_rate || ''"
-            @input="onInputRestHr"
-          />
-        </view>
-
-        <!-- 跑龄 (年) -->
-        <view class="form-group full-width-group">
-          <text class="label">跑龄 (年)</text>
-          <input
-            class="form-input"
-            type="number"
-            placeholder="3"
-            :value="profile?.years_running || ''"
-            @input="onInputYearsRunning"
-          />
-        </view>
-      </view>
-    </view>
-
-    <!-- ── CARD: 商学院项目与戈友认证 ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🏫</text>
-          <text class="card-title">商学院项目与戈友认证</text>
-        </view>
-        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
-          大群自动同步
-        </text>
-      </view>
-
-      <text class="desc-text">
-        在此填写的项目、班级与戈壁经历，将自动同步至您已加入的所有商学院跑团大群（如复旦戈友会）实名花名册，自动流转审核状态。
-      </text>
-
-      <view class="form-grid-2">
-        <!-- 所属项目 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">商学院项目<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <view class="program-pill-grid">
-            <view
-              v-for="prog in ORG_PROGRAM_OPTIONS"
-              :key="prog"
-              class="program-pill"
-              :class="{ active: profile?.program === prog }"
-              @click="onSelectProgram(prog)"
-            >
-              <text>{{ prog }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 班级 / 届别 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">所在班级 / 届别 (自由输入)<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如: 23春、21级、18班、2022秋"
-            :value="profile?.class_detail || ''"
-            @input="onInputClassDetail"
-          />
-          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: #fbbf24;">
-            名册组合预览：{{ profile.program }} {{ profile.class_detail }}
-          </text>
-        </view>
-
-        <!-- 戈壁经历 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">戈壁经历 (戈赛经验)</text>
-            <text class="field-sec-tag">{{ gobiType === 'new' ? '🌱 新戈' : `🏅 ${gobiEdition} ${gobiGroup}` }}</text>
-          </view>
-
-          <view class="gobi-type-selector">
-            <view
-              class="gobi-type-btn"
-              :class="{ active: gobiType === 'new' }"
-              @click="onSelectGobiType('new')"
-            >
-              <text class="gobi-icon">🌱</text>
-              <view class="gobi-info">
-                <text class="gobi-main-title">新戈跑者</text>
-                <text class="gobi-sub-title">首次备赛 / 暂无往届</text>
-              </view>
-            </view>
-            <view
-              class="gobi-type-btn"
-              :class="{ active: gobiType === 'vet' }"
-              @click="onSelectGobiType('vet')"
-            >
-              <text class="gobi-icon">🏅</text>
-              <view class="gobi-info">
-                <text class="gobi-main-title">往届老戈友</text>
-                <text class="gobi-sub-title">参加过戈1至戈21</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 往届老戈友详情选择 -->
-          <view v-if="gobiType === 'vet'" class="gobi-vet-box">
-            <view class="vet-row">
-              <text class="vet-label">参加届数：</text>
-              <picker
-                mode="selector"
-                :range="GOBI_EDITIONS"
-                :value="GOBI_EDITIONS.indexOf(gobiEdition) >= 0 ? GOBI_EDITIONS.indexOf(gobiEdition) : 0"
-                @change="onGobiEditionChange"
-                class="vet-picker-flex"
-              >
-                <view class="picker-input-box">
-                  <text>{{ gobiEdition || '请选择届数' }}</text>
-                  <text class="picker-arrow">▼</text>
-                </view>
-              </picker>
-            </view>
-
-            <view class="vet-row" style="margin-top: 16rpx;">
-              <text class="vet-label">参赛组别：</text>
-              <view class="grp-pill-group">
-                <view
-                  v-for="grp in GOBI_GROUPS"
-                  :key="grp"
-                  class="grp-pill"
-                  :class="{ active: gobiGroup === grp }"
-                  @click="onSelectGobiGroup(grp)"
-                >
-                  <text>{{ grp }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <!-- ── CARD: 赛事活动与装备保障 ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🎽</text>
-          <text class="card-title">赛事活动与装备保障</text>
-        </view>
-        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.3);">
-          物资发放 · 保险
-        </text>
-      </view>
-
-      <text class="desc-text">
-        用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
-      </text>
-
-      <view class="form-grid-2">
-        <!-- 紧急联系人及电话 -->
-        <view class="form-group full-width-group">
-          <text class="label">紧急联系人及电话</text>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如: 张三 13900001111"
-            :value="profile?.emergency_contact || ''"
-            @input="onInputEmergencyContact"
-          />
-          <text class="field-privacy-subtip">建议填写直系亲属或紧急联络人姓名与电话</text>
-        </view>
-
-        <!-- 队服尺码 -->
-        <view class="form-group">
-          <text class="label">队服尺码 (Clothing)</text>
-          <picker
-            mode="selector"
-            :range="CLOTHING_SIZES"
-            :value="CLOTHING_SIZES.indexOf(profile?.clothing_size) >= 0 ? CLOTHING_SIZES.indexOf(profile?.clothing_size) : 0"
-            @change="onClothingSizeChange"
-          >
-            <view class="picker-input-box">
-              <text :class="{ 'placeholder-text': !profile?.clothing_size }">
-                {{ profile?.clothing_size || '请选择尺码' }}
-              </text>
-              <text class="picker-arrow">▼</text>
-            </view>
-          </picker>
-        </view>
-
-        <!-- 跑鞋尺码 -->
-        <view class="form-group">
-          <text class="label">跑鞋尺码 (Shoe EUR)</text>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如 42 或 42.5"
-            :value="profile?.shoe_size || ''"
-            @input="onInputShoeSize"
-          />
-        </view>
-
-        <!-- 健康状况声明 -->
-        <view class="form-group full-width-group">
-          <view
-            class="health-decl-box"
-            :class="{ active: profile?.health_declaration !== false }"
-            @click="onToggleHealthDeclaration"
-          >
-            <view class="health-checkbox">
-              <text class="check-mark">{{ profile?.health_declaration !== false ? '✓' : '' }}</text>
-            </view>
-            <view class="health-decl-texts">
-              <text class="health-title">健康状况与免责声明确认</text>
-              <text class="health-desc">
-                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
-              </text>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <!-- ── CARD 4: 个人2026年度跑量规划 ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🎯</text>
-          <text class="card-title">个人跑量目标规划 (2026)</text>
-        </view>
-        <view class="target-badge" :class="{ locked: goalMode === 'custom' }">
-          {{ goalMode === 'custom' ? '按月自定义' : `全年统一: ${targetDistance} km/月` }}
-        </view>
-      </view>
-
-      <text class="desc-text">
-        设定您个人的月跑量计划。支持全年统一均值设定，也可针对秋冬重点备赛期按月自定义递增规划。数据仅保存在您个人的跑者档案中。
-      </text>
-
-      <!-- Goal Mode Switcher -->
-      <view class="goal-mode-selector">
-        <view
-          class="goal-mode-btn"
-          :class="{ active: goalMode === 'uniform' }"
-          @click="setGoalMode('uniform')"
-        >
-          全年统一均值
-        </view>
-        <view
-          class="goal-mode-btn"
-          :class="{ active: goalMode === 'custom' }"
-          @click="setGoalMode('custom')"
-        >
-          按月自定义 (备赛期进阶)
-        </view>
-      </view>
-
-      <!-- Uniform Slider Controller -->
-      <view class="slider-wrapper" :class="{ disabled: goalMode === 'custom' }">
-        <slider
-          :value="targetDistance"
-          :min="50"
-          :max="600"
-          :step="10"
-          :disabled="goalMode === 'custom'"
-          activeColor="#fc4c02"
-          backgroundColor="#2c2c2e"
-          block-size="20"
-          @change="(e: any) => onTargetSliderChange(e.detail.value)"
-        />
-        <text v-if="goalMode === 'custom'" class="locked-tip">
-          💡 已开启按月自定义模式，下方可针对每个月份独立调整
-        </text>
-        <text v-else class="uniform-tip">
-          拖动滑块即可一键将您的 1~12 月跑量目标统一设为 {{ targetDistance }} km
-        </text>
-      </view>
-
-      <!-- 12 Months Grid -->
-      <view class="custom-months-section">
-        <view class="custom-months-header">
-          <text class="cm-title">各月跑量细化目标 (km)</text>
-          <text v-if="goalMode === 'custom'" class="sync-uniform-action" @click="syncUniformToAll">
-            重置为统一 {{ targetDistance }}km
-          </text>
-        </view>
-
-        <view class="months-grid">
-          <view v-for="m in 12" :key="m" class="month-cell">
-            <text class="month-label">{{ m }}月</text>
-            <input
-              class="month-input"
-              type="number"
-              :value="monthlyTargets[m - 1]"
-              @input="(e: any) => onMonthTargetInput(m - 1, e.detail.value)"
-            />
-          </view>
-        </view>
-      </view>
-
-      <!-- ── 周跑量常规计划 (Weekly Target Plan) ── -->
-      <view class="weekly-plan-section">
-        <view class="custom-months-header">
-          <view class="title-with-icon">
-            <text class="cm-title">🏃 常规周跑量计划</text>
-          </view>
-          <text class="weekly-target-badge">{{ weeklyTarget }} km / 周</text>
-        </view>
-        <text class="weekly-desc-tip">
-          周跑量计划无需按 52 周单独设定，设定常规周目标即可自动应用于全年的每周训练进度与负荷追踪。
-        </text>
-
-        <!-- Quick selection pills -->
-        <view class="weekly-quick-pills">
-          <view
-            v-for="km in [30, 40, 50, 60, 70, 80, 100]"
-            :key="km"
-            class="weekly-pill"
-            :class="{ active: weeklyTarget === km }"
-            @click="setWeeklyTarget(km)"
-          >
-            {{ km }}k
-          </view>
-        </view>
-
-        <!-- Weekly Slider -->
-        <view class="slider-wrapper">
-          <slider
-            :value="weeklyTarget"
-            :min="10"
-            :max="160"
-            :step="5"
-            activeColor="#10b981"
-            backgroundColor="#2c2c2e"
-            block-size="20"
-            @change="(e: any) => onWeeklySliderChange(e.detail.value)"
-          />
-          <text class="uniform-tip">
-            滑动调整每周常规跑步目标：{{ weeklyTarget }} km（相当于月均约 {{ Math.round(weeklyTarget * 4.3) }} km）
-          </text>
-        </view>
-
-        <view class="weekly-save-action">
-          <button class="save-weekly-btn" :loading="savingWeekly" @click="handleSaveWeeklyOnly">
-            单独保存周跑量目标 ({{ weeklyTarget }}km)
-          </button>
-        </view>
-      </view>
-
-      <view class="save-box">
-        <button class="save-btn" :loading="saving" @click="handleSaveAll">
-          保存我的跑量目标与配置
-        </button>
-      </view>
-    </view>
-
-    <!-- ── CARD: 🛡️ 个人隐私与数据安全保障 ── -->
-    <view v-if="user" class="section-card privacy-guard-card">
-      <view class="card-title-row">
-        <view class="title-with-badge">
-          <text class="card-title">🛡️ 个人隐私与数据安全保障</text>
-          <text class="security-chip">AES-256 加密保护</text>
-        </view>
-      </view>
-
-      <view class="privacy-statement-box">
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">🔒</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">敏感隐私 AES-256 高强度密文存储</text>
-            <text class="privacy-rule-desc">
-              真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
-            </text>
-          </view>
-        </view>
-
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">👁️</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">大群体名册严格自动脱敏</text>
-            <text class="privacy-rule-desc">
-              在团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
-            </text>
-          </view>
-        </view>
-
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">🧹</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">随时一键彻底清除个人隐私</text>
-            <text class="privacy-rule-desc">
-              您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。原有运动里程与活动记录将以匿名形式保留，以保障跑团队伍统计完整性。
-            </text>
-          </view>
-        </view>
-      </view>
-
-      <view class="privacy-actions-row">
-        <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
-          🧹 一键清除所有个人隐私数据
-        </button>
-      </view>
-    </view>
-
-    <!-- 底部退出登录（仅登录后显示） -->
-    <view v-if="user" class="logout-box">
-      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
-    </view>
+    </template>
 
     <!-- ── 微信授权登录专属弹窗 (Pure WeChat Login Modal) ── -->
     <view v-if="showAuthModal" class="modal-mask auth-modal-mask" @click="closeAuthModal">
@@ -2210,8 +2269,13 @@ const showPhone = ref(false);
 const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
 
+const activeTab = ref<"profile" | "training">("profile");
+
 function scrollToRequiredFields() {
-  uni.pageScrollTo({ selector: ".section-card-runner-info", duration: 400 });
+  activeTab.value = "profile";
+  setTimeout(() => {
+    uni.pageScrollTo({ selector: "#required-personal-fields", duration: 400 });
+  }, 150);
 }
 
 const gobiType = ref<"new" | "vet">("new");
@@ -4089,6 +4153,50 @@ onShow(() => {
 </script>
 
 <style scoped>
+/* ── Segmented Profile Tabs Nav ── */
+.profile-tabs-nav {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background: #151518;
+  border-radius: 24rpx;
+  padding: 8rpx;
+  margin-bottom: 28rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.profile-tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: 20rpx 0;
+  border-radius: 18rpx;
+  transition: all 0.2s ease;
+  gap: 12rpx;
+}
+
+.profile-tab-item-active {
+  background: rgba(252, 76, 2, 0.16);
+  border: 1rpx solid rgba(252, 76, 2, 0.45);
+}
+
+.profile-tab-icon {
+  font-size: 30rpx;
+}
+
+.profile-tab-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #8e8e93;
+}
+
+.profile-tab-title-active {
+  color: #fc4c02;
+  font-weight: 700;
+}
+
 .profile-page {
   min-height: 100vh;
   background-color: #0b0b0d;

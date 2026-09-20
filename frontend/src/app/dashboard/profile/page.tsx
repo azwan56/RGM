@@ -94,14 +94,18 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<"profile" | "training">("profile");
 
   function scrollToRequiredFields() {
-    if (typeof document !== "undefined") {
-      const el = document.getElementById("required-personal-fields");
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth" });
+    setActiveTab("profile");
+    setTimeout(() => {
+      if (typeof document !== "undefined") {
+        const el = document.getElementById("required-personal-fields");
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth" });
+        }
       }
-    }
+    }, 100);
   }
 
   function computeAge(dobStr: string): number | null {
@@ -882,8 +886,41 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           </p>
         </div>
 
+        {/* Tab Switcher */}
+        <div className="flex border-b border-white/10 mb-8 space-x-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("profile")}
+            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px ${
+              activeTab === "profile"
+                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
+                : "text-zinc-400 border-transparent hover:text-zinc-200"
+            }`}
+          >
+            <span>👤</span>
+            <span>个人资料与账号</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("training")}
+            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px ${
+              activeTab === "training"
+                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
+                : "text-zinc-400 border-transparent hover:text-zinc-200"
+            }`}
+          >
+            <span>🏃</span>
+            <span>训练档案与赛事</span>
+          </button>
+        </div>
+
         <form onSubmit={handleSave} className="space-y-8">
-          {/* ── CARD: 大群体成员认证与审核状态 (Grand Org Membership Status Card) ── */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* TAB 1: 个人资料与账号 (Profile & Account)                         */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {activeTab === "profile" && (
+            <div className="space-y-8">
+              {/* ── CARD: 大群体成员认证与审核状态 (Grand Org Membership Status Card) ── */}
           {userOrgs && userOrgs.length > 0 && (
             <div className="bg-[#121215] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -1016,7 +1053,506 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           )}
 
-          {/* ── CARD 0: 运动手表数据直连 (Garmin & COROS) ── */}
+              {/* ── CARD 0.5: 跑者个人形象与昵称 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-center gap-2">
+              <User className="w-5 h-5 text-amber-500" />
+              <h2 className="text-lg font-bold text-white tracking-wide">跑者基本资料与形象</h2>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="relative group shrink-0">
+                <img
+                  src={avatarUrl || "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0"}
+                  alt="跑者头像"
+                  referrerPolicy="no-referrer"
+                  className="w-24 h-24 rounded-full object-cover border-2 border-white/10 shadow-lg group-hover:border-[#FC4C02] transition"
+                />
+                <label className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition">
+                  <span className="text-[11px] font-bold">更换头像</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                  />
+                </label>
+              </div>
+
+              <div className="flex-1 w-full space-y-3">
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称 (Display Name)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSaveNicknameOnly();
+                        }
+                      }}
+                      placeholder="例如: Alex Wan / 珍珍"
+                      className="flex-1 bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingNickname}
+                      onClick={handleSaveNicknameOnly}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] text-white hover:bg-[#ff5d1a] transition active:scale-95 shadow-md shadow-[#FC4C02]/20 shrink-0 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {savingNickname ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>保存中...</span>
+                        </>
+                      ) : nicknameSavedSuccess ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-white" />
+                          <span>已保存</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5" />
+                          <span>保存昵称</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    该昵称将展示在跑团花名册、大盘排行榜与 Renato Canova 科学训练档案中（支持直接回车保存）
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 cursor-pointer transition">
+                    <span>📷 上传本地图片替换头像</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                    />
+                  </label>
+                  {uploadingAvatar && <span className="text-xs text-[#FC4C02] animate-pulse">正在上传头像...</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+              {/* ── CARD: 个人实名身份与敏感信息 (AES-256-GCM 密文存储) ── */}
+          <div id="required-personal-fields" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-2xl bg-emerald-500/20 text-emerald-400">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-wide">个人实名身份与敏感信息</h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    真实姓名、生理性别、出生日期、联系电话及证件号采用 AES-256-GCM 密文存储保护
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
+                🔒 AES-256 高强度加密 · 非必要不暴露
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 性别 */}
+              <div>
+                <label className="text-xs text-zinc-400 flex items-center gap-1.5 mb-1.5">
+                  <span>生理性别<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                  <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                </label>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                >
+                  <option value="male">男 (Male)</option>
+                  <option value="female">女 (Female)</option>
+                </select>
+              </div>
+              {/* 真实姓名 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showRealName ? "text" : "password"}
+                      value={realName}
+                      onChange={(e) => setRealName(e.target.value)}
+                      placeholder="戈友实名认证真实姓名"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRealName(!showRealName)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showRealName ? "隐藏" : "显示"}
+                    >
+                      {showRealName ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 紧急联系手机 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>联系手机 (Emergency Phone)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">保密</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showPhone ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showPhone ? "tel" : "password"}
+                      maxLength={11}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="便于紧急联络与赛事活动通知"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPhone(!showPhone)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showPhone ? "隐藏" : "显示"}
+                    >
+                      {showPhone ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 出生日期 & 年龄 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
+                    </label>
+                    {age !== null && (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
+                        {age} 岁 · {getAgeGroup(age)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex items-center">
+                    {showDob ? (
+                      <input
+                        type="date"
+                        value={dateOfBirth}
+                        onChange={(e) => {
+                          setDateOfBirth(e.target.value);
+                          setAge(computeAge(e.target.value));
+                        }}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    ) : (
+                      <input
+                        type="password"
+                        readOnly
+                        value={dateOfBirth ? "1990-01-01" : ""}
+                        placeholder="点击右侧眼睛显示并选择出生日期"
+                        onClick={() => setShowDob(true)}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02] cursor-pointer"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowDob(!showDob)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showDob ? "隐藏" : "显示"}
+                    >
+                      {showDob ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    仅用于生理体能评估与大组织分组核实，对外公开名册仅显示组别脱敏保护
+                  </p>
+                </div>
+
+                {/* 身份证号码 / 证件号 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
+                      <span>身份证号码 / 证件号 (选填)</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">非必要不暴露</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-500">{showIdCard ? "明文展示" : "星号遮罩"}</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showIdCard ? "text" : "password"}
+                      maxLength={18}
+                      value={idCard}
+                      onChange={(e) => setIdCard(e.target.value)}
+                      placeholder="用于赛事保险投保与参赛资格核验"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowIdCard(!showIdCard)}
+                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
+                      title={showIdCard ? "隐藏" : "显示"}
+                    >
+                      {showIdCard ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向任何第三方暴露
+                  </p>
+                </div>
+            </div>
+          </div>
+
+              {/* ── CARD: 商学院项目与戈友认证 (Gobi & Business School Credentials) ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-amber-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">商学院项目与戈友认证</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 self-start sm:self-auto">
+                🏫 大组织审核资格 · 实时双向自动同步
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              在此填写的商学院项目、班级与戈壁经历，将自动同步至您已加入的所有商学院大群（如复旦戈友会）实名花名册。当群管理员设置必须字段时，在此补齐即可自动流转为正式/待审核状态，无需重复填报。
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              {/* 商学院项目与班级 */}
+              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <span>商学院项目与班级<span className="text-red-400 ml-0.5">*</span></span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大组织必填项</span>
+                  </label>
+                </div>
+                
+                <div>
+                  <span className="text-xs text-zinc-400 block mb-2">选择所属项目：</span>
+                  <div className="flex flex-wrap gap-2">
+                    {ORG_PROGRAM_OPTIONS.map((prog) => (
+                      <button
+                        key={prog}
+                        type="button"
+                        onClick={() => setProgram(prog)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                          program === prog
+                            ? "bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold"
+                            : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/5"
+                        }`}
+                      >
+                        {prog}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="text-xs text-zinc-400">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5 font-bold">*</span>：</span>
+                    <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={classDetail}
+                    onChange={(e) => setClassDetail(e.target.value)}
+                    placeholder="例如: 23春、21级、18班、2022秋"
+                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+                  />
+                  {program && classDetail && (
+                    <div className="mt-2 text-xs text-amber-300 flex items-center gap-1.5 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
+                      <span>名册显示组合：</span>
+                      <span className="font-bold">{program} {classDetail}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 戈壁经历 */}
+              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <span>戈壁经历 (戈赛经验)</span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">分组与荣誉铭牌</span>
+                  </label>
+                  <span className="text-xs text-zinc-400">{gobiType === "new" ? "🌱 新戈跑者" : `🏅 ${gobiEdition} ${gobiGroup}`}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setGobiType("new")}
+                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                      gobiType === "new"
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md shadow-emerald-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🌱</span>
+                    <div>
+                      <div className="font-bold text-xs text-white">新戈</div>
+                      <div className="text-[10px] text-zinc-400">首次备赛/无往届</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGobiType("vet")}
+                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                      gobiType === "vet"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-md shadow-amber-500/10"
+                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-xl">🏅</span>
+                    <div>
+                      <div className="font-bold text-xs text-white">往届老戈友</div>
+                      <div className="text-[10px] text-zinc-400">戈1至戈21</div>
+                    </div>
+                  </button>
+                </div>
+
+                {gobiType === "vet" && (
+                  <div className="p-3.5 bg-black/40 border border-white/10 rounded-xl space-y-3">
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数 (戈1 ~ 戈21)：</span>
+                      <select
+                        value={gobiEdition}
+                        onChange={(e) => setGobiEdition(e.target.value)}
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+                      >
+                        {GOBI_EDITIONS.map((ed) => (
+                          <option key={ed} value={ed}>{ed}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参赛组别：</span>
+                      <div className="flex gap-2">
+                        {GOBI_GROUPS.map((grp) => (
+                          <button
+                            key={grp}
+                            type="button"
+                            onClick={() => setGobiGroup(grp)}
+                            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
+                              gobiGroup === grp
+                                ? "bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20"
+                                : "bg-white/5 text-zinc-400 hover:text-white border border-white/5"
+                            }`}
+                          >
+                            {grp}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-amber-300 flex items-center gap-1.5 pt-1">
+                      <span>认证经历展示：</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
+                        🏅 {gobiEdition} {gobiGroup}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+              {/* ── CARD: 赛事活动与装备保障 (Race Gear & Emergency) ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">赛事活动与装备保障</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 self-start sm:self-auto">
+                🎽 物资发放 · 安全保险
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+              {/* 紧急联系人及电话 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  紧急联系人及电话
+                </label>
+                <input
+                  type="text"
+                  value={emergencyContact}
+                  onChange={(e) => setEmergencyContact(e.target.value)}
+                  placeholder="例如: 张三 13900001111"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[11px] text-zinc-500 mt-1 block">建议填写直系亲属或紧急联络人姓名与电话</span>
+              </div>
+
+              {/* 队服尺码 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  队服尺码 (Clothing Size)
+                </label>
+                <select
+                  value={clothingSize}
+                  onChange={(e) => setClothingSize(e.target.value)}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">请选择尺码</option>
+                  {CLOTHING_SIZES.map((sz) => (
+                    <option key={sz} value={sz}>{sz}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-zinc-500 mt-1 block">用于团队赛事战袍、训练T恤订制与发放</span>
+              </div>
+
+              {/* 跑鞋尺码 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  跑鞋尺码 (Shoe Size)
+                </label>
+                <input
+                  type="text"
+                  value={shoeSize}
+                  onChange={(e) => setShoeSize(e.target.value)}
+                  placeholder="例如: 42 或 42.5"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[11px] text-zinc-500 mt-1 block">欧洲码 (EUR)，如 40、41、42、42.5、43</span>
+              </div>
+            </div>
+
+            {/* 健康状况声明 */}
+            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-3 mt-2">
+              <input
+                type="checkbox"
+                id="health-decl-check"
+                checked={healthDeclaration}
+                onChange={(e) => setHealthDeclaration(e.target.checked)}
+                className="mt-1 w-4 h-4 rounded border-white/20 text-[#FC4C02] focus:ring-[#FC4C02] bg-[#18181c] cursor-pointer"
+              />
+              <label htmlFor="health-decl-check" className="text-xs text-zinc-300 leading-relaxed cursor-pointer select-none">
+                <span className="font-bold text-white block mb-0.5">健康状况与免责声明确认</span>
+                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
+              </label>
+            </div>
+          </div>
+
+              {/* ── CARD 0: 运动手表数据直连 (Garmin & COROS) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white tracking-wide">运动手表数据直连</h2>
 
@@ -1121,95 +1657,439 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           </div>
 
-          {/* ── CARD 0.5: 跑者个人形象与昵称 ── */}
+              {/* ── CARD 5: 个人隐私与数据安全保障 & 一键彻底清除 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex items-center gap-2">
-              <User className="w-5 h-5 text-amber-500" />
-              <h2 className="text-lg font-bold text-white tracking-wide">跑者基本资料与形象</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">个人隐私与数据安全保障</h2>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
+                🔒 AES-256-GCM 高强度密文保护
+              </span>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-center gap-6">
-              <div className="relative group shrink-0">
-                <img
-                  src={avatarUrl || "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0"}
-                  alt="跑者头像"
-                  referrerPolicy="no-referrer"
-                  className="w-24 h-24 rounded-full object-cover border-2 border-white/10 shadow-lg group-hover:border-[#FC4C02] transition"
-                />
-                <label className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition">
-                  <span className="text-[11px] font-bold">更换头像</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleAvatarUpload}
-                  />
-                </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">🔒</span>
+                  <span>敏感隐私密文存储</span>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与资格核验。
+                </p>
               </div>
 
-              <div className="flex-1 w-full space-y-3">
-                <div>
-                  <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称 (Display Name)</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleSaveNicknameOnly();
-                        }
-                      }}
-                      placeholder="例如: Alex Wan / 珍珍"
-                      className="flex-1 bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                    />
-                    <button
-                      type="button"
-                      disabled={savingNickname}
-                      onClick={handleSaveNicknameOnly}
-                      className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] text-white hover:bg-[#ff5d1a] transition active:scale-95 shadow-md shadow-[#FC4C02]/20 shrink-0 flex items-center gap-1.5 disabled:opacity-50"
-                    >
-                      {savingNickname ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>保存中...</span>
-                        </>
-                      ) : nicknameSavedSuccess ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-white" />
-                          <span>已保存</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" />
-                          <span>保存昵称</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    该昵称将展示在跑团花名册、大盘排行榜与 Renato Canova 科学训练档案中（支持直接回车保存）
-                  </p>
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">👁️</span>
+                  <span>大群体名册自动脱敏</span>
                 </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  在公开团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
+                </p>
+              </div>
 
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 cursor-pointer transition">
-                    <span>📷 上传本地图片替换头像</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleAvatarUpload}
-                    />
-                  </label>
-                  {uploadingAvatar && <span className="text-xs text-[#FC4C02] animate-pulse">正在上传头像...</span>}
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center gap-2 text-white font-bold text-xs">
+                  <span className="text-base">🧹</span>
+                  <span>随时一键彻底清除</span>
                 </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。历史运动里程将以匿名跑者形式保留。
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <p className="text-xs text-zinc-500">
+                若您不再需要参与赛事资格审核，可随时一键清除所有个人实名与认证记录。
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowPurgeConfirmModal(true)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition active:scale-95 shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>🧹 一键清除所有个人隐私数据</span>
+              </button>
+            </div>
+          </div>
+
+                          <div className="flex justify-end pt-4">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
+              >
+                <Save className="w-5 h-5" />
+                {saving ? "正在保存..." : "💾 保存个人资料与账号设置"}
+              </button>
+            </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* TAB 2: 训练档案与赛事 (Training Metrics & Races)                  */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {activeTab === "training" && (
+            <div className="space-y-8">
+              {/* ── CARD 2: 个人最佳成绩 (PB) - 从 Garmin 导入 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-[#FC4C02]" />
+                  <h2 className="text-lg font-bold text-white tracking-wide">个人最佳成绩 (PB)</h2>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  格式: H:MM:SS 或 MM:SS · 例如 3:45:30 或 45:10 · 可手动修改导入值
+                </p>
+              </div>
+
+              {/* Import from Garmin Button (Replacing Strava) */}
+              <button
+                type="button"
+                onClick={handleImportGarminPb}
+                disabled={importingGarmin}
+                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#FC4C02] hover:bg-[#ff5d1a] transition active:scale-95 text-white shadow-lg shadow-[#FC4C02]/25"
+              >
+                <Zap className={`w-3.5 h-3.5 ${importingGarmin ? "animate-spin" : ""}`} />
+                {importingGarmin ? "正在同步 Garmin PR..." : "从 Garmin 导入"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">全马 PB (时:分:秒)</label>
+                <input
+                  type="text"
+                  value={marathonPb}
+                  onChange={(e) => setMarathonPb(e.target.value)}
+                  placeholder="3:09:29"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">半马 PB (时:分:秒)</label>
+                <input
+                  type="text"
+                  value={halfPb}
+                  onChange={(e) => setHalfPb(e.target.value)}
+                  placeholder="1:25:00"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">10公里 PB (分:秒)</label>
+                <input
+                  type="text"
+                  value={tenKPb}
+                  onChange={(e) => setTenKPb(e.target.value)}
+                  placeholder="40:00"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">5公里 PB (分:秒)</label>
+                <input
+                  type="text"
+                  value={fiveKPb}
+                  onChange={(e) => setFiveKPb(e.target.value)}
+                  placeholder="19:00"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
               </div>
             </div>
           </div>
 
-          {/* ── CARD 1: 比赛计划 (Race Plans) ── */}
+              {/* ── CARD 3: 运动体能与生理指标 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Heart className="w-5 h-5 text-rose-500" />
+                  <h2 className="text-lg font-bold text-white tracking-wide">运动体能与生理指标</h2>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Renato Canova 教练根据实际体能参数与 VO2Max 精准自适应训练配速与超量恢复窗口
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSyncDeviceProfile}
+                disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
+                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-white transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#FC4C02] ${syncingDeviceProfile ? "animate-spin" : ""}`} />
+                {syncingDeviceProfile ? "正在同步手表身体指标..." : "从手表同步指标"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+              {/* 最大摄氧量 VO2Max */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-zinc-400">最大摄氧量 (VO2Max)</label>
+                  <button
+                    type="button"
+                    onClick={handleEstimateVo2max}
+                    disabled={estimatingVo2}
+                    className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
+                    title="基于您在上方填写的 5K/10K/半马/全马 PB 成绩自动测算 VDOT"
+                  >
+                    <span>⚡ 依据 PB 测算</span>
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={vo2max}
+                  onChange={(e) => setVo2max(e.target.value ? Number(e.target.value) : "")}
+                  placeholder="例如 54.0"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 身高 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
+                <input
+                  type="number"
+                  value={heightCm}
+                  onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 体重 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 最大心率 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (Max HR bpm)</label>
+                <input
+                  type="number"
+                  value={maxHr}
+                  onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 静息心率 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (Resting HR bpm)</label>
+                <input
+                  type="number"
+                  value={restHr}
+                  onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+
+              {/* 跑龄 */}
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
+                <input
+                  type="number"
+                  value={yearsRunning}
+                  onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+            </div>
+          </div>
+
+              {/* ── CARD 4: 训练目标与跑量设置 ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-cyan-400" />
+                <h2 className="text-lg font-bold text-white tracking-wide">训练目标与跑量设置</h2>
+              </div>
+              <span
+                className={`text-xs px-3 py-1 rounded-full font-bold self-start sm:self-auto border ${
+                  goalMode === "custom"
+                    ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                    : "bg-[#FC4C02]/10 text-[#FC4C02] border-[#FC4C02]/20"
+                }`}
+              >
+                {goalMode === "uniform" ? `${targetDistance} km / 月` : "12 个月独立设定"}
+              </span>
+            </div>
+
+            {/* ── 常规周跑量计划 (可单独设置与单独保存) ── */}
+            <div className="bg-[#18181c] border border-emerald-500/20 rounded-2xl p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🏃</span>
+                  <h3 className="text-sm font-bold text-white tracking-wide">常规周跑量计划 (每周目标)</h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs px-3 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    {weeklyTarget} km / 周
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveWeeklyOnly}
+                    disabled={savingWeekly}
+                    className="px-3 py-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition active:scale-95 disabled:opacity-50 shadow-md shadow-emerald-600/20"
+                  >
+                    {savingWeekly ? "保存中..." : "单独保存周跑量"}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-xs text-zinc-400">
+                周跑量目标无需按 52 周单独设定，设定常规周目标后自动应用于全年的每周训练进度与负荷追踪，可完全独立于月跑量设置。
+              </p>
+
+              {/* Quick Pills */}
+              <div className="flex flex-wrap gap-2">
+                {[30, 40, 50, 60, 70, 80, 100].map((km) => (
+                  <button
+                    key={km}
+                    type="button"
+                    onClick={() => setWeeklyTarget(km)}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg border transition ${
+                      weeklyTarget === km
+                        ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20"
+                        : "bg-[#202026] text-zinc-300 border-white/5 hover:border-white/20"
+                    }`}
+                  >
+                    {km}k
+                  </button>
+                ))}
+              </div>
+
+              {/* Weekly Slider */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span>微调滑块: <strong className="text-emerald-400">{weeklyTarget} km</strong></span>
+                  <span>范围: 10 ~ 160 km</span>
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={160}
+                  step={5}
+                  value={weeklyTarget}
+                  onChange={(e) => setWeeklyTarget(Number(e.target.value))}
+                  className="w-full accent-emerald-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                />
+                <p className="text-[11px] text-zinc-500">
+                  相当于月均完成约 {Math.round(weeklyTarget * 4.3)} km 跑步负荷。
+                </p>
+              </div>
+            </div>
+
+            {/* ── 月跑量计划 ── */}
+            <div className="pt-2 border-t border-white/5">
+              <h3 className="text-xs font-bold text-zinc-400 mb-3">📅 月度跑量规划</h3>
+            </div>
+
+            {/* Mode Switcher */}
+            <div className="flex bg-[#18181c] p-1 rounded-2xl border border-white/5 max-w-sm">
+              <button
+                type="button"
+                onClick={() => handleGoalModeChange("uniform")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
+                  goalMode === "uniform"
+                    ? "bg-[#282830] text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                每月统一跑量
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGoalModeChange("custom")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
+                  goalMode === "custom"
+                    ? "bg-[#282830] text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                12 个月独立设定
+              </button>
+            </div>
+
+            {/* General Slider */}
+            <div className={`space-y-2 transition-opacity ${goalMode === "custom" ? "opacity-40" : "opacity-100"}`}>
+              <div className="flex justify-between text-xs text-zinc-400">
+                <span>月度通用基准: <strong className="text-white text-sm">{targetDistance} km</strong></span>
+                <span>范围: 50 ~ 600 km</span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={600}
+                step={10}
+                disabled={goalMode === "custom"}
+                value={targetDistance}
+                onChange={(e) => handleSliderChange(Number(e.target.value))}
+                className="w-full accent-[#FC4C02] bg-zinc-800 h-2 rounded-lg cursor-pointer disabled:cursor-not-allowed"
+              />
+              {goalMode === "custom" ? (
+                <p className="text-[11px] text-cyan-400">
+                  🔒 当前已启用 12 个月独立设定，通用滑动条已锁定以防误触变更。可在下方单独修改每月跑量。
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-500">
+                  ✨ 拖动滑块将同时应用到全年 12 个月份。
+                </p>
+              )}
+            </div>
+
+            {/* 12 Months Grid when custom */}
+            {goalMode === "custom" && (
+              <div className="pt-4 border-t border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-zinc-300">各月份独立跑量 (km)</span>
+                  <button
+                    type="button"
+                    onClick={handleSyncUniformToAll}
+                    className="text-xs text-[#FC4C02] hover:underline"
+                  >
+                    一键统一为 {targetDistance}km
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                  {monthlyTargets.map((target, index) => (
+                    <div key={index} className="bg-[#18181c] border border-white/5 rounded-2xl p-3 text-center">
+                      <span className="text-[11px] text-zinc-500 block mb-1">{index + 1} 月</span>
+                      <input
+                        type="number"
+                        value={target}
+                        onChange={(e) => {
+                          const newTargets = [...monthlyTargets];
+                          newTargets[index] = Number(e.target.value);
+                          setMonthlyTargets(newTargets);
+                        }}
+                        className="w-full bg-[#202026] text-center border border-white/10 rounded-lg py-1.5 text-sm font-bold text-white focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+              {/* ── CARD 1: 比赛计划 (Race Plans) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1780,840 +2660,18 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           </div>
 
-
-          {/* ── CARD 2: 个人最佳成绩 (PB) - 从 Garmin 导入 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Award className="w-5 h-5 text-[#FC4C02]" />
-                  <h2 className="text-lg font-bold text-white tracking-wide">个人最佳成绩 (PB)</h2>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  格式: H:MM:SS 或 MM:SS · 例如 3:45:30 或 45:10 · 可手动修改导入值
-                </p>
-              </div>
-
-              {/* Import from Garmin Button (Replacing Strava) */}
+                          <div className="flex justify-end pt-4">
               <button
-                type="button"
-                onClick={handleImportGarminPb}
-                disabled={importingGarmin}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#FC4C02] hover:bg-[#ff5d1a] transition active:scale-95 text-white shadow-lg shadow-[#FC4C02]/25"
+                type="submit"
+                disabled={saving}
+                className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
               >
-                <Zap className={`w-3.5 h-3.5 ${importingGarmin ? "animate-spin" : ""}`} />
-                {importingGarmin ? "正在同步 Garmin PR..." : "从 Garmin 导入"}
+                <Save className="w-5 h-5" />
+                {saving ? "正在保存..." : "🎯 保存训练目标与生理参数"}
               </button>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">全马 PB (时:分:秒)</label>
-                <input
-                  type="text"
-                  value={marathonPb}
-                  onChange={(e) => setMarathonPb(e.target.value)}
-                  placeholder="3:09:29"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">半马 PB (时:分:秒)</label>
-                <input
-                  type="text"
-                  value={halfPb}
-                  onChange={(e) => setHalfPb(e.target.value)}
-                  placeholder="1:25:00"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">10公里 PB (分:秒)</label>
-                <input
-                  type="text"
-                  value={tenKPb}
-                  onChange={(e) => setTenKPb(e.target.value)}
-                  placeholder="40:00"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">5公里 PB (分:秒)</label>
-                <input
-                  type="text"
-                  value={fiveKPb}
-                  onChange={(e) => setFiveKPb(e.target.value)}
-                  placeholder="19:00"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
             </div>
-          </div>
-
-          {/* ── CARD 3: 生理参数与跑者身材 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Heart className="w-5 h-5 text-rose-500" />
-                  <h2 className="text-lg font-bold text-white tracking-wide">生理参数与身体指标</h2>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Renato Canova 教练根据实际年龄、性别与 VO2Max 精准自适应训练配速与超量恢复窗口
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleSyncDeviceProfile}
-                disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-white transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-[#FC4C02] ${syncingDeviceProfile ? "animate-spin" : ""}`} />
-                {syncingDeviceProfile ? "正在同步手表身体指标..." : "从手表同步指标"}
-              </button>
-            </div>
-
-            {/* ── 敏感个人实名与隐私信息 (AES-256-GCM 密文存储) ── */}
-            <div id="required-personal-fields" className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4 scroll-mt-24">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-sm font-bold text-white tracking-wide">个人实名身份与敏感信息</h3>
-                </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
-                  🔒 AES-256 高强度加密 · 非必要不暴露
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400">
-                真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储。默认以 *** 隐藏保护隐私，点击眼睛符号才完整显示。
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* 真实姓名 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
-                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
-                    </label>
-                    <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showRealName ? "text" : "password"}
-                      value={realName}
-                      onChange={(e) => setRealName(e.target.value)}
-                      placeholder="戈友实名认证真实姓名"
-                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowRealName(!showRealName)}
-                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
-                      title={showRealName ? "隐藏" : "显示"}
-                    >
-                      {showRealName ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 紧急联系手机 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>联系手机 (Emergency Phone)</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">保密</span>
-                    </label>
-                    <span className="text-[11px] text-zinc-500">{showPhone ? "明文展示" : "星号遮罩"}</span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showPhone ? "tel" : "password"}
-                      maxLength={11}
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="便于紧急联络与赛事活动通知"
-                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPhone(!showPhone)}
-                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
-                      title={showPhone ? "隐藏" : "显示"}
-                    >
-                      {showPhone ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 出生日期 & 年龄 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
-                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
-                    </label>
-                    {age !== null && (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
-                        {age} 岁 · {getAgeGroup(age)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative flex items-center">
-                    {showDob ? (
-                      <input
-                        type="date"
-                        value={dateOfBirth}
-                        onChange={(e) => {
-                          setDateOfBirth(e.target.value);
-                          setAge(computeAge(e.target.value));
-                        }}
-                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                      />
-                    ) : (
-                      <input
-                        type="password"
-                        readOnly
-                        value={dateOfBirth ? "1990-01-01" : ""}
-                        placeholder="点击右侧眼睛显示并选择出生日期"
-                        onClick={() => setShowDob(true)}
-                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02] cursor-pointer"
-                      />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setShowDob(!showDob)}
-                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
-                      title={showDob ? "隐藏" : "显示"}
-                    >
-                      {showDob ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    仅用于生理体能评估与大组织分组核实，对外公开名册仅显示组别脱敏保护
-                  </p>
-                </div>
-
-                {/* 身份证号码 / 证件号 */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>身份证号码 / 证件号 (选填)</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">非必要不暴露</span>
-                    </label>
-                    <span className="text-[11px] text-zinc-500">{showIdCard ? "明文展示" : "星号遮罩"}</span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showIdCard ? "text" : "password"}
-                      maxLength={18}
-                      value={idCard}
-                      onChange={(e) => setIdCard(e.target.value)}
-                      placeholder="用于赛事保险投保与参赛资格核验"
-                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowIdCard(!showIdCard)}
-                      className="absolute right-2.5 text-zinc-400 hover:text-white transition p-1"
-                      title={showIdCard ? "隐藏" : "显示"}
-                    >
-                      {showIdCard ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向任何第三方暴露
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
-              {/* 性别 */}
-              <div>
-                <label className="text-xs text-zinc-400 flex items-center gap-1.5 mb-1.5">
-                  <span>生理性别<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                  <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
-                </label>
-                <select
-                  value={gender}
-                  onChange={(e) => setGender(e.target.value)}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                >
-                  <option value="male">男 (Male)</option>
-                  <option value="female">女 (Female)</option>
-                </select>
-              </div>
-
-              {/* 最大摄氧量 VO2Max */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-zinc-400">最大摄氧量 (VO2Max)</label>
-                  <button
-                    type="button"
-                    onClick={handleEstimateVo2max}
-                    disabled={estimatingVo2}
-                    className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
-                    title="基于您在上方填写的 5K/10K/半马/全马 PB 成绩自动测算 VDOT"
-                  >
-                    <span>⚡ 依据 PB 测算</span>
-                  </button>
-                </div>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={vo2max}
-                  onChange={(e) => setVo2max(e.target.value ? Number(e.target.value) : "")}
-                  placeholder="例如 54.0"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 身高 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
-                <input
-                  type="number"
-                  value={heightCm}
-                  onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 体重 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={weightKg}
-                  onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 最大心率 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (Max HR bpm)</label>
-                <input
-                  type="number"
-                  value={maxHr}
-                  onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 静息心率 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (Resting HR bpm)</label>
-                <input
-                  type="number"
-                  value={restHr}
-                  onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 跑龄 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
-                <input
-                  type="number"
-                  value={yearsRunning}
-                  onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ── CARD: 商学院项目与戈友认证 (Gobi & Business School Credentials) ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Award className="w-5 h-5 text-amber-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">商学院项目与戈友认证</h2>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 self-start sm:self-auto">
-                🏫 大组织审核资格 · 实时双向自动同步
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400">
-              在此填写的商学院项目、班级与戈壁经历，将自动同步至您已加入的所有商学院大群（如复旦戈友会）实名花名册。当群管理员设置必须字段时，在此补齐即可自动流转为正式/待审核状态，无需重复填报。
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-              {/* 商学院项目与班级 */}
-              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <span>商学院项目与班级<span className="text-red-400 ml-0.5">*</span></span>
-                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大组织必填项</span>
-                  </label>
-                </div>
-                
-                <div>
-                  <span className="text-xs text-zinc-400 block mb-2">选择所属项目：</span>
-                  <div className="flex flex-wrap gap-2">
-                    {ORG_PROGRAM_OPTIONS.map((prog) => (
-                      <button
-                        key={prog}
-                        type="button"
-                        onClick={() => setProgram(prog)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          program === prog
-                            ? "bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold"
-                            : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/5"
-                        }`}
-                      >
-                        {prog}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="text-xs text-zinc-400">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5 font-bold">*</span>：</span>
-                    <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={classDetail}
-                    onChange={(e) => setClassDetail(e.target.value)}
-                    placeholder="例如: 23春、21级、18班、2022秋"
-                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-                  />
-                  {program && classDetail && (
-                    <div className="mt-2 text-xs text-amber-300 flex items-center gap-1.5 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
-                      <span>名册显示组合：</span>
-                      <span className="font-bold">{program} {classDetail}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 戈壁经历 */}
-              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <span>戈壁经历 (戈赛经验)</span>
-                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">分组与荣誉铭牌</span>
-                  </label>
-                  <span className="text-xs text-zinc-400">{gobiType === "new" ? "🌱 新戈跑者" : `🏅 ${gobiEdition} ${gobiGroup}`}</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setGobiType("new")}
-                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
-                      gobiType === "new"
-                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md shadow-emerald-500/10"
-                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
-                    }`}
-                  >
-                    <span className="text-xl">🌱</span>
-                    <div>
-                      <div className="font-bold text-xs text-white">新戈</div>
-                      <div className="text-[10px] text-zinc-400">首次备赛/无往届</div>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGobiType("vet")}
-                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
-                      gobiType === "vet"
-                        ? "bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-md shadow-amber-500/10"
-                        : "bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10"
-                    }`}
-                  >
-                    <span className="text-xl">🏅</span>
-                    <div>
-                      <div className="font-bold text-xs text-white">往届老戈友</div>
-                      <div className="text-[10px] text-zinc-400">戈1至戈21</div>
-                    </div>
-                  </button>
-                </div>
-
-                {gobiType === "vet" && (
-                  <div className="p-3.5 bg-black/40 border border-white/10 rounded-xl space-y-3">
-                    <div>
-                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数 (戈1 ~ 戈21)：</span>
-                      <select
-                        value={gobiEdition}
-                        onChange={(e) => setGobiEdition(e.target.value)}
-                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
-                      >
-                        {GOBI_EDITIONS.map((ed) => (
-                          <option key={ed} value={ed}>{ed}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <span className="text-xs text-zinc-400 block mb-1.5">参赛组别：</span>
-                      <div className="flex gap-2">
-                        {GOBI_GROUPS.map((grp) => (
-                          <button
-                            key={grp}
-                            type="button"
-                            onClick={() => setGobiGroup(grp)}
-                            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
-                              gobiGroup === grp
-                                ? "bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20"
-                                : "bg-white/5 text-zinc-400 hover:text-white border border-white/5"
-                            }`}
-                          >
-                            {grp}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="text-[11px] text-amber-300 flex items-center gap-1.5 pt-1">
-                      <span>认证经历展示：</span>
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
-                        🏅 {gobiEdition} {gobiGroup}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ── CARD: 赛事活动与装备保障 (Race Gear & Emergency) ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-indigo-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">赛事活动与装备保障</h2>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 self-start sm:self-auto">
-                🎽 物资发放 · 安全保险
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400">
-              用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
-              {/* 紧急联系人及电话 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">
-                  紧急联系人及电话
-                </label>
-                <input
-                  type="text"
-                  value={emergencyContact}
-                  onChange={(e) => setEmergencyContact(e.target.value)}
-                  placeholder="例如: 张三 13900001111"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-[11px] text-zinc-500 mt-1 block">建议填写直系亲属或紧急联络人姓名与电话</span>
-              </div>
-
-              {/* 队服尺码 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">
-                  队服尺码 (Clothing Size)
-                </label>
-                <select
-                  value={clothingSize}
-                  onChange={(e) => setClothingSize(e.target.value)}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">请选择尺码</option>
-                  {CLOTHING_SIZES.map((sz) => (
-                    <option key={sz} value={sz}>{sz}</option>
-                  ))}
-                </select>
-                <span className="text-[11px] text-zinc-500 mt-1 block">用于团队赛事战袍、训练T恤订制与发放</span>
-              </div>
-
-              {/* 跑鞋尺码 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">
-                  跑鞋尺码 (Shoe Size)
-                </label>
-                <input
-                  type="text"
-                  value={shoeSize}
-                  onChange={(e) => setShoeSize(e.target.value)}
-                  placeholder="例如: 42 或 42.5"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-[11px] text-zinc-500 mt-1 block">欧洲码 (EUR)，如 40、41、42、42.5、43</span>
-              </div>
-            </div>
-
-            {/* 健康状况声明 */}
-            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-3 mt-2">
-              <input
-                type="checkbox"
-                id="health-decl-check"
-                checked={healthDeclaration}
-                onChange={(e) => setHealthDeclaration(e.target.checked)}
-                className="mt-1 w-4 h-4 rounded border-white/20 text-[#FC4C02] focus:ring-[#FC4C02] bg-[#18181c] cursor-pointer"
-              />
-              <label htmlFor="health-decl-check" className="text-xs text-zinc-300 leading-relaxed cursor-pointer select-none">
-                <span className="font-bold text-white block mb-0.5">健康状况与免责声明确认</span>
-                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
-              </label>
-            </div>
-          </div>
-
-          {/* ── CARD 4: 训练目标与跑量设置 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Target className="w-5 h-5 text-cyan-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">训练目标与跑量设置</h2>
-              </div>
-              <span
-                className={`text-xs px-3 py-1 rounded-full font-bold self-start sm:self-auto border ${
-                  goalMode === "custom"
-                    ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
-                    : "bg-[#FC4C02]/10 text-[#FC4C02] border-[#FC4C02]/20"
-                }`}
-              >
-                {goalMode === "uniform" ? `${targetDistance} km / 月` : "12 个月独立设定"}
-              </span>
-            </div>
-
-            {/* ── 常规周跑量计划 (可单独设置与单独保存) ── */}
-            <div className="bg-[#18181c] border border-emerald-500/20 rounded-2xl p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🏃</span>
-                  <h3 className="text-sm font-bold text-white tracking-wide">常规周跑量计划 (每周目标)</h3>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs px-3 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    {weeklyTarget} km / 周
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleSaveWeeklyOnly}
-                    disabled={savingWeekly}
-                    className="px-3 py-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition active:scale-95 disabled:opacity-50 shadow-md shadow-emerald-600/20"
-                  >
-                    {savingWeekly ? "保存中..." : "单独保存周跑量"}
-                  </button>
-                </div>
-              </div>
-
-              <p className="text-xs text-zinc-400">
-                周跑量目标无需按 52 周单独设定，设定常规周目标后自动应用于全年的每周训练进度与负荷追踪，可完全独立于月跑量设置。
-              </p>
-
-              {/* Quick Pills */}
-              <div className="flex flex-wrap gap-2">
-                {[30, 40, 50, 60, 70, 80, 100].map((km) => (
-                  <button
-                    key={km}
-                    type="button"
-                    onClick={() => setWeeklyTarget(km)}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg border transition ${
-                      weeklyTarget === km
-                        ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20"
-                        : "bg-[#202026] text-zinc-300 border-white/5 hover:border-white/20"
-                    }`}
-                  >
-                    {km}k
-                  </button>
-                ))}
-              </div>
-
-              {/* Weekly Slider */}
-              <div className="space-y-1.5 pt-1">
-                <div className="flex justify-between text-xs text-zinc-400">
-                  <span>微调滑块: <strong className="text-emerald-400">{weeklyTarget} km</strong></span>
-                  <span>范围: 10 ~ 160 km</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={160}
-                  step={5}
-                  value={weeklyTarget}
-                  onChange={(e) => setWeeklyTarget(Number(e.target.value))}
-                  className="w-full accent-emerald-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
-                />
-                <p className="text-[11px] text-zinc-500">
-                  相当于月均完成约 {Math.round(weeklyTarget * 4.3)} km 跑步负荷。
-                </p>
-              </div>
-            </div>
-
-            {/* ── 月跑量计划 ── */}
-            <div className="pt-2 border-t border-white/5">
-              <h3 className="text-xs font-bold text-zinc-400 mb-3">📅 月度跑量规划</h3>
-            </div>
-
-            {/* Mode Switcher */}
-            <div className="flex bg-[#18181c] p-1 rounded-2xl border border-white/5 max-w-sm">
-              <button
-                type="button"
-                onClick={() => handleGoalModeChange("uniform")}
-                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
-                  goalMode === "uniform"
-                    ? "bg-[#282830] text-white shadow"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                每月统一跑量
-              </button>
-              <button
-                type="button"
-                onClick={() => handleGoalModeChange("custom")}
-                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${
-                  goalMode === "custom"
-                    ? "bg-[#282830] text-white shadow"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                12 个月独立设定
-              </button>
-            </div>
-
-            {/* General Slider */}
-            <div className={`space-y-2 transition-opacity ${goalMode === "custom" ? "opacity-40" : "opacity-100"}`}>
-              <div className="flex justify-between text-xs text-zinc-400">
-                <span>月度通用基准: <strong className="text-white text-sm">{targetDistance} km</strong></span>
-                <span>范围: 50 ~ 600 km</span>
-              </div>
-              <input
-                type="range"
-                min={50}
-                max={600}
-                step={10}
-                disabled={goalMode === "custom"}
-                value={targetDistance}
-                onChange={(e) => handleSliderChange(Number(e.target.value))}
-                className="w-full accent-[#FC4C02] bg-zinc-800 h-2 rounded-lg cursor-pointer disabled:cursor-not-allowed"
-              />
-              {goalMode === "custom" ? (
-                <p className="text-[11px] text-cyan-400">
-                  🔒 当前已启用 12 个月独立设定，通用滑动条已锁定以防误触变更。可在下方单独修改每月跑量。
-                </p>
-              ) : (
-                <p className="text-[11px] text-zinc-500">
-                  ✨ 拖动滑块将同时应用到全年 12 个月份。
-                </p>
-              )}
-            </div>
-
-            {/* 12 Months Grid when custom */}
-            {goalMode === "custom" && (
-              <div className="pt-4 border-t border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-zinc-300">各月份独立跑量 (km)</span>
-                  <button
-                    type="button"
-                    onClick={handleSyncUniformToAll}
-                    className="text-xs text-[#FC4C02] hover:underline"
-                  >
-                    一键统一为 {targetDistance}km
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-                  {monthlyTargets.map((target, index) => (
-                    <div key={index} className="bg-[#18181c] border border-white/5 rounded-2xl p-3 text-center">
-                      <span className="text-[11px] text-zinc-500 block mb-1">{index + 1} 月</span>
-                      <input
-                        type="number"
-                        value={target}
-                        onChange={(e) => {
-                          const newTargets = [...monthlyTargets];
-                          newTargets[index] = Number(e.target.value);
-                          setMonthlyTargets(newTargets);
-                        }}
-                        className="w-full bg-[#202026] text-center border border-white/10 rounded-lg py-1.5 text-sm font-bold text-white focus:outline-none focus:border-[#FC4C02]"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── CARD 5: 个人隐私与数据安全保障 & 一键彻底清除 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-emerald-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">个人隐私与数据安全保障</h2>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
-                🔒 AES-256-GCM 高强度密文保护
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">🔒</span>
-                  <span>敏感隐私密文存储</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与资格核验。
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">👁️</span>
-                  <span>大群体名册自动脱敏</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  在公开团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">🧹</span>
-                  <span>随时一键彻底清除</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。历史运动里程将以匿名跑者形式保留。
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <p className="text-xs text-zinc-500">
-                若您不再需要参与赛事资格审核，可随时一键清除所有个人实名与认证记录。
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowPurgeConfirmModal(true)}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition active:scale-95 shrink-0"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>🧹 一键清除所有个人隐私数据</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Submit Button */}
-          <div className="flex justify-end pt-4">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
-            >
-              <Save className="w-5 h-5" />
-              {saving ? "正在保存..." : "保存设置"}
-            </button>
-          </div>
+          )}
         </form>
       </main>
 
