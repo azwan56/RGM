@@ -93,6 +93,16 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
+  const [userOrgs, setUserOrgs] = useState<any[]>([]);
+
+  function scrollToRequiredFields() {
+    if (typeof document !== "undefined") {
+      const el = document.getElementById("required-personal-fields");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  }
 
   function computeAge(dobStr: string): number | null {
     if (!dobStr) return null;
@@ -258,6 +268,15 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       }
       if (userRaces && Array.isArray(userRaces) && userRaces.length > 0) {
         setRaces(userRaces);
+      }
+
+      try {
+        const orgRes = await apiClient.get(`/api/org/my-orgs/${uid}`);
+        if (orgRes.data?.organizations) {
+          setUserOrgs(orgRes.data.organizations);
+        }
+      } catch (orgErr) {
+        console.error("Load user organizations error:", orgErr);
       }
     } catch (e) {
       console.error("Load profile failed:", e);
@@ -864,6 +883,139 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
+          {/* ── CARD: 大群体成员认证与审核状态 (Grand Org Membership Status Card) ── */}
+          {userOrgs && userOrgs.length > 0 && (
+            <div className="bg-[#121215] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-2xl bg-amber-500/20 text-amber-400">
+                    <Award className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white tracking-wide">
+                      大群体成员认证与审核状态
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      您已加入的商学院大组织准入考核与认证资格（关系到下属跑团的浏览与活动参与权限）
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {userOrgs.map((org: any) => {
+                  const isConfirmed = org.status === "confirmed";
+                  const isSuspended = org.status === "expired" || org.status === "suspended" || org.is_suspended;
+                  const isPending = org.status === "pending";
+                  const daysRemaining = org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14;
+
+                  return (
+                    <div
+                      key={org.id}
+                      className={`p-5 rounded-2xl border transition ${
+                        isConfirmed
+                          ? "bg-emerald-500/5 border-emerald-500/20"
+                          : isSuspended
+                          ? "bg-rose-500/10 border-rose-500/40"
+                          : isPending
+                          ? "bg-blue-500/5 border-blue-500/20"
+                          : "bg-amber-500/5 border-amber-500/30"
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base font-bold text-white">{org.name}</span>
+                          {org.city && (
+                            <span className="text-xs text-zinc-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5">
+                              {org.city}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="self-start sm:self-auto">
+                          {isConfirmed ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              正式队员 · 已核验
+                            </span>
+                          ) : isSuspended ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              🚫 访问已暂停
+                            </span>
+                          ) : isPending ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5" />
+                              📋 待管理员核验 · 余{daysRemaining}天
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5" />
+                              ⏳ 临时状态 · 余{daysRemaining}天
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Description / Instructions */}
+                      {isConfirmed && (
+                        <p className="text-xs text-emerald-200/90 leading-relaxed">
+                          ✓ 您已完成所有必填字段并通过大团管理员审核确认，已成为正式队员，享有大团及所有从属跑团的永久完整访问与活动参与权限。
+                        </p>
+                      )}
+
+                      {isSuspended && (
+                        <div className="space-y-3">
+                          <p className="text-xs text-rose-200/95 leading-relaxed font-medium">
+                            ⚠️ 您的2周临时访问期已到期。由于超期未完成所有必填字段填写并获大团管理员确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！
+                          </p>
+                          <button
+                            type="button"
+                            onClick={scrollToRequiredFields}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/30 transition flex items-center gap-1.5"
+                          >
+                            <span>📝 立即补齐必填字段</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {isPending && (
+                        <p className="text-xs text-blue-200/90 leading-relaxed">
+                          📋 您已填齐必填资料，正在等待大团管理员审核确认。请在 2 周临时期内（剩余 {daysRemaining} 天）由管理员在后台核验批准成为正式队员。
+                        </p>
+                      )}
+
+                      {!isConfirmed && !isSuspended && !isPending && (
+                        <div className="space-y-3">
+                          <p className="text-xs text-amber-200/90 leading-relaxed">
+                            ⏳ 根据大群群规，必须在 2 周内（剩余 {daysRemaining} 天）完成所有必填字段填写并获得大团管理员确认。2周超期未完成将被暂停大团及从属跑团的一切内容和活动！
+                          </p>
+                          {org.missing_fields && org.missing_fields.length > 0 && (
+                            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs">
+                              <span className="text-amber-300 font-bold mr-2">待补齐必填项：</span>
+                              <span className="text-amber-200">
+                                {org.missing_fields.map((f: any) => f.label).join("、")}
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={scrollToRequiredFields}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/20 transition flex items-center gap-1.5"
+                          >
+                            <span>📝 立即前往补齐必填字段</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── CARD 0: 运动手表数据直连 (Garmin & COROS) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white tracking-wide">运动手表数据直连</h2>
@@ -1726,7 +1878,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
 
             {/* ── 敏感个人实名与隐私信息 (AES-256-GCM 密文存储) ── */}
-            <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+            <div id="required-personal-fields" className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4 scroll-mt-24">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Lock className="w-4 h-4 text-emerald-400" />
@@ -1744,8 +1896,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 {/* 真实姓名 */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5">*</span></span>
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
                     </label>
                     <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
@@ -1801,8 +1954,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 {/* 出生日期 & 年龄 */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5">*</span></span>
+                    <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
                     </label>
                     {age !== null && (
@@ -1820,7 +1974,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                           setDateOfBirth(e.target.value);
                           setAge(computeAge(e.target.value));
                         }}
-                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                        className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
                       />
                     ) : (
                       <input
@@ -1883,7 +2037,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
               {/* 性别 */}
               <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">生理性别<span className="text-red-400 ml-0.5">*</span></label>
+                <label className="text-xs text-zinc-400 flex items-center gap-1.5 mb-1.5">
+                  <span>生理性别<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                  <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                </label>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
@@ -2022,7 +2179,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 </div>
 
                 <div>
-                  <span className="text-xs text-zinc-400 block mb-1.5">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5">*</span>：</span>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="text-xs text-zinc-400">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5 font-bold">*</span>：</span>
+                    <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                  </div>
                   <input
                     type="text"
                     value={classDetail}

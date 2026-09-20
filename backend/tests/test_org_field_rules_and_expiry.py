@@ -386,3 +386,155 @@ def test_org_program_and_gobi_experience():
     assert len(m_list3) == 1
     assert m_list3[0]["user_id"] == runner_vet_uid
 
+
+def test_sub_club_access_suspension_and_admin_confirmation_flow():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_admin_{ts}"
+    runner_uid = f"u_test_runner_{ts}"
+    invite_code = f"FD_SUSP_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "复旦戈大团管理员", "email": "fudan_admin2@test.com"})
+    LocalStore.upsert_profile(runner_uid, {"display_name": "复旦戈受试队员", "email": "tested_runner@test.com"})
+
+    # 1. Create grand org (e.g. 复旦戈)
+    org_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试总团_{ts}",
+        "invite_code": invite_code,
+        "description": "测试超期2周暂停下属跑团浏览与活动使用",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert org_res.status_code == 200
+    org_id = org_res.json()["organization"]["id"]
+
+    # 2. Create sub-club under this org (e.g. 复旦戈闵文跑团)
+    sub_club = LocalStore.create_club(
+        owner_id=owner_uid,
+        name=f"复旦戈闵文测试跑团_{ts}",
+        description="复旦戈闵文下属跑团",
+        city="上海",
+        org_id=org_id,
+        join_mode="free"
+    )
+    sub_club_id = sub_club["id"]
+
+    # 3. Create independent club (e.g. RGM先锋跑团) with org_id = None
+    indep_club = LocalStore.create_club(
+        owner_id=owner_uid,
+        name=f"RGM先锋独立测试跑团_{ts}",
+        description="独立跑团不属于任何大群体",
+        city="上海",
+        org_id=None,
+        join_mode="free"
+    )
+    indep_club_id = indep_club["id"]
+
+    # 4. Runner joins org
+    join_res = client.post("/api/org/join", json={
+        "user_id": runner_uid,
+        "invite_code": invite_code,
+        "real_name": "李戈友",
+        "gender": "female",
+        "date_of_birth": "1995-05-05",
+        "class_name": "MBA 2024秋",
+        "program": "全日制MBA",
+        "class_detail": "2024秋"
+    })
+    assert join_res.status_code == 200
+    assert join_res.json()["membership"]["status"] == "pending"
+
+    # Also add runner as member of sub-club and independent club for test
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES (?, ?, ?, 'member', 'active', ?)",
+                     (f"{sub_club_id}_{runner_uid}", sub_club_id, runner_uid, datetime.utcnow().isoformat()))
+        conn.execute("INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES (?, ?, ?, 'member', 'active', ?)",
+                     (f"{indep_club_id}_{runner_uid}", indep_club_id, runner_uid, datetime.utcnow().isoformat()))
+        conn.commit()
+
+    # 5. Within 14 days, runner CAN access sub-club dashboard, feed, leaderboard, events, members
+    dash_res = client.get(f"/api/team/{sub_club_id}/dashboard?user_id={runner_uid}")
+    assert dash_res.status_code == 200
+
+    feed_res = client.get(f"/api/team/{sub_club_id}/feed?uid={runner_uid}")
+    assert feed_res.status_code == 200
+
+    mem_res = client.get(f"/api/team/{sub_club_id}/members?user_id={runner_uid}")
+    assert mem_res.status_code == 200
+
+    # 6. Now simulate 15 days elapsed without admin confirmation
+    past_15_days = (datetime.utcnow() - timedelta(days=15)).isoformat() + "Z"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE organization_members SET joined_at = ? WHERE org_id = ? AND user_id = ?",
+                     (past_15_days, org_id, runner_uid))
+        conn.commit()
+
+    # Verify status in check_org_member_status is expired/suspended
+    st = LocalStore.check_org_member_status(org_id, runner_uid)
+    assert st["status"] == "expired"
+    assert st["is_valid"] is False
+
+    # 7. Expired/suspended runner tries to browse or use sub-club -> 403 Forbidden!
+    dash_blocked = client.get(f"/api/team/{sub_club_id}/dashboard?user_id={runner_uid}")
+    assert dash_blocked.status_code == 403
+    assert "访问被暂停" in dash_blocked.json()["detail"]
+
+    feed_blocked = client.get(f"/api/team/{sub_club_id}/feed?uid={runner_uid}")
+    assert feed_blocked.status_code == 403
+    assert "访问被暂停" in feed_blocked.json()["detail"]
+
+    mem_blocked = client.get(f"/api/team/{sub_club_id}/members?user_id={runner_uid}")
+    assert mem_blocked.status_code == 403
+    assert "访问被暂停" in mem_blocked.json()["detail"]
+
+    evt_blocked = client.get(f"/api/team/{sub_club_id}/events?user_id={runner_uid}")
+    assert evt_blocked.status_code == 403
+    assert "访问被暂停" in evt_blocked.json()["detail"]
+
+    lead_blocked = client.get(f"/api/team/{sub_club_id}/leaderboard?user_id={runner_uid}")
+    assert lead_blocked.status_code == 403
+    assert "访问被暂停" in lead_blocked.json()["detail"]
+
+    sub_clubs_blocked = client.get(f"/api/org/{org_id}/sub-clubs?user_id={runner_uid}")
+    assert sub_clubs_blocked.status_code == 403
+    assert "临时访问权限已到期" in sub_clubs_blocked.json()["detail"]
+
+    # 8. Check my-clubs list flags is_access_suspended = True
+    my_clubs = LocalStore.get_user_clubs(runner_uid)
+    sub_c = next(c for c in my_clubs if c["id"] == sub_club_id)
+    assert sub_c["is_access_suspended"] is True
+    assert "暂停使用" in sub_c["suspension_reason"]
+
+    # 9. Independent club (RGM先锋跑团) is NOT blocked!
+    indep_dash = client.get(f"/api/team/{indep_club_id}/dashboard?user_id={runner_uid}")
+    assert indep_dash.status_code == 200
+
+    indep_feed = client.get(f"/api/team/{indep_club_id}/feed?uid={runner_uid}")
+    assert indep_feed.status_code == 200
+
+    indep_c = next(c for c in my_clubs if c["id"] == indep_club_id)
+    assert indep_c["is_access_suspended"] is False
+
+    # 10. Admin confirms member
+    confirm_res = client.post(f"/api/org/{org_id}/members/{runner_uid}/confirm", json={
+        "operator_uid": owner_uid
+    })
+    assert confirm_res.status_code == 200
+
+    # 11. Now runner is confirmed formal member! All sub-club endpoints are restored (200 OK)!
+    st2 = LocalStore.check_org_member_status(org_id, runner_uid)
+    assert st2["status"] == "confirmed"
+    assert st2["is_valid"] is True
+
+    dash_ok = client.get(f"/api/team/{sub_club_id}/dashboard?user_id={runner_uid}")
+    assert dash_ok.status_code == 200
+
+    feed_ok = client.get(f"/api/team/{sub_club_id}/feed?uid={runner_uid}")
+    assert feed_ok.status_code == 200
+
+    mem_ok = client.get(f"/api/team/{sub_club_id}/members?user_id={runner_uid}")
+    assert mem_ok.status_code == 200
+
+    lead_ok = client.get(f"/api/team/{sub_club_id}/leaderboard?user_id={runner_uid}")
+    assert lead_ok.status_code == 200
+
+

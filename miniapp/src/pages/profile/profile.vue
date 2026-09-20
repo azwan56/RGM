@@ -35,6 +35,53 @@
       <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出登录</button>
     </view>
 
+    <!-- ── CARD: 大群体成员认证与审核状态卡 (Grand Org Membership & Expiry Status) ── -->
+    <view v-if="userOrgs && userOrgs.length > 0" class="section-card org-status-section-card">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">🏫</text>
+          <text class="card-title">大群成员认证与准入状态</text>
+        </view>
+        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+          2周实名核验制
+        </text>
+      </view>
+
+      <view v-for="org in userOrgs" :key="org.id" class="org-status-item" :class="'org-state-' + (org.status || 'temporary')">
+        <view class="org-status-header">
+          <view class="org-name-wrap">
+            <text class="org-item-name">{{ org.name }}</text>
+          </view>
+          <view class="org-status-badge" :class="'badge-' + (org.status || 'temporary')">
+            <text v-if="org.status === 'confirmed'">🏅 正式队员 · 已核验</text>
+            <text v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended">🚫 访问已暂停</text>
+            <text v-else-if="org.status === 'pending'">📋 待管理员核验 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
+            <text v-else>⏳ 临时状态 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
+          </view>
+        </view>
+
+        <!-- Status Details -->
+        <view v-if="org.status === 'confirmed'" class="org-status-desc desc-confirmed">
+          <text class="org-desc-text">✓ 您已完成所有必填字段并通过大团管理员审核确认，已成为正式队员，享有大团及所有从属跑团的永久完整访问与活动参与权限。</text>
+        </view>
+        <view v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended" class="org-status-desc desc-suspended">
+          <text class="org-desc-text warning-text">⚠️ 您的2周临时访问期已到期。由于超期未完成所有必填字段填写并获大团管理员确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！</text>
+          <button class="org-action-btn btn-danger" @click="scrollToRequiredFields">📝 立即补齐必填字段</button>
+        </view>
+        <view v-else-if="org.status === 'pending'" class="org-status-desc desc-pending">
+          <text class="org-desc-text">📋 您已填齐必填资料，正在等待大团管理员审核确认。请在 2 周临时期内（剩余 {{ org.days_remaining }} 天）由管理员核验批准成为正式队员。</text>
+        </view>
+        <view v-else class="org-status-desc desc-temporary">
+          <text class="org-desc-text">⏳ 根据大群群规，必须在 2 周内（剩余 {{ org.days_remaining }} 天）完成所有必填字段填写并获得大团管理员确认。2周超期未完成将被暂停大团及从属跑团的一切内容和活动！</text>
+          <view v-if="org.missing_fields && org.missing_fields.length" class="missing-fields-box">
+            <text class="missing-title">待补齐必填项：</text>
+            <text class="missing-labels">{{ org.missing_fields.map((f: any) => f.label).join('、') }}</text>
+          </view>
+          <button class="org-action-btn" @click="scrollToRequiredFields">📝 立即前往补齐必填字段</button>
+        </view>
+      </view>
+    </view>
+
     <!-- ── CARD 1: 我的跑团与管理 (Running Club Card) ── -->
     <view class="section-card club-card-highlight">
       <view class="card-title-row">
@@ -602,6 +649,7 @@
           <view class="label-with-tag">
             <view class="label-with-sec">
               <text class="label">出生日期 (Date of Birth)<text class="required-star"> *</text></text>
+              <text class="field-sec-tag req-tag">大群必填</text>
               <text class="field-sec-tag">🔒 AES-256 加密</text>
             </view>
             <text v-if="displayAge !== null" class="age-badge-pill">
@@ -635,6 +683,7 @@
         <view class="form-group">
           <view class="label-with-tag">
             <text class="label">真实姓名<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
             <text class="field-sec-tag">🔒 加密存储</text>
           </view>
           <view class="secure-input-wrapper">
@@ -699,7 +748,10 @@
 
         <!-- 生理性别 -->
         <view class="form-group">
-          <text class="label">生理性别<text class="required-star"> *</text></text>
+          <view class="label-with-tag">
+            <text class="label">生理性别<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
+          </view>
           <view class="gender-pill-group">
             <view
               class="gender-pill"
@@ -815,8 +867,8 @@
         <!-- 所属项目 -->
         <view class="form-group full-width-group">
           <view class="label-with-tag">
-            <text class="label">商学院项目</text>
-            <text class="field-sec-tag">大群必填</text>
+            <text class="label">商学院项目<text class="required-star"> *</text></text>
+            <text class="field-sec-tag req-tag">大群必填</text>
           </view>
           <view class="program-pill-grid">
             <view
@@ -835,7 +887,7 @@
         <view class="form-group full-width-group">
           <view class="label-with-tag">
             <text class="label">所在班级 / 届别 (自由输入)<text class="required-star"> *</text></text>
-            <text class="field-sec-tag">大群必填</text>
+            <text class="field-sec-tag req-tag">大群必填</text>
           </view>
           <input
             class="form-input"
@@ -2150,12 +2202,17 @@ const user = ref<UserProfile | null>(null);
 const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
+const userOrgs = ref<any[]>([]);
 const purgingPrivacy = ref(false);
 const showDob = ref(false);
 const showRealName = ref(false);
 const showPhone = ref(false);
 const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
+
+function scrollToRequiredFields() {
+  uni.pageScrollTo({ selector: ".section-card-runner-info", duration: 400 });
+}
 
 const gobiType = ref<"new" | "vet">("new");
 const gobiEdition = ref("戈21");
@@ -2742,10 +2799,13 @@ async function loadProfileData() {
   const uid = user.value.id;
 
   try {
-    const [res, clubRes] = await Promise.all([
+    const [res, clubRes, orgRes] = await Promise.all([
       request(`/api/profile/${uid}`),
       request(`/api/team/my-clubs/${uid}`),
+      request(`/api/org/my-orgs/${uid}`),
     ]);
+
+    userOrgs.value = orgRes?.organizations || [];
 
     if (res?.profile) {
       profile.value = res.profile;
@@ -2798,36 +2858,54 @@ async function loadProfileData() {
     userClubs.value = clubs;
     userClub.value = resolveActiveClub(clubs);
 
-    // ── Check if user has any temporary org memberships → show profile completion reminder ──
-    checkOrgMembershipReminder(uid);
+    // ── Check if user has temporary or suspended org memberships → show reminder ──
+    checkOrgMembershipReminder(uid, userOrgs.value);
   } catch (err) {
     console.error("Failed to load profile:", err);
   }
 }
 
-// Popup reminder: if user belongs to any org with 'temporary' status (incomplete required fields)
-async function checkOrgMembershipReminder(uid: string) {
+// Popup reminder: if user belongs to any org with 'suspended' or 'temporary' status
+async function checkOrgMembershipReminder(uid: string, orgsList?: any[]) {
   try {
-    const orgRes = await request(`/api/org/my-orgs/${uid}`);
-    const orgs: any[] = orgRes?.organizations || [];
+    const orgs: any[] = orgsList || (await request(`/api/org/my-orgs/${uid}`))?.organizations || [];
+    const suspendedMemberships = orgs.filter((o: any) => o.status === "expired" || o.status === "suspended" || o.is_suspended);
+    if (suspendedMemberships.length > 0) {
+      const firstOrg = suspendedMemberships[0];
+      uni.showModal({
+        title: "⚠️ 大群体访问已被暂停",
+        content: `您在【${firstOrg.name}】的2周临时访问期已过。由于超期未完成必填字段并获管理员审核确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！请立即补齐必填资料并联系管理员核验。`,
+        confirmText: "立即补齐",
+        cancelText: "知道了",
+        confirmColor: "#ef4444",
+        success: (res) => {
+          if (res.confirm) {
+            scrollToRequiredFields();
+          }
+        }
+      });
+      return;
+    }
+
     const incompleteMemberships = orgs.filter((o: any) => o.status === "temporary");
     if (incompleteMemberships.length > 0) {
       const firstOrg = incompleteMemberships[0];
       const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label).join("、");
       const orgCount = incompleteMemberships.length;
       const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
+      const remainingDays = firstOrg.days_remaining !== undefined && firstOrg.days_remaining !== null ? firstOrg.days_remaining : 14;
       const contentText = orgCount > 1
-        ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成，请立即补充以完成成员认证。`
-        : `您在【${firstOrg.name}】中${missingLabels ? '还缺少：' + missingLabels + '。' : '有必填资料尚未完成。'}请如实填写以完成成员认证。`;
+        ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成（临时访问期还剩 ${remainingDays} 天）。请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`
+        : `您在【${firstOrg.name}】中${missingLabels ? '还缺少：' + missingLabels + '。' : '有必填资料尚未完成。'}（临时访问期还剩 ${remainingDays} 天）请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`;
       uni.showModal({
         title: "📋 跑者档案待完善",
         content: contentText,
         confirmText: "立即填写",
         cancelText: "稍后再说",
+        confirmColor: "#f59e0b",
         success: (res) => {
           if (res.confirm) {
-            // Scroll to the profile fields card (商学院项目 section)
-            uni.pageScrollTo({ selector: ".section-card-runner-info", duration: 400 });
+            scrollToRequiredFields();
           }
         }
       });
@@ -6987,6 +7065,152 @@ onShow(() => {
   border: 1rpx solid rgba(16, 185, 129, 0.25);
   padding: 2rpx 8rpx;
   border-radius: 8rpx;
+}
+
+.field-sec-tag.req-tag {
+  color: #f87171 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+  font-weight: bold;
+}
+
+/* ── Grand Org Status Section Card ── */
+.org-status-section-card {
+  border-left: 6rpx solid #f59e0b;
+}
+
+.org-status-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-top: 16rpx;
+}
+
+.org-state-confirmed {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.org-state-expired,
+.org-state-suspended {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.org-state-pending {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.org-state-temporary {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.org-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+}
+
+.org-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.org-item-name {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.org-status-badge {
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+}
+
+.badge-confirmed {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1rpx solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-pending {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1rpx solid rgba(59, 130, 246, 0.3);
+}
+
+.badge-temporary {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1rpx solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-expired,
+.badge-suspended {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1rpx solid rgba(239, 68, 68, 0.4);
+}
+
+.org-status-desc {
+  margin-top: 10rpx;
+}
+
+.org-desc-text {
+  font-size: 22rpx;
+  color: #d1d5db;
+  line-height: 1.5;
+  display: block;
+}
+
+.warning-text {
+  color: #fca5a5 !important;
+  font-weight: 500;
+}
+
+.missing-fields-box {
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 12rpx;
+  border: 1rpx solid rgba(245, 158, 11, 0.2);
+}
+
+.missing-title {
+  font-size: 20rpx;
+  color: #fbbf24;
+  font-weight: bold;
+}
+
+.missing-labels {
+  font-size: 20rpx;
+  color: #fef3c7;
+}
+
+.org-action-btn {
+  margin-top: 16rpx;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #000000;
+  font-size: 24rpx;
+  font-weight: bold;
+  border-radius: 16rpx;
+  padding: 12rpx 28rpx;
+  line-height: 1.4;
+  border: none;
+}
+
+.org-action-btn.btn-danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
 }
 
 .field-privacy-subtip {

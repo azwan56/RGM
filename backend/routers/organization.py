@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
@@ -241,27 +241,38 @@ def update_org_member_profile_endpoint(org_id: str, req: UpdateMemberProfileRequ
 @router.get("/{org_id}")
 def get_organization_endpoint(org_id: str, user_id: Optional[str] = None):
     """
-    Returns detail of a specific grand community, rejecting expired members.
+    Returns detail of a specific grand community, rejecting expired/suspended members.
     """
     org = LocalStore.get_organization(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
     if user_id:
         status_info = LocalStore.check_org_member_status(org_id, user_id)
-        if status_info.get("is_member") and status_info.get("status") == "expired":
+        if status_info.get("is_member") and (status_info.get("status") in ("expired", "suspended") or not status_info.get("is_valid", True)):
             raise HTTPException(
                 status_code=403,
-                detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法进入大群。如需继续参与，请联系管理员或重新输入邀请码认证。"
+                detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法进入大群。如需继续参与，请前往个人中心补齐必填资料并联系管理员确认。"
             )
         org["user_membership"] = status_info
     return {"organization": org}
 
 
 @router.get("/{org_id}/sub-clubs")
-def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None):
+def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None, request: Request = None):
     """
     Returns all sub-running clubs under this organization, with 'is_member' flag for the user.
+    Blocks expired/suspended members from browsing.
     """
+    eff_uid = user_id or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        status_info = LocalStore.check_org_member_status(org_id, eff_uid)
+        if status_info.get("is_member") and (status_info.get("status") in ("expired", "suspended") or not status_info.get("is_valid", True)):
+            org = LocalStore.get_organization(org_id)
+            org_name = org.get("name") if org else "大群"
+            raise HTTPException(
+                status_code=403,
+                detail=f"您在【{org_name}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法浏览下属跑团列表。如需继续参与，请前往个人中心补齐必填资料并联系管理员确认。"
+            )
     sub_clubs = LocalStore.get_org_sub_clubs(org_id, user_id)
     return {"sub_clubs": sub_clubs}
 
@@ -283,10 +294,10 @@ def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_fi
             is_admin = True
         else:
             status_info = LocalStore.check_org_member_status(org_id, operator_uid)
-            if status_info.get("is_member") and status_info.get("status") == "expired":
+            if status_info.get("is_member") and (status_info.get("status") in ("expired", "suspended") or not status_info.get("is_valid", True)):
                 raise HTTPException(
                     status_code=403,
-                    detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期，无法查看大群花名册。"
+                    detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期，无法查看大群花名册。请前往个人中心补齐必填资料并联系管理员确认。"
                 )
             if status_info.get("role") in ("owner", "admin"):
                 is_admin = True

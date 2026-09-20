@@ -1873,7 +1873,7 @@ class LocalStore:
     def create_club(owner_id: str, name: str, description: Optional[str] = None, city: str = "上海", logo_url: Optional[str] = None, org_id: Optional[str] = None, join_mode: str = "free") -> Dict[str, Any]:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            club_id = f"club_{int(datetime.utcnow().timestamp()*1000)}"
+            club_id = f"club_{int(datetime.utcnow().timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
             code = generate_invite_code()
             logo = logo_url or "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"
             created_at = datetime.utcnow().isoformat() + "Z"
@@ -1936,7 +1936,19 @@ class LocalStore:
                 ORDER BY m.joined_at ASC
             """, (eff_uid,))
             rows = cursor.fetchall()
-            return [dict(r) for r in rows]
+            clubs = [dict(r) for r in rows]
+            for c in clubs:
+                if c.get("org_id"):
+                    st = LocalStore.check_org_member_status(c["org_id"], eff_uid)
+                    c["org_member_status"] = st.get("status")
+                    c["org_member_info"] = st
+                    is_suspended = (st.get("status") in ("expired", "suspended")) or not st.get("is_valid", True)
+                    c["is_access_suspended"] = is_suspended
+                    if is_suspended:
+                        c["suspension_reason"] = f"该跑团隶属于【{c.get('org_name') or '大群体'}】。大团2周临时访问期已过，超期未完成所有必填资料并获管理员确认，已暂停使用。"
+                else:
+                    c["is_access_suspended"] = False
+            return clubs
 
     @staticmethod
     def join_club_by_code(user_id: str, invite_code: str, privacy_consent: bool = True) -> Optional[Dict[str, Any]]:
@@ -3968,6 +3980,50 @@ class LocalStore:
             raise ValueError(f"加入【{club_dict.get('name')}】失败：该跑团隶属于【{org_name}】大群。您的入群资料已提交，正等待大群管理员审核批准，审批通过后方可加入下属跑团！")
         elif status != "confirmed":
             raise ValueError(f"加入【{club_dict.get('name')}】失败：根据【{org_name}】群规，必须在完成全部必填资料并获得管理员核验批准后方可加入下属跑团（当前状态：{status}）。")
+
+    @staticmethod
+    def validate_sub_club_access(club_id_or_dict: Any, user_id: Optional[str]):
+        """
+        Validates whether a runner is permitted to browse or use content, metrics, feeds,
+        and activities of a sub-club.
+        If the club belongs to an organization (org_id is present):
+          - If user_id is provided:
+            - Check org member status.
+            - If user's status in the org is expired/suspended (2-week temporary window expired without confirmation):
+              raise ValueError with detailed reason, blocking browsing and using sub-club.
+        """
+        if not user_id:
+            return
+
+        club_dict = None
+        if isinstance(club_id_or_dict, dict):
+            club_dict = club_id_or_dict
+        elif isinstance(club_id_or_dict, str):
+            club_dict = LocalStore.get_club(club_id_or_dict)
+
+        if not club_dict:
+            return
+
+        org_id = club_dict.get("org_id")
+        if not org_id:
+            return
+
+        eff_uid = LocalStore.resolve_user_id(user_id)
+        status_info = LocalStore.check_org_member_status(org_id, eff_uid)
+
+        status = status_info.get("status")
+        is_valid = status_info.get("is_valid", True)
+        if status in ("expired", "suspended") or (status_info.get("is_member") and not is_valid):
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM organizations WHERE id = ?", (org_id,))
+                org_row = cursor.fetchone()
+                org_name = org_row["name"] if org_row else "大群体"
+
+            raise ValueError(
+                f"访问被暂停：跑团【{club_dict.get('name')}】隶属于【{org_name}】大群。您在大群的2周临时访问期已过（超期未完成所有必填字段并获管理员确认）。已暂停浏览使用该大团及其从属跑团的一切内容和活动！请前往个人中心补齐必填资料并联系管理员确认。"
+            )
 
     @staticmethod
     def get_organization(org_id: str) -> Optional[Dict[str, Any]]:

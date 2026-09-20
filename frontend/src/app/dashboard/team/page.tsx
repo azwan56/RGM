@@ -58,6 +58,8 @@ export default function TeamPage() {
   const [clubs, setClubs] = useState<any[]>([]);
   const [currentClub, setCurrentClub] = useState<any>(null);
   const [currentRole, setCurrentRole] = useState<string>("member");
+  const [clubSuspended, setClubSuspended] = useState(false);
+  const [clubSuspensionReason, setClubSuspensionReason] = useState("");
 
   // Tab: 'leaderboard', 'president', 'coach', 'events'
   const [activeTab, setActiveTab] = useState<"leaderboard" | "president" | "coach" | "events">("leaderboard");
@@ -682,13 +684,22 @@ export default function TeamPage() {
         if (typeof window !== "undefined") {
           localStorage.setItem("rgm_active_club_id", primary.id);
         }
-        loadClubDetails(primary.id, uid);
+        if (primary.is_access_suspended) {
+          setClubSuspended(true);
+          setClubSuspensionReason(primary.suspension_reason || "");
+        } else {
+          setClubSuspended(false);
+          setClubSuspensionReason("");
+          loadClubDetails(primary.id, uid);
+        }
       } else {
         if (typeof window !== "undefined") {
           localStorage.removeItem("rgm_active_club_id");
         }
         setCurrentClub(null);
         setCurrentRole("member");
+        setClubSuspended(false);
+        setClubSuspensionReason("");
         setDashboardMetrics(null);
         setLeaderboard([]);
         setMembers([]);
@@ -710,12 +721,12 @@ export default function TeamPage() {
     if (!effUid) return;
     try {
       const [dashRes, lbRes, memRes, coachRes, evtRes, feedRes] = await Promise.all([
-        apiClient.get(`/api/team/${clubId}/dashboard`),
-        apiClient.get(`/api/team/${clubId}/leaderboard`),
-        apiClient.get(`/api/team/${clubId}/members`),
-        apiClient.get(`/api/team/${clubId}/coach-cockpit?coach_uid=${effUid}`),
-        apiClient.get(`/api/team/${clubId}/events`),
-        apiClient.get(`/api/team/${clubId}/feed?uid=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/dashboard?user_id=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/leaderboard?user_id=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/members?user_id=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/coach-cockpit?coach_uid=${effUid}&user_id=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/events?user_id=${effUid}`),
+        apiClient.get(`/api/team/${clubId}/feed?uid=${effUid}&user_id=${effUid}`),
       ]);
 
       setDashboardMetrics(dashRes.data?.metrics || null);
@@ -733,8 +744,16 @@ export default function TeamPage() {
         month_label: feedRes.data?.month_label || "当月",
         is_current_month: feedRes.data?.is_current_month ?? true
       });
-    } catch (e) {
+      setClubSuspended(false);
+      setClubSuspensionReason("");
+    } catch (e: any) {
       console.error("Load club details error:", e);
+      if (e?.response?.status === 403) {
+        setClubSuspended(true);
+        if (e.response?.data?.detail) {
+          setClubSuspensionReason(e.response.data.detail);
+        }
+      }
     }
   }
 
@@ -746,7 +765,7 @@ export default function TeamPage() {
     setLoadingMoreFeed(true);
     try {
       const res = await apiClient.get(
-        `/api/team/${currentClub.id}/feed?uid=${effUid}&scope=all&limit=20&offset=${feed.length}`
+        `/api/team/${currentClub.id}/feed?uid=${effUid}&user_id=${effUid}&scope=all&limit=20&offset=${feed.length}`
       );
       const moreItems = res.data?.feed || [];
       setFeed((prev) => [...prev, ...moreItems]);
@@ -766,7 +785,14 @@ export default function TeamPage() {
     if (typeof window !== "undefined") {
       localStorage.setItem("rgm_active_club_id", club.id);
     }
-    loadClubDetails(club.id);
+    if (club.is_access_suspended) {
+      setClubSuspended(true);
+      setClubSuspensionReason(club.suspension_reason || "");
+    } else {
+      setClubSuspended(false);
+      setClubSuspensionReason("");
+      loadClubDetails(club.id);
+    }
   }
 
   async function handleToggleLike(activityId: string) {
@@ -1182,13 +1208,21 @@ export default function TeamPage() {
                       <button
                         key={c.id}
                         onClick={() => handleSwitchClub(c)}
-                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition ${
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
                           currentClub.id === c.id
-                            ? "bg-[#FC4C02] text-white shadow-md shadow-[#FC4C02]/20 font-bold"
+                            ? c.is_access_suspended
+                              ? "bg-rose-600 text-white shadow-md shadow-rose-600/20 font-bold"
+                              : "bg-[#FC4C02] text-white shadow-md shadow-[#FC4C02]/20 font-bold"
+                            : c.is_access_suspended
+                            ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30"
                             : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5"
                         }`}
                       >
-                        {c.name} {currentClub.id === c.id && "✓"}
+                        <span>{c.name}</span>
+                        {c.is_access_suspended && (
+                          <span className="text-[10px] px-1 py-0.2 bg-rose-950/80 rounded text-rose-300 font-bold">受限</span>
+                        )}
+                        {currentClub.id === c.id && <span>✓</span>}
                       </button>
                     ))}
                   </div>
@@ -1255,8 +1289,51 @@ export default function TeamPage() {
           )}
 
 
-        {/* 4-Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
+        {(currentClub.is_access_suspended || clubSuspended) ? (
+          <div className="bg-[#121215] border border-rose-500/30 rounded-3xl p-8 sm:p-12 text-center max-w-2xl mx-auto shadow-2xl space-y-6 my-8">
+            <div className="w-16 h-16 rounded-3xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto text-3xl">
+              🚫
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-black text-rose-300">
+                跑团访问权限已暂停
+              </h2>
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                {clubSuspensionReason || currentClub.suspension_reason || "您在大群体/大组织的2周临时访问期已到期（超期未完成所有必填字段填写并获大团管理员确认）。根据群规，已暂停浏览使用该大团及其从属跑团的一切内容和活动！"}
+              </p>
+            </div>
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 text-left text-xs text-zinc-400 space-y-2">
+              <div className="font-bold text-zinc-200">💡 如何恢复跑团访问？</div>
+              <div>1. 前往【个人档案】补齐大群要求的所有必填字段（真实姓名、生理性别、出生日期、商学院项目与班级等）。</div>
+              <div>2. 联系大团管理员在“大群体花名册”中核对并点击【确认转正】。</div>
+              <div>3. 管理员审核确认后，将立即恢复大团及从属跑团的全部访问与活动参与权限！</div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => router.push("/dashboard/profile")}
+                className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-[#FC4C02] to-amber-500 text-white font-bold text-sm shadow-lg shadow-orange-500/20 hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-2"
+              >
+                <span>📝 立即前往个人档案补齐必填项</span>
+              </button>
+              {clubs.filter((c: any) => !c.is_access_suspended).length > 0 && (
+                <button
+                  onClick={() => {
+                    const other = clubs.find((c: any) => c.id !== currentClub.id && !c.is_access_suspended);
+                    if (other) {
+                      handleSwitchClub(other);
+                    }
+                  }}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-sm border border-white/10 transition"
+                >
+                  切换其他未受限跑团
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* 4-Tab Navigation */}
+            <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
           <button
             onClick={() => setActiveTab("leaderboard")}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
@@ -2464,6 +2541,8 @@ export default function TeamPage() {
               ))}
             </div>
           </div>
+        )}
+          </>
         )}
       </main>
       )}

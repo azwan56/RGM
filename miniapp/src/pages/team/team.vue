@@ -161,20 +161,41 @@
         </view>
       </view>
 
-      <!-- ── 跑团英雄榜与打卡动态直通卡 ── -->
-      <view class="rank-banner-card" @click="goToRankPage">
-        <view class="banner-left">
-          <view class="banner-badge-row">
-            <text class="banner-badge">🥇 英雄风云榜</text>
-            <text class="banner-hint-pill">独立专页 ›</text>
-          </view>
-          <text class="banner-title">本月跑团英雄榜 · 打卡动态与 Canova教练点评</text>
-          <text class="banner-desc">查看全团队员跑量排名、达标进度与 Canova教练动态互动</text>
+      <!-- ── 🚫 跑团访问权限已暂停阻断屏 ── -->
+      <view v-if="currentClub.is_access_suspended || isCurrentClubSuspended" class="section-card club-suspended-block-card">
+        <view class="csb-icon-box">
+          <text class="csb-icon">🚫</text>
         </view>
-        <view class="banner-arrow-box">
-          <text class="banner-arrow">→</text>
+        <text class="csb-title">大团访问权限已暂停</text>
+        <text class="csb-desc">
+          跑团【{{ currentClub.name }}】隶属于【{{ currentClub.org_name || '大群体' }}】。{{ currentSuspensionReason || '您在大群体的2周临时访问期已过。由于超期未完成所有必填字段填写并获管理员审核确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！' }}
+        </text>
+        <view class="csb-btn-row">
+          <button class="csb-btn primary" @click="goToProfilePage">
+            📝 立即前往个人中心补齐必填资料
+          </button>
+          <button v-if="userClubs.length > 1" class="csb-btn secondary" @click="openAllClubsModal">
+            ⇄ 切换至其他跑团
+          </button>
         </view>
       </view>
+
+      <!-- 正常访问内容容器 -->
+      <view v-else>
+        <!-- ── 跑团英雄榜与打卡动态直通卡 ── -->
+        <view class="rank-banner-card" @click="goToRankPage">
+          <view class="banner-left">
+            <view class="banner-badge-row">
+              <text class="banner-badge">🥇 英雄风云榜</text>
+              <text class="banner-hint-pill">独立专页 ›</text>
+            </view>
+            <text class="banner-title">本月跑团英雄榜 · 打卡动态与 Canova教练点评</text>
+            <text class="banner-desc">查看全团队员跑量排名、达标进度与 Canova教练动态互动</text>
+          </view>
+          <view class="banner-arrow-box">
+            <text class="banner-arrow">→</text>
+          </view>
+        </view>
 
     <!-- ── CARD 1: 👑 团长管理中心 (Only visible to Owner) ── -->
     <view v-if="currentRole === 'owner' || isOwnerOrDev" class="section-card owner-panel-card">
@@ -326,6 +347,7 @@
       <view v-else class="empty-box">
         <text class="empty-text">暂无进行中的跑团活动</text>
       </view>
+    </view>
     </view>
     </view>
 
@@ -1774,6 +1796,15 @@ function goToCoachPage() {
   });
 }
 
+function goToProfilePage() {
+  uni.switchTab({
+    url: "/pages/profile/profile"
+  });
+}
+
+const isCurrentClubSuspended = ref(false);
+const currentSuspensionReason = ref("");
+
 
 const isOwnerOrDev = computed(() => {
   if (!user.value || !currentClub.value) return false;
@@ -1845,16 +1876,39 @@ async function loadClubData(preferredClubId?: string) {
       currentRole.value = targetClub.role || "member";
       const clubId = targetClub.id;
 
-      // Load events, members, coach cockpit
-      const [evtRes, memRes, coachRes] = await Promise.all([
-        request(`/api/team/${clubId}/events`),
-        request(`/api/team/${clubId}/members`),
-        request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`),
-      ]);
+      if (targetClub.is_access_suspended) {
+        isCurrentClubSuspended.value = true;
+        currentSuspensionReason.value = targetClub.suspension_reason || "";
+      } else {
+        isCurrentClubSuspended.value = false;
+        currentSuspensionReason.value = "";
+      }
 
-      events.value = evtRes?.events || [];
-      members.value = memRes?.members || [];
-      coachCockpit.value = coachRes || null;
+      // Load events, members, coach cockpit with user_id
+      try {
+        const [evtRes, memRes, coachRes] = await Promise.all([
+          request(`/api/team/${clubId}/events?user_id=${uid}`).catch((e: any) => ({ error: e })),
+          request(`/api/team/${clubId}/members?user_id=${uid}`).catch((e: any) => ({ error: e })),
+          request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`).catch((e: any) => ({ error: e })),
+        ]);
+
+        if (evtRes?.error && (evtRes.error?.statusCode === 403 || String(evtRes.error?.message).includes("暂停"))) {
+          isCurrentClubSuspended.value = true;
+          currentSuspensionReason.value = evtRes.error.message;
+        } else if (memRes?.error && (memRes.error?.statusCode === 403 || String(memRes.error?.message).includes("暂停"))) {
+          isCurrentClubSuspended.value = true;
+          currentSuspensionReason.value = memRes.error.message;
+        } else {
+          events.value = evtRes?.events || [];
+          members.value = memRes?.members || [];
+          coachCockpit.value = coachRes || null;
+        }
+      } catch (err: any) {
+        if (err?.statusCode === 403 || String(err?.message).includes("暂停")) {
+          isCurrentClubSuspended.value = true;
+          currentSuspensionReason.value = err.message;
+        }
+      }
     } else {
       setActiveClubId("");
       currentClub.value = null;
@@ -5939,5 +5993,69 @@ onPullDownRefresh(async () => {
   text-align: center;
   border: 1rpx solid rgba(255, 255, 255, 0.12);
   line-height: 1.4;
+}
+
+/* ── Club Suspended Access Block Screen ── */
+.club-suspended-block-card {
+  text-align: center;
+  padding: 48rpx 32rpx;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1rpx solid rgba(239, 68, 68, 0.35);
+  border-radius: 28rpx;
+  margin: 20rpx 0 30rpx;
+}
+
+.csb-icon-box {
+  margin-bottom: 16rpx;
+}
+
+.csb-icon {
+  font-size: 64rpx;
+}
+
+.csb-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #f87171;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.csb-desc {
+  font-size: 24rpx;
+  color: #e5e7eb;
+  line-height: 1.6;
+  display: block;
+  margin-bottom: 32rpx;
+  padding: 0 16rpx;
+}
+
+.csb-btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.csb-btn {
+  width: 100%;
+  font-size: 26rpx;
+  font-weight: bold;
+  border-radius: 20rpx;
+  padding: 20rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+}
+
+.csb-btn.primary {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  box-shadow: 0 6rpx 20rpx rgba(239, 68, 68, 0.3);
+}
+
+.csb-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
 }
 </style>

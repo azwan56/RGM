@@ -159,8 +159,20 @@ def update_club_join_mode(club_id: str, req: UpdateJoinModeRequest):
 
 
 @router.get("/{club_id}/dashboard")
-def get_club_dashboard(club_id: str, operator_uid: Optional[str] = None):
+def get_club_dashboard(
+    club_id: str,
+    operator_uid: Optional[str] = None,
+    user_id: Optional[str] = None,
+    request: Request = None
+):
     """Returns club overview metrics for President and Members."""
+    eff_uid = user_id or operator_uid or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     club = LocalStore.get_club(club_id)
     if not club:
         raise HTTPException(status_code=404, detail="跑团不存在")
@@ -199,8 +211,20 @@ def get_club_dashboard(club_id: str, operator_uid: Optional[str] = None):
 
 
 @router.get("/{club_id}/members")
-def get_club_members_list(club_id: str):
+def get_club_members_list(
+    club_id: str,
+    user_id: Optional[str] = None,
+    operator_uid: Optional[str] = None,
+    request: Request = None
+):
     """Returns all members of the club with their roles."""
+    eff_uid = user_id or operator_uid or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     members = LocalStore.get_club_members(club_id)
     return {"members": members}
 
@@ -246,10 +270,22 @@ def remove_member(club_id: str, target_uid: str, operator_uid: Optional[str] = N
 
 
 @router.get("/{club_id}/coach-cockpit")
-def get_coach_cockpit(club_id: str, coach_uid: Optional[str] = None):
+def get_coach_cockpit(
+    club_id: str,
+    coach_uid: Optional[str] = None,
+    user_id: Optional[str] = None,
+    request: Request = None
+):
     """
     Returns Coach Cockpit:全队学员 TSB/HRV 负荷与红黄绿状态罗盘.
     """
+    eff_uid = user_id or coach_uid or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     students = LocalStore.get_coach_students_metrics(club_id, coach_uid)
     
     # Aggregate status count
@@ -271,8 +307,19 @@ def get_coach_cockpit(club_id: str, coach_uid: Optional[str] = None):
 
 
 @router.get("/{club_id}/events")
-def get_club_events(club_id: str):
+def get_club_events(
+    club_id: str,
+    user_id: Optional[str] = None,
+    request: Request = None
+):
     """Returns active club challenges and events."""
+    eff_uid = user_id or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     events = LocalStore.get_club_events(club_id)
     return {"events": events}
 
@@ -280,6 +327,12 @@ def get_club_events(club_id: str):
 @router.post("/{club_id}/events")
 def create_club_event(club_id: str, req: CreateClubEventRequest):
     """Allows Club Owner or Coach to create an event / distance challenge."""
+    if req.operator_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, req.operator_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     club = LocalStore.get_club(club_id)
     if not club:
         raise HTTPException(status_code=404, detail="跑团不存在")
@@ -332,8 +385,21 @@ def delete_club_event_endpoint(club_id: str, event_id: str, operator_uid: Option
 
 
 @router.get("/{club_id}/leaderboard")
-def get_club_leaderboard(club_id: str, time_range: str = "month"):
+def get_club_leaderboard(
+    club_id: str,
+    time_range: str = "month",
+    user_id: Optional[str] = None,
+    uid: Optional[str] = None,
+    request: Request = None
+):
     """Returns real-time running leaderboard for the club."""
+    eff_uid = user_id or uid or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
     leaderboard = LocalStore.get_club_leaderboard(club_id, time_range)
     return {"leaderboard": leaderboard}
 
@@ -402,18 +468,26 @@ def delete_comment_endpoint(activity_id: str, comment_id: str, user_id: Optional
 def get_club_activity_feed(
     club_id: str,
     uid: Optional[str] = None,
+    user_id: Optional[str] = None,
     limit: Optional[int] = None,
     offset: int = 0,
     before_time: Optional[str] = None,
     scope: Optional[str] = None,
     year: Optional[int] = None,
-    month: Optional[int] = None
+    month: Optional[int] = None,
+    request: Request = None
 ):
     """
     Returns group workout feed for the club.
     - Default (when limit is None or scope="month"): Returns all check-in activities of the current month.
     - If limit & offset are explicitly provided for pagination: Returns paginated records.
     """
+    eff_uid = user_id or uid or (request.headers.get("x-user-id") if request else None)
+    if eff_uid:
+        try:
+            LocalStore.validate_sub_club_access(club_id, eff_uid)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
     today = LocalStore.get_beijing_today()
     target_year = year or today.year
     target_month = month or today.month

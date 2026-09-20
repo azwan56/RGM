@@ -41,13 +41,34 @@
         </view>
       </view>
 
-      <!-- ── SECTION 1: 🥇 本月跑团英雄榜 ── -->
-      <view class="section-card">
-        <view class="card-header-row">
-          <view class="title-with-icon">
-            <text class="icon">🥇</text>
-            <text class="card-title">本月跑团英雄榜</text>
-          </view>
+      <!-- ── 🚫 跑团访问权限已暂停阻断屏 ── -->
+      <view v-if="currentClub.is_access_suspended || isRankSuspended" class="section-card club-suspended-block-card">
+        <view class="csb-icon-box">
+          <text class="csb-icon">🚫</text>
+        </view>
+        <text class="csb-title">大团访问权限已暂停</text>
+        <text class="csb-desc">
+          跑团【{{ currentClub.name }}】隶属于【{{ currentClub.org_name || '大群体' }}】。{{ rankSuspensionReason || '您在大群体的2周临时访问期已过。由于超期未完成所有必填字段填写并获管理员审核确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！' }}
+        </text>
+        <view class="csb-btn-row">
+          <button class="csb-btn primary" @click="goToProfilePage">
+            📝 立即前往个人中心补齐必填资料
+          </button>
+          <button v-if="userClubs.length > 1" class="csb-btn secondary" @click="showSwitchModal = true">
+            ⇄ 切换至其他跑团
+          </button>
+        </view>
+      </view>
+
+      <!-- 正常榜单与动态 -->
+      <view v-else>
+        <!-- ── SECTION 1: 🥇 本月跑团英雄榜 ── -->
+        <view class="section-card">
+          <view class="card-header-row">
+            <view class="title-with-icon">
+              <text class="icon">🥇</text>
+              <text class="card-title">本月跑团英雄榜</text>
+            </view>
           <view class="header-right-meta">
             <text class="sub-tip">按当月实跑里程排名</text>
           </view>
@@ -246,6 +267,7 @@
           <text class="empty-text">暂无队员近期打卡，快去完成今日跑步吧！</text>
         </view>
       </view>
+    </view>
     </view>
 
     <!-- ── Unjoined Empty State (未加入任何跑团) ── -->
@@ -484,6 +506,15 @@ function goToTeamPage() {
   });
 }
 
+function goToProfilePage() {
+  uni.switchTab({
+    url: "/pages/profile/profile",
+  });
+}
+
+const isRankSuspended = ref(false);
+const rankSuspensionReason = ref("");
+
 async function loadRankData(preferredClubId?: string) {
   user.value = getStoredUser();
   if (!user.value) {
@@ -512,17 +543,40 @@ async function loadRankData(preferredClubId?: string) {
       currentRole.value = targetClub.role || "member";
       const clubId = targetClub.id;
 
-      // Only fetch leaderboard and feed for high performance
-      const [lbRes, feedRes] = await Promise.all([
-        request(`/api/team/${clubId}/leaderboard`),
-        request(`/api/team/${clubId}/feed?uid=${uid}`),
-      ]);
+      if (targetClub.is_access_suspended) {
+        isRankSuspended.value = true;
+        rankSuspensionReason.value = targetClub.suspension_reason || "";
+      } else {
+        isRankSuspended.value = false;
+        rankSuspensionReason.value = "";
+      }
 
-      leaderboard.value = lbRes?.leaderboard || [];
-      const newFeed = feedRes?.feed || [];
-      feed.value = newFeed;
-      feedTotal.value = feedRes?.total ?? newFeed.length;
-      hasMoreFeed.value = feedRes?.has_more ?? false;
+      // Only fetch leaderboard and feed for high performance
+      try {
+        const [lbRes, feedRes] = await Promise.all([
+          request(`/api/team/${clubId}/leaderboard?user_id=${uid}`).catch((e: any) => ({ error: e })),
+          request(`/api/team/${clubId}/feed?uid=${uid}`).catch((e: any) => ({ error: e })),
+        ]);
+
+        if (lbRes?.error && (lbRes.error?.statusCode === 403 || String(lbRes.error?.message).includes("暂停"))) {
+          isRankSuspended.value = true;
+          rankSuspensionReason.value = lbRes.error.message;
+        } else if (feedRes?.error && (feedRes.error?.statusCode === 403 || String(feedRes.error?.message).includes("暂停"))) {
+          isRankSuspended.value = true;
+          rankSuspensionReason.value = feedRes.error.message;
+        } else {
+          leaderboard.value = lbRes?.leaderboard || [];
+          const newFeed = feedRes?.feed || [];
+          feed.value = newFeed;
+          feedTotal.value = feedRes?.total ?? newFeed.length;
+          hasMoreFeed.value = feedRes?.has_more ?? false;
+        }
+      } catch (err: any) {
+        if (err?.statusCode === 403 || String(err?.message).includes("暂停")) {
+          isRankSuspended.value = true;
+          rankSuspensionReason.value = err.message;
+        }
+      }
       isFeedExpanded.value = false;
     } else {
       setActiveClubId("");
@@ -1525,5 +1579,69 @@ onPullDownRefresh(async () => {
   background-color: #121214;
   color: #71717a;
   font-size: 22rpx;
+}
+
+/* ── Club Suspended Access Block Screen ── */
+.club-suspended-block-card {
+  text-align: center;
+  padding: 48rpx 32rpx;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1rpx solid rgba(239, 68, 68, 0.35);
+  border-radius: 28rpx;
+  margin: 20rpx 0 30rpx;
+}
+
+.csb-icon-box {
+  margin-bottom: 16rpx;
+}
+
+.csb-icon {
+  font-size: 64rpx;
+}
+
+.csb-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #f87171;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.csb-desc {
+  font-size: 24rpx;
+  color: #e5e7eb;
+  line-height: 1.6;
+  display: block;
+  margin-bottom: 32rpx;
+  padding: 0 16rpx;
+}
+
+.csb-btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.csb-btn {
+  width: 100%;
+  font-size: 26rpx;
+  font-weight: bold;
+  border-radius: 20rpx;
+  padding: 20rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+}
+
+.csb-btn.primary {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  box-shadow: 0 6rpx 20rpx rgba(239, 68, 68, 0.3);
+}
+
+.csb-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border: 1rpx solid rgba(255, 255, 255, 0.15);
 }
 </style>
