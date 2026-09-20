@@ -375,6 +375,8 @@ def get_user_month_activities(uid: str, year: Optional[int] = None, month: Optio
     formatted = []
     total_meters = 0.0
     for a in acts:
+        if not LocalStore.is_running_activity(a.get("sport_type")):
+            continue
         dist_m = float(a.get("distance_meters") or 0)
         total_meters += dist_m
         dist_km = round(dist_m / 1000.0, 2)

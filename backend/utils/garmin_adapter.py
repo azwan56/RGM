@@ -334,9 +334,10 @@ class GarminAdapter:
         if not raw_id:
             return None
 
-        # Filter activity type (Run, Trail Run, Treadmill, Workout)
+        # Filter activity type (Run, Trail Run, Treadmill, Workout, Swim, Ride, Hike, Walk, etc.)
         act_type_obj = act.get("activityType", {})
         type_key = act_type_obj.get("typeKey", "running") if isinstance(act_type_obj, dict) else str(act_type_obj)
+        type_key_lower = (type_key or "").lower()
         
         type_map = {
             "running": "Run",
@@ -348,10 +349,55 @@ class GarminAdapter:
             "hiking": "Hike",
             "walking": "Walk",
             "cycling": "Ride",
+            "road_biking": "Ride",
+            "mountain_biking": "Ride",
+            "gravel_cycling": "Ride",
+            "indoor_cycling": "Ride",
             "swimming": "Swim",
+            "lap_swimming": "Swim",
+            "open_water_swimming": "Swim",
             "strength_training": "Workout",
+            "cardio_training": "Workout",
+            "stand_up_paddleboarding": "Paddleboard",
+            "paddling": "Paddleboard",
+            "rowing": "Rowing",
+            "indoor_rowing": "Rowing",
+            "yoga": "Workout",
+            "pilates": "Workout",
+            "breathwork": "Workout",
+            "stair_climbing": "Workout",
+            "elliptical": "Workout",
         }
-        mapped_type = type_map.get(type_key.lower(), "Workout")
+        mapped_type = type_map.get(type_key_lower)
+        if not mapped_type:
+            if "swim" in type_key_lower:
+                mapped_type = "Swim"
+            elif "cycl" in type_key_lower or "bike" in type_key_lower or "biking" in type_key_lower:
+                mapped_type = "Ride"
+            elif "hike" in type_key_lower or "hiking" in type_key_lower:
+                mapped_type = "Hike"
+            elif "walk" in type_key_lower:
+                mapped_type = "Walk"
+            elif "run" in type_key_lower:
+                mapped_type = "Run"
+            else:
+                mapped_type = "Workout"
+
+        # Check activity name heuristic if still Workout or Other
+        act_name_raw = str(act.get("activityName") or "")
+        if mapped_type in ("Workout", "Other"):
+            if "泳" in act_name_raw or "swim" in act_name_raw.lower():
+                mapped_type = "Swim"
+            elif "骑" in act_name_raw or "车" in act_name_raw or "bike" in act_name_raw.lower() or "cycling" in act_name_raw.lower():
+                mapped_type = "Ride"
+            elif "徒步" in act_name_raw or "hike" in act_name_raw.lower():
+                mapped_type = "Hike"
+            elif "健走" in act_name_raw or "散步" in act_name_raw or "walk" in act_name_raw.lower():
+                mapped_type = "Walk"
+            elif "桨板" in act_name_raw:
+                mapped_type = "Paddleboard"
+
+        default_name = "Garmin 跑步" if mapped_type == "Run" else f"Garmin {mapped_type}"
 
         distance_m = float(act.get("distance", 0.0))
         duration_s = int(act.get("duration", 0))
@@ -384,7 +430,7 @@ class GarminAdapter:
         return {
             "id": f"garmin_{raw_id}",
             "source": f"garmin_{'cn' if self.is_cn else 'global'}",
-            "name": act.get("activityName") or "Garmin 跑步",
+            "name": act.get("activityName") or default_name,
             "activity_type": mapped_type,
             "sport_type": mapped_type,
             "start_time": start_iso,

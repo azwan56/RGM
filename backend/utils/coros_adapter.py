@@ -576,16 +576,51 @@ class CorosAdapter:
 
         # COROS Sport Types:
         # 100: Run (户外跑), 101: Indoor Run (跑步机), 102: Trail Run (越野跑), 103: Track Run (田径场)
-        sport_type_code = act.get("sportType") or 100
+        # 200: Outdoor Cycling (骑行), 201: Indoor Cycling
+        # 300: Pool Swim (泳池游泳), 301: Open Water Swim (公开水域游泳)
+        # 400: Triathlon (铁人三项)
+        # 500: Hike (徒步), 501: Walk (健走), 502: Mountain Climb (登山)
+        # 600: Strength (力量训练), 601: Gym Cardio (室内健身)
+        # 700: Ski / Snowboard (滑雪), 701: Cross Country Ski
+        # 800: Rowing, 900: Jump Rope
+        sport_type_code = act.get("sportType")
         type_map = {
             100: "Run",
             101: "Run",
             102: "Run",
             103: "Run",
             200: "Ride",
+            201: "Ride",
             300: "Swim",
+            301: "Swim",
+            400: "Triathlon",
+            500: "Hike",
+            501: "Walk",
+            502: "Climb",
+            600: "Workout",
+            601: "Workout",
+            700: "Ski",
+            701: "Ski",
+            800: "Rowing",
+            900: "JumpRope",
         }
-        mapped_type = type_map.get(sport_type_code, "Run")
+        mapped_type = type_map.get(sport_type_code)
+        if not mapped_type:
+            act_name_raw = str(act.get("name") or act.get("activityName") or "")
+            if "跑" in act_name_raw or "run" in act_name_raw.lower():
+                mapped_type = "Run"
+            elif "泳" in act_name_raw or "swim" in act_name_raw.lower():
+                mapped_type = "Swim"
+            elif "骑" in act_name_raw or "车" in act_name_raw or "bike" in act_name_raw.lower():
+                mapped_type = "Ride"
+            elif "徒步" in act_name_raw or "hike" in act_name_raw.lower():
+                mapped_type = "Hike"
+            elif "健走" in act_name_raw or "散步" in act_name_raw or "walk" in act_name_raw.lower():
+                mapped_type = "Walk"
+            else:
+                mapped_type = "Workout"
+
+        default_name = "COROS 跑步" if mapped_type == "Run" else f"COROS {mapped_type}"
 
         distance_m = float(act.get("distance", 0.0))
         # Total elapsed time (including pauses / rest intervals) in seconds
@@ -655,7 +690,7 @@ class CorosAdapter:
         return {
             "id": f"coros_{raw_id}",
             "source": f"coros_{'cn' if self.is_cn else 'global'}",
-            "name": act.get("name") or act.get("activityName") or "COROS 跑步",
+            "name": act.get("name") or act.get("activityName") or default_name,
             "activity_type": mapped_type,
             "sport_type": mapped_type,
             "start_time": start_iso,

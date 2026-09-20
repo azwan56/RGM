@@ -553,7 +553,44 @@ def init_db():
 
 init_db()
 
+RUNNING_SPORT_TYPES = (
+    "Run",
+    "running",
+    "TrailRun",
+    "Trail Run",
+    "trail_running",
+    "treadmill_running",
+    "track_running",
+    "street_running",
+    "obstacle_run",
+)
+
+RUNNING_SQL_FILTER = (
+    "LOWER(sport_type) IN ('run', 'running', 'trailrun', 'trail run', "
+    "'trail_running', 'treadmill_running', 'track_running', 'street_running', 'obstacle_run')"
+)
+
 class LocalStore:
+    RUNNING_SPORT_TYPES = RUNNING_SPORT_TYPES
+    RUNNING_SQL_FILTER = RUNNING_SQL_FILTER
+
+    @staticmethod
+    def is_running_activity(sport_type: Optional[str]) -> bool:
+        """Determines if an activity's sport_type is running or trail running (eligible for mileage)."""
+        if not sport_type:
+            return False
+        st = str(sport_type).strip().lower()
+        return st in {
+            "run",
+            "running",
+            "trailrun",
+            "trail run",
+            "trail_running",
+            "treadmill_running",
+            "track_running",
+            "street_running",
+            "obstacle_run",
+        }
     @staticmethod
     def resolve_user_id(uid: str) -> str:
         """Resolves canonical user_id from profiles table if uid is email or display_name."""
@@ -983,9 +1020,10 @@ class LocalStore:
 
     @staticmethod
     def get_month_distance_meters(uid: str, month_start: str) -> float:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT SUM(distance_meters) FROM activities WHERE user_id = ? AND start_time >= ?", (uid, month_start))
+            cursor.execute(f"SELECT SUM(distance_meters) FROM activities WHERE user_id = ? AND start_time >= ? AND {RUNNING_SQL_FILTER}", (canonical_uid, month_start))
             res = cursor.fetchone()
             return float(res[0]) if res and res[0] is not None else 0.0
 
@@ -1005,9 +1043,10 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT * FROM activities 
                 WHERE user_id = ? AND start_time >= ? AND start_time < ? 
+                  AND {RUNNING_SQL_FILTER}
                 ORDER BY start_time DESC
             """, (canonical_uid, start_date, end_date))
             rows = [dict(r) for r in cursor.fetchall()]
@@ -1051,10 +1090,11 @@ class LocalStore:
                     target_km = 50.0
 
             # 2. Total week distance & runs
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT SUM(distance_meters), COUNT(id)
                 FROM activities
                 WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
             """, (canonical_uid, uid, monday_iso, next_monday_iso))
             res = cursor.fetchone()
             week_m = float(res[0]) if res and res[0] is not None else 0.0
@@ -1068,10 +1108,11 @@ class LocalStore:
 
             # 3. Daily breakdown Mon-Sun
             day_names = ["一", "二", "三", "四", "五", "六", "日"]
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT substr(start_time, 1, 10) as act_date, SUM(distance_meters), COUNT(id)
                 FROM activities
                 WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
                 GROUP BY substr(start_time, 1, 10)
             """, (canonical_uid, uid, monday_iso, next_monday_iso))
             daily_map = { row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in cursor.fetchall() }
@@ -1183,10 +1224,11 @@ class LocalStore:
                 next_m = m + 1 if m < 12 else 1
                 end_iso = f"{next_y:04d}-{next_m:02d}-01"
 
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT SUM(distance_meters), COUNT(id) 
                     FROM activities 
                     WHERE user_id = ? AND start_time >= ? AND start_time < ?
+                      AND {RUNNING_SQL_FILTER}
                 """, (uid, start_iso, end_iso))
                 res = cursor.fetchone()
                 dist_m = float(res[0]) if res and res[0] is not None else 0.0
@@ -1223,10 +1265,11 @@ class LocalStore:
             start_iso = f"{year:04d}-01-01"
             end_iso = f"{year + 1:04d}-01-01"
 
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT SUM(distance_meters), COUNT(id) 
                 FROM activities 
                 WHERE user_id = ? AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
             """, (uid, start_iso, end_iso))
             res = cursor.fetchone()
             total_m = float(res[0]) if res and res[0] is not None else 0.0
@@ -1258,10 +1301,11 @@ class LocalStore:
                 next_y = year if m < 12 else year + 1
                 next_m = m + 1 if m < 12 else 1
                 m_end = f"{next_y:04d}-{next_m:02d}-01"
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT SUM(distance_meters), COUNT(id) 
                     FROM activities 
                     WHERE user_id = ? AND start_time >= ? AND start_time < ?
+                      AND {RUNNING_SQL_FILTER}
                 """, (uid, m_start, m_end))
                 m_res = cursor.fetchone()
                 m_dist = float(m_res[0]) if m_res and m_res[0] is not None else 0.0
@@ -1769,11 +1813,12 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             # Match exact date first
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
                        elapsed_time_seconds, avg_pace_str, elevation_gain_meters, average_heartrate
                 FROM activities
                 WHERE (user_id = ? OR user_id = ?) AND start_time LIKE ?
+                  AND {RUNNING_SQL_FILTER}
                 ORDER BY distance_meters DESC
                 LIMIT 1
             """, (canonical_uid, uid, f"{date_clean}%"))
@@ -1784,11 +1829,12 @@ class LocalStore:
                     d_obj = datetime.strptime(date_clean, "%Y-%m-%d").date()
                     prev_d = (d_obj - timedelta(days=1)).isoformat()
                     next_d = (d_obj + timedelta(days=1)).isoformat()
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
                                elapsed_time_seconds, avg_pace_str, elevation_gain_meters, average_heartrate
                         FROM activities
                         WHERE (user_id = ? OR user_id = ?) AND (start_time LIKE ? OR start_time LIKE ?)
+                          AND {RUNNING_SQL_FILTER}
                         ORDER BY distance_meters DESC
                         LIMIT 1
                     """, (canonical_uid, uid, f"{prev_d}%", f"{next_d}%"))
@@ -2401,7 +2447,11 @@ class LocalStore:
 
             # 3. 7-day distance & TRIMP
             seven_days_ago_iso = (today - timedelta(days=7)).isoformat()
-            acts_7d = [a for a in recent_acts if str(a.get("start_time", ""))[:10] >= seven_days_ago_iso]
+            acts_7d = [
+                a for a in recent_acts
+                if str(a.get("start_time", ""))[:10] >= seven_days_ago_iso
+                and LocalStore.is_running_activity(a.get("sport_type"))
+            ]
             km_7d = round(sum(float(a.get("distance_meters") or 0) for a in acts_7d) / 1000.0, 1)
             runs_7d_count = len(acts_7d)
 
@@ -2663,6 +2713,7 @@ class LocalStore:
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
                   AND a.start_time >= ? AND a.start_time < ?
+                  AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
                 ORDER BY a.start_time DESC
             """
             cursor.execute(query, uids + [start_iso, end_iso])
@@ -2871,6 +2922,59 @@ class LocalStore:
         trimp = float(activity.get("trimp") or 50)
         elev_gain = float(activity.get("elevation_gain_meters") or activity.get("total_elevation_gain") or activity.get("elevationGain") or 0)
         act_name = str(activity.get("name") or "")
+
+        sport_type = activity.get("sport_type") or activity.get("activity_type")
+        act_name_lower = act_name.lower()
+        
+        # Check non-running sport types and cross-training
+        is_swim = (sport_type and sport_type.lower() == "swim") or "泳" in act_name or "swim" in act_name_lower
+        is_ride = (sport_type and sport_type.lower() == "ride") or ("骑" in act_name and "跑" not in act_name) or "cycling" in act_name_lower or "bike" in act_name_lower
+        is_hike = (sport_type and sport_type.lower() == "hike") or ("徒步" in act_name and "跑" not in act_name)
+        is_walk = (sport_type and sport_type.lower() == "walk") or (("健走" in act_name or "散步" in act_name) and "跑" not in act_name)
+        is_paddle = (sport_type and sport_type.lower() == "paddleboard") or "桨板" in act_name
+        is_strength = (sport_type and sport_type.lower() == "workout" and not is_swim and not is_ride and not is_paddle) or "力量" in act_name or "身训" in act_name or "strength" in act_name_lower
+
+        if is_swim:
+            dist_desc = f"{int(dist_m)}米" if dist_m > 0 else "专项"
+            return (
+                f"【交叉训练 · 游泳 (Cross-Training / Swim)】游泳训练是跑者极佳的无冲击有氧交叉刺激（完成{dist_desc}）。"
+                "有效减免下肢各关节与肌腱在铺装路面的离地落地冲击，促进血液循环与淋巴代谢废物排出，并协同增强核心与上肢肌群稳定。"
+                " 💡 教练建议：游泳不计入跑量统计，适合作为大强度训练课后或跑休日的主动恢复（Active Recovery）。"
+            )
+        if is_ride:
+            dist_desc = f"{dist_km}km" if dist_km > 0 else ""
+            return (
+                f"【交叉训练 · 骑行 (Cross-Training / Cycling)】骑行训练可提供低冲击心肺有氧刺激{f'（完成{dist_desc}）' if dist_desc else ''}。"
+                "在大幅减轻膝踝关节冲击压力的同时，锻炼股四头肌与臀肌向心做功能力，维持基础心肺耐力。"
+                " 💡 教练建议：骑行不计入跑量统计，适合作为减量调整周或轻微不适期的有氧体能维持训练。"
+            )
+        if is_hike:
+            return (
+                f"【户外徒步 (Hiking)】徒步活动{f'（克服累计爬升 +{int(elev_gain)}m）' if elev_gain > 0 else ''}。"
+                "强化低心率长时间有氧耐力与足踝小肌群稳定性，是跑者提升关节耐受度与有氧底盘的良好补充。"
+                " 💡 教练建议：徒步活动不计入跑量统计，注意下山时落脚缓冲与髋膝协同，课后做好小腿与足底筋膜拉伸。"
+            )
+        if is_walk:
+            return (
+                "【日常健走 (Walking)】日常步行健走活动，有助于打破久坐僵硬，促进下肢微循环与基础代谢活化。"
+                " 💡 教练建议：健走不计入跑步里程统计，保持良好日常活动习惯即可。"
+            )
+        if is_paddle:
+            return (
+                "【交叉训练 · 水上运动 (Cross-Training / Paddleboard)】桨板水上活动，深度调动核心肌群与平衡抗扭转本体感觉。"
+                " 💡 教练建议：水上活动不计入跑量统计，适合作为跑休期的趣味全身协同训练。"
+            )
+        if is_strength or (not LocalStore.is_running_activity(sport_type) and ("训" in act_name or "workout" in act_name_lower or "力量" in act_name)):
+            return (
+                "【力量与体能强化 (Strength & Conditioning)】针对跑者核心骨盆稳定、髋臀外展肌群及下肢肌腱刚性的抗阻力量训练。"
+                "不仅能显著提升长跑后程的动作经济性，更是防伤防过度劳损的科学根基。"
+                " 💡 教练建议：力量训练不计入跑量统计，建议每周保持 1~2 次专项力量强化，课后注意结缔组织深层滚压。"
+            )
+        if not LocalStore.is_running_activity(sport_type) and sport_type:
+            return (
+                f"【交叉运动 · {sport_type}】多元化交叉活动，有助于唤醒不同动力链肌肉群，打破单调跑步重复动作带来的局部肌纤维应力累积。"
+                " 💡 教练建议：非跑步运动不计入跑步里程与配速统计，保持多元化身体机能激活。"
+            )
 
         if dist_km < 1.0:
             return "短距离激活训练，建议结合动态拉伸与下肢力量辅助练习。"
@@ -3089,7 +3193,7 @@ class LocalStore:
             placeholders = ["?"] * len(uids)
 
             # Get total count of club activities for pagination
-            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)})", uids)
+            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)}) AND {RUNNING_SQL_FILTER}", uids)
             total_row = cursor.fetchone()
             total = total_row[0] if total_row else 0
 
@@ -3105,6 +3209,7 @@ class LocalStore:
                 FROM activities a
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
+                  AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
                 {time_filter}
                 ORDER BY a.start_time DESC
                 LIMIT ? OFFSET ?
@@ -3165,7 +3270,7 @@ class LocalStore:
             placeholders = ["?"] * len(uids)
 
             # Total count all time
-            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)})", uids)
+            cursor.execute(f"SELECT COUNT(*) FROM activities WHERE user_id IN ({','.join(placeholders)}) AND {RUNNING_SQL_FILTER}", uids)
             total_row = cursor.fetchone()
             total_all_time = total_row[0] if total_row else 0
 
@@ -3174,6 +3279,7 @@ class LocalStore:
                 SELECT COUNT(*) FROM activities 
                 WHERE user_id IN ({','.join(placeholders)})
                   AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
             """, uids + [month_start, next_month_start])
             month_row = cursor.fetchone()
             month_total = month_row[0] if month_row else 0
@@ -3185,6 +3291,7 @@ class LocalStore:
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
                   AND a.start_time >= ? AND a.start_time < ?
+                  AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
                 ORDER BY a.start_time DESC
             """
             cursor.execute(query, uids + [month_start, next_month_start])
@@ -3361,19 +3468,21 @@ class LocalStore:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 if start_date_str:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT id, name, sport_type, start_time, distance_meters, 
                                moving_time_seconds, avg_pace_str, average_heartrate
                         FROM activities
                         WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                          AND {RUNNING_SQL_FILTER}
                         ORDER BY start_time ASC
                     """, (canonical_uid, uid, start_date_str))
                 else:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT id, name, sport_type, start_time, distance_meters, 
                                moving_time_seconds, avg_pace_str, average_heartrate
                         FROM activities
-                        WHERE user_id = ? OR user_id = ?
+                        WHERE (user_id = ? OR user_id = ?)
+                          AND {RUNNING_SQL_FILTER}
                         ORDER BY start_time ASC
                     """, (canonical_uid, uid))
                 act_rows = [dict(r) for r in cursor.fetchall()]
@@ -3703,12 +3812,13 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds, 
                        elapsed_time_seconds, avg_pace_str, elevation_gain_meters, 
                        average_heartrate, max_heartrate, trimp
                 FROM activities
                 WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                  AND {RUNNING_SQL_FILTER}
                 ORDER BY start_time DESC
             """, (canonical_uid, user_id, cutoff_date))
             rows = [dict(r) for r in cursor.fetchall()]

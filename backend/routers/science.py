@@ -69,7 +69,7 @@ def get_science_metrics(uid: str):
 
             dist = float(act.get("distance_meters") or 0)
             time_s = float(act.get("moving_time_seconds") or 0)
-            if dist >= 4500 and time_s > 0:
+            if dist >= 4500 and time_s > 0 and LocalStore.is_running_activity(act.get("sport_type")):
                 v = calculate_vdot(dist, time_s)
                 if v > best_vdot:
                     best_vdot = v
