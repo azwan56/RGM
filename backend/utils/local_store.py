@@ -492,9 +492,9 @@ def init_db():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'free', ?)
             """, (
                 "club_fudan_gobi_main",
-                "复旦戈友先锋跑团",
+                "复旦戈闵文跑团",
                 "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=300&auto=format&fit=crop&q=80",
-                "复旦大学戈壁挑战赛日常拉练与备战总跑团，面向全体复旦戈友队员。",
+                "复旦戈闵文跑团 · 汇聚复旦戈友与闵文精英跑者，定期开展长距离拉练与马拉松科学耐力备战。",
                 "上海",
                 "FD8888",
                 "u_df65d9a588c9",
@@ -511,7 +511,7 @@ def init_db():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 default_club_id,
-                "RGM 巅峰先锋跑团",
+                "RGM先锋跑团",
                 "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80",
                 "基于科学耐力训练与 Renato Canova 哲学的精英跑者联盟，追求 PB 突破与健康长久奔跑。",
                 "上海",
