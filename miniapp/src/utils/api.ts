@@ -684,11 +684,15 @@ export async function fetchOrgReminderInfo(uid: string): Promise<OrgReminderInfo
       };
     }
 
-    // 2. Check temporary with missing fields
-    const incompleteMemberships = orgs.filter((o: any) => o.status === "temporary");
+    // 2. Check temporary with missing fields or any org where missing_fields is non-empty
+    const incompleteMemberships = orgs.filter(
+      (o: any) =>
+        (o.missing_fields && o.missing_fields.length > 0) ||
+        o.status === "temporary"
+    );
     if (incompleteMemberships.length > 0) {
       const firstOrg = incompleteMemberships[0];
-      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label).join("、");
+      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label || f.field).join("、");
       const orgCount = incompleteMemberships.length;
       const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
       const remainingDays =
@@ -730,14 +734,31 @@ export function navigateToProfileRequiredFields() {
 
 export async function checkAndPromptOrgReminder(
   uid: string,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; preview?: boolean } = {}
 ): Promise<OrgReminderInfo> {
-  const reminder = await fetchOrgReminderInfo(uid);
+  let reminder: OrgReminderInfo;
+  if (options.preview) {
+    reminder = {
+      hasReminder: true,
+      type: "temporary",
+      firstOrg: { name: "复旦戈" },
+      missingLabels: "身份证号、紧急联系人及电话、班级/届别",
+      remainingDays: 13,
+      title: "📋 【复旦戈】档案待完善 (测试预览)",
+      content:
+        "【测试预览】您在【复旦戈】中尚缺少：身份证号、紧急联系人及电话、班级/届别。（临时访问期还剩 13 天）请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！",
+      confirmText: "立即填写",
+      cancelText: "稍后再说",
+    };
+  } else {
+    reminder = await fetchOrgReminderInfo(uid);
+  }
+
   if (!reminder.hasReminder) {
     return reminder;
   }
 
-  if (!options.force && _hasPromptedOrgReminderInSession) {
+  if (!options.force && !options.preview && _hasPromptedOrgReminderInSession) {
     return reminder;
   }
 

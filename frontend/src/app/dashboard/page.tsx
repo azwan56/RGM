@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import GarminConnectModal from "@/components/GarminConnectModal";
 import RouteMapPreview from "@/components/RouteMapPreview";
+import OrgRequirementModal, { OrgReminderInfo } from "@/components/OrgRequirementModal";
 import {
   Zap,
   Activity,
@@ -27,6 +28,9 @@ import {
   Compass,
   Target,
   Check,
+  AlertTriangle,
+  ShieldAlert,
+  ArrowRight,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -62,6 +66,94 @@ export default function DashboardPage() {
   const [monthActivities, setMonthActivities] = useState<any[]>([]);
   const [loadingMonthActs, setLoadingMonthActs] = useState<boolean>(false);
 
+  // Grand Org field requirements reminder states
+  const [userOrgs, setUserOrgs] = useState<any[]>([]);
+  const [orgReminder, setOrgReminder] = useState<OrgReminderInfo | null>(null);
+  const [showOrgReminderModal, setShowOrgReminderModal] = useState<boolean>(false);
+
+  function parseOrgReminder(orgs: any[]): OrgReminderInfo {
+    if (!orgs || !orgs.length) return { hasReminder: false, type: "none" };
+
+    // 1. Check suspended/expired
+    const suspendedMemberships = orgs.filter(
+      (o: any) => o.status === "expired" || o.status === "suspended" || o.is_suspended
+    );
+    if (suspendedMemberships.length > 0) {
+      const firstOrg = suspendedMemberships[0];
+      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label || f.field).join("、");
+      return {
+        hasReminder: true,
+        type: "suspended",
+        firstOrg,
+        orgCount: suspendedMemberships.length,
+        orgNames: suspendedMemberships.map((o: any) => o.name).join("、"),
+        missingLabels,
+        missingFields: firstOrg.missing_fields || [],
+        remainingDays: 0,
+        title: `⚠️ 【${firstOrg.name}】组织访问权限已被暂停`,
+        confirmText: "立即前往补齐",
+        cancelText: "稍后再说",
+      };
+    }
+
+    // 2. Check temporary OR has missing fields (even for admin/pending/etc)
+    const incompleteMemberships = orgs.filter(
+      (o: any) => (o.missing_fields && o.missing_fields.length > 0) || o.status === "temporary"
+    );
+    if (incompleteMemberships.length > 0) {
+      const firstOrg = incompleteMemberships[0];
+      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label || f.field).join("、");
+      const orgCount = incompleteMemberships.length;
+      const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
+      const remainingDays =
+        firstOrg.days_remaining !== undefined && firstOrg.days_remaining !== null
+          ? firstOrg.days_remaining
+          : 14;
+
+      return {
+        hasReminder: true,
+        type: "temporary",
+        firstOrg,
+        orgCount,
+        orgNames,
+        missingLabels,
+        missingFields: firstOrg.missing_fields || [],
+        remainingDays,
+        title: `📋 【${firstOrg.name}】入队必填档案待完善`,
+        confirmText: "立即前往补齐",
+        cancelText: "稍后再说",
+      };
+    }
+
+    return { hasReminder: false, type: "none" };
+  }
+
+  function handleGoToRequiredFields() {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("auto_scroll_to_required_fields", "1");
+    }
+    router.push("/dashboard/profile?scroll_to_required=1");
+  }
+
+  function handlePreviewReminderModal() {
+    const sampleReminder: OrgReminderInfo = {
+      hasReminder: true,
+      type: "temporary",
+      firstOrg: userOrgs?.[0] || { name: "复旦戈" },
+      missingLabels: "身份证号、紧急联系人及电话、班级/届别",
+      missingFields: [
+        { field: "class_name", label: "班级/届别" },
+        { field: "id_card", label: "证件号码(身份证/护照)" },
+        { field: "emergency_contact", label: "紧急联系人及电话" },
+      ],
+      remainingDays: 13,
+      confirmText: "立即前往补齐",
+      cancelText: "稍后再说",
+    };
+    setOrgReminder(sampleReminder);
+    setShowOrgReminderModal(true);
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const u = data?.session?.user;
@@ -89,6 +181,26 @@ export default function DashboardPage() {
       if (dashRes.data?.current_month_info) {
         setSelectedYear(dashRes.data.current_month_info.year);
         setSelectedMonth(dashRes.data.current_month_info.month);
+      }
+
+      // Check organization field requirements & prompt modal if incomplete
+      try {
+        const orgRes = await apiClient.get(`/api/org/my-orgs/${uid}`);
+        const orgs = orgRes.data?.organizations || [];
+        setUserOrgs(orgs);
+        const rem = parseOrgReminder(orgs);
+        if (rem.hasReminder) {
+          setOrgReminder(rem);
+          const dismissed = typeof window !== "undefined" ? sessionStorage.getItem(`org_reminder_dismissed_${uid}`) : null;
+          if (!dismissed) {
+            setShowOrgReminderModal(true);
+          }
+        } else {
+          setOrgReminder(null);
+          setShowOrgReminderModal(false);
+        }
+      } catch (orgErr) {
+        console.warn("Check org reminder error:", orgErr);
       }
     } catch (e) {
       console.error("Dashboard fetch error:", e);
@@ -286,6 +398,17 @@ export default function DashboardPage() {
               </button>
             )}
 
+            {userOrgs?.some(o => o.role === "owner" || o.role === "admin") && (
+              <button
+                onClick={handlePreviewReminderModal}
+                title="管理员测试：预览未完善信息队员打开看板时所见的弹窗"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-300 transition active:scale-95"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>预览补齐弹窗</span>
+              </button>
+            )}
+
             <button
               onClick={handleSync}
               disabled={syncing}
@@ -296,6 +419,61 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        {/* ── 大组织必填资料待完善醒目提醒横幅 (若有) ── */}
+        {orgReminder?.hasReminder && (
+          <div
+            onClick={handleGoToRequiredFields}
+            className={`p-4 sm:p-5 rounded-3xl border cursor-pointer transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+              orgReminder.type === "suspended"
+                ? "bg-gradient-to-r from-rose-500/15 via-[#1a1215] to-[#121215] border-rose-500/40 hover:border-rose-500/60 shadow-lg shadow-rose-950/30"
+                : "bg-gradient-to-r from-amber-500/15 via-[#1a1812] to-[#121215] border-amber-500/40 hover:border-amber-500/60 shadow-lg shadow-amber-950/30"
+            }`}
+          >
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div
+                className={`p-2.5 rounded-2xl flex-shrink-0 ${
+                  orgReminder.type === "suspended"
+                    ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                    : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                }`}
+              >
+                {orgReminder.type === "suspended" ? (
+                  <ShieldAlert className="w-5 h-5" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span
+                    className={`text-sm sm:text-base font-bold ${
+                      orgReminder.type === "suspended" ? "text-rose-300" : "text-amber-300"
+                    }`}
+                  >
+                    {orgReminder.type === "suspended"
+                      ? `⚠️ 【${orgReminder.firstOrg?.name}】组织访问已被暂停`
+                      : `📋 【${orgReminder.firstOrg?.name}】入队必填档案待完善`}
+                  </span>
+                  {orgReminder.remainingDays !== undefined && orgReminder.remainingDays !== null && (
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      剩余 {orgReminder.remainingDays} 天
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  {orgReminder.missingLabels
+                    ? `尚缺少必填项目：${orgReminder.missingLabels}`
+                    : "请尽快补齐入队实名资料以获管理员审核确认并恢复完整权限"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-4 py-2 rounded-xl border border-amber-500/30 transition self-end sm:self-auto flex-shrink-0">
+              <span>立即前往补齐</span>
+              <ArrowRight className="w-4 h-4" />
+            </div>
+          </div>
+        )}
 
         {/* ── CARD 0: 本周跑量进度与今日训练计划 (在周跑量进度下面) ── */}
         <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
@@ -1107,6 +1285,18 @@ export default function DashboardPage() {
         uid={user?.id}
         initialBrand={modalBrand}
         onSuccess={() => user && loadDashboardData(user.id)}
+      />
+
+      <OrgRequirementModal
+        isOpen={showOrgReminderModal}
+        onClose={() => {
+          setShowOrgReminderModal(false);
+          if (user?.id) {
+            sessionStorage.setItem(`org_reminder_dismissed_${user.id}`, "1");
+          }
+        }}
+        reminder={orgReminder}
+        onNavigateToProfile={handleGoToRequiredFields}
       />
     </div>
   );

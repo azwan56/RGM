@@ -96,6 +96,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<"profile" | "training">("profile");
+  const [highlightPulse, setHighlightPulse] = useState(false);
 
   function scrollToRequiredFields() {
     setActiveTab("profile");
@@ -104,10 +105,25 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         const el = document.getElementById("required-personal-fields");
         if (el) {
           el.scrollIntoView({ behavior: "smooth" });
+          setHighlightPulse(true);
+          setTimeout(() => setHighlightPulse(false), 3200);
         }
       }
-    }, 100);
+    }, 150);
   }
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const shouldScroll =
+        urlParams.get("scroll_to_required") === "1" ||
+        sessionStorage.getItem("auto_scroll_to_required_fields") === "1";
+      if (shouldScroll) {
+        sessionStorage.removeItem("auto_scroll_to_required_fields");
+        scrollToRequiredFields();
+      }
+    }
+  }, []);
 
   function computeAge(dobStr: string): number | null {
     if (!dobStr) return null;
@@ -1152,7 +1168,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           </div>
 
               {/* ── CARD: 个人实名身份与敏感信息 (AES-256-GCM 密文存储) ── */}
-          <div id="required-personal-fields" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
+          <div
+            id="required-personal-fields"
+            className={`bg-[#121215] border ${
+              highlightPulse
+                ? "border-amber-400 ring-4 ring-amber-400/40 shadow-2xl shadow-amber-500/25 scale-[1.005]"
+                : "border-white/[0.08]"
+            } rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24 transition-all duration-700`}
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-2xl bg-emerald-500/20 text-emerald-400">
