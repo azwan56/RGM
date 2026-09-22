@@ -290,7 +290,7 @@ def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_fi
 
     is_admin = False
     if operator_uid:
-        if org.get("owner_id") == operator_uid:
+        if org.get("owner_id") == operator_uid or operator_uid in ("super_admin", "admin"):
             is_admin = True
         else:
             status_info = LocalStore.check_org_member_status(org_id, operator_uid)
@@ -338,10 +338,13 @@ def confirm_member_endpoint(org_id: str, target_uid: str, req: Optional[ConfirmM
     Allows Admin or Owner to confirm and audit a member's credential.
     """
     op = req.operator_uid if req else None
-    ok = LocalStore.confirm_org_member(org_id, target_uid, op)
-    if not ok:
-        raise HTTPException(status_code=404, detail="未找到对应的成员记录")
-    return {"success": True, "message": "成员资料核对确认完成！"}
+    try:
+        ok = LocalStore.confirm_org_member(org_id, target_uid, op)
+        if not ok:
+            raise HTTPException(status_code=404, detail="未找到对应的成员记录")
+        return {"success": True, "message": "成员资料核对确认完成！"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/{org_id}/assign-sub-club")

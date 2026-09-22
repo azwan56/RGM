@@ -3942,6 +3942,26 @@ class LocalStore:
             return True
 
     @staticmethod
+    def is_field_missing(field_name: str, field_type: str, val: Any, extra_data: Optional[Dict[str, Any]] = None) -> bool:
+        if val is None:
+            return True
+        s_val = str(val).strip()
+        if not s_val:
+            return True
+        if field_name == "real_name" and s_val in ("跑者", "跑友", "微信用户", "未实名"):
+            return True
+        if field_name == "date_of_birth" and s_val in ("--", "0000-00-00"):
+            return True
+        if field_name == "class_name":
+            if s_val in ("复旦戈友", "复旦商学院", "未设班级", "在读/毕业"):
+                return True
+        if field_name == "gobi_experience" and s_val in ("未登记", "未设置"):
+            return True
+        if field_type == "boolean" and not val:
+            return True
+        return False
+
+    @staticmethod
     def check_org_member_status(org_id: str, user_id: str) -> Dict[str, Any]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -3992,7 +4012,8 @@ class LocalStore:
                 if r.get("required"):
                     f = r["field"]
                     val = field_values.get(f)
-                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                    f_type = r.get("type", "text")
+                    if LocalStore.is_field_missing(f, f_type, val, extra_data):
                         missing_fields.append({"field": f, "label": r.get("label", f)})
 
             if role in ("owner", "admin"):
@@ -4009,14 +4030,52 @@ class LocalStore:
                     "missing_fields": missing_fields
                 }
 
-            if status == "confirmed":
+            # ── If required fields are missing: status CANNOT be confirmed for regular members! ──
+            if len(missing_fields) > 0:
+                joined_at_dt = None
+                if joined_at_str:
+                    joined_at_dt = parse_iso_datetime(joined_at_str)
+
+                now_utc = datetime.now(timezone.utc)
+                if joined_at_dt:
+                    if joined_at_dt.tzinfo is None:
+                        joined_at_dt = joined_at_dt.replace(tzinfo=timezone.utc)
+                    elapsed_seconds = (now_utc - joined_at_dt).total_seconds()
+                    elapsed_days = elapsed_seconds / 86400.0
+                    remaining_days = max(0, math.ceil(14.0 - elapsed_days))
+                    is_expired = elapsed_days >= 14.0
+                else:
+                    elapsed_days = 0
+                    remaining_days = 14
+                    is_expired = False
+
+                target_status = "expired" if is_expired else "temporary"
+                if status != target_status or member.get("confirmed_by") is not None:
+                    cursor.execute("""
+                        UPDATE organization_members 
+                        SET status = ?, confirmed_at = NULL, confirmed_by = NULL 
+                        WHERE org_id = ? AND user_id = ?
+                    """, (target_status, org_id, user_id))
+                    conn.commit()
+
+                return {
+                    "is_member": True,
+                    "status": target_status,
+                    "role": role,
+                    "is_valid": (target_status != "expired"),
+                    "days_remaining": remaining_days if target_status != "expired" else 0,
+                    "missing_fields": missing_fields
+                }
+
+            # ── All required fields are filled ──
+            if status == "confirmed" and member.get("confirmed_by"):
                 return {
                     "is_member": True,
                     "status": "confirmed",
                     "role": role,
                     "is_valid": True,
                     "days_remaining": None,
-                    "missing_fields": missing_fields
+                    "missing_fields": []
                 }
 
             joined_at_dt = None
@@ -4046,21 +4105,20 @@ class LocalStore:
                     "role": role,
                     "is_valid": False,
                     "days_remaining": 0,
-                    "missing_fields": missing_fields
+                    "missing_fields": []
                 }
 
-            current_status = "temporary" if len(missing_fields) > 0 else "pending"
-            if member.get("status") != current_status:
-                cursor.execute("UPDATE organization_members SET status = ? WHERE org_id = ? AND user_id = ?", (current_status, org_id, user_id))
+            if status != "pending":
+                cursor.execute("UPDATE organization_members SET status = 'pending' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
                 conn.commit()
 
             return {
                 "is_member": True,
-                "status": current_status,
+                "status": "pending",
                 "role": role,
                 "is_valid": True,
                 "days_remaining": remaining_days,
-                "missing_fields": missing_fields
+                "missing_fields": []
             }
 
     @staticmethod
@@ -4293,13 +4351,16 @@ class LocalStore:
                 if r.get("required"):
                     f = r["field"]
                     val = field_values.get(f)
-                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                    f_type = r.get("type", "text")
+                    if LocalStore.is_field_missing(f, f_type, val, merged_extra):
                         missing_fields.append({"field": f, "label": r.get("label", f)})
 
-            if role in ("owner", "admin") or (existing and existing["status"] == "confirmed"):
+            if role in ("owner", "admin"):
                 status = "confirmed"
             elif len(missing_fields) > 0:
                 status = "temporary"
+            elif existing and existing["status"] == "confirmed" and existing.get("confirmed_by"):
+                status = "confirmed"
             else:
                 status = "pending"
 
@@ -4311,8 +4372,14 @@ class LocalStore:
             else:
                 joined_at = now
 
-            confirmed_at = now if status == "confirmed" else (existing["confirmed_at"] if existing and status == "confirmed" else None)
-            confirmed_by = (org.get("owner_id") or "admin") if status == "confirmed" else (existing["confirmed_by"] if existing and status == "confirmed" else None)
+            confirmed_at = (
+                now if (status == "confirmed" and role in ("owner", "admin"))
+                else (existing["confirmed_at"] if existing and status == "confirmed" else None)
+            )
+            confirmed_by = (
+                (org.get("owner_id") or "admin") if (status == "confirmed" and role in ("owner", "admin"))
+                else (existing["confirmed_by"] if existing and status == "confirmed" else None)
+            )
 
             enc_real_name = encrypt_pii(clean_name)
             enc_dob = encrypt_pii(clean_dob)
@@ -4507,17 +4574,23 @@ class LocalStore:
                 if r.get("required"):
                     f = r["field"]
                     val = field_values.get(f)
-                    if val is None or str(val).strip() == "" or (r.get("type") == "boolean" and not val):
+                    f_type = r.get("type", "text")
+                    if LocalStore.is_field_missing(f, f_type, val, merged_extra):
                         missing_fields.append({"field": f, "label": r.get("label", f)})
 
             role = member.get("role") or "member"
             current_status = member.get("status")
-            if role in ("owner", "admin") or current_status == "confirmed":
+            if role in ("owner", "admin"):
                 status = "confirmed"
             elif len(missing_fields) > 0:
                 status = "temporary"
+            elif current_status == "confirmed" and member.get("confirmed_by"):
+                status = "confirmed"
             else:
                 status = "pending"
+
+            confirmed_at = member.get("confirmed_at") if status == "confirmed" else None
+            confirmed_by = member.get("confirmed_by") if status == "confirmed" else None
 
             enc_real_name = encrypt_pii(clean_name)
             enc_dob = encrypt_pii(clean_dob)
@@ -4528,9 +4601,9 @@ class LocalStore:
             cursor.execute("""
                 UPDATE organization_members
                 SET real_name = ?, gender = ?, date_of_birth = ?, class_name = ?,
-                    phone = ?, id_card = ?, status = ?, extra_data = ?
+                    phone = ?, id_card = ?, status = ?, confirmed_at = ?, confirmed_by = ?, extra_data = ?
                 WHERE id = ?
-            """, (enc_real_name, clean_gender, enc_dob, clean_class, enc_phone, enc_id_card, status, extra_str, membership_id))
+            """, (enc_real_name, clean_gender, enc_dob, clean_class, enc_phone, enc_id_card, status, confirmed_at, confirmed_by, extra_str, membership_id))
 
             cursor.execute("""
                 UPDATE profiles
@@ -4779,6 +4852,7 @@ class LocalStore:
                 d["status"] = status_info.get("status")
                 d["days_remaining"] = status_info.get("days_remaining")
                 d["missing_fields"] = status_info.get("missing_fields", [])
+                d["missing_required_fields"] = [f.get("label", f.get("field")) for f in d["missing_fields"]]
                 d["is_valid"] = status_info.get("is_valid", True)
 
                 extra = {}
@@ -4874,6 +4948,14 @@ class LocalStore:
 
     @staticmethod
     def confirm_org_member(org_id: str, target_uid: str, operator_uid: Optional[str] = None) -> bool:
+        status_info = LocalStore.check_org_member_status(org_id, target_uid)
+        if not status_info.get("is_member"):
+            return False
+        missing = status_info.get("missing_fields", [])
+        if len(missing) > 0:
+            missing_labels = [m.get("label", m.get("field")) for m in missing]
+            raise ValueError(f"该队员必填资料尚未补齐（缺：{'、'.join(missing_labels)}），暂无法核验转正！")
+
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             now = datetime.utcnow().isoformat() + "Z"

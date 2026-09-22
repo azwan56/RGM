@@ -538,3 +538,93 @@ def test_sub_club_access_suspension_and_admin_confirmation_flow():
     assert lead_ok.status_code == 200
 
 
+def test_incomplete_profile_cannot_be_confirmed_and_auto_downgrades():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_inc_{ts}"
+    runner_uid = f"u_runner_inc_{ts}"
+    invite_code = f"INC_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "测试主理人", "email": "lead_inc@test.com"})
+    LocalStore.upsert_profile(runner_uid, {"display_name": "未填全跑友", "email": "runner_inc@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试_{ts}",
+        "invite_code": invite_code,
+        "description": "测试不完整资料审核与降级",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Field rules: real_name, date_of_birth, class_name, gobi_experience required
+    rules = LocalStore.get_org_field_rules(org_id)
+    for r in rules:
+        if r["field"] in ("real_name", "date_of_birth", "class_name", "gobi_experience"):
+            r["required"] = True
+    LocalStore.update_org_field_rules(org_id, rules)
+
+    # 3. Runner joins with placeholder class '复旦戈友' and no gobi_experience
+    join_res = client.post("/api/org/join", json={
+        "user_id": runner_uid,
+        "invite_code": invite_code,
+        "real_name": "王某某",
+        "gender": "male",
+        "date_of_birth": "1990-01-01",
+        "class_name": "复旦戈友",  # Placeholder!
+        "phone": "13800001111"
+    })
+    assert join_res.status_code == 200
+    membership = join_res.json()["membership"]
+    assert membership["status"] == "temporary"  # Must be temporary!
+
+    # 4. Admin attempts to confirm member with missing fields -> MUST FAIL with 400!
+    confirm_fail = client.post(f"/api/org/{org_id}/members/{runner_uid}/confirm", json={
+        "operator_uid": owner_uid
+    })
+    assert confirm_fail.status_code == 400
+    assert "尚未补齐" in confirm_fail.json()["detail"]
+
+    # 5. Simulate legacy / hardcoded confirmed record in DB (like what scripts did)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            UPDATE organization_members 
+            SET status = 'confirmed', confirmed_by = 'legacy_admin', confirmed_at = '2026-01-01T00:00:00Z'
+            WHERE org_id = ? AND user_id = ?
+        """, (org_id, runner_uid))
+
+    # 6. check_org_member_status MUST automatically detect missing fields, demote to temporary, and clear confirmed_by
+    st = LocalStore.check_org_member_status(org_id, runner_uid)
+    assert st["status"] == "temporary"
+    assert len(st["missing_fields"]) > 0
+    missing_fields_names = [f["field"] for f in st["missing_fields"]]
+    assert "class_name" in missing_fields_names  # '复旦戈友' recognized as placeholder!
+    assert "gobi_experience" in missing_fields_names
+
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT status, confirmed_by FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, runner_uid)).fetchone()
+        assert row[0] == "temporary"
+        assert row[1] is None
+
+    # 7. Runner fills in real program/class and gobi_experience
+    up_res = client.post(f"/api/org/{org_id}/members/update-profile", json={
+        "user_id": runner_uid,
+        "program": "中文EMBA",
+        "class_detail": "23春",
+        "gobi_experience": "新戈"
+    })
+    assert up_res.status_code == 200
+    assert up_res.json()["membership"]["status"] == "pending"
+
+    # 8. Now all required fields are filled, admin confirms successfully!
+    confirm_ok = client.post(f"/api/org/{org_id}/members/{runner_uid}/confirm", json={
+        "operator_uid": owner_uid
+    })
+    assert confirm_ok.status_code == 200
+    st_final = LocalStore.check_org_member_status(org_id, runner_uid)
+    assert st_final["status"] == "confirmed"
+    assert len(st_final["missing_fields"]) == 0
+
+
+

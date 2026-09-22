@@ -182,13 +182,13 @@ def restore_users(target_db: str = DB_PATH):
             if not c.fetchone():
                 c.execute("""
                     INSERT INTO organization_members (
-                        id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at, confirmed_at, confirmed_by
+                        id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at
                     ) VALUES (
-                        ?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, 'member', 'confirmed', ?, ?, 'u_df65d9a588c9'
+                        ?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, 'member', 'temporary', ?
                     )
                 """, (
                     f"org_fudan_gobi_{uid}", uid, u["real_name"], u["gender"], u["date_of_birth"],
-                    u["class_name"], u.get("phone") or "", now_iso, now_iso
+                    u["class_name"], u.get("phone") or "", now_iso
                 ))
 
             # 6. If Gao Jiukai, restore his Shanghai Marathon training plan if missing

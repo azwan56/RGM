@@ -149,9 +149,9 @@ def run_cleanup(db_path: str):
                 m_exists = c.fetchone()
                 if not m_exists:
                     c.execute("""
-                        INSERT INTO organization_members (id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at, confirmed_at, confirmed_by)
-                        VALUES (?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, 'u_df65d9a588c9')
-                    """, (f"org_fudan_gobi_{uid}", uid, p_rname or p_disp, p_gender or 'male', p_dob or '1985-01-01', p_cname or '复旦戈友', p_phone or '', role, now_iso, now_iso))
+                        INSERT INTO organization_members (id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at)
+                        VALUES (?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, ?, 'temporary', ?)
+                    """, (f"org_fudan_gobi_{uid}", uid, p_rname or p_disp, p_gender or 'male', p_dob or '1985-01-01', p_cname or '复旦戈友', p_phone or '', role, now_iso))
 
     # Post-checks
     c.execute("SELECT COUNT(*) FROM profiles")

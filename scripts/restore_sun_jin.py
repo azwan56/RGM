@@ -114,15 +114,16 @@ def restore_sun_jin(target_db: str = DB_PATH):
         if not c.fetchone():
             c.execute("""
                 INSERT INTO organization_members (
-                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at, confirmed_at, confirmed_by
+                    id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at
                 ) VALUES (
-                    ?, 'org_fudan_gobi', ?, '孙进', 'male', ?, '复旦戈友', '', 'member', 'confirmed', ?, ?, 'u_df65d9a588c9'
+                    ?, 'org_fudan_gobi', ?, '孙进', 'male', ?, '复旦戈友', '', 'member', 'temporary', ?
                 )
-            """, (f"org_fudan_gobi_{uid}", uid, dob, now_iso, now_iso))
+            """, (f"org_fudan_gobi_{uid}", uid, dob, now_iso))
         else:
             c.execute("""
                 UPDATE organization_members SET
-                    real_name = '孙进', gender = 'male', date_of_birth = ?, class_name = '复旦戈友', status = 'confirmed'
+                    real_name = '孙进', gender = 'male', date_of_birth = ?, class_name = '复旦戈友', status = 'temporary',
+                    confirmed_at = NULL, confirmed_by = NULL
                 WHERE org_id = 'org_fudan_gobi' AND user_id = ?
             """, (dob, uid))
 

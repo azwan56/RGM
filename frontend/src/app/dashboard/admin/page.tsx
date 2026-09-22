@@ -321,7 +321,7 @@ export default function AdminPage() {
     setShowOrgRosterModal(true);
     setRosterLoading(true);
     try {
-      const res = await axios.get(`/api/org/${org.id}/members`);
+      const res = await axios.get(`/api/org/${org.id}/members?operator_uid=super_admin`);
       setOrgMembers(res.data?.members || []);
     } catch (err: any) {
       setActionErrorMsg("加载花名册失败");
@@ -2136,11 +2136,11 @@ export default function AdminPage() {
                             ) : m.status === 'temporary' ? (
                               <div className="space-y-1">
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                  ⚠️ 临时人员 (剩 {m.remaining_days ?? 14} 天)
+                                  ⚠️ 临时人员 (剩 {m.days_remaining ?? m.remaining_days ?? 14} 天)
                                 </span>
-                                {m.missing_required_fields && m.missing_required_fields.length > 0 && (
+                                {((m.missing_required_fields && m.missing_required_fields.length > 0) || (m.missing_fields && m.missing_fields.length > 0)) && (
                                   <span className="block text-[10px] text-rose-400">
-                                    缺: {m.missing_required_fields.join("、")}
+                                    缺: {(m.missing_required_fields || m.missing_fields.map((f: any) => f.label || f.field)).join("、")}
                                   </span>
                                 )}
                               </div>
@@ -2156,13 +2156,23 @@ export default function AdminPage() {
                           </td>
                           <td className="p-3.5 text-right">
                             {m.status !== 'confirmed' ? (
-                              <button
-                                onClick={() => handleConfirmMember(m.user_id)}
-                                disabled={confirmingUid === m.user_id}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition disabled:opacity-50"
-                              >
-                                {confirmingUid === m.user_id ? "核验中..." : (m.status === 'expired' ? "恢复并批准" : "核验并批准")}
-                              </button>
+                              m.status === 'temporary' ? (
+                                <button
+                                  disabled
+                                  className="px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-500 text-xs font-medium cursor-not-allowed border border-white/5"
+                                  title="队员必填资料尚未齐备，暂无法核验转正"
+                                >
+                                  必填项未齐
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleConfirmMember(m.user_id)}
+                                  disabled={confirmingUid === m.user_id}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition disabled:opacity-50"
+                                >
+                                  {confirmingUid === m.user_id ? "核验中..." : (m.status === 'expired' ? "恢复并批准" : "核验并批准")}
+                                </button>
+                              )
                             ) : (
                               <span className="text-zinc-600 text-xs flex items-center justify-end gap-1">
                                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />

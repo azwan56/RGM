@@ -1061,22 +1061,28 @@
                   <text v-if="m.gobi_experience" class="m-gobi-tag" :class="{ 'is-new': m.gobi_experience === '新戈' }">
                     {{ m.gobi_experience === '新戈' ? '🌱 新戈' : '🏅 ' + m.gobi_experience }}
                   </text>
-                  <text class="m-status-pill" :class="m.status">{{ m.status === 'confirmed' ? '已核验' : '待核对' }}</text>
+                  <text class="m-status-pill" :class="m.status">{{ m.status === 'confirmed' ? '已核验' : (m.status === 'pending' ? '待审核' : '资料待补') }}</text>
                 </view>
                 <text class="m-sub-text">
                   {{ m.gender === 'female' ? '女' : '男' }} · {{ m.age_group || getAgeGroup(m.date_of_birth) }} · 分队: {{ m.sub_clubs && m.sub_clubs.length ? m.sub_clubs.map((s: any) => s.name).join('、') : '暂未入队' }}
+                </text>
+                <text v-if="m.status === 'temporary' && ((m.missing_required_fields && m.missing_required_fields.length) || (m.missing_fields && m.missing_fields.length))" class="m-missing-text" style="font-size: 20rpx; color: #f43f5e; display: block; margin-top: 4rpx;">
+                  缺: {{ (m.missing_required_fields || m.missing_fields.map((f: any) => f.label || f.field)).join('、') }}
                 </text>
               </view>
             </view>
 
             <view class="m-actions">
               <button
-                v-if="m.status !== 'confirmed'"
+                v-if="m.status === 'pending'"
                 class="act-pill coach-pill"
                 @click="handleConfirmOrgMember(m.user_id)"
               >
-                ✓ 核对确认
+                ✓ 核对通过
               </button>
+              <text v-else-if="m.status === 'temporary'" class="incomplete-label" style="font-size: 22rpx; color: #f59e0b; padding: 6rpx 14rpx;">
+                资料待补
+              </text>
               <text v-else class="confirmed-label">✓ 已确认</text>
             </view>
           </view>
