@@ -23,6 +23,33 @@
       </view>
     </view>
 
+    <!-- ── 大群必填资料待完善醒目提醒横幅 (若有) ── -->
+    <view
+      v-if="pendingOrgReminder?.hasReminder"
+      class="org-reminder-banner"
+      :class="pendingOrgReminder.type === 'suspended' ? 'banner-suspended' : 'banner-temporary'"
+      @click="goToFillRequiredFields"
+    >
+      <view class="orb-icon">{{ pendingOrgReminder.type === 'suspended' ? '🚫' : '⏳' }}</view>
+      <view class="orb-text-col">
+        <view class="orb-title-row">
+          <text class="orb-title">
+            {{ pendingOrgReminder.type === 'suspended' ? '大群体访问已被暂停' : '大群档案待完善' }}
+          </text>
+          <text class="orb-badge" v-if="pendingOrgReminder.remainingDays !== undefined && pendingOrgReminder.remainingDays !== null">
+            剩余 {{ pendingOrgReminder.remainingDays }} 天
+          </text>
+        </view>
+        <text class="orb-desc">
+          {{ pendingOrgReminder.missingLabels ? '缺少必填项：' + pendingOrgReminder.missingLabels : '请尽快补齐实名资料以获管理员审核' }}
+        </text>
+      </view>
+      <view class="orb-action-btn">
+        <text class="orb-btn-label">立即填写</text>
+        <text class="orb-arrow">›</text>
+      </view>
+    </view>
+
     <!-- Goal Progress Hero Card (Dual View: Week / Month) -->
     <view class="hero-progress-card">
       <!-- Period Segmented Switcher -->
@@ -1064,7 +1091,15 @@ import {
   uploadAvatarFile,
   UserProfile,
   syncTabBarIndex,
+  checkAndPromptOrgReminder,
+  navigateToProfileRequiredFields,
+  OrgReminderInfo,
 } from "../../utils/api";
+
+const pendingOrgReminder = ref<OrgReminderInfo | null>(null);
+function goToFillRequiredFields() {
+  navigateToProfileRequiredFields();
+}
 
 const selectedTrackActivity = ref<any>(null);
 function openTrackModal(act: any) {
@@ -2035,6 +2070,13 @@ async function loadDashboard() {
         setTimeout(drawFitnessChart, 150);
       });
       loadNotifications();
+      checkAndPromptOrgReminder(uid).then((rem) => {
+        if (rem && rem.hasReminder) {
+          pendingOrgReminder.value = rem;
+        } else {
+          pendingOrgReminder.value = null;
+        }
+      });
     }
   } catch (e) {
     console.warn("Dashboard fetch fallback:", e);
@@ -2125,6 +2167,121 @@ onPullDownRefresh(async () => {
   background-color: #0b0b0d;
   padding: 36rpx 28rpx 90rpx 28rpx;
   box-sizing: border-box;
+}
+
+/* ── Org Reminder Banner ── */
+.org-reminder-banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
+  padding: 22rpx 26rpx;
+  border-radius: 24rpx;
+  margin-bottom: 28rpx;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.org-reminder-banner:active {
+  opacity: 0.85;
+}
+
+.banner-temporary {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(20, 20, 24, 0.95) 100%);
+  border: 1rpx solid rgba(245, 158, 11, 0.45);
+}
+
+.banner-suspended {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.18) 0%, rgba(20, 20, 24, 0.95) 100%);
+  border: 1rpx solid rgba(239, 68, 68, 0.5);
+}
+
+.orb-icon {
+  font-size: 38rpx;
+  flex-shrink: 0;
+}
+
+.orb-text-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.orb-title-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.orb-title {
+  font-size: 27rpx;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
+.banner-suspended .orb-title {
+  color: #ef4444;
+}
+
+.orb-badge {
+  font-size: 20rpx;
+  color: #ffffff;
+  background: rgba(245, 158, 11, 0.35);
+  padding: 2rpx 12rpx;
+  border-radius: 12rpx;
+  font-weight: 600;
+}
+
+.banner-suspended .orb-badge {
+  background: rgba(239, 68, 68, 0.35);
+}
+
+.orb-desc {
+  font-size: 23rpx;
+  color: #d4d4d8;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-action-btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4rpx;
+  flex-shrink: 0;
+  background: rgba(245, 158, 11, 0.2);
+  padding: 10rpx 18rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid rgba(245, 158, 11, 0.4);
+}
+
+.banner-suspended .orb-action-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.orb-btn-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.banner-suspended .orb-btn-label {
+  color: #ef4444;
+}
+
+.orb-arrow {
+  font-size: 24rpx;
+  color: #f59e0b;
+}
+
+.banner-suspended .orb-arrow {
+  color: #ef4444;
 }
 
 .header-card {

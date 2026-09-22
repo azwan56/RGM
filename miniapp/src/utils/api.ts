@@ -643,3 +643,119 @@ export function syncTabBarIndex(index: number) {
     // Ignore in non-tab contexts
   }
 }
+
+let _hasPromptedOrgReminderInSession = false;
+
+export interface OrgReminderInfo {
+  hasReminder: boolean;
+  type: "suspended" | "temporary" | "none";
+  firstOrg?: any;
+  orgCount?: number;
+  orgNames?: string;
+  missingLabels?: string;
+  remainingDays?: number;
+  title?: string;
+  content?: string;
+  confirmText?: string;
+  cancelText?: string;
+}
+
+export async function fetchOrgReminderInfo(uid: string): Promise<OrgReminderInfo> {
+  try {
+    const res = await request(`/api/org/my-orgs/${encodeURIComponent(uid)}`);
+    const orgs: any[] = res?.organizations || [];
+
+    // 1. Check suspended/expired
+    const suspendedMemberships = orgs.filter(
+      (o: any) => o.status === "expired" || o.status === "suspended" || o.is_suspended
+    );
+    if (suspendedMemberships.length > 0) {
+      const firstOrg = suspendedMemberships[0];
+      return {
+        hasReminder: true,
+        type: "suspended",
+        firstOrg,
+        orgCount: suspendedMemberships.length,
+        orgNames: suspendedMemberships.map((o: any) => o.name).join("、"),
+        title: "⚠️ 大群体访问已被暂停",
+        content: `您在【${firstOrg.name}】的2周临时访问期已过。由于超期未完成必填字段并获管理员审核确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！请立即补齐必填资料并联系管理员核验。`,
+        confirmText: "立即补齐",
+        cancelText: "知道了",
+      };
+    }
+
+    // 2. Check temporary with missing fields
+    const incompleteMemberships = orgs.filter((o: any) => o.status === "temporary");
+    if (incompleteMemberships.length > 0) {
+      const firstOrg = incompleteMemberships[0];
+      const missingLabels = (firstOrg.missing_fields || []).map((f: any) => f.label).join("、");
+      const orgCount = incompleteMemberships.length;
+      const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
+      const remainingDays =
+        firstOrg.days_remaining !== undefined && firstOrg.days_remaining !== null
+          ? firstOrg.days_remaining
+          : 14;
+      const contentText =
+        orgCount > 1
+          ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成（临时访问期还剩 ${remainingDays} 天）。请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`
+          : `您在【${firstOrg.name}】中${missingLabels ? "还缺少：" + missingLabels + "。" : "有必填资料尚未完成。"}（临时访问期还剩 ${remainingDays} 天）请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`;
+
+      return {
+        hasReminder: true,
+        type: "temporary",
+        firstOrg,
+        orgCount,
+        orgNames,
+        missingLabels,
+        remainingDays,
+        title: "📋 跑者档案待完善",
+        content: contentText,
+        confirmText: "立即填写",
+        cancelText: "稍后再说",
+      };
+    }
+  } catch (e) {
+    console.warn("fetchOrgReminderInfo failed:", e);
+  }
+
+  return { hasReminder: false, type: "none" };
+}
+
+export function navigateToProfileRequiredFields() {
+  uni.setStorageSync("auto_scroll_to_required_fields", true);
+  uni.switchTab({
+    url: "/pages/profile/profile",
+  });
+}
+
+export async function checkAndPromptOrgReminder(
+  uid: string,
+  options: { force?: boolean } = {}
+): Promise<OrgReminderInfo> {
+  const reminder = await fetchOrgReminderInfo(uid);
+  if (!reminder.hasReminder) {
+    return reminder;
+  }
+
+  if (!options.force && _hasPromptedOrgReminderInSession) {
+    return reminder;
+  }
+
+  _hasPromptedOrgReminderInSession = true;
+
+  uni.showModal({
+    title: reminder.title,
+    content: reminder.content,
+    confirmText: reminder.confirmText || "立即填写",
+    cancelText: reminder.cancelText || "稍后再说",
+    confirmColor: reminder.type === "suspended" ? "#ef4444" : "#f59e0b",
+    success: (res) => {
+      if (res.confirm) {
+        navigateToProfileRequiredFields();
+      }
+    },
+  });
+
+  return reminder;
+}
+

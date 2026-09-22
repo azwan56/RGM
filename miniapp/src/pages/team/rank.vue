@@ -382,6 +382,7 @@ import {
   setActiveClubId,
   resolveActiveClub,
   syncTabBarIndex,
+  navigateToProfileRequiredFields,
 } from "../../utils/api";
 
 const selectedTrackActivity = ref<any>(null);
@@ -507,9 +508,7 @@ function goToTeamPage() {
 }
 
 function goToProfilePage() {
-  uni.switchTab({
-    url: "/pages/profile/profile",
-  });
+  navigateToProfileRequiredFields();
 }
 
 const isRankSuspended = ref(false);

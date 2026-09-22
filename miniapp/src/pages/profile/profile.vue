@@ -171,7 +171,7 @@
     </view>
 
       <!-- ── CARD: 个人实名身份与敏感信息 (AES-256 加密保护) ── -->
-    <view id="required-personal-fields" class="section-card section-card-runner-info">
+    <view id="required-personal-fields" class="section-card section-card-runner-info" :class="{ 'highlight-pulse': isFieldHighlighted }">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🔒</text>
@@ -2289,11 +2289,16 @@ const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
 
 const activeTab = ref<"profile" | "training">("profile");
+const isFieldHighlighted = ref(false);
 
 function scrollToRequiredFields() {
   activeTab.value = "profile";
   setTimeout(() => {
     uni.pageScrollTo({ selector: "#required-personal-fields", duration: 400 });
+    isFieldHighlighted.value = true;
+    setTimeout(() => {
+      isFieldHighlighted.value = false;
+    }, 2800);
   }, 150);
 }
 
@@ -4174,10 +4179,33 @@ async function handleImportGarminPb() {
 onShow(() => {
   syncTabBarIndex(4);
   loadProfileData();
+  if (uni.getStorageSync("auto_scroll_to_required_fields")) {
+    uni.removeStorageSync("auto_scroll_to_required_fields");
+    activeTab.value = "profile";
+    setTimeout(() => {
+      scrollToRequiredFields();
+    }, 450);
+  }
 });
 </script>
 
 <style scoped>
+/* ── Pulse Animation for Required Fields Focus ── */
+.highlight-pulse {
+  animation: fieldPulse 1.2s ease-in-out 2 !important;
+}
+
+@keyframes fieldPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(245, 158, 11, 0);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 35rpx rgba(245, 158, 11, 0.65);
+    border-color: #f59e0b !important;
+  }
+}
+
 /* ── Manual Entry Banner ── */
 .manual-entry-banner {
   background: linear-gradient(90deg, rgba(252, 76, 2, 0.12) 0%, rgba(255, 255, 255, 0.03) 100%);
