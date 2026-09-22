@@ -4016,21 +4016,7 @@ class LocalStore:
                     if LocalStore.is_field_missing(f, f_type, val, extra_data):
                         missing_fields.append({"field": f, "label": r.get("label", f)})
 
-            if role in ("owner", "admin"):
-                if status != "confirmed":
-                    cursor.execute("UPDATE organization_members SET status = 'confirmed' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
-                    conn.commit()
-                    status = "confirmed"
-                return {
-                    "is_member": True,
-                    "status": "confirmed",
-                    "role": role,
-                    "is_valid": True,
-                    "days_remaining": None,
-                    "missing_fields": missing_fields
-                }
-
-            # ── If required fields are missing: status CANNOT be confirmed for regular members! ──
+            # ── If required fields are missing: status CANNOT be confirmed (even for owner/admin during onboarding/testing)! ──
             if len(missing_fields) > 0:
                 joined_at_dt = None
                 if joined_at_str:
@@ -4065,6 +4051,21 @@ class LocalStore:
                     "is_valid": (target_status != "expired"),
                     "days_remaining": remaining_days if target_status != "expired" else 0,
                     "missing_fields": missing_fields
+                }
+
+            # ── All required fields are filled ──
+            if role in ("owner", "admin"):
+                if status != "confirmed":
+                    cursor.execute("UPDATE organization_members SET status = 'confirmed' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                    conn.commit()
+                    status = "confirmed"
+                return {
+                    "is_member": True,
+                    "status": "confirmed",
+                    "role": role,
+                    "is_valid": True,
+                    "days_remaining": None,
+                    "missing_fields": []
                 }
 
             # ── All required fields are filled ──
