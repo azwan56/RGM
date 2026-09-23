@@ -110,8 +110,8 @@ export default function AnalysisPage() {
                       fontSize: "12px",
                     }}
                     formatter={(val: any, name: any) => {
-                      if (name === "resting_heart_rate") return [`${val} bpm`, "静息心率 (RHR)"];
-                      if (name === "hrv") return [`${val} ms`, "夜间 HRV"];
+                      if (name === "resting_heart_rate") return [val != null ? `${val} bpm` : "—", "静息心率 (RHR)"];
+                      if (name === "hrv") return [val != null ? `${val} ms` : "—", "夜间 HRV"];
                       return [val, name];
                     }}
                   />
@@ -124,6 +124,7 @@ export default function AnalysisPage() {
                     strokeWidth={2}
                     dot={{ r: 3, fill: "#ef4444" }}
                     activeDot={{ r: 5 }}
+                    connectNulls={true}
                   />
                   <Line
                     yAxisId="right"
@@ -134,6 +135,7 @@ export default function AnalysisPage() {
                     strokeWidth={2}
                     dot={{ r: 3, fill: "#06b6d4" }}
                     activeDot={{ r: 5 }}
+                    connectNulls={true}
                   />
                 </RechartsLine>
               </ResponsiveContainer>
@@ -188,8 +190,8 @@ export default function AnalysisPage() {
                       fontSize: "12px",
                     }}
                     formatter={(val: any, name: any) => {
-                      if (name === "sleep_score") return [`${val} 分`, "睡眠得分"];
-                      if (name === "body_battery") return [`${val} %`, "身体电量 Max"];
+                      if (name === "sleep_score") return [val != null ? `${val} 分` : "—", "睡眠得分"];
+                      if (name === "body_battery") return [val != null ? `${val} %` : "—", "身体电量 Max"];
                       return [val, name];
                     }}
                   />
@@ -202,6 +204,7 @@ export default function AnalysisPage() {
                     strokeWidth={2}
                     dot={{ r: 3, fill: "#818cf8" }}
                     activeDot={{ r: 5 }}
+                    connectNulls={true}
                   />
                   <Line
                     yAxisId="right"
@@ -212,6 +215,7 @@ export default function AnalysisPage() {
                     strokeWidth={2}
                     dot={{ r: 3, fill: "#eab308" }}
                     activeDot={{ r: 5 }}
+                    connectNulls={true}
                   />
                 </RechartsLine>
               </ResponsiveContainer>

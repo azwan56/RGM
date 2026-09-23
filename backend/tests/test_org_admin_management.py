@@ -105,3 +105,35 @@ def test_org_admin_management_workflow():
     })
     assert unbind_res.status_code == 200
     assert unbind_res.json()["club"]["org_id"] is None
+
+    # 9. Appoint member as Org Admin (委派大群管理员)
+    # Unauthorized operator fails
+    unauth_role_res = client.post(f"/api/org/{org_id}/members/{member_uid}/role", json={
+        "role": "admin",
+        "operator_uid": "stranger_uid"
+    })
+    assert unauth_role_res.status_code == 400
+
+    # Owner appoints member as admin
+    role_res = client.post(f"/api/org/{org_id}/members/{member_uid}/role", json={
+        "role": "admin",
+        "operator_uid": owner_uid
+    })
+    assert role_res.status_code == 200
+    assert "已成功将该成员角色更新为【大群管理员】" in role_res.json()["message"]
+
+    # Verify appointed admin can view roster with unmasked real name
+    admin_view_res = client.get(f"/api/org/{org_id}/members?operator_uid={member_uid}")
+    assert admin_view_res.status_code == 200
+    admin_view_members = admin_view_res.json()["members"]
+    target_in_list = next(m for m in admin_view_members if m["user_id"] == member_uid)
+    assert target_in_list["role"] == "admin"
+    assert target_in_list["real_name"] == "李安泰"
+
+    # Revoke admin back to member
+    revoke_res = client.post(f"/api/org/{org_id}/members/{member_uid}/role", json={
+        "role": "member",
+        "operator_uid": owner_uid
+    })
+    assert revoke_res.status_code == 200
+    assert "已成功将该成员角色更新为【普通成员】" in revoke_res.json()["message"]

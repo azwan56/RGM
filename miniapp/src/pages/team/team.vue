@@ -23,6 +23,9 @@
           </text>
         </view>
         <view class="org-right-actions">
+          <view v-if="isOrgAdmin" class="subclubs-tag-btn admin-tag-btn" @click="openOrgMembersModal" style="margin-right: 12rpx; background: rgba(59, 130, 246, 0.15); border: 1rpx solid rgba(59, 130, 246, 0.4); color: #60a5fa;">
+            <text class="subclubs-tag-text">📋 戈友花名册 ›</text>
+          </view>
           <view class="subclubs-tag-btn" @click="openSubClubsModal">
             <text class="subclubs-tag-text">下属分队 ({{ orgSubClubs.length }}) ›</text>
           </view>
@@ -197,18 +200,18 @@
           </view>
         </view>
 
-    <!-- ── CARD 1: 👑 团长管理中心 (Only visible to Owner) ── -->
-    <view v-if="currentRole === 'owner' || isOwnerOrDev" class="section-card owner-panel-card">
+    <!-- ── CARD 1: 👑 团长/组织管理中心 (Visible to Owner or Org Admin) ── -->
+    <view v-if="currentRole === 'owner' || isOwnerOrDev || isOrgAdmin" class="section-card owner-panel-card">
       <view class="card-header-row">
         <view class="title-with-icon">
           <text class="icon">👑</text>
-          <text class="card-title">跑团主理人管理中心</text>
+          <text class="card-title">{{ currentRole === 'owner' || isOwnerOrDev ? '跑团主理人管理中心' : '大群体管理中心' }}</text>
         </view>
-        <text class="owner-pill">团长权限</text>
+        <text class="owner-pill">{{ currentRole === 'owner' || isOwnerOrDev ? '团长权限' : '管理员权限' }}</text>
       </view>
 
       <view class="owner-actions-grid">
-        <view class="owner-tool-item" @click="handleOpenMembersModal">
+        <view v-if="currentRole === 'owner' || isOwnerOrDev" class="owner-tool-item" @click="handleOpenMembersModal">
           <view class="tool-icon-box bg-purple">
             <text class="tool-icon">👥</text>
           </view>
@@ -219,7 +222,7 @@
           <text class="arrow-right">›</text>
         </view>
 
-        <view class="owner-tool-item" @click="handleOpenCreateEvent">
+        <view v-if="currentRole === 'owner' || isOwnerOrDev" class="owner-tool-item" @click="handleOpenCreateEvent">
           <view class="tool-icon-box bg-orange">
             <text class="tool-icon">🏆</text>
           </view>
@@ -230,18 +233,18 @@
           <text class="arrow-right">›</text>
         </view>
 
-        <view v-if="currentOrg" class="owner-tool-item" @click="openOrgMembersModal">
+        <view v-if="isOrgAdmin" class="owner-tool-item" @click="openOrgMembersModal">
           <view class="tool-icon-box bg-blue">
             <text class="tool-icon">🏛️</text>
           </view>
           <view class="tool-content">
-            <text class="tool-main-title">{{ currentOrg.name }} 大群体花名册</text>
+            <text class="tool-main-title">{{ currentOrg?.name }} 大群体花名册</text>
             <text class="tool-sub-desc">核对全体戈友班级、实名认证与归属 ({{ orgMembers.length }}人)</text>
           </view>
           <text class="arrow-right">›</text>
         </view>
 
-        <view class="owner-tool-item" @click="openJoinModeModal">
+        <view v-if="currentRole === 'owner' || isOwnerOrDev" class="owner-tool-item" @click="openJoinModeModal">
           <view class="tool-icon-box bg-green">
             <text class="tool-icon">⚙️</text>
           </view>
@@ -259,7 +262,7 @@
           <text class="arrow-right">›</text>
         </view>
 
-        <view class="owner-tool-item" @click="openReportModal">
+        <view v-if="currentRole === 'owner' || isOwnerOrDev" class="owner-tool-item" @click="openReportModal">
           <view class="tool-icon-box bg-gold">
             <text class="tool-icon">📊</text>
           </view>
@@ -1057,6 +1060,8 @@
               <view class="m-info">
                 <view class="m-name-line">
                   <text class="m-name">{{ m.real_name || m.display_name }}</text>
+                  <text v-if="m.role === 'owner'" class="m-role-badge owner">👑 主理人</text>
+                  <text v-else-if="m.role === 'admin'" class="m-role-badge admin">🛡️ 管理员</text>
                   <text class="m-class-tag">{{ m.class_name || '未设班级' }}</text>
                   <text v-if="m.gobi_experience" class="m-gobi-tag" :class="{ 'is-new': m.gobi_experience === '新戈' }">
                     {{ m.gobi_experience === '新戈' ? '🌱 新戈' : '🏅 ' + m.gobi_experience }}
@@ -1072,7 +1077,7 @@
               </view>
             </view>
 
-            <view class="m-actions">
+            <view class="m-actions" style="flex-direction: column; align-items: flex-end; gap: 8rpx;">
               <button
                 v-if="m.status === 'pending'"
                 class="act-pill coach-pill"
@@ -1080,10 +1085,25 @@
               >
                 ✓ 核对通过
               </button>
-              <text v-else-if="m.status === 'temporary'" class="incomplete-label" style="font-size: 22rpx; color: #f59e0b; padding: 6rpx 14rpx;">
+              <text v-else-if="m.status === 'temporary'" class="incomplete-label" style="font-size: 22rpx; color: #f59e0b; padding: 4rpx 10rpx;">
                 资料待补
               </text>
               <text v-else class="confirmed-label">✓ 已确认</text>
+
+              <button
+                v-if="isOrgOwner && m.role === 'admin'"
+                class="act-pill revoke-admin-pill"
+                @click="handleToggleOrgMemberRole(m, 'member')"
+              >
+                撤销管理
+              </button>
+              <button
+                v-else-if="isOrgOwner && m.role !== 'owner' && m.status === 'confirmed'"
+                class="act-pill appoint-admin-pill"
+                @click="handleToggleOrgMemberRole(m, 'admin')"
+              >
+                委派管理
+              </button>
             </view>
           </view>
         </scroll-view>
@@ -1729,9 +1749,20 @@ function openSubClubsModal() {
   showSubClubsModal.value = true;
 }
 
-function openOrgMembersModal() {
+async function openOrgMembersModal() {
   orgMemberSearch.value = "";
   showOrgMembersModal.value = true;
+  if (currentOrg.value) {
+    try {
+      const uid = user.value?.id;
+      const memRes = await request(`/api/org/${currentOrg.value.id}/members?operator_uid=${uid || ''}`);
+      if (memRes?.members) {
+        orgMembers.value = memRes.members;
+      }
+    } catch (e) {
+      console.warn("Failed to refresh org members on open:", e);
+    }
+  }
 }
 
 async function handleConfirmOrgMember(targetUid: string) {
@@ -1747,6 +1778,44 @@ async function handleConfirmOrgMember(targetUid: string) {
   } catch (e: any) {
     uni.showToast({ title: e?.message || "确认失败", icon: "none" });
   }
+}
+
+async function handleToggleOrgMemberRole(targetMember: any, newRole: 'admin' | 'member') {
+  if (!currentOrg.value || !targetMember) return;
+  const actionText = newRole === 'admin' ? '委派为大群体管理员' : '撤销大群体管理员职务';
+  const name = targetMember.real_name || targetMember.display_name || '该成员';
+
+  uni.showModal({
+    title: `确认${actionText}？`,
+    content: newRole === 'admin'
+      ? `委派【${name}】为大群管理员后，其将拥有查看全员未脱敏档案及审核戈友入群的权限。`
+      : `撤销【${name}】的管理权限后，其将恢复为普通戈友成员。`,
+    confirmText: '确认',
+    confirmColor: newRole === 'admin' ? '#3b82f6' : '#ef4444',
+    success: async (res) => {
+      if (res.confirm) {
+        try {
+          uni.showLoading({ title: '处理中...' });
+          const uid = user.value?.id;
+          await request(`/api/org/${currentOrg.value.id}/members/${targetMember.user_id}/role`, 'POST', {
+            operator_uid: uid,
+            role: newRole
+          });
+          uni.hideLoading();
+          uni.showToast({ title: `${actionText}成功`, icon: 'success' });
+          const memRes = await request(`/api/org/${currentOrg.value.id}/members?operator_uid=${uid || ''}`);
+          orgMembers.value = memRes?.members || [];
+        } catch (e: any) {
+          uni.hideLoading();
+          uni.showModal({
+            title: '操作失败',
+            content: e?.message || e?.data?.detail || '权限变更失败，请重试',
+            showCancel: false
+          });
+        }
+      }
+    }
+  });
 }
 
 const filteredOrgMembers = computed(() => {
@@ -1818,6 +1887,16 @@ const isOwnerOrDev = computed(() => {
     currentRole.value === "owner" ||
     currentClub.value.owner_id === user.value.id
   );
+});
+
+const isOrgAdmin = computed(() => {
+  if (user.value?.role === "admin") return true;
+  return !!currentOrg.value && ["owner", "admin"].includes(currentOrg.value.role);
+});
+
+const isOrgOwner = computed(() => {
+  if (user.value?.role === "admin") return true;
+  return !!currentOrg.value && currentOrg.value.role === "owner";
 });
 
 const filteredMembers = computed(() => {
@@ -4862,6 +4941,39 @@ onPullDownRefresh(async () => {
   font-size: 22rpx;
   color: #10b981;
   font-weight: bold;
+}
+
+.m-role-badge {
+  font-size: 18rpx;
+  font-weight: bold;
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+  margin-left: 6rpx;
+  flex-shrink: 0;
+}
+
+.m-role-badge.owner {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1rpx solid rgba(245, 158, 11, 0.4);
+}
+
+.m-role-badge.admin {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1rpx solid rgba(59, 130, 246, 0.4);
+}
+
+.appoint-admin-pill {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1rpx solid rgba(59, 130, 246, 0.4);
+}
+
+.revoke-admin-pill {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1rpx solid rgba(239, 68, 68, 0.3);
 }
 
 .bg-blue {

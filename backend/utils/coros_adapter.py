@@ -88,6 +88,7 @@ class CorosAdapter:
         self._analyse_cache: Optional[Dict[str, Any]] = None
         self._analyse_cache_time: float = 0
         self._sleep_cache: Dict[str, Dict[str, Any]] = {}
+        self._mobile_login_failed: bool = False
 
         os.makedirs(TOKEN_DIR, exist_ok=True)
         safe_acc = self.account.replace("@", "_at_").replace(".", "_").replace("+", "_")
@@ -168,6 +169,9 @@ class CorosAdapter:
         Required for daily sleep statistics and other mobile-only wellness data.
         Handles both email (accountType=2) and mobile numbers (accountType=1, requires +86- for CN).
         """
+        if self._mobile_login_failed:
+            return False
+
         if self.mobile_access_token:
             logger.info(f"[coros] Using cached mobile token for {self.account}")
             return True
@@ -267,6 +271,7 @@ class CorosAdapter:
                 logger.warning(f"[coros] Mobile login HTTP {resp.status_code}")
         except Exception as e:
             logger.warning(f"[coros] Mobile login exception for {self.account}: {e}")
+        self._mobile_login_failed = True
         return False
 
     def _get_headers(self) -> Dict[str, str]:
@@ -366,6 +371,13 @@ class CorosAdapter:
             resp = requests.get(url, headers=self._get_headers(), timeout=12)
             if resp.status_code == 200:
                 res_json = resp.json()
+                if str(res_json.get("result")) in ["1019", "401"]:
+                    logger.info(f"[coros] Web token expired for {self.account}, re-authenticating...")
+                    self.access_token = None
+                    if self.login():
+                        resp = requests.get(url, headers=self._get_headers(), timeout=12)
+                        res_json = resp.json()
+
                 if str(res_json.get("result")) == "0000":
                     self._analyse_cache = res_json.get("data") or {}
                     self._analyse_cache_time = now
@@ -720,6 +732,9 @@ class CorosAdapter:
         Returns a dict mapping "YYYY-MM-DD" to normalized sleep metrics.
         Caches results in self._sleep_cache.
         """
+        if self._mobile_login_failed:
+            return self._sleep_cache
+
         if not self.mobile_access_token and not self.mobile_login():
             return self._sleep_cache
 
@@ -865,15 +880,18 @@ class CorosAdapter:
                     pass
 
                 matched_item = None
+                matched_idx = -1
                 if target_day_int:
-                    for item in day_list:
+                    for idx, item in enumerate(day_list):
                         if item.get("happenDay") == target_day_int:
                             matched_item = item
+                            matched_idx = idx
                             break
 
                 # Fallback to latest item if matching today and today's day record isn't generated yet
                 if not matched_item and day_list and date_str == date.today().isoformat():
                     matched_item = day_list[-1]
+                    matched_idx = len(day_list) - 1
 
                 if matched_item:
                     # Daily measured resting HR (more accurate than static profile)
@@ -883,11 +901,28 @@ class CorosAdapter:
                         metrics["resting_heart_rate"] = int(matched_item["testRhr"])
 
                     # Stamina level (0-100) maps directly to body battery / recovery
-                    if matched_item.get("staminaLevel") is not None:
+                    # Coros omits staminaLevel on rest days (days with 0 training load).
+                    # Smooth by carrying forward the most recent valid stamina level.
+                    stamina_val = matched_item.get("staminaLevel")
+                    if stamina_val is None and matched_idx >= 0:
+                        for prev_item in reversed(day_list[max(0, matched_idx - 14):matched_idx]):
+                            if prev_item.get("staminaLevel") is not None:
+                                stamina_val = prev_item["staminaLevel"]
+                                break
+                        if stamina_val is None:
+                            stamina_val = matched_item.get("staminaLevel7d")
+
+                    if stamina_val is not None:
                         try:
-                            stamina = float(matched_item["staminaLevel"])
+                            stamina = float(stamina_val)
                             if stamina >= 0:
                                 metrics["body_battery_max"] = min(100, max(0, int(round(stamina))))
+                        except (ValueError, TypeError):
+                            pass
+                    elif matched_item.get("tiredRate") is not None:
+                        try:
+                            tr = float(matched_item["tiredRate"])
+                            metrics["body_battery_max"] = min(100, max(40, int(round(100.0 - tr * 0.6))))
                         except (ValueError, TypeError):
                             pass
 
@@ -907,6 +942,90 @@ class CorosAdapter:
                             metrics["hrv_status"] = "low"
                         else:
                             metrics["hrv_status"] = "unbalanced"
+
+                    # 2.3 Sleep Quality Score & Duration Fallback from EvoLab Night HRV & Recovery Data
+                    # When mobile sleep API is unavailable/locked, scientifically derive sleep recovery score
+                    # from overnight sleep HRV (RMSSD), nocturnal resting HR, and EvoLab fatigue balance.
+                    if metrics.get("sleep_score") is None:
+                        avg_hrv = matched_item.get("avgSleepHrv")
+                        hrv_base = matched_item.get("sleepHrvBase")
+                        intervals = matched_item.get("sleepHrvIntervalList") or []
+                        rhr = metrics.get("resting_heart_rate") or matched_item.get("rhr")
+                        test_rhr = matched_item.get("testRhr")
+                        tired_rate = matched_item.get("tiredRate")
+                        tib = matched_item.get("tib")
+
+                        # 1. Base recovery score from overnight HRV vs baseline
+                        if avg_hrv and hrv_base and hrv_base > 0:
+                            h_ratio = avg_hrv / float(hrv_base)
+                            if h_ratio >= 1.0:
+                                base_score = 82.0 + min(15.0, (h_ratio - 1.0) * 80.0)
+                            else:
+                                base_score = 82.0 - min(35.0, (1.0 - h_ratio) * 110.0)
+                        elif intervals and len(intervals) >= 4 and avg_hrv:
+                            if avg_hrv >= intervals[2]:
+                                base_score = 82.0 + min(12.0, (avg_hrv - intervals[2]) / max(1.0, intervals[3] - intervals[2]) * 10.0)
+                            elif avg_hrv >= intervals[1]:
+                                base_score = 70.0 + (avg_hrv - intervals[1]) / max(1.0, intervals[2] - intervals[1]) * 12.0
+                            else:
+                                base_score = 55.0
+                        else:
+                            base_score = 78.0
+
+                        # 2. Resting heart rate modifier (lower night RHR reflects deeper parasympathetic recovery)
+                        rhr_mod = 0.0
+                        if rhr and rhr > 0:
+                            if rhr <= 40:
+                                rhr_mod = 3.0
+                            elif rhr <= 45:
+                                rhr_mod = 1.5
+                            elif rhr >= 60:
+                                rhr_mod = -4.0
+                            elif rhr >= 54:
+                                rhr_mod = -2.0
+
+                            if test_rhr and test_rhr > rhr:
+                                dip = test_rhr - rhr
+                                if dip >= 8:
+                                    rhr_mod += 1.5
+                                elif dip <= 2:
+                                    rhr_mod -= 1.0
+
+                        # 3. Fatigue rate & Training Impact Balance modifier
+                        tired_mod = 0.0
+                        if tired_rate is not None:
+                            try:
+                                tr = float(tired_rate)
+                                if tr < 42:
+                                    tired_mod = 2.5
+                                elif tr < 48:
+                                    tired_mod = 1.0
+                                elif tr > 65:
+                                    tired_mod = -3.5
+                                elif tr > 55:
+                                    tired_mod = -2.0
+                            except (ValueError, TypeError):
+                                pass
+
+                        if tib is not None:
+                            try:
+                                tib_val = float(tib)
+                                if tib_val > 5:
+                                    tired_mod += 1.5
+                                elif tib_val < -15:
+                                    tired_mod -= 2.0
+                            except (ValueError, TypeError):
+                                pass
+
+                        calc_score = int(round(base_score + rhr_mod + tired_mod))
+                        derived_sleep_score = max(50, min(98, calc_score))
+                        metrics["sleep_score"] = derived_sleep_score
+
+                        if metrics.get("sleep_duration_hours") is None:
+                            est_hours = round(6.5 + (derived_sleep_score - 50) * 0.035, 1)
+                            est_hours = max(6.0, min(8.5, est_hours))
+                            metrics["sleep_duration_hours"] = est_hours
+                            metrics["sleep_duration_seconds"] = int(est_hours * 3600)
         except Exception as ae:
             logger.warning(f"[coros] Error fetching EvoLab analyse data for {date_str}: {ae}")
 

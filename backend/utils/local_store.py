@@ -4969,6 +4969,45 @@ class LocalStore:
             return cursor.rowcount > 0
 
     @staticmethod
+    def update_org_member_role(org_id: str, target_uid: str, new_role: str, operator_uid: Optional[str] = None) -> bool:
+        """
+        Allows Organization Owner or Super Admin to appoint/revoke Admin role for an organization member.
+        """
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT owner_id FROM organizations WHERE id = ?", (org_id,))
+            org = cursor.fetchone()
+            if not org:
+                raise ValueError("组织不存在")
+
+            owner_id = org["owner_id"]
+            if operator_uid not in (owner_id, "super_admin", "admin"):
+                cursor.execute("SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, operator_uid))
+                op_row = cursor.fetchone()
+                if not op_row or op_row["role"] != "owner":
+                    raise ValueError("只有大群主理人或超级管理员有权委派或调整大群管理员角色")
+
+            if target_uid == owner_id and new_role != "owner":
+                raise ValueError("不能修改大群主理人的身份角色")
+
+            if new_role not in ("admin", "member"):
+                raise ValueError("目标角色必须为 admin 或 member")
+
+            cursor.execute("SELECT * FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, target_uid))
+            target_mem = cursor.fetchone()
+            if not target_mem:
+                raise ValueError("未找到该大群成员")
+
+            cursor.execute("""
+                UPDATE organization_members
+                SET role = ?
+                WHERE org_id = ? AND user_id = ?
+            """, (new_role, org_id, target_uid))
+            conn.commit()
+            return True
+
+    @staticmethod
     def list_all_organizations() -> List[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row

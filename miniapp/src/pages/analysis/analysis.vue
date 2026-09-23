@@ -39,8 +39,8 @@
               <text class="tip-date">{{ activeHrvTooltip.date_label || activeHrvTooltip.date }}</text>
               <text v-if="isLatestDate(activeHrvTooltip.date)" class="latest-pill">最新</text>
             </view>
-            <text class="tip-val text-cyan">HRV: {{ activeHrvTooltip.hrv }} ms</text>
-            <text class="tip-val text-rose">RHR: {{ activeHrvTooltip.resting_heart_rate }} bpm</text>
+            <text class="tip-val text-cyan">HRV: {{ activeHrvTooltip.hrv != null ? activeHrvTooltip.hrv : '—' }} ms</text>
+            <text class="tip-val text-rose">RHR: {{ activeHrvTooltip.resting_heart_rate != null ? activeHrvTooltip.resting_heart_rate : '—' }} bpm</text>
           </view>
 
           <canvas
@@ -76,8 +76,8 @@
               <text class="tip-date">{{ activeBatteryTooltip.date_label || activeBatteryTooltip.date }}</text>
               <text v-if="isLatestDate(activeBatteryTooltip.date)" class="latest-pill">最新</text>
             </view>
-            <text class="tip-val text-indigo">睡眠: {{ activeBatteryTooltip.sleep_score }} 分</text>
-            <text class="tip-val text-amber">电量: {{ activeBatteryTooltip.body_battery }}%</text>
+            <text class="tip-val text-indigo">睡眠: {{ activeBatteryTooltip.sleep_score != null ? activeBatteryTooltip.sleep_score : '—' }} 分</text>
+            <text class="tip-val text-amber">电量: {{ activeBatteryTooltip.body_battery != null ? activeBatteryTooltip.body_battery : '—' }}%</text>
           </view>
 
           <canvas
@@ -258,13 +258,19 @@ function drawHrvRhrChart() {
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
-  // Scales
-  const minRhr = 45, maxRhr = 65;
-  const minHrv = 20, maxHrv = 55;
+  // Scales - dynamic based on actual dataset to avoid clipping athletic ranges
+  const validRhr = data.map((d: any) => d.resting_heart_rate).filter((v: any) => v != null && v > 0);
+  const validHrv = data.map((d: any) => d.hrv).filter((v: any) => v != null && v > 0);
 
-  const getY_Rhr = (val: number) => padT + plotH * (maxRhr - Math.max(minRhr, Math.min(maxRhr, val))) / (maxRhr - minRhr);
-  const getY_Hrv = (val: number) => padT + plotH * (maxHrv - Math.max(minHrv, Math.min(maxHrv, val))) / (maxHrv - minHrv);
-  const getX = (idx: number) => padL + (idx / (data.length - 1)) * plotW;
+  const minRhr = validRhr.length ? Math.max(30, Math.min(...validRhr) - 4) : 40;
+  const maxRhr = validRhr.length ? Math.min(100, Math.max(...validRhr) + 4) : 70;
+
+  const minHrv = validHrv.length ? Math.max(10, Math.min(...validHrv) - 8) : 20;
+  const maxHrv = validHrv.length ? Math.min(130, Math.max(...validHrv) + 8) : 80;
+
+  const getY_Rhr = (val: number) => padT + plotH * (maxRhr - Math.max(minRhr, Math.min(maxRhr, val))) / Math.max(1, maxRhr - minRhr);
+  const getY_Hrv = (val: number) => padT + plotH * (maxHrv - Math.max(minHrv, Math.min(maxHrv, val))) / Math.max(1, maxHrv - minHrv);
+  const getX = (idx: number) => padL + (idx / Math.max(1, data.length - 1)) * plotW;
 
   ctx.clearRect(0, 0, W, H);
 
@@ -283,11 +289,18 @@ function drawHrvRhrChart() {
   ctx.setStrokeStyle("#06b6d4");
   ctx.setLineWidth(2.2);
   ctx.beginPath();
+  let startedHrv = false;
   data.forEach((item: any, idx: number) => {
-    const x = getX(idx);
-    const y = getY_Hrv(item.hrv);
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (item.hrv != null) {
+      const x = getX(idx);
+      const y = getY_Hrv(item.hrv);
+      if (!startedHrv) {
+        ctx.moveTo(x, y);
+        startedHrv = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
   });
   ctx.stroke();
 
@@ -295,11 +308,18 @@ function drawHrvRhrChart() {
   ctx.setStrokeStyle("#ef4444");
   ctx.setLineWidth(2.2);
   ctx.beginPath();
+  let startedRhr = false;
   data.forEach((item: any, idx: number) => {
-    const x = getX(idx);
-    const y = getY_Rhr(item.resting_heart_rate);
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (item.resting_heart_rate != null) {
+      const x = getX(idx);
+      const y = getY_Rhr(item.resting_heart_rate);
+      if (!startedRhr) {
+        ctx.moveTo(x, y);
+        startedRhr = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
   });
   ctx.stroke();
 
@@ -320,8 +340,6 @@ function drawHrvRhrChart() {
     const idx = data.findIndex((d) => d.date === activeHrvTooltip.value.date);
     if (idx >= 0) {
       const activeX = getX(idx);
-      const activeY_Hrv = getY_Hrv(activeHrvTooltip.value.hrv);
-      const activeY_Rhr = getY_Rhr(activeHrvTooltip.value.resting_heart_rate);
 
       // Vertical line
       ctx.setStrokeStyle("rgba(255,255,255,0.4)");
@@ -332,16 +350,22 @@ function drawHrvRhrChart() {
       ctx.stroke();
 
       // Highlight Dot - HRV (Cyan)
-      ctx.setFillStyle("#06b6d4");
-      ctx.beginPath();
-      ctx.arc(activeX, activeY_Hrv, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (activeHrvTooltip.value.hrv != null) {
+        const activeY_Hrv = getY_Hrv(activeHrvTooltip.value.hrv);
+        ctx.setFillStyle("#06b6d4");
+        ctx.beginPath();
+        ctx.arc(activeX, activeY_Hrv, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // Highlight Dot - RHR (Rose)
-      ctx.setFillStyle("#ef4444");
-      ctx.beginPath();
-      ctx.arc(activeX, activeY_Rhr, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (activeHrvTooltip.value.resting_heart_rate != null) {
+        const activeY_Rhr = getY_Rhr(activeHrvTooltip.value.resting_heart_rate);
+        ctx.setFillStyle("#ef4444");
+        ctx.beginPath();
+        ctx.arc(activeX, activeY_Rhr, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -367,7 +391,7 @@ function drawBatterySleepChart() {
   const plotH = H - padT - padB;
 
   const getY = (val: number) => padT + plotH * (100 - Math.max(0, Math.min(100, val))) / 100;
-  const getX = (idx: number) => padL + (idx / (data.length - 1)) * plotW;
+  const getX = (idx: number) => padL + (idx / Math.max(1, data.length - 1)) * plotW;
 
   ctx.clearRect(0, 0, W, H);
 
@@ -391,11 +415,18 @@ function drawBatterySleepChart() {
   ctx.setStrokeStyle("#818cf8");
   ctx.setLineWidth(2.2);
   ctx.beginPath();
+  let startedSleep = false;
   data.forEach((item: any, idx: number) => {
-    const x = getX(idx);
-    const y = getY(item.sleep_score);
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (item.sleep_score != null) {
+      const x = getX(idx);
+      const y = getY(item.sleep_score);
+      if (!startedSleep) {
+        ctx.moveTo(x, y);
+        startedSleep = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
   });
   ctx.stroke();
 
@@ -403,11 +434,18 @@ function drawBatterySleepChart() {
   ctx.setStrokeStyle("#eab308");
   ctx.setLineWidth(2.2);
   ctx.beginPath();
+  let startedBattery = false;
   data.forEach((item: any, idx: number) => {
-    const x = getX(idx);
-    const y = getY(item.body_battery);
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (item.body_battery != null) {
+      const x = getX(idx);
+      const y = getY(item.body_battery);
+      if (!startedBattery) {
+        ctx.moveTo(x, y);
+        startedBattery = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
   });
   ctx.stroke();
 
@@ -428,8 +466,6 @@ function drawBatterySleepChart() {
     const idx = data.findIndex((d) => d.date === activeBatteryTooltip.value.date);
     if (idx >= 0) {
       const activeX = getX(idx);
-      const activeY_Sleep = getY(activeBatteryTooltip.value.sleep_score);
-      const activeY_Battery = getY(activeBatteryTooltip.value.body_battery);
 
       // Vertical line
       ctx.setStrokeStyle("rgba(255,255,255,0.4)");
@@ -440,16 +476,22 @@ function drawBatterySleepChart() {
       ctx.stroke();
 
       // Highlight Dot - Sleep (Indigo)
-      ctx.setFillStyle("#818cf8");
-      ctx.beginPath();
-      ctx.arc(activeX, activeY_Sleep, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (activeBatteryTooltip.value.sleep_score != null) {
+        const activeY_Sleep = getY(activeBatteryTooltip.value.sleep_score);
+        ctx.setFillStyle("#818cf8");
+        ctx.beginPath();
+        ctx.arc(activeX, activeY_Sleep, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // Highlight Dot - Battery (Amber)
-      ctx.setFillStyle("#eab308");
-      ctx.beginPath();
-      ctx.arc(activeX, activeY_Battery, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (activeBatteryTooltip.value.body_battery != null) {
+        const activeY_Battery = getY(activeBatteryTooltip.value.body_battery);
+        ctx.setFillStyle("#eab308");
+        ctx.beginPath();
+        ctx.arc(activeX, activeY_Battery, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 

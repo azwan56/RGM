@@ -159,7 +159,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     except Exception as s_err:
                         logger.warning(f"[sync] COROS sleep prefetch error: {s_err}")
 
-                    for i in range(14):
+                    for i in range(30):
                         d = (date.today() - timedelta(days=i)).isoformat()
                         try:
                             h_metrics = coros_adapter.fetch_daily_health_metrics(d)

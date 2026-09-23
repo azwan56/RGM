@@ -80,6 +80,10 @@ class BindClubRequest(BaseModel):
     action: str = "bind"  # "bind" or "unbind"
 
 
+class UpdateOrgMemberRoleRequest(BaseModel):
+    role: str  # 'admin' | 'member'
+    operator_uid: Optional[str] = None
+
 
 @router.post("/verify-code")
 def verify_org_code(req: VerifyOrgCodeRequest):
@@ -345,6 +349,22 @@ def confirm_member_endpoint(org_id: str, target_uid: str, req: Optional[ConfirmM
         return {"success": True, "message": "成员资料核对确认完成！"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{org_id}/members/{target_uid}/role")
+def update_org_member_role_endpoint(org_id: str, target_uid: str, req: UpdateOrgMemberRoleRequest):
+    """
+    Allows Org Owner or Super Admin to appoint or revoke Organization Admin role.
+    """
+    try:
+        ok = LocalStore.update_org_member_role(org_id, target_uid, req.role, req.operator_uid)
+        role_label = "大群管理员" if req.role == "admin" else "普通成员"
+        return {"success": True, "message": f"已成功将该成员角色更新为【{role_label}】！"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[update_org_member_role] failed: {e}")
+        raise HTTPException(status_code=500, detail="调整成员大群角色失败")
 
 
 @router.post("/{org_id}/assign-sub-club")
