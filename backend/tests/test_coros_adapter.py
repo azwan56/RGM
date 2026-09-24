@@ -195,7 +195,7 @@ def test_coros_auth_api_routes(monkeypatch):
     client = TestClient(app)
 
     # 1. Mock CorosAdapter network calls
-    monkeypatch.setattr(CorosAdapter, "login", lambda self: True)
+    monkeypatch.setattr(CorosAdapter, "login", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(CorosAdapter, "fetch_activities_by_date", lambda self, start_date=None, end_date=None: [])
     monkeypatch.setattr(CorosAdapter, "fetch_recent_activities", lambda self, limit=100: [])
     monkeypatch.setattr(CorosAdapter, "fetch_user_profile_info", lambda self: {
@@ -459,6 +459,64 @@ def test_coros_mobile_encryption_and_sleep_data(monkeypatch):
     assert m17["body_battery_max"] == 85
     assert m17["hrv_last_night_avg"] == 69
     assert m17["hrv_status"] == "balanced"  # 69 / 64 = 1.07 within 0.85~1.15
+
+
+def test_coros_login_failure_caching_and_sync_error_reporting(monkeypatch):
+    """
+    Verifies that when COROS credentials fail:
+    1. CorosAdapter sets _login_failed=True and does not repeatedly hammer the remote server.
+    2. sync_single_user accurately returns success=False with clear error message instead of false success.
+    """
+    from routers.sync import sync_single_user
+    from utils.encryption import encrypt_string
+
+    attempt_count = 0
+
+    def mock_post(url, json=None, headers=None, timeout=None):
+        nonlocal attempt_count
+        if "account/login" in url:
+            attempt_count += 1
+            class MockResp:
+                status_code = 200
+                text = '{"result": "1030", "message": "The login credentials you entered do not match our records."}'
+                def json(self):
+                    return {"result": "1030", "message": "The login credentials you entered do not match our records."}
+            return MockResp()
+        raise RuntimeError("Unexpected url")
+
+    import requests
+    monkeypatch.setattr(requests, "post", mock_post)
+
+    adapter = CorosAdapter("bad_user@runner.cn", "wrong_pwd")
+    adapter.access_token = None
+    res1 = adapter.login()
+    assert res1 is False
+    assert adapter._login_failed is True
+    assert "账号或密码不匹配" in adapter.last_error
+    assert attempt_count == 1
+
+    # Calling login again without force must NOT fire another network call
+    res2 = adapter.login()
+    assert res2 is False
+    assert attempt_count == 1
+
+    # Now test sync_single_user with this user
+    test_uid = "u_test_sync_fail_coros"
+    LocalStore.upsert_profile(test_uid, {
+        "id": test_uid,
+        "display_name": "故障测试跑者",
+        "coros_connected": 1,
+        "coros_account": "bad_user@runner.cn",
+        "coros_encrypted_password": encrypt_string("wrong_pwd"),
+        "coros_domain": "teamcnapi.coros.com"
+    })
+
+    sync_res = sync_single_user(test_uid)
+    assert sync_res["success"] is False
+    assert "高驰登录失败" in sync_res["error"]
+
+    # Clean up
+    LocalStore.delete_profile(test_uid)
 
 
 

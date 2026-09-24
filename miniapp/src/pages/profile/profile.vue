@@ -581,14 +581,23 @@
         >
           绑定高驰账号
         </button>
-        <button
-          v-else
-          class="unbind-btn"
-          :loading="unbindingCoros"
-          @click="handleUnbindCoros"
-        >
-          解除高驰绑定
-        </button>
+        <view v-else class="btn-group-row" style="display: flex; gap: 16rpx; margin-top: 8rpx;">
+          <button
+            class="garmin-btn coros-btn"
+            style="flex: 1; margin: 0;"
+            @click="openDeviceModal('coros')"
+          >
+            🔑 重新授权/改密
+          </button>
+          <button
+            class="unbind-btn"
+            style="flex: 1; margin: 0;"
+            :loading="unbindingCoros"
+            @click="handleUnbindCoros"
+          >
+            解除绑定
+          </button>
+        </view>
       </view>
     </view>
 
@@ -4093,6 +4102,15 @@ async function handleUnbindGarmin() {
 
 function openDeviceModal(brand: "garmin" | "coros" = "garmin") {
   selectedBrand.value = brand;
+  if (brand === "coros") {
+    if (corosAccount.value) {
+      inputCorosAccount.value = corosAccount.value;
+    }
+    inputCorosPassword.value = "";
+    if (corosDomain.value) {
+      inputCorosDomain.value = corosDomain.value;
+    }
+  }
   showGarminModal.value = true;
 }
 

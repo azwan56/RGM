@@ -2106,7 +2106,11 @@ async function handleInstantSync() {
     await loadDashboard();
   } catch (e: any) {
     uni.hideLoading();
-    uni.showToast({ title: "同步已触发", icon: "success" });
+    uni.showModal({
+      title: "同步失败",
+      content: e?.message || e?.data?.detail || "网络请求失败，请稍后重试",
+      showCancel: false,
+    });
   } finally {
     syncing.value = false;
   }

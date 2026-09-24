@@ -121,58 +121,66 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                 enc_pwd = user.get("coros_encrypted_password")
                 domain = user.get("coros_domain") or "teamcnapi.coros.com"
                 pwd = decrypt_string(enc_pwd)
-                if pwd:
+                if not pwd:
+                    sync_errors.append("高驰密码解密失败，请重新绑定高驰账号")
+                else:
                     coros_adapter = CorosAdapter(account=account, password=pwd, domain=domain)
-                    try:
-                        c_info = coros_adapter.fetch_user_profile_info()
-                        if c_info.get("avatar_url") and not profile_updates.get("avatar_url"):
-                            profile_updates["avatar_url"] = c_info["avatar_url"]
-                        if c_info.get("display_name") and not user.get("display_name"):
-                            profile_updates["display_name"] = c_info["display_name"]
-                        if c_info.get("weight_kg"):
-                            profile_updates["weight_kg"] = c_info["weight_kg"]
-                        if c_info.get("height_cm"):
-                            profile_updates["height_cm"] = c_info["height_cm"]
-                        if c_info.get("date_of_birth"):
-                            profile_updates["date_of_birth"] = c_info["date_of_birth"]
-                        if c_info.get("gender"):
-                            profile_updates["gender"] = c_info["gender"]
-                        if c_info.get("vo2max"):
-                            profile_updates["vo2max"] = c_info["vo2max"]
-                        if c_info.get("max_heart_rate"):
-                            profile_updates["max_heart_rate"] = c_info["max_heart_rate"]
-                        if c_info.get("resting_heart_rate"):
-                            profile_updates["resting_heart_rate"] = c_info["resting_heart_rate"]
-                    except Exception as pe:
-                        logger.warning(f"[sync] COROS profile fetch error: {pe}")
-
-                    year_start = start_date or f"{date.today().year}-01-01"
-                    c_acts = coros_adapter.fetch_activities_by_date(start_date=year_start)
-                    if not c_acts:
-                        c_acts = coros_adapter.fetch_recent_activities(limit=100)
-                    all_activities.extend(c_acts)
-
-                    try:
-                        t_end = date.today().isoformat()
-                        t_start = (date.today() - timedelta(days=14)).isoformat()
-                        coros_adapter.fetch_sleep_data(t_start, t_end)
-                    except Exception as s_err:
-                        logger.warning(f"[sync] COROS sleep prefetch error: {s_err}")
-
-                    for i in range(30):
-                        d = (date.today() - timedelta(days=i)).isoformat()
+                    # Verify authentication upfront before querying
+                    if not coros_adapter.access_token and not coros_adapter.login():
+                        err_msg = coros_adapter.last_error or "高驰授权凭证失效，请重新绑定"
+                        logger.warning(f"[sync] COROS login failed for {uid}: {err_msg}")
+                        sync_errors.append(f"高驰登录失败: {err_msg}")
+                    else:
                         try:
-                            h_metrics = coros_adapter.fetch_daily_health_metrics(d)
-                            if h_metrics and any(h_metrics.get(k) is not None for k in [
-                                "resting_heart_rate", "sleep_score", "sleep_duration_seconds",
-                                "body_battery_max", "vo2_max", "hrv_last_night_avg"
-                            ]):
-                                LocalStore.upsert_daily_health(uid, h_metrics)
-                                synced_health = True
-                        except Exception as he:
-                            logger.warning(f"[sync] COROS health fetch error on {d} for {uid}: {he}")
+                            c_info = coros_adapter.fetch_user_profile_info()
+                            if c_info.get("avatar_url") and not profile_updates.get("avatar_url"):
+                                profile_updates["avatar_url"] = c_info["avatar_url"]
+                            if c_info.get("display_name") and not user.get("display_name"):
+                                profile_updates["display_name"] = c_info["display_name"]
+                            if c_info.get("weight_kg"):
+                                profile_updates["weight_kg"] = c_info["weight_kg"]
+                            if c_info.get("height_cm"):
+                                profile_updates["height_cm"] = c_info["height_cm"]
+                            if c_info.get("date_of_birth"):
+                                profile_updates["date_of_birth"] = c_info["date_of_birth"]
+                            if c_info.get("gender"):
+                                profile_updates["gender"] = c_info["gender"]
+                            if c_info.get("vo2max"):
+                                profile_updates["vo2max"] = c_info["vo2max"]
+                            if c_info.get("max_heart_rate"):
+                                profile_updates["max_heart_rate"] = c_info["max_heart_rate"]
+                            if c_info.get("resting_heart_rate"):
+                                profile_updates["resting_heart_rate"] = c_info["resting_heart_rate"]
+                        except Exception as pe:
+                            logger.warning(f"[sync] COROS profile fetch error: {pe}")
 
-                    profile_updates["coros_last_sync_at"] = sync_time_iso
+                        year_start = start_date or f"{date.today().year}-01-01"
+                        c_acts = coros_adapter.fetch_activities_by_date(start_date=year_start)
+                        if not c_acts:
+                            c_acts = coros_adapter.fetch_recent_activities(limit=100)
+                        all_activities.extend(c_acts)
+
+                        try:
+                            t_end = date.today().isoformat()
+                            t_start = (date.today() - timedelta(days=14)).isoformat()
+                            coros_adapter.fetch_sleep_data(t_start, t_end)
+                        except Exception as s_err:
+                            logger.warning(f"[sync] COROS sleep prefetch error: {s_err}")
+
+                        for i in range(30):
+                            d = (date.today() - timedelta(days=i)).isoformat()
+                            try:
+                                h_metrics = coros_adapter.fetch_daily_health_metrics(d)
+                                if h_metrics and any(h_metrics.get(k) is not None for k in [
+                                    "resting_heart_rate", "sleep_score", "sleep_duration_seconds",
+                                    "body_battery_max", "vo2_max", "hrv_last_night_avg"
+                                ]):
+                                    LocalStore.upsert_daily_health(uid, h_metrics)
+                                    synced_health = True
+                            except Exception as he:
+                                logger.warning(f"[sync] COROS health fetch error on {d} for {uid}: {he}")
+
+                        profile_updates["coros_last_sync_at"] = sync_time_iso
             except Exception as ce:
                 logger.error(f"[sync] COROS sync error for {uid}: {ce}")
                 sync_errors.append(f"COROS 同步异常: {str(ce)}")

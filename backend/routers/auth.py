@@ -6,7 +6,7 @@ from config import settings
 from db import supabase_admin
 from utils.encryption import encrypt_string, decrypt_string
 from utils.garmin_adapter import GarminAdapter, HAS_GARMINCONNECT
-from utils.coros_adapter import CorosAdapter
+from utils.coros_adapter import CorosAdapter, remove_cached_coros_tokens
 from utils.wechat import wechat_client
 
 logger = logging.getLogger("router_auth")
@@ -732,7 +732,7 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
         domain = "teamcnapi.coros.com"
 
     adapter = CorosAdapter(account=request.account, password=request.password, domain=domain)
-    ok = adapter.login()
+    ok = adapter.login(force=True)
     if not ok:
         err_msg = adapter.last_error or "高驰绑定失败，请检查高驰账号、密码及选择的区域。"
         raise HTTPException(status_code=400, detail=err_msg)
@@ -838,7 +838,12 @@ def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Hea
         except jwt.PyJWTError as e:
             logger.debug(f"[unbind_coros] Token expired or invalid: {e}")
 
-    from utils.local_store import LocalStore
+    # Remove any cached token files on disk
+    try:
+        remove_cached_coros_tokens(target_p.get("coros_account"))
+    except Exception as te:
+        logger.warning(f"[auth] Failed removing cached token file: {te}")
+
     LocalStore.upsert_profile(request.uid, {
         "coros_connected": 0,
         "coros_encrypted_password": "",

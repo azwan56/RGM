@@ -88,6 +88,7 @@ class CorosAdapter:
         self._analyse_cache: Optional[Dict[str, Any]] = None
         self._analyse_cache_time: float = 0
         self._sleep_cache: Dict[str, Dict[str, Any]] = {}
+        self._login_failed: bool = False
         self._mobile_login_failed: bool = False
 
         os.makedirs(TOKEN_DIR, exist_ok=True)
@@ -107,8 +108,8 @@ class CorosAdapter:
                 data = json.load(f)
                 token = data.get("access_token")
                 saved_at = data.get("saved_at", 0)
-                # Tokens usually valid for at least 7-30 days; we use 14 days conservatively
-                if token and (time.time() - saved_at < 14 * 86400):
+                # COROS web tokens are valid for 7 days
+                if token and (time.time() - saved_at < 7 * 86400):
                     self.access_token = token
                     self.user_id = data.get("user_id")
                     self.nick_name = data.get("nick_name")
@@ -288,12 +289,15 @@ class CorosAdapter:
             headers["cookie"] = f"CPL-coros-region=2; CPL-coros-token={self.access_token}"
         return headers
 
-    def login(self) -> bool:
+    def login(self, force: bool = False) -> bool:
         """
         Logs into COROS Training Hub with MD5 encrypted password.
-        Uses cached token if available and tests validity.
+        Uses cached token if available and tests validity (unless force=True).
         """
-        if self.access_token:
+        if self._login_failed and not force:
+            return False
+
+        if not force and self.access_token:
             # Verify cached token with lightweight query
             if self._verify_token():
                 logger.info(f"[coros] Using valid cached token for {self.account}")
@@ -301,6 +305,12 @@ class CorosAdapter:
                 return True
             else:
                 logger.info(f"[coros] Cached token expired for {self.account}, re-authenticating...")
+                self.access_token = None
+                try:
+                    if os.path.exists(self.token_path):
+                        os.remove(self.token_path)
+                except Exception:
+                    pass
 
         login_url = f"{self.base_url}/account/login"
         # COROS requires MD5 of password
@@ -317,6 +327,7 @@ class CorosAdapter:
             if resp.status_code != 200:
                 self.last_error = f"COROS 登录接口返回 HTTP {resp.status_code}"
                 logger.error(f"[coros] Login failed HTTP {resp.status_code}: {resp.text}")
+                self._login_failed = True
                 return False
 
             res_json = resp.json()
@@ -324,8 +335,15 @@ class CorosAdapter:
             result_code = str(res_json.get("result", ""))
             if result_code != "0000":
                 msg = res_json.get("message") or "账号或密码错误"
+                if result_code == "1030":
+                    msg = "账号或密码不匹配，请核对您的高驰登录密码"
+                elif result_code == "2018":
+                    msg = "密码错误次数超限被高驰安全锁定，请稍后15-30分钟再试，或在COROS App重置密码"
+                elif result_code == "1029":
+                    msg = "该账号未在高驰注册"
                 self.last_error = f"高驰登录失败：{msg}"
                 logger.warning(f"[coros] Login rejected: {res_json}")
+                self._login_failed = True
                 return False
 
             data = res_json.get("data") or {}
@@ -336,14 +354,17 @@ class CorosAdapter:
 
             if not self.access_token:
                 self.last_error = "登录成功但未能解析到访问凭证 (accessToken)"
+                self._login_failed = True
                 return False
 
             self._save_cached_token()
             self.last_error = None
+            self._login_failed = False
             logger.info(f"[coros] Login success for {self.account}, userId={self.user_id}")
             return True
         except Exception as e:
             self.last_error = f"连接高驰服务器失败: {str(e)}"
+            self._login_failed = True
             logger.error(f"[coros] Login exception for {self.account}: {e}")
             return False
 
@@ -1041,3 +1062,19 @@ class CorosAdapter:
             logger.warning(f"[coros] Error fetching fallback profile info: {pe}")
 
         return metrics
+
+
+def remove_cached_coros_tokens(account: Optional[str]):
+    """Removes any cached COROS web and mobile token files for the given account."""
+    if not account:
+        return
+    safe_acc = account.replace("@", "_at_").replace(".", "_").replace("+", "_")
+    for region_str in ["cn", "global", "eu"]:
+        for prefix in ["tokens_coros_", "tokens_coros_mobile_"]:
+            p = os.path.join(TOKEN_DIR, f"{prefix}{safe_acc}_{region_str}.json")
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                    logger.info(f"[coros] Removed cached token file: {p}")
+                except Exception as e:
+                    logger.warning(f"[coros] Could not remove token file {p}: {e}")
