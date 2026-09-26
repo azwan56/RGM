@@ -13,7 +13,236 @@ logger = logging.getLogger("garmin_adapter")
 
 try:
     from garminconnect import Garmin
+    import garminconnect.client as gc_client
     HAS_GARMINCONNECT = True
+
+    def _patch_garminconnect():
+        """
+        Hot-patches garminconnect (0.3.x) to support Garmin China (garmin.cn):
+        1. Makes DI_TOKEN_URL domain-aware (diauth.garmin.cn vs diauth.garmin.com).
+        2. Fixes _establish_session so unresolvable mobile.integration.garmin.com
+           does not trigger a DNS crash during JWT_WEB fallback.
+        3. Adds explicit handling for ACCOUNT_LOCKED in mobile SSO login.
+        4. Makes locale zh-CN for garmin.cn accounts.
+        """
+        if getattr(gc_client, "_rgm_cn_patched", False):
+            return
+
+        orig_exchange = gc_client.Client._exchange_service_ticket
+        orig_refresh = gc_client.Client._refresh_di_token
+        orig_establish = gc_client.Client._establish_session
+        orig_mobile_login = gc_client.Client._do_mobile_login
+
+        def patched_exchange(self, ticket: str, service_url: str | None = None) -> None:
+            svc_url = service_url or gc_client.MOBILE_SSO_SERVICE_URL
+            di_token_url = f"https://diauth.{self.domain}/di-oauth2-service/oauth/token"
+            di_grant_type = (
+                "https://connectapi.garmin.com/di-oauth2-service/oauth/grant/service_ticket"
+            )
+
+            di_token = None
+            di_refresh = None
+            di_client_id = None
+
+            for client_id in gc_client.DI_CLIENT_IDS:
+                r = self._http_post(
+                    di_token_url,
+                    headers=gc_client._native_headers(
+                        {
+                            "Authorization": gc_client._build_basic_auth(client_id),
+                            "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
+                            "Content-Type": "application/x-www-form-urlencoded",
+                            "Cache-Control": "no-cache",
+                        }
+                    ),
+                    data={
+                        "client_id": client_id,
+                        "service_ticket": ticket,
+                        "grant_type": di_grant_type,
+                        "service_url": svc_url,
+                    },
+                    timeout=30,
+                )
+                if r.status_code == 429:
+                    raise gc_client.GarminConnectTooManyRequestsError(
+                        "DI token exchange rate limited"
+                    )
+                if not r.ok:
+                    gc_client._LOGGER.debug(
+                        "DI exchange failed for %s: %s %s",
+                        client_id,
+                        r.status_code,
+                        r.text[:200],
+                    )
+                    continue
+                try:
+                    data = r.json()
+                    di_token = data["access_token"]
+                    di_refresh = data.get("refresh_token")
+                    di_client_id = self._extract_client_id_from_jwt(di_token) or client_id
+                    break
+                except Exception as e:
+                    gc_client._LOGGER.debug("DI token parse failed for %s: %s", client_id, e)
+                    continue
+
+            if not di_token:
+                raise gc_client.GarminConnectAuthenticationError(
+                    "DI token exchange failed for all client IDs"
+                )
+
+            self.di_token = di_token
+            self.di_refresh_token = di_refresh
+            self.di_client_id = di_client_id
+
+        def patched_refresh(self) -> None:
+            if not self.di_refresh_token or not self.di_client_id:
+                raise gc_client.GarminConnectAuthenticationError("No DI refresh token available")
+            di_token_url = f"https://diauth.{self.domain}/di-oauth2-service/oauth/token"
+            r = self._http_post(
+                di_token_url,
+                headers=gc_client._native_headers(
+                    {
+                        "Authorization": gc_client._build_basic_auth(self.di_client_id),
+                        "Accept": "application/json",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Cache-Control": "no-cache",
+                    }
+                ),
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.di_client_id,
+                    "refresh_token": self.di_refresh_token,
+                },
+                timeout=30,
+            )
+            if not r.ok:
+                raise gc_client.GarminConnectAuthenticationError(
+                    f"DI token refresh failed: {r.status_code} {r.text[:200]}"
+                )
+            data = r.json()
+            self.di_token = data["access_token"]
+            self.di_refresh_token = data.get("refresh_token", self.di_refresh_token)
+            self.di_client_id = (
+                self._extract_client_id_from_jwt(self.di_token) or self.di_client_id
+            )
+
+        def patched_establish(
+            self, ticket: str, sess: Any = None, service_url: str | None = None
+        ) -> None:
+            try:
+                self._exchange_service_ticket(ticket, service_url=service_url)
+                return
+            except Exception as e:
+                gc_client._LOGGER.warning(
+                    "DI token exchange failed (%s), falling back to JWT_WEB", e
+                )
+
+            if sess is not None:
+                self.cs = sess
+
+            svc = service_url or self._portal_service_url
+            if "mobile.integration.garmin.com" in (svc or ""):
+                svc = self._portal_service_url
+
+            try:
+                self.cs.get(
+                    svc,
+                    params={"ticket": ticket},
+                    allow_redirects=True,
+                    timeout=30,
+                )
+            except Exception as ge:
+                gc_client._LOGGER.warning("JWT_WEB consumption GET failed: %s", ge)
+
+            jwt_web = None
+            for c in self.cs.cookies.jar:
+                if c.name == "JWT_WEB":
+                    jwt_web = c.value
+                    break
+
+            if not jwt_web:
+                raise gc_client.GarminConnectAuthenticationError(
+                    "JWT_WEB cookie not set after ticket consumption"
+                )
+            self.jwt_web = jwt_web
+
+        def patched_mobile_login(self, sess: Any, email: str, password: str) -> None:
+            login_url = f"{self._sso}/mobile/api/login"
+            login_params = {
+                "clientId": gc_client.IOS_SSO_CLIENT_ID,
+                "locale": "zh-CN" if self.domain == "garmin.cn" else "en-US",
+                "service": gc_client.IOS_SERVICE_URL,
+            }
+            login_headers = {
+                "User-Agent": gc_client.IOS_LOGIN_UA,
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Origin": self._sso,
+            }
+            r = sess.post(
+                login_url,
+                params=login_params,
+                headers=login_headers,
+                json={
+                    "username": email,
+                    "password": password,
+                    "rememberMe": True,
+                    "captchaToken": "",
+                },
+                timeout=30,
+            )
+            if r.status_code == 429:
+                raise gc_client.GarminConnectTooManyRequestsError(
+                    "Mobile login returned 429 — IP rate limited by Garmin"
+                )
+            try:
+                res = r.json()
+            except Exception as err:
+                raise gc_client.GarminConnectConnectionError(
+                    f"Mobile login failed (non-JSON): HTTP {r.status_code}"
+                ) from err
+
+            resp_type = res.get("responseStatus", {}).get("type")
+            if resp_type == "MFA_REQUIRED":
+                self._mfa_method = res.get("customerMfaInfo", {}).get(
+                    "mfaLastMethodUsed", "email"
+                )
+                self._mfa_session = sess
+                self._mfa_login_params = login_params
+                self._mfa_post_headers = login_headers
+                self._mfa_service_url = gc_client.IOS_SERVICE_URL
+                self._mfa_flow = "ios"
+                raise gc_client._MFARequired()
+
+            if resp_type == "SUCCESSFUL":
+                ticket = res["serviceTicketId"]
+                self._establish_session(ticket, sess=sess, service_url=gc_client.IOS_SERVICE_URL)
+                return
+
+            if resp_type == "INVALID_USERNAME_PASSWORD":
+                raise gc_client.GarminConnectAuthenticationError(
+                    "401 Unauthorized (Invalid Username or Password)"
+                )
+
+            if resp_type == "ACCOUNT_LOCKED":
+                raise gc_client.GarminConnectAuthenticationError(
+                    "账号已被锁定，请前往 Garmin 官网重置密码或解锁后再试"
+                )
+
+            if res.get("error", {}).get("status-code") == "429":
+                raise gc_client.GarminConnectTooManyRequestsError("Mobile login: 429 in JSON body")
+
+            raise gc_client.GarminConnectConnectionError(f"Mobile login failed: {res}")
+
+        gc_client.Client._exchange_service_ticket = patched_exchange
+        gc_client.Client._refresh_di_token = patched_refresh
+        gc_client.Client._establish_session = patched_establish
+        gc_client.Client._do_mobile_login = patched_mobile_login
+        gc_client._rgm_cn_patched = True
+        logger.info("[garmin] Successfully patched garminconnect client for China & Global SSO support")
+
+    _patch_garminconnect()
+
 except ImportError:
     Garmin = None
     HAS_GARMINCONNECT = False
@@ -54,6 +283,22 @@ class GarminAdapter:
         safe_email = self.email.replace("@", "_at_").replace(".", "_")
         self.token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if self.is_cn else 'global'}.json")
 
+    @staticmethod
+    def _format_error(err: str, chosen_domain: str) -> str:
+        err_lower = err.lower()
+        if "locked" in err_lower or "account_locked" in err_lower:
+            return "佳明账号已被锁定，请前往 Garmin 官网解锁或重置密码后再试。"
+        elif "429" in err or "rate limit" in err_lower:
+            return "佳明官方安全风控拦截（尝试过于频繁），请等待 2~3 分钟后再试。"
+        elif "401" in err or "unauthorized" in err_lower or "invalid username or password" in err_lower:
+            region_hint = "中国版 (garmin.cn)" if "cn" in chosen_domain else "国际版 (garmin.com)"
+            return f"佳明账号或密码错误。您当前选择的是【{region_hint}】，如手表购自海外或账号不同区域请核对后重试。"
+        elif "403" in err or "portal login failed" in err_lower:
+            return "佳明官方服务器安全策略拦截 (HTTP 403)。如果您使用的是国内购买的手表，请务必选择【中国版 (garmin.cn)】"
+        elif "jwt_web" in err_lower or "cookie not set" in err_lower:
+            return "佳明登录凭证解析失败，请检查账号密码或稍后重试。"
+        return err
+
     def login(self, use_token: bool = True) -> bool:
         """Logs into Garmin Connect with MFA awareness, automatic region fallback & OAuth token caching."""
         if not HAS_GARMINCONNECT:
@@ -72,6 +317,14 @@ class GarminAdapter:
                 self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
                 return False
 
+            # Persist tokens to disk on success
+            if hasattr(self.client, "client") and hasattr(self.client.client, "dump"):
+                try:
+                    self.client.client.dump(self.token_path)
+                    logger.info(f"[garmin] Successfully saved tokens to {self.token_path}")
+                except Exception as de:
+                    logger.warning(f"[garmin] Failed to dump tokens: {de}")
+
             logger.info(f"[garmin] Login successful for {self.email} on is_cn={self.is_cn}")
             self.last_error = None
             self.needs_mfa = False
@@ -85,8 +338,16 @@ class GarminAdapter:
                 self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
                 return False
 
+            # Only attempt alternate region fallback if error indicates invalid credentials / account region mismatch
+            # Do NOT fall back on 429 rate limit or locked account
+            is_cred_error = any(k in err1.lower() for k in ("401", "unauthorized", "invalid username or password"))
+            if not is_cred_error:
+                self.last_error = self._format_error(err1, self.domain)
+                return False
+
             # Attempt 2: Try alternate region fallback
             alt_is_cn = not self.is_cn
+            alt_domain = "garmin.cn" if alt_is_cn else "garmin.com"
             safe_email = self.email.replace("@", "_at_").replace(".", "_")
             alt_token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if alt_is_cn else 'global'}.json")
             try:
@@ -98,16 +359,23 @@ class GarminAdapter:
                     logger.info(f"[garmin] MFA Required for {self.email} on alternate is_cn={alt_is_cn}")
                     self.client = alt_client
                     self.is_cn = alt_is_cn
-                    self.domain = "garmin.cn" if alt_is_cn else "garmin.com"
+                    self.domain = alt_domain
                     self.token_path = alt_token_path
                     self.needs_mfa = True
                     self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
                     return False
 
+                if hasattr(alt_client, "client") and hasattr(alt_client.client, "dump"):
+                    try:
+                        alt_client.client.dump(alt_token_path)
+                        logger.info(f"[garmin] Successfully saved tokens to {alt_token_path}")
+                    except Exception as de:
+                        logger.warning(f"[garmin] Failed to dump tokens: {de}")
+
                 logger.info(f"[garmin] Fallback login successful for {self.email} on is_cn={alt_is_cn}")
                 self.client = alt_client
                 self.is_cn = alt_is_cn
-                self.domain = "garmin.cn" if alt_is_cn else "garmin.com"
+                self.domain = alt_domain
                 self.token_path = alt_token_path
                 self.last_error = None
                 self.needs_mfa = False
@@ -115,14 +383,8 @@ class GarminAdapter:
             except Exception as e2:
                 err2 = str(e2)
                 logger.error(f"[garmin] Alternate region (is_cn={alt_is_cn}) also failed for {self.email}: {err2}")
-                if "429" in err1 or "rate limit" in err1.lower():
-                    self.last_error = "佳明官方安全风控拦截（尝试过于频繁），请等待 2~3 分钟后再试。"
-                elif "401" in err1 or "unauthorized" in err1.lower():
-                    self.last_error = "佳明账号或密码错误。国内购买手表或使用中国版 Connect App 请选【中国版 (garmin.cn)】，海外账号请选【国际版 (garmin.com)】。"
-                elif "403" in err1 or "Portal login failed" in err1:
-                    self.last_error = "佳明官方服务器安全策略拦截 (HTTP 403)。如果您使用的是国内购买的手表，请选择【中国版 (garmin.cn)】"
-                else:
-                    self.last_error = err1
+                # Prefer primary region's error context
+                self.last_error = self._format_error(err1, self.domain)
                 return False
 
     def complete_mfa(self, mfa_code: str) -> bool:
