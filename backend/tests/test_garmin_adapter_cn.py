@@ -52,8 +52,11 @@ def test_garmin_adapter_cn_token_url():
 
         client._exchange_service_ticket("ST-123-ticket", service_url="https://mobile.integration.garmin.com/gcm/ios")
 
-        # Verify that the URL posted to is diauth.garmin.cn
+        # Verify that the URL posted to is diauth.garmin.cn and client_id is IOS
         assert mock_post.called
         call_url = mock_post.call_args[0][0]
         assert "diauth.garmin.cn" in call_url
+        call_data = mock_post.call_args[1]["data"]
+        assert call_data["client_id"] == "GARMIN_CONNECT_MOBILE_IOS_DI"
         assert client.di_token == "dummy.eyJzdWIiOiIxMjMifQ.sig"
+

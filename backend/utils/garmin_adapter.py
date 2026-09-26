@@ -18,160 +18,102 @@ try:
 
     def _patch_garminconnect():
         """
-        Hot-patches garminconnect (0.3.x) to support Garmin China (garmin.cn):
-        1. Makes DI_TOKEN_URL domain-aware (diauth.garmin.cn vs diauth.garmin.com).
-        2. Fixes _establish_session so unresolvable mobile.integration.garmin.com
-           does not trigger a DNS crash during JWT_WEB fallback.
-        3. Adds explicit handling for ACCOUNT_LOCKED in mobile SSO login.
-        4. Makes locale zh-CN for garmin.cn accounts.
+        Hot-patches garminconnect client to properly support Garmin China (garmin.cn) & Global (garmin.com):
+        1. Ensures domain-aware URLs:
+           - self._di_token_url = f"https://diauth.{self.domain}/di-oauth2-service/oauth/token"
+           - self._ios_service_url = f"https://mobile.integration.{self.domain}/gcm/ios"
+           - self._mobile_sso_service_url = f"https://mobile.integration.{self.domain}/gcm/android"
+           - self._portal_service_url = f"https://connect.{self.domain}/app"
+        2. Correctly matches DI client ID with the ticket's service_url:
+           - When service_url contains '/ios', uses GARMIN_CONNECT_MOBILE_IOS_DI first to avoid burning single-use CAS ticket.
+           - When service_url contains '/android', uses GARMIN_CONNECT_MOBILE_ANDROID_DI_* first.
+        3. Avoids unresolvable mobile.integration hostnames during session establishment fallback.
+        4. Detects ACCOUNT_LOCKED explicitly and provides clean error messages.
         """
         if getattr(gc_client, "_rgm_cn_patched", False):
             return
 
-        orig_exchange = gc_client.Client._exchange_service_ticket
-        orig_refresh = gc_client.Client._refresh_di_token
-        orig_establish = gc_client.Client._establish_session
-        orig_mobile_login = gc_client.Client._do_mobile_login
-
         def patched_exchange(self, ticket: str, service_url: str | None = None) -> None:
-            svc_url = service_url or gc_client.MOBILE_SSO_SERVICE_URL
-            di_token_url = f"https://diauth.{self.domain}/di-oauth2-service/oauth/token"
-            di_grant_type = (
-                "https://connectapi.garmin.com/di-oauth2-service/oauth/grant/service_ticket"
-            )
+            svc_url = service_url or getattr(self, "_mobile_sso_service_url", f"https://mobile.integration.{self.domain}/gcm/android")
+            di_token_url = getattr(self, "_di_token_url", f"https://diauth.{self.domain}/di-oauth2-service/oauth/token")
+            di_grant_type = "https://connectapi.garmin.com/di-oauth2-service/oauth/grant/service_ticket"
+
+            # Sort client IDs so we match the ticket's issuing service
+            # CAS service tickets are single-use; trying an incompatible client ID invalidates the ticket!
+            client_ids = list(gc_client.DI_CLIENT_IDS)
+            if "ios" in (svc_url or "").lower():
+                client_ids.sort(key=lambda cid: 0 if "IOS" in cid else 1)
+            else:
+                client_ids.sort(key=lambda cid: 0 if "ANDROID" in cid else 1)
 
             di_token = None
             di_refresh = None
             di_client_id = None
+            last_err = None
 
-            for client_id in gc_client.DI_CLIENT_IDS:
-                r = self._http_post(
-                    di_token_url,
-                    headers=gc_client._native_headers(
-                        {
-                            "Authorization": gc_client._build_basic_auth(client_id),
-                            "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
-                            "Content-Type": "application/x-www-form-urlencoded",
-                            "Cache-Control": "no-cache",
-                        }
-                    ),
-                    data={
-                        "client_id": client_id,
-                        "service_ticket": ticket,
-                        "grant_type": di_grant_type,
-                        "service_url": svc_url,
-                    },
-                    timeout=30,
-                )
-                if r.status_code == 429:
-                    raise gc_client.GarminConnectTooManyRequestsError(
-                        "DI token exchange rate limited"
+            for client_id in client_ids:
+                try:
+                    r = self._http_post(
+                        di_token_url,
+                        headers=gc_client._native_headers(
+                            {
+                                "Authorization": gc_client._build_basic_auth(client_id),
+                                "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
+                                "Content-Type": "application/x-www-form-urlencoded",
+                                "Cache-Control": "no-cache",
+                            }
+                        ),
+                        data={
+                            "client_id": client_id,
+                            "service_ticket": ticket,
+                            "grant_type": di_grant_type,
+                            "service_url": svc_url,
+                        },
+                        timeout=30,
                     )
-                if not r.ok:
-                    gc_client._LOGGER.debug(
-                        "DI exchange failed for %s: %s %s",
-                        client_id,
-                        r.status_code,
-                        r.text[:200],
-                    )
+                except Exception as post_err:
+                    logger.warning(f"[garmin] POST to {di_token_url} failed: {post_err}")
+                    last_err = post_err
                     continue
+
+                if r.status_code == 429:
+                    raise gc_client.GarminConnectTooManyRequestsError("DI token exchange rate limited (429)")
+
+                if not r.ok:
+                    logger.warning(
+                        f"[garmin] DI exchange failed for {client_id} (svc_url={svc_url}): {r.status_code} {r.text[:250]}"
+                    )
+                    last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+                    continue
+
                 try:
                     data = r.json()
                     di_token = data["access_token"]
                     di_refresh = data.get("refresh_token")
                     di_client_id = self._extract_client_id_from_jwt(di_token) or client_id
+                    logger.info(f"[garmin] Successfully exchanged DI token using {client_id}")
                     break
                 except Exception as e:
-                    gc_client._LOGGER.debug("DI token parse failed for %s: %s", client_id, e)
+                    logger.warning(f"[garmin] DI token JSON parse failed for {client_id}: {e}")
+                    last_err = e
                     continue
 
             if not di_token:
                 raise gc_client.GarminConnectAuthenticationError(
-                    "DI token exchange failed for all client IDs"
+                    f"DI token exchange failed for all client IDs ({last_err})"
                 )
 
             self.di_token = di_token
             self.di_refresh_token = di_refresh
             self.di_client_id = di_client_id
 
-        def patched_refresh(self) -> None:
-            if not self.di_refresh_token or not self.di_client_id:
-                raise gc_client.GarminConnectAuthenticationError("No DI refresh token available")
-            di_token_url = f"https://diauth.{self.domain}/di-oauth2-service/oauth/token"
-            r = self._http_post(
-                di_token_url,
-                headers=gc_client._native_headers(
-                    {
-                        "Authorization": gc_client._build_basic_auth(self.di_client_id),
-                        "Accept": "application/json",
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Cache-Control": "no-cache",
-                    }
-                ),
-                data={
-                    "grant_type": "refresh_token",
-                    "client_id": self.di_client_id,
-                    "refresh_token": self.di_refresh_token,
-                },
-                timeout=30,
-            )
-            if not r.ok:
-                raise gc_client.GarminConnectAuthenticationError(
-                    f"DI token refresh failed: {r.status_code} {r.text[:200]}"
-                )
-            data = r.json()
-            self.di_token = data["access_token"]
-            self.di_refresh_token = data.get("refresh_token", self.di_refresh_token)
-            self.di_client_id = (
-                self._extract_client_id_from_jwt(self.di_token) or self.di_client_id
-            )
-
-        def patched_establish(
-            self, ticket: str, sess: Any = None, service_url: str | None = None
-        ) -> None:
-            try:
-                self._exchange_service_ticket(ticket, service_url=service_url)
-                return
-            except Exception as e:
-                gc_client._LOGGER.warning(
-                    "DI token exchange failed (%s), falling back to JWT_WEB", e
-                )
-
-            if sess is not None:
-                self.cs = sess
-
-            svc = service_url or self._portal_service_url
-            if "mobile.integration.garmin.com" in (svc or ""):
-                svc = self._portal_service_url
-
-            try:
-                self.cs.get(
-                    svc,
-                    params={"ticket": ticket},
-                    allow_redirects=True,
-                    timeout=30,
-                )
-            except Exception as ge:
-                gc_client._LOGGER.warning("JWT_WEB consumption GET failed: %s", ge)
-
-            jwt_web = None
-            for c in self.cs.cookies.jar:
-                if c.name == "JWT_WEB":
-                    jwt_web = c.value
-                    break
-
-            if not jwt_web:
-                raise gc_client.GarminConnectAuthenticationError(
-                    "JWT_WEB cookie not set after ticket consumption"
-                )
-            self.jwt_web = jwt_web
-
         def patched_mobile_login(self, sess: Any, email: str, password: str) -> None:
+            ios_svc_url = getattr(self, "_ios_service_url", f"https://mobile.integration.{self.domain}/gcm/ios")
             login_url = f"{self._sso}/mobile/api/login"
             login_params = {
                 "clientId": gc_client.IOS_SSO_CLIENT_ID,
-                "locale": "zh-CN" if self.domain == "garmin.cn" else "en-US",
-                "service": gc_client.IOS_SERVICE_URL,
+                "locale": "zh-CN" if "cn" in self.domain else "en-US",
+                "service": ios_svc_url,
             }
             login_headers = {
                 "User-Agent": gc_client.IOS_LOGIN_UA,
@@ -210,13 +152,14 @@ try:
                 self._mfa_session = sess
                 self._mfa_login_params = login_params
                 self._mfa_post_headers = login_headers
-                self._mfa_service_url = gc_client.IOS_SERVICE_URL
+                self._mfa_service_url = ios_svc_url
                 self._mfa_flow = "ios"
                 raise gc_client._MFARequired()
 
             if resp_type == "SUCCESSFUL":
                 ticket = res["serviceTicketId"]
-                self._establish_session(ticket, sess=sess, service_url=gc_client.IOS_SERVICE_URL)
+                logger.info(f"[garmin] Mobile login got serviceTicketId for {email} on {self.domain}")
+                self._establish_session(ticket, sess=sess, service_url=ios_svc_url)
                 return
 
             if resp_type == "INVALID_USERNAME_PASSWORD":
@@ -234,8 +177,45 @@ try:
 
             raise gc_client.GarminConnectConnectionError(f"Mobile login failed: {res}")
 
+        def patched_establish(
+            self, ticket: str, sess: Any = None, service_url: str | None = None
+        ) -> None:
+            try:
+                self._exchange_service_ticket(ticket, service_url=service_url)
+                return
+            except Exception as e:
+                logger.warning(f"[garmin] DI token exchange failed ({e}), checking JWT_WEB fallback")
+
+            if sess is not None:
+                self.cs = sess
+
+            svc = service_url or getattr(self, "_portal_service_url", f"https://connect.{self.domain}/app")
+            if "mobile.integration" in (svc or ""):
+                svc = getattr(self, "_portal_service_url", f"https://connect.{self.domain}/app")
+
+            try:
+                self.cs.get(
+                    svc,
+                    params={"ticket": ticket},
+                    allow_redirects=True,
+                    timeout=30,
+                )
+            except Exception as ge:
+                logger.warning(f"[garmin] JWT_WEB consumption GET failed: {ge}")
+
+            jwt_web = None
+            for c in self.cs.cookies.jar:
+                if c.name == "JWT_WEB":
+                    jwt_web = c.value
+                    break
+
+            if not jwt_web:
+                raise gc_client.GarminConnectAuthenticationError(
+                    "JWT_WEB cookie not set after ticket consumption"
+                )
+            self.jwt_web = jwt_web
+
         gc_client.Client._exchange_service_ticket = patched_exchange
-        gc_client.Client._refresh_di_token = patched_refresh
         gc_client.Client._establish_session = patched_establish
         gc_client.Client._do_mobile_login = patched_mobile_login
         gc_client._rgm_cn_patched = True
