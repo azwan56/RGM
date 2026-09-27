@@ -463,8 +463,8 @@
     </view>
 
     <!-- ── Member & Coach Management Modal (跑团成员与指定教练管理) ── -->
-    <view v-if="showMembersModal" class="modal-mask" @click="showMembersModal = false" @touchmove.stop.prevent>
-      <view class="modal-content large-modal" @click.stop>
+    <view v-if="showMembersModal" class="modal-mask" @click="showMembersModal = false">
+      <view class="modal-content large-modal" @click.stop @touchmove.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">跑团成员与指定教练</text>
@@ -603,8 +603,8 @@
     </view>
 
     <!-- ── All Clubs Modal (浏览与切换全部跑团) ── -->
-    <view v-if="showAllClubsModal" class="modal-mask" @click="showAllClubsModal = false" @touchmove.stop.prevent>
-      <view class="modal-content large-modal" @click.stop>
+    <view v-if="showAllClubsModal" class="modal-mask" @click="showAllClubsModal = false">
+      <view class="modal-content large-modal" @click.stop @touchmove.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">跑团切换与浏览</text>
@@ -631,7 +631,7 @@
           </view>
         </view>
 
-        <view class="modal-body modal-scroll">
+        <scroll-view scroll-y class="modal-body modal-scroll">
           <view v-if="displayedClubs.length === 0" class="empty-clubs-text">
             {{ clubModalTab === 'joined' ? '您尚未加入任何跑团，请切换至“平台全部”选择加入！' : '平台暂无其他已创建跑团。' }}
           </view>
@@ -683,13 +683,13 @@
               </view>
             </view>
           </view>
-        </view>
+        </scroll-view>
       </view>
     </view>
 
     <!-- ── 1. Join Grand Organization Modal (大群体实名认证资料弹窗) ── -->
-    <view v-if="showOrgJoinModal" class="modal-mask" @click="showOrgJoinModal = false" @touchmove.stop.prevent>
-      <view class="modal-content large-modal" @click.stop>
+    <view v-if="showOrgJoinModal" class="modal-mask" @click="showOrgJoinModal = false">
+      <view class="modal-content large-modal org-join-modal-dialog" @click.stop @touchmove.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
@@ -698,7 +698,7 @@
           <text class="close-btn" @click="showOrgJoinModal = false">✕</text>
         </view>
 
-        <view class="modal-body org-form-body">
+        <scroll-view scroll-y class="modal-body org-form-scroll" :scroll-with-animation="true" :enable-back-to-top="true">
           <view class="privacy-security-notice">
             <view class="privacy-badge-row">
               <text class="privacy-badge-icon">🛡️</text>
@@ -715,7 +715,9 @@
             <input
               class="text-input"
               type="text"
-              placeholder="请输入大群体专属邀请码"
+              :adjust-position="true"
+              :cursor-spacing="35"
+              placeholder="请输入大群体专属邀请码 (如: FDGOBI)"
               v-model="orgJoinForm.invite_code"
             />
           </view>
@@ -730,6 +732,8 @@
                 class="text-input secure-input"
                 :password="!showOrgRealName"
                 type="text"
+                :adjust-position="true"
+                :cursor-spacing="35"
                 placeholder="请填写真实姓名以便管理员核实"
                 v-model="orgJoinForm.real_name"
               />
@@ -791,6 +795,8 @@
                 :password="!showOrgIdCard"
                 type="text"
                 maxlength="18"
+                :adjust-position="true"
+                :cursor-spacing="35"
                 placeholder="用于赛事保险投保与参赛资格核验"
                 v-model="orgJoinForm.id_card"
               />
@@ -822,6 +828,8 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="例如: 23春 / 21级 / 18班 / 2022秋"
               v-model="orgJoinForm.class_detail"
             />
@@ -905,6 +913,8 @@
                 :password="!showOrgPhone"
                 type="number"
                 maxlength="11"
+                :adjust-position="true"
+                :cursor-spacing="35"
                 placeholder="便于紧急联络与赛事活动通知"
                 v-model="orgJoinForm.phone"
               />
@@ -919,6 +929,8 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="例如: 张三 13800000000"
               v-model="orgJoinForm.emergency_contact"
             />
@@ -929,6 +941,8 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="例如: 42 / 42.5"
               v-model="orgJoinForm.running_shoe_size"
             />
@@ -939,6 +953,8 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="例如: M / L / XL / 2XL"
               v-model="orgJoinForm.jersey_size"
             />
@@ -949,6 +965,8 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="例如: 3:25:00"
               v-model="orgJoinForm.full_marathon_pb"
             />
@@ -959,11 +977,15 @@
             <input
               class="text-input"
               type="text"
+              :adjust-position="true"
+              :cursor-spacing="35"
               placeholder="本人确认身体健康，无不适合高强度跑步的疾病"
               v-model="orgJoinForm.health_declaration"
             />
           </view>
+        </scroll-view>
 
+        <view class="modal-footer org-modal-footer">
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
             {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入大群体" }}
           </button>
@@ -972,8 +994,8 @@
     </view>
 
     <!-- ── 2. Sub Clubs Modal (下属跑团列表弹窗) ── -->
-    <view v-if="showSubClubsModal" class="modal-mask" @click="showSubClubsModal = false" @touchmove.stop.prevent>
-      <view class="modal-content large-modal" @click.stop>
+    <view v-if="showSubClubsModal" class="modal-mask" @click="showSubClubsModal = false">
+      <view class="modal-content large-modal" @click.stop @touchmove.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">【{{ currentOrg?.name || '大组织' }}】下属分跑团</text>
@@ -982,7 +1004,7 @@
           <text class="close-btn" @click="showSubClubsModal = false">✕</text>
         </view>
 
-        <view class="modal-body modal-scroll">
+        <scroll-view scroll-y class="modal-body modal-scroll">
           <view v-if="orgSubClubs.length === 0" class="empty-clubs-text">
             该大群体下暂无分跑团，请联系平台管理员创建！
           </view>
@@ -1027,13 +1049,13 @@
               </view>
             </view>
           </view>
-        </view>
+        </scroll-view>
       </view>
     </view>
 
     <!-- ── 3. Grand Community Roster Modal (大群体戈友花名册) ── -->
-    <view v-if="showOrgMembersModal" class="modal-mask" @click="showOrgMembersModal = false" @touchmove.stop.prevent>
-      <view class="modal-content large-modal" @click.stop>
+    <view v-if="showOrgMembersModal" class="modal-mask" @click="showOrgMembersModal = false">
+      <view class="modal-content large-modal" @click.stop @touchmove.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">【{{ currentOrg?.name }}】戈友花名册</text>
@@ -1667,14 +1689,22 @@ async function submitOrgJoin() {
     uni.showToast({ title: "请输入邀请码", icon: "none" });
     return;
   }
+  if (!orgJoinForm.value.real_name.trim()) {
+    uni.showToast({ title: "请填写真实姓名", icon: "none" });
+    return;
+  }
+  if (!orgJoinForm.value.date_of_birth.trim()) {
+    uni.showToast({ title: "请选择出生日期", icon: "none" });
+    return;
+  }
 
   const computedGobi = orgJoinForm.value.gobi_type === "new" ? "新戈" : `${orgJoinForm.value.gobi_edition} ${orgJoinForm.value.gobi_group}`;
   const computedClass = orgJoinForm.value.program
     ? `${orgJoinForm.value.program} ${orgJoinForm.value.class_detail}`.trim()
     : orgJoinForm.value.class_name.trim();
 
-  if (!computedClass) {
-    uni.showToast({ title: "请填写班级信息", icon: "none" });
+  if (!computedClass || (orgJoinForm.value.program && !orgJoinForm.value.class_detail.trim())) {
+    uni.showToast({ title: "请填写班级/届别", icon: "none" });
     return;
   }
 
@@ -3524,9 +3554,42 @@ onPullDownRefresh(async () => {
 }
 
 .modal-content.large-modal {
-  max-height: 80vh;
+  max-height: 82vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-content.large-modal.org-join-modal-dialog {
+  max-height: 86vh;
+  height: 86vh;
+  padding: 36rpx 36rpx 24rpx;
+  box-sizing: border-box;
+}
+
+.org-form-scroll {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  padding-right: 6rpx;
+}
+
+.org-modal-footer {
+  flex-shrink: 0;
+  padding-top: 20rpx;
+  margin-top: 10rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.org-submit-btn {
+  width: 100%;
+  margin: 0;
+  height: 84rpx;
+  line-height: 84rpx;
+  border-radius: 20rpx;
 }
 
 .modal-header {
