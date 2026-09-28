@@ -711,13 +711,13 @@
           </view>
         </view>
 
-        <!-- 核心滑动表单区域 -->
+        <!-- 核心滑动表单区域 — 高度必须用 JS 像素值注入，微信不支持 vh/flex -->
         <scroll-view
           scroll-y
           class="org-sheet-scroll-body"
-          :scroll-with-animation="true"
-          :enable-back-to-top="true"
+          :style="{ height: orgScrollHeight + 'px' }"
         >
+          <view class="org-sheet-scroll-inner">
           <view class="privacy-security-notice">
             <view class="privacy-badge-row">
               <text class="privacy-badge-icon">🛡️</text>
@@ -1005,6 +1005,7 @@
 
           <!-- 底部垫高预留，确保最底下一个表单输入框即使在 iOS 滚动到底也能完全露出 -->
           <view class="sheet-scroll-bottom-spacer"></view>
+          </view><!-- /org-sheet-scroll-inner -->
         </scroll-view>
 
         <!-- 常驻底部操作栏：永不滚出屏幕，安全区域垫高 -->
@@ -1587,6 +1588,23 @@ const isAnyModalOpen = computed(() => {
   );
 });
 
+// 微信小程序 scroll-view 必须用真实 px 数值驱动高度，vh/flex 无效
+// 88% 屏高 - 顶部手柄(38rpx) - 标题栏(约96rpx) - 底部footer(约148rpx) = 可用滚动区域
+const orgScrollHeight = ref(500);
+function computeOrgScrollHeight() {
+  uni.getSystemInfo({
+    success(res) {
+      const screenH = res.windowHeight; // px
+      const rpxRatio = res.windowWidth / 750; // 1rpx = ? px
+      const sheetH = screenH * 0.88;
+      const handleH = 38 * rpxRatio;      // sheet-drag-handle
+      const headerH = 96 * rpxRatio;      // org-sheet-header
+      const footerH = 148 * rpxRatio;     // org-sheet-footer (incl. safe area approx)
+      orgScrollHeight.value = Math.floor(sheetH - handleH - headerH - footerH);
+    }
+  });
+}
+
 const ORG_PROGRAM_OPTIONS = [
   "中文EMBA",
   "台大班",
@@ -1651,6 +1669,7 @@ function getAgeGroup(dob?: string, fallbackGroup?: string): string {
 
 function openOrgJoinModal() {
   isUpdatingOrgProfile.value = false;
+  computeOrgScrollHeight();
   const u = user.value || getStoredUser();
   if (u) {
     orgJoinForm.value.real_name =
@@ -1678,6 +1697,7 @@ function openOrgJoinModal() {
 function openOrgEditProfileModal() {
   if (!currentOrg.value) return;
   isUpdatingOrgProfile.value = true;
+  computeOrgScrollHeight();
   orgJoinForm.value.invite_code = currentOrg.value.invite_code || "";
   orgJoinForm.value.real_name = currentOrg.value.real_name || "";
   orgJoinForm.value.gender = currentOrg.value.gender || "male";
@@ -3633,12 +3653,12 @@ onPullDownRefresh(async () => {
   box-sizing: border-box;
   border-top: 1rpx solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 -12rpx 48rpx rgba(0, 0, 0, 0.6);
-  overflow: hidden;
+  /* NOTE: 绝不能设 overflow:hidden，会阻止 scroll-view 内部滚动事件 */
 }
 
 .sheet-drag-handle {
   width: 100%;
-  height: 24rpx;
+  height: 38rpx;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -3667,13 +3687,15 @@ onPullDownRefresh(async () => {
 }
 
 .org-sheet-scroll-body {
-  height: calc(88vh - 245rpx - env(safe-area-inset-bottom));
-  max-height: calc(88vh - 245rpx - env(safe-area-inset-bottom));
-  flex: 1;
+  /* 高度完全由 JS orgScrollHeight 注入 inline style，CSS 只写非尺寸属性 */
   box-sizing: border-box;
-  padding: 24rpx 36rpx 16rpx;
-  overflow-y: scroll;
+  padding: 0;
   -webkit-overflow-scrolling: touch;
+}
+
+.org-sheet-scroll-inner {
+  padding: 24rpx 36rpx 16rpx;
+  box-sizing: border-box;
 }
 
 .sheet-scroll-bottom-spacer {
