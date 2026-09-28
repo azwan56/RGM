@@ -688,328 +688,180 @@
       </view>
     </view>
 
-    <!-- ── 1. Join Grand Organization Modal (大群体实名认证资料弹窗 - 底部全屏抽屉架构) ── -->
-    <view v-if="showOrgJoinModal" class="org-bottom-sheet-mask">
-      <!-- 独立透明/暗色背景遮罩，拦截背景点击与滑动 -->
-      <view class="org-sheet-backdrop" @click="showOrgJoinModal = false" @touchmove.stop.prevent></view>
+    <!-- ── 1. Join Grand Organization Modal ── -->
+    <!--
+      架构：整个遮罩用 column flex 分两块，不重叠：
+      1. org-dismiss-strip 顶部暗色条：点击/touchmove.stop.prevent 只在这里
+      2. org-panel 底部面板：完全没有 catchtouchmove，scroll-view 可以自由滚动
+    -->
+    <view v-if="showOrgJoinModal" class="org-modal-root">
+      <!-- 顶部关闭条（不重叠于面板） -->
+      <view class="org-dismiss-strip" @click="showOrgJoinModal = false" @touchmove.stop.prevent></view>
 
-      <!-- 底部抽屉主体：绝无 catchtouchmove，iOS原生平滑手势滑动 -->
-      <view class="org-sheet-container" @click.stop>
-        <!-- 抽屉顶部拖拽手柄 -->
-        <view class="sheet-drag-handle">
-          <view class="drag-bar"></view>
+      <!-- 底部面板（无任何 catchtouchmove） -->
+      <view class="org-panel">
+        <!-- 头部 -->
+        <view class="org-panel-head">
+          <view class="drag-bar-wrap"><view class="drag-bar"></view></view>
+          <view class="org-panel-title-row">
+            <view class="title-with-pill">
+              <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
+              <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "大群体") : "凭专属码认证" }}</text>
+            </view>
+            <view class="org-panel-close" @click="showOrgJoinModal = false">
+              <text class="close-btn">✕</text>
+            </view>
+          </view>
         </view>
 
-        <!-- 顶部导航标题栏 -->
-        <view class="org-sheet-header">
-          <view class="title-with-pill">
-            <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
-            <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "大群体") : "凭专属码认证" }}</text>
-          </view>
-          <view class="sheet-close-touch" @click="showOrgJoinModal = false">
-            <text class="close-btn">✕</text>
-          </view>
-        </view>
-
-        <!-- 核心滑动表单区域 — 高度必须用 JS 像素值注入，微信不支持 vh/flex -->
-        <scroll-view
-          scroll-y
-          class="org-sheet-scroll-body"
-          :style="{ height: orgScrollHeight + 'px' }"
-        >
-          <view class="org-sheet-scroll-inner">
-          <view class="privacy-security-notice">
-            <view class="privacy-badge-row">
-              <text class="privacy-badge-icon">🛡️</text>
-              <text class="privacy-badge-title">个人隐私与数据安全保障</text>
-              <text class="privacy-badge-tag">AES-256 加密</text>
-            </view>
-            <text class="privacy-security-desc">
-              真实姓名、证件号、出生日期及手机号均在数据库底层采用 AES-256 密文存储，非必要不暴露，仅用于戈赛资格核验与分组合规。普通跑友无法查看您的明文隐私，且支持随时一键彻底清除。
-            </text>
-          </view>
-
-          <view v-if="!isUpdatingOrgProfile" class="form-group">
-            <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="请输入大群体专属邀请码 (如: FDGOBI)"
-              v-model="orgJoinForm.invite_code"
-            />
-          </view>
-
-          <view class="form-group">
-            <view class="label-with-icon-row">
-              <text class="input-label">真实姓名 <text class="req-star">*</text></text>
-              <text class="field-security-pill">🔒 加密存储</text>
-            </view>
-            <view class="secure-input-wrapper">
-              <input
-                class="text-input secure-input"
-                :password="!showOrgRealName"
-                type="text"
-                :adjust-position="true"
-                :cursor-spacing="50"
-                placeholder="请填写真实姓名以便管理员核实"
-                v-model="orgJoinForm.real_name"
-              />
-              <view class="eye-toggle-btn" @click="showOrgRealName = !showOrgRealName">
-                <text class="eye-icon">{{ showOrgRealName ? '👁️' : '🙈' }}</text>
+        <!-- scroll-view：高度用 JS 真实 px 值注入 -->
+        <scroll-view scroll-y :style="{ height: orgScrollHeight + 'px' }">
+          <view class="org-form-body">
+            <view class="privacy-security-notice">
+              <view class="privacy-badge-row">
+                <text class="privacy-badge-icon">🛡️</text>
+                <text class="privacy-badge-title">个人隐私与数据安全保障</text>
+                <text class="privacy-badge-tag">AES-256 加密</text>
               </view>
+              <text class="privacy-security-desc">真实姓名、证件号、出生日期及手机号均在数据库底层采用 AES-256 密文存储，非必要不暴露，仅用于戈赛资格核验与分组合规。普通跑友无法查看您的明文隐私，且支持随时一键彻底清除。</text>
             </view>
-          </view>
 
-          <view class="form-group">
-            <text class="input-label">性别 <text class="req-star">*</text></text>
-            <view class="gender-segmented-row">
-              <view
-                class="gender-pill"
-                :class="{ active: orgJoinForm.gender === 'male' }"
-                @click="orgJoinForm.gender = 'male'"
-              >
-                🚹 男
-              </view>
-              <view
-                class="gender-pill"
-                :class="{ active: orgJoinForm.gender === 'female' }"
-                @click="orgJoinForm.gender = 'female'"
-              >
-                🚺 女
-              </view>
+            <view v-if="!isUpdatingOrgProfile" class="form-group">
+              <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请输入大群体专属邀请码 (如: FDGOBI)" v-model="orgJoinForm.invite_code" />
             </view>
-          </view>
 
-          <view class="form-group">
-            <view class="label-with-icon-row">
-              <text class="input-label">出生日期 <text class="req-star">*</text></text>
-              <text class="field-security-pill">🔒 密文分级</text>
-            </view>
-            <view class="secure-picker-row">
-              <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange" class="secure-picker-flex">
-                <view class="picker-display-box">
-                  <text class="picker-value">
-                    {{ showOrgDob ? (orgJoinForm.date_of_birth || '请选择出生日期') : (orgJoinForm.date_of_birth ? '****-**-**' : '请选择出生日期') }}
-                  </text>
-                  <text class="picker-arrow">📅 选择 ›</text>
-                </view>
-              </picker>
-              <view class="eye-toggle-btn" @click.stop="showOrgDob = !showOrgDob">
-                <text class="eye-icon">{{ showOrgDob ? '👁️' : '🙈' }}</text>
+            <view class="form-group">
+              <view class="label-with-icon-row">
+                <text class="input-label">真实姓名 <text class="req-star">*</text></text>
+                <text class="field-security-pill">🔒 加密存储</text>
               </view>
-            </view>
-            <text class="field-hint">点击眼睛符号显示/隐藏。对外仅展示组别脱敏保护隐私</text>
-          </view>
-
-          <view class="form-group">
-            <view class="label-with-icon-row">
-              <text class="input-label">身份证号码 / 证件号 (选填)</text>
-              <text class="field-security-pill">🔒 密文存储</text>
-            </view>
-            <view class="secure-input-wrapper">
-              <input
-                class="text-input secure-input"
-                :password="!showOrgIdCard"
-                type="text"
-                maxlength="18"
-                :adjust-position="true"
-                :cursor-spacing="50"
-                placeholder="用于赛事保险投保与参赛资格核验"
-                v-model="orgJoinForm.id_card"
-              />
-              <view class="eye-toggle-btn" @click="showOrgIdCard = !showOrgIdCard">
-                <text class="eye-icon">{{ showOrgIdCard ? '👁️' : '🙈' }}</text>
-              </view>
-            </view>
-            <text class="field-hint">默认以 *** 隐藏，点击眼睛符号才完整显示。非必要绝不向第三方暴露</text>
-          </view>
-
-          <!-- 商学院项目与自由班级 -->
-          <view class="form-group">
-            <text class="input-label">商学院项目 <text class="req-star">*</text></text>
-            <view class="program-chips-grid">
-              <view
-                v-for="p in ORG_PROGRAM_OPTIONS"
-                :key="p"
-                class="program-chip"
-                :class="{ active: orgJoinForm.program === p }"
-                @click="orgJoinForm.program = p"
-              >
-                {{ p }}
-              </view>
-            </view>
-          </view>
-
-          <view class="form-group">
-            <text class="input-label">所在班级 / 届别 (自由输入) <text class="req-star">*</text></text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="例如: 23春 / 21级 / 18班 / 2022秋"
-              v-model="orgJoinForm.class_detail"
-            />
-            <text v-if="orgJoinForm.program && orgJoinForm.class_detail" class="field-preview-tag">
-              班级组合预览：{{ orgJoinForm.program }} {{ orgJoinForm.class_detail }}
-            </text>
-          </view>
-
-          <!-- 戈壁经历体系 (新戈 / 戈1-戈21 + A/B/C组) -->
-          <view class="form-group">
-            <view class="label-with-icon-row">
-              <text class="input-label">戈壁经历 (戈赛经验) <text class="req-star">*</text></text>
-              <text class="field-security-pill">🏅 戈友身份</text>
-            </view>
-            <view class="gobi-type-segmented-row">
-              <view
-                class="gobi-type-pill"
-                :class="{ active: orgJoinForm.gobi_type === 'new' }"
-                @click="orgJoinForm.gobi_type = 'new'"
-              >
-                🌱 新戈 (首次参赛)
-              </view>
-              <view
-                class="gobi-type-pill"
-                :class="{ active: orgJoinForm.gobi_type === 'vet' }"
-                @click="orgJoinForm.gobi_type = 'vet'"
-              >
-                🏅 往届戈友 (老戈)
+              <view class="secure-input-wrapper">
+                <input class="text-input secure-input" :password="!showOrgRealName" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请填写真实姓名以便管理员核实" v-model="orgJoinForm.real_name" />
+                <view class="eye-toggle-btn" @click="showOrgRealName = !showOrgRealName"><text class="eye-icon">{{ showOrgRealName ? '👁️' : '🙈' }}</text></view>
               </view>
             </view>
 
-            <!-- 老戈友届数与组别选择器 -->
-            <view v-if="orgJoinForm.gobi_type === 'vet'" class="vet-gobi-box">
-              <view class="vet-row">
-                <text class="vet-label">参赛届数：</text>
-                <picker
-                  mode="selector"
-                  :range="GOBI_EDITION_OPTIONS"
-                  :value="selectedGobiEditionIndex"
-                  @change="onGobiEditionChange"
-                  class="vet-picker"
-                >
-                  <view class="vet-picker-box">
-                    <text class="vpb-value">{{ orgJoinForm.gobi_edition || '选择届数' }}</text>
-                    <text class="vpb-arrow">▼</text>
+            <view class="form-group">
+              <text class="input-label">性别 <text class="req-star">*</text></text>
+              <view class="gender-segmented-row">
+                <view class="gender-pill" :class="{ active: orgJoinForm.gender === 'male' }" @click="orgJoinForm.gender = 'male'">🚹 男</view>
+                <view class="gender-pill" :class="{ active: orgJoinForm.gender === 'female' }" @click="orgJoinForm.gender = 'female'">🚺 女</view>
+              </view>
+            </view>
+
+            <view class="form-group">
+              <view class="label-with-icon-row">
+                <text class="input-label">出生日期 <text class="req-star">*</text></text>
+                <text class="field-security-pill">🔒 密文分级</text>
+              </view>
+              <view class="secure-picker-row">
+                <picker mode="date" :value="orgJoinForm.date_of_birth" @change="onOrgDobChange" class="secure-picker-flex">
+                  <view class="picker-display-box">
+                    <text class="picker-value">{{ showOrgDob ? (orgJoinForm.date_of_birth || '请选择出生日期') : (orgJoinForm.date_of_birth ? '****-**-**' : '请选择出生日期') }}</text>
+                    <text class="picker-arrow">📅 选择 ›</text>
                   </view>
                 </picker>
+                <view class="eye-toggle-btn" @click.stop="showOrgDob = !showOrgDob"><text class="eye-icon">{{ showOrgDob ? '👁️' : '🙈' }}</text></view>
               </view>
+              <text class="field-hint">点击眼睛符号显示/隐藏。对外仅展示组别脱敏保护隐私</text>
+            </view>
 
-              <view class="vet-row">
-                <text class="vet-label">参赛组别：</text>
-                <view class="group-pills-row">
-                  <view
-                    v-for="grp in GOBI_GROUP_OPTIONS"
-                    :key="grp"
-                    class="grp-pill"
-                    :class="{ active: orgJoinForm.gobi_group === grp }"
-                    @click="orgJoinForm.gobi_group = grp"
-                  >
-                    {{ grp }}
+            <view class="form-group">
+              <view class="label-with-icon-row">
+                <text class="input-label">身份证号码 / 证件号 (选填)</text>
+                <text class="field-security-pill">🔒 密文存储</text>
+              </view>
+              <view class="secure-input-wrapper">
+                <input class="text-input secure-input" :password="!showOrgIdCard" type="text" maxlength="18" :adjust-position="true" :cursor-spacing="50" placeholder="用于赛事保险投保与参赛资格核验" v-model="orgJoinForm.id_card" />
+                <view class="eye-toggle-btn" @click="showOrgIdCard = !showOrgIdCard"><text class="eye-icon">{{ showOrgIdCard ? '👁️' : '🙈' }}</text></view>
+              </view>
+              <text class="field-hint">默认以 *** 隐藏，点击眼睛符号才完整显示。</text>
+            </view>
+
+            <view class="form-group">
+              <text class="input-label">商学院项目 <text class="req-star">*</text></text>
+              <view class="program-chips-grid">
+                <view v-for="p in ORG_PROGRAM_OPTIONS" :key="p" class="program-chip" :class="{ active: orgJoinForm.program === p }" @click="orgJoinForm.program = p">{{ p }}</view>
+              </view>
+            </view>
+
+            <view class="form-group">
+              <text class="input-label">所在班级 / 届别 <text class="req-star">*</text></text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="例如: 23春 / 21级 / 18班" v-model="orgJoinForm.class_detail" />
+              <text v-if="orgJoinForm.program && orgJoinForm.class_detail" class="field-preview-tag">班级预览：{{ orgJoinForm.program }} {{ orgJoinForm.class_detail }}</text>
+            </view>
+
+            <view class="form-group">
+              <view class="label-with-icon-row">
+                <text class="input-label">戈壁经历 <text class="req-star">*</text></text>
+                <text class="field-security-pill">🏅 戈友身份</text>
+              </view>
+              <view class="gobi-type-segmented-row">
+                <view class="gobi-type-pill" :class="{ active: orgJoinForm.gobi_type === 'new' }" @click="orgJoinForm.gobi_type = 'new'">🌱 新戈 (首次参赛)</view>
+                <view class="gobi-type-pill" :class="{ active: orgJoinForm.gobi_type === 'vet' }" @click="orgJoinForm.gobi_type = 'vet'">🏅 往届戈友 (老戈)</view>
+              </view>
+              <view v-if="orgJoinForm.gobi_type === 'vet'" class="vet-gobi-box">
+                <view class="vet-row">
+                  <text class="vet-label">参赛届数：</text>
+                  <picker mode="selector" :range="GOBI_EDITION_OPTIONS" :value="selectedGobiEditionIndex" @change="onGobiEditionChange" class="vet-picker">
+                    <view class="vet-picker-box"><text class="vpb-value">{{ orgJoinForm.gobi_edition || '选择届数' }}</text><text class="vpb-arrow">▼</text></view>
+                  </picker>
+                </view>
+                <view class="vet-row">
+                  <text class="vet-label">参赛组别：</text>
+                  <view class="group-pills-row">
+                    <view v-for="grp in GOBI_GROUP_OPTIONS" :key="grp" class="grp-pill" :class="{ active: orgJoinForm.gobi_group === grp }" @click="orgJoinForm.gobi_group = grp">{{ grp }}</view>
                   </view>
                 </view>
-              </view>
-
-              <view class="vet-summary-row">
-                <text class="vet-summary-text">
-                  经历勋章：<text class="vst-badge">🏅 {{ orgJoinForm.gobi_edition }} {{ orgJoinForm.gobi_group }}</text>
-                </text>
+                <view class="vet-summary-row">
+                  <text class="vet-summary-text">经历勋章：<text class="vst-badge">🏅 {{ orgJoinForm.gobi_edition }} {{ orgJoinForm.gobi_group }}</text></text>
+                </view>
               </view>
             </view>
-          </view>
 
-          <view class="form-group">
-            <view class="label-with-icon-row">
-              <text class="input-label">联系手机 (选填)</text>
-              <text class="field-security-pill">🔒 保密</text>
-            </view>
-            <view class="secure-input-wrapper">
-              <input
-                class="text-input secure-input"
-                :password="!showOrgPhone"
-                type="number"
-                maxlength="11"
-                :adjust-position="true"
-                :cursor-spacing="50"
-                placeholder="便于紧急联络与赛事活动通知"
-                v-model="orgJoinForm.phone"
-              />
-              <view class="eye-toggle-btn" @click="showOrgPhone = !showOrgPhone">
-                <text class="eye-icon">{{ showOrgPhone ? '👁️' : '🙈' }}</text>
+            <view class="form-group">
+              <view class="label-with-icon-row">
+                <text class="input-label">联系手机 (选填)</text>
+                <text class="field-security-pill">🔒 保密</text>
+              </view>
+              <view class="secure-input-wrapper">
+                <input class="text-input secure-input" :password="!showOrgPhone" type="number" maxlength="11" :adjust-position="true" :cursor-spacing="50" placeholder="便于紧急联络与赛事活动通知" v-model="orgJoinForm.phone" />
+                <view class="eye-toggle-btn" @click="showOrgPhone = !showOrgPhone"><text class="eye-icon">{{ showOrgPhone ? '👁️' : '🙈' }}</text></view>
               </view>
             </view>
-          </view>
 
-          <view class="form-group">
-            <text class="input-label">紧急联系人与电话 (选填)</text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="例如: 张三 13800000000"
-              v-model="orgJoinForm.emergency_contact"
-            />
-          </view>
+            <view class="form-group">
+              <text class="input-label">紧急联系人与电话 (选填)</text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="例如: 张三 13800000000" v-model="orgJoinForm.emergency_contact" />
+            </view>
 
-          <view class="form-group">
-            <text class="input-label">跑鞋尺码 (EUR, 选填)</text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="例如: 42 / 42.5"
-              v-model="orgJoinForm.running_shoe_size"
-            />
-          </view>
+            <view class="form-group">
+              <text class="input-label">跑鞋尺码 EUR (选填)</text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="例如: 42 / 42.5" v-model="orgJoinForm.running_shoe_size" />
+            </view>
 
-          <view class="form-group">
-            <text class="input-label">队服尺码 (选填)</text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="例如: M / L / XL / 2XL"
-              v-model="orgJoinForm.jersey_size"
-            />
-          </view>
+            <view class="form-group">
+              <text class="input-label">队服尺码 (选填)</text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="例如: M / L / XL / 2XL" v-model="orgJoinForm.jersey_size" />
+            </view>
 
-          <view class="form-group">
-            <text class="input-label">全马最好成绩 (PB, 选填)</text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="例如: 3:25:00"
-              v-model="orgJoinForm.full_marathon_pb"
-            />
-          </view>
+            <view class="form-group">
+              <text class="input-label">全马 PB (选填)</text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="例如: 3:25:00" v-model="orgJoinForm.full_marathon_pb" />
+            </view>
 
-          <view class="form-group">
-            <text class="input-label">健康与参赛声明 (选填)</text>
-            <input
-              class="text-input"
-              type="text"
-              :adjust-position="true"
-              :cursor-spacing="50"
-              placeholder="本人确认身体健康，无不适合高强度跑步的疾病"
-              v-model="orgJoinForm.health_declaration"
-            />
-          </view>
+            <view class="form-group">
+              <text class="input-label">健康声明 (选填)</text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="本人确认身体健康，无不适合高强度跑步的疾病" v-model="orgJoinForm.health_declaration" />
+            </view>
 
-          <!-- 底部垫高预留，确保最底下一个表单输入框即使在 iOS 滚动到底也能完全露出 -->
-          <view class="sheet-scroll-bottom-spacer"></view>
-          </view><!-- /org-sheet-scroll-inner -->
+            <view style="height: 40rpx;"></view>
+          </view>
         </scroll-view>
 
-        <!-- 常驻底部操作栏：永不滚出屏幕，安全区域垫高 -->
-        <view class="org-sheet-footer">
+        <!-- 吸底提交按钮 -->
+        <view class="org-panel-foot">
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
             {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入大群体" }}
           </button>
@@ -1017,7 +869,7 @@
       </view>
     </view>
 
-    <!-- ── 2. Sub Clubs Modal (下属跑团列表弹窗) ── -->
+        <!-- ── 2. Sub Clubs Modal (下属跑团列表弹窗) ── -->
     <view v-if="showSubClubsModal" class="modal-mask" @click="showSubClubsModal = false">
       <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
@@ -3618,8 +3470,8 @@ onPullDownRefresh(async () => {
   overflow: hidden;
 }
 
-/* ── Grand Org Bottom Sheet Architecture ── */
-.org-bottom-sheet-mask {
+/* ── Grand Org Join Modal (non-overlapping flex layout) ── */
+.org-modal-root {
   position: fixed;
   top: 0;
   left: 0;
@@ -3628,97 +3480,52 @@ onPullDownRefresh(async () => {
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
 }
 
-.org-sheet-backdrop {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.78);
+.org-dismiss-strip {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.78);
+  /* catchtouchmove 只在这里，与面板不重叠，不影响 scroll-view */
 }
 
-.org-sheet-container {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  height: 88vh;
-  max-height: 88vh;
-  background-color: #18181c;
+.org-panel {
+  /* 占底部固定比例，不用 vh，由 flex 自然分配 */
+  background: #18181c;
   border-radius: 36rpx 36rpx 0 0;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
   border-top: 1rpx solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 -12rpx 48rpx rgba(0, 0, 0, 0.6);
-  /* NOTE: 绝不能设 overflow:hidden，会阻止 scroll-view 内部滚动事件 */
+  /* 绝对禁止 overflow:hidden！会阻断 scroll-view 滚动 */
 }
 
-.sheet-drag-handle {
-  width: 100%;
-  height: 38rpx;
+.org-panel-head {
+  padding: 0 36rpx 16rpx;
+}
+
+.drag-bar-wrap {
   display: flex;
   justify-content: center;
-  align-items: center;
-  flex-shrink: 0;
-  padding-top: 14rpx;
+  padding: 16rpx 0 12rpx;
 }
 
-.drag-bar {
-  width: 72rpx;
-  height: 8rpx;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 4rpx;
-}
-
-.org-sheet-header {
+.org-panel-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12rpx 36rpx 20rpx;
-  flex-shrink: 0;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
 }
 
-.sheet-close-touch {
-  padding: 8rpx 16rpx;
+.org-panel-close {
+  padding: 8rpx 8rpx 8rpx 24rpx;
 }
 
-.org-sheet-scroll-body {
-  /* 高度完全由 JS orgScrollHeight 注入 inline style，CSS 只写非尺寸属性 */
-  box-sizing: border-box;
-  padding: 0;
-  -webkit-overflow-scrolling: touch;
-}
-
-.org-sheet-scroll-inner {
-  padding: 24rpx 36rpx 16rpx;
+.org-form-body {
+  padding: 16rpx 36rpx 0;
   box-sizing: border-box;
 }
 
-.sheet-scroll-bottom-spacer {
-  height: 60rpx;
-  width: 100%;
-}
-
-.org-sheet-footer {
-  flex-shrink: 0;
-  padding: 16rpx 36rpx calc(24rpx + env(safe-area-inset-bottom));
-  background-color: #1a1a1e;
+.org-panel-foot {
+  padding: 16rpx 36rpx calc(20rpx + env(safe-area-inset-bottom));
+  background: #1a1a1e;
   border-top: 1rpx solid rgba(255, 255, 255, 0.08);
-  box-sizing: border-box;
-}
-
-.org-submit-btn {
-  width: 100%;
-  margin: 0;
-  height: 88rpx;
-  line-height: 88rpx;
-  border-radius: 22rpx;
-  font-size: 28rpx;
-  font-weight: bold;
 }
 
 .modal-header {
