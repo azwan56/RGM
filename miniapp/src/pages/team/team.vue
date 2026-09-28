@@ -1442,20 +1442,22 @@ const isAnyModalOpen = computed(() => {
 
 // 微信小程序 scroll-view 必须用真实 px 数值驱动高度，vh/flex 无效
 // 88% 屏高 - 顶部手柄(38rpx) - 标题栏(约96rpx) - 底部footer(约148rpx) = 可用滚动区域
-const orgScrollHeight = ref(500);
+const orgScrollHeight = ref(480);
 function computeOrgScrollHeight() {
-  uni.getSystemInfo({
-    success(res) {
-      const screenH = res.windowHeight; // px
-      const rpxRatio = res.windowWidth / 750; // 1rpx = ? px
-      const sheetH = screenH * 0.88;
-      const handleH = 38 * rpxRatio;      // sheet-drag-handle
-      const headerH = 96 * rpxRatio;      // org-sheet-header
-      const footerH = 148 * rpxRatio;     // org-sheet-footer (incl. safe area approx)
-      orgScrollHeight.value = Math.floor(sheetH - handleH - headerH - footerH);
-    }
-  });
+  try {
+    const res = uni.getSystemInfoSync();
+    const screenH = res.windowHeight || 700;
+    const rpxRatio = (res.windowWidth || 375) / 750;
+    const sheetH = screenH * 0.88;
+    const handleH = 38 * rpxRatio;
+    const headerH = 96 * rpxRatio;
+    const footerH = 148 * rpxRatio;
+    orgScrollHeight.value = Math.max(300, Math.floor(sheetH - handleH - headerH - footerH));
+  } catch (e) {
+    orgScrollHeight.value = 450;
+  }
 }
+computeOrgScrollHeight();
 
 const ORG_PROGRAM_OPTIONS = [
   "中文EMBA",

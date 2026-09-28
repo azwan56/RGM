@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "scripts": {
     "dev:mp-weixin": "uni -p mp-weixin",
-    "build:mp-weixin": "uni build -p mp-weixin"
+    "build:mp-weixin": "uni build -p mp-weixin && rsync -a --delete dist/build/mp-weixin/ dist/dev/mp-weixin/"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020420260813003",
