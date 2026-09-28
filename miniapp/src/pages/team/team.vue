@@ -1,4 +1,5 @@
 <template>
+  <page-meta :page-style="isAnyModalOpen ? 'overflow: hidden;' : ''" />
   <view class="team-page">
     <!-- ── 顶部导航栏 / 跑团与榜单快速切换胶囊 ── -->
     <view class="top-nav-capsule">
@@ -464,7 +465,7 @@
 
     <!-- ── Member & Coach Management Modal (跑团成员与指定教练管理) ── -->
     <view v-if="showMembersModal" class="modal-mask" @click="showMembersModal = false">
-      <view class="modal-content large-modal" @click.stop @touchmove.stop>
+      <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">跑团成员与指定教练</text>
@@ -604,7 +605,7 @@
 
     <!-- ── All Clubs Modal (浏览与切换全部跑团) ── -->
     <view v-if="showAllClubsModal" class="modal-mask" @click="showAllClubsModal = false">
-      <view class="modal-content large-modal" @click.stop @touchmove.stop>
+      <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">跑团切换与浏览</text>
@@ -687,18 +688,39 @@
       </view>
     </view>
 
-    <!-- ── 1. Join Grand Organization Modal (大群体实名认证资料弹窗) ── -->
-    <view v-if="showOrgJoinModal" class="modal-mask" @click="showOrgJoinModal = false">
-      <view class="modal-content large-modal org-join-modal-dialog" @click.stop @touchmove.stop>
-        <view class="modal-header">
+    <!-- ── 1. Join Grand Organization Modal (大群体实名认证资料弹窗 - 底部全屏抽屉架构) ── -->
+    <view v-if="showOrgJoinModal" class="org-bottom-sheet-mask">
+      <!-- 独立透明/暗色背景遮罩，拦截背景点击与滑动 -->
+      <view class="org-sheet-backdrop" @click="showOrgJoinModal = false" @touchmove.stop.prevent></view>
+
+      <!-- 底部抽屉主体：绝无 catchtouchmove，iOS原生平滑手势滑动 -->
+      <view class="org-sheet-container" @click.stop>
+        <!-- 抽屉顶部拖拽手柄 -->
+        <view class="sheet-drag-handle">
+          <view class="drag-bar"></view>
+        </view>
+
+        <!-- 顶部导航标题栏 -->
+        <view class="org-sheet-header">
           <view class="title-with-pill">
             <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
             <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "大群体") : "凭专属码认证" }}</text>
           </view>
-          <text class="close-btn" @click="showOrgJoinModal = false">✕</text>
+          <view class="sheet-close-touch" @click="showOrgJoinModal = false">
+            <text class="close-btn">✕</text>
+          </view>
         </view>
 
-        <scroll-view scroll-y class="modal-body org-form-scroll" :scroll-with-animation="true" :enable-back-to-top="true">
+        <!-- 核心滑动表单区域：启用 enhanced 高性能滚动模式 -->
+        <scroll-view
+          scroll-y
+          class="org-sheet-scroll-body"
+          :scroll-with-animation="true"
+          :enable-back-to-top="true"
+          :enhanced="true"
+          :show-scrollbar="true"
+          :bounces="true"
+        >
           <view class="privacy-security-notice">
             <view class="privacy-badge-row">
               <text class="privacy-badge-icon">🛡️</text>
@@ -716,7 +738,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="请输入大群体专属邀请码 (如: FDGOBI)"
               v-model="orgJoinForm.invite_code"
             />
@@ -733,7 +755,7 @@
                 :password="!showOrgRealName"
                 type="text"
                 :adjust-position="true"
-                :cursor-spacing="35"
+                :cursor-spacing="50"
                 placeholder="请填写真实姓名以便管理员核实"
                 v-model="orgJoinForm.real_name"
               />
@@ -796,7 +818,7 @@
                 type="text"
                 maxlength="18"
                 :adjust-position="true"
-                :cursor-spacing="35"
+                :cursor-spacing="50"
                 placeholder="用于赛事保险投保与参赛资格核验"
                 v-model="orgJoinForm.id_card"
               />
@@ -829,7 +851,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="例如: 23春 / 21级 / 18班 / 2022秋"
               v-model="orgJoinForm.class_detail"
             />
@@ -914,7 +936,7 @@
                 type="number"
                 maxlength="11"
                 :adjust-position="true"
-                :cursor-spacing="35"
+                :cursor-spacing="50"
                 placeholder="便于紧急联络与赛事活动通知"
                 v-model="orgJoinForm.phone"
               />
@@ -930,7 +952,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="例如: 张三 13800000000"
               v-model="orgJoinForm.emergency_contact"
             />
@@ -942,7 +964,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="例如: 42 / 42.5"
               v-model="orgJoinForm.running_shoe_size"
             />
@@ -954,7 +976,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="例如: M / L / XL / 2XL"
               v-model="orgJoinForm.jersey_size"
             />
@@ -966,7 +988,7 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="例如: 3:25:00"
               v-model="orgJoinForm.full_marathon_pb"
             />
@@ -978,14 +1000,18 @@
               class="text-input"
               type="text"
               :adjust-position="true"
-              :cursor-spacing="35"
+              :cursor-spacing="50"
               placeholder="本人确认身体健康，无不适合高强度跑步的疾病"
               v-model="orgJoinForm.health_declaration"
             />
           </view>
+
+          <!-- 底部垫高预留，确保最底下一个表单输入框即使在 iOS 滚动到底也能完全露出 -->
+          <view class="sheet-scroll-bottom-spacer"></view>
         </scroll-view>
 
-        <view class="modal-footer org-modal-footer">
+        <!-- 常驻底部操作栏：永不滚出屏幕，安全区域垫高 -->
+        <view class="org-sheet-footer">
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
             {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入大群体" }}
           </button>
@@ -995,7 +1021,7 @@
 
     <!-- ── 2. Sub Clubs Modal (下属跑团列表弹窗) ── -->
     <view v-if="showSubClubsModal" class="modal-mask" @click="showSubClubsModal = false">
-      <view class="modal-content large-modal" @click.stop @touchmove.stop>
+      <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">【{{ currentOrg?.name || '大组织' }}】下属分跑团</text>
@@ -1055,7 +1081,7 @@
 
     <!-- ── 3. Grand Community Roster Modal (大群体戈友花名册) ── -->
     <view v-if="showOrgMembersModal" class="modal-mask" @click="showOrgMembersModal = false">
-      <view class="modal-content large-modal" @click.stop @touchmove.stop>
+      <view class="modal-content large-modal" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">【{{ currentOrg?.name }}】戈友花名册</text>
@@ -1244,7 +1270,7 @@
     </view>
 
     <!-- ── 6. Club Periodic Report Modal (跑团周报/月报专属战报弹窗) ── -->
-    <view v-if="showReportModal" class="modal-mask" @click="showReportModal = false" @touchmove.stop.prevent>
+    <view v-if="showReportModal" class="modal-mask" @click="showReportModal = false">
       <view class="modal-content large-modal report-modal-content" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
@@ -1548,6 +1574,21 @@ const reportPeriodOffset = ref(0);
 const reportViewMode = ref<"poster" | "text">("poster");
 const loadingReport = ref(false);
 const reportData = ref<any>(null);
+
+const isAnyModalOpen = computed(() => {
+  return (
+    showOrgJoinModal.value ||
+    showAllClubsModal.value ||
+    showSubClubsModal.value ||
+    showOrgMembersModal.value ||
+    showMembersModal.value ||
+    showEventModal.value ||
+    showJoinModal.value ||
+    showJoinModeModal.value ||
+    showClubCodeModal.value ||
+    showReportModal.value
+  );
+});
 
 const ORG_PROGRAM_OPTIONS = [
   "中文EMBA",
@@ -3560,36 +3601,104 @@ onPullDownRefresh(async () => {
   overflow: hidden;
 }
 
-.modal-content.large-modal.org-join-modal-dialog {
-  max-height: 86vh;
-  height: 86vh;
-  padding: 36rpx 36rpx 24rpx;
-  box-sizing: border-box;
+/* ── Grand Org Bottom Sheet Architecture ── */
+.org-bottom-sheet-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
-.org-form-scroll {
+.org-sheet-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.78);
+}
+
+.org-sheet-container {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 88vh;
+  max-height: 88vh;
+  background-color: #18181c;
+  border-radius: 36rpx 36rpx 0 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 -12rpx 48rpx rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.sheet-drag-handle {
+  width: 100%;
+  height: 24rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  padding-top: 14rpx;
+}
+
+.drag-bar {
+  width: 72rpx;
+  height: 8rpx;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 4rpx;
+}
+
+.org-sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12rpx 36rpx 20rpx;
+  flex-shrink: 0;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.sheet-close-touch {
+  padding: 8rpx 16rpx;
+}
+
+.org-sheet-scroll-body {
   flex: 1;
   height: 0;
   min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
   box-sizing: border-box;
-  padding-right: 6rpx;
+  padding: 24rpx 36rpx 16rpx;
+  -webkit-overflow-scrolling: touch;
 }
 
-.org-modal-footer {
+.sheet-scroll-bottom-spacer {
+  height: 60rpx;
+  width: 100%;
+}
+
+.org-sheet-footer {
   flex-shrink: 0;
-  padding-top: 20rpx;
-  margin-top: 10rpx;
+  padding: 16rpx 36rpx calc(24rpx + env(safe-area-inset-bottom));
+  background-color: #1a1a1e;
   border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
 }
 
 .org-submit-btn {
   width: 100%;
   margin: 0;
-  height: 84rpx;
-  line-height: 84rpx;
-  border-radius: 20rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  border-radius: 22rpx;
+  font-size: 28rpx;
+  font-weight: bold;
 }
 
 .modal-header {
