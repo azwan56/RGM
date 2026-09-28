@@ -77,7 +77,7 @@
       </view>
       <text class="gop-title">加入高校戈友 / 商学院大群体架构</text>
       <view class="gop-btn-group">
-        <button class="gop-join-btn" @click="openOrgJoinModal('FDGOBI')">
+        <button class="gop-join-btn" @click="openOrgJoinModal()">
           🔑 凭专属邀请码实名认证（复旦戈）
         </button>
       </view>
@@ -729,7 +729,7 @@
 
             <view v-if="!isUpdatingOrgProfile" class="form-group">
               <text class="input-label">复旦戈专属邀请码 <text class="req-star">*</text></text>
-              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请输入复旦戈专属邀请码 (如: FDGOBI)" v-model="orgJoinForm.invite_code" />
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请输入复旦戈专属邀请码" v-model="orgJoinForm.invite_code" />
             </view>
 
             <view class="form-group">
@@ -1546,11 +1546,7 @@ function openOrgJoinModal(presetCode?: string) {
     orgJoinForm.value.gobi_group = "A组";
     orgJoinForm.value.gobi_experience = "新戈";
   }
-  if (presetCode) {
-    orgJoinForm.value.invite_code = presetCode;
-  } else if (!orgJoinForm.value.invite_code) {
-    orgJoinForm.value.invite_code = "FDGOBI";
-  }
+  orgJoinForm.value.invite_code = presetCode || "";
   showOrgJoinModal.value = true;
 }
 
