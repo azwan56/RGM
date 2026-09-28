@@ -76,10 +76,11 @@
         <text class="gop-code-pill">凭组织专属码验证</text>
       </view>
       <text class="gop-title">加入高校戈友 / 商学院大群体架构</text>
-      <text class="gop-desc">汇聚各大高校戈友会及商学院跑者。请向您所属群体的管理员索取专属邀请码，凭码实名登记姓名、班级与生日完成认证，解锁下属分队备战与花名册！（自由独立跑者可跳过）</text>
-      <button class="gop-join-btn" @click="openOrgJoinModal">
-        🔑 凭专属邀请码实名认证加入 (选填)
-      </button>
+      <view class="gop-btn-group">
+        <button class="gop-join-btn" @click="openOrgJoinModal('FDGOBI')">
+          🔑 凭专属邀请码实名认证（复旦戈）
+        </button>
+      </view>
     </view>
 
 
@@ -705,8 +706,8 @@
           <view class="drag-bar-wrap"><view class="drag-bar"></view></view>
           <view class="org-panel-title-row">
             <view class="title-with-pill">
-              <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改大群体资料" : "加入大群体 · 戈友实名认证" }}</text>
-              <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "大群体") : "凭专属码认证" }}</text>
+              <text class="modal-title">{{ isUpdatingOrgProfile ? "补全 / 修改“复旦戈”大群资料" : "加入“复旦戈”大群" }}</text>
+              <text class="count-pill">{{ isUpdatingOrgProfile ? (currentOrg?.name || "复旦戈") : "复旦戈专属认证" }}</text>
             </view>
             <view class="org-panel-close" @click="showOrgJoinModal = false">
               <text class="close-btn">✕</text>
@@ -727,8 +728,8 @@
             </view>
 
             <view v-if="!isUpdatingOrgProfile" class="form-group">
-              <text class="input-label">大群体专属邀请码 <text class="req-star">*</text></text>
-              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请输入大群体专属邀请码 (如: FDGOBI)" v-model="orgJoinForm.invite_code" />
+              <text class="input-label">复旦戈专属邀请码 <text class="req-star">*</text></text>
+              <input class="text-input" type="text" :adjust-position="true" :cursor-spacing="50" placeholder="请输入复旦戈专属邀请码 (如: FDGOBI)" v-model="orgJoinForm.invite_code" />
             </view>
 
             <view class="form-group">
@@ -863,7 +864,7 @@
         <!-- 吸底提交按钮 -->
         <view class="org-panel-foot">
           <button class="submit-btn org-submit-btn" :loading="joiningOrg" @click="submitOrgJoin">
-            {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入大群体" }}
+            {{ isUpdatingOrgProfile ? "保存并提交审核" : "提交认证资料并加入“复旦戈”大群" }}
           </button>
         </view>
       </view>
@@ -1521,7 +1522,7 @@ function getAgeGroup(dob?: string, fallbackGroup?: string): string {
   return "青年组";
 }
 
-function openOrgJoinModal() {
+function openOrgJoinModal(presetCode?: string) {
   isUpdatingOrgProfile.value = false;
   computeOrgScrollHeight();
   const u = user.value || getStoredUser();
@@ -1544,6 +1545,11 @@ function openOrgJoinModal() {
     orgJoinForm.value.gobi_edition = "戈20";
     orgJoinForm.value.gobi_group = "A组";
     orgJoinForm.value.gobi_experience = "新戈";
+  }
+  if (presetCode) {
+    orgJoinForm.value.invite_code = presetCode;
+  } else if (!orgJoinForm.value.invite_code) {
+    orgJoinForm.value.invite_code = "FDGOBI";
   }
   showOrgJoinModal.value = true;
 }
@@ -4594,6 +4600,12 @@ onPullDownRefresh(async () => {
   line-height: 1.6;
   margin-bottom: 24rpx;
   display: block;
+}
+
+.gop-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
 }
 
 .gop-join-btn {
