@@ -711,15 +711,12 @@
           </view>
         </view>
 
-        <!-- 核心滑动表单区域：启用 enhanced 高性能滚动模式 -->
+        <!-- 核心滑动表单区域 -->
         <scroll-view
           scroll-y
           class="org-sheet-scroll-body"
           :scroll-with-animation="true"
           :enable-back-to-top="true"
-          :enhanced="true"
-          :show-scrollbar="true"
-          :bounces="true"
         >
           <view class="privacy-security-notice">
             <view class="privacy-badge-row">
@@ -3670,11 +3667,12 @@ onPullDownRefresh(async () => {
 }
 
 .org-sheet-scroll-body {
+  height: calc(88vh - 245rpx - env(safe-area-inset-bottom));
+  max-height: calc(88vh - 245rpx - env(safe-area-inset-bottom));
   flex: 1;
-  height: 0;
-  min-height: 0;
   box-sizing: border-box;
   padding: 24rpx 36rpx 16rpx;
+  overflow-y: scroll;
   -webkit-overflow-scrolling: touch;
 }
 
