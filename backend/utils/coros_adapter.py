@@ -136,142 +136,23 @@ class CorosAdapter:
             logger.warning(f"[coros] Failed to save token cache: {e}")
 
     def _load_cached_mobile_token(self) -> bool:
-        """Attempts to load cached mobile access token."""
-        if not os.path.exists(self.mobile_token_path):
-            return False
-        try:
-            with open(self.mobile_token_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                token = data.get("access_token")
-                saved_at = data.get("saved_at", 0)
-                if token and (time.time() - saved_at < 14 * 86400):
-                    self.mobile_access_token = token
-                    return True
-        except Exception as e:
-            logger.warning(f"[coros] Failed to read mobile cached token: {e}")
+        """Permanently disabled: mobile tokens trigger single-device session conflicts."""
         return False
 
     def _save_cached_mobile_token(self):
-        """Persists mobile access token to disk."""
-        if not self.mobile_access_token:
-            return
-        try:
-            with open(self.mobile_token_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "access_token": self.mobile_access_token,
-                    "saved_at": time.time()
-                }, f)
-        except Exception as e:
-            logger.warning(f"[coros] Failed to save mobile token cache: {e}")
+        """Permanently disabled: mobile tokens trigger single-device session conflicts."""
+        pass
 
     def mobile_login(self, override_account: Optional[str] = None, override_type: Optional[int] = None) -> bool:
         """
-        Logs into COROS Mobile API using AES-encrypted credentials.
-        Required for daily sleep statistics and other mobile-only wellness data.
-        Handles both email (accountType=2) and mobile numbers (accountType=1, requires +86- for CN).
+        [PERMANENTLY DISABLED FOR USER PROTECTION]
+        COROS mobile API (/coros/user/login with clientType=1) enforces a strict single-device policy.
+        Logging in via mobile API kicks the user out of the official COROS App on their physical phone,
+        causing repeated logouts and prompting security alerts ('被盗号了').
+        To guarantee zero disruption to the user's phone app, mobile login is strictly disabled.
+        All data (activities, GPS tracks, EvoLab fitness & recovery metrics) is fetched via Web Training Hub.
         """
-        if self._mobile_login_failed:
-            return False
-
-        if self.mobile_access_token:
-            logger.info(f"[coros] Using cached mobile token for {self.account}")
-            return True
-
-        target_acc = (override_account or self.account).strip()
-        if override_type is not None:
-            account_type = override_type
-            mobile_acc = target_acc
-        elif "@" in target_acc:
-            mobile_acc = target_acc
-            account_type = 2
-        elif target_acc.isdigit() and len(target_acc) == 11 and self.is_cn:
-            mobile_acc = f"+86-{target_acc}"
-            account_type = 1
-        elif target_acc.startswith("+"):
-            mobile_acc = target_acc
-            account_type = 1
-        else:
-            mobile_acc = target_acc
-            account_type = 1 if target_acc.replace("-", "").isdigit() else 2
-
-        login_url = f"{self.mobile_base_url}/coros/user/login"
-        app_key = str(random.randint(1_000_000_000_000_000, 9_999_999_999_999_999))
-        pwd_md5 = hashlib.md5(self.password.encode("utf-8")).hexdigest()
-
-        payload = {
-            "account": _encrypt_mobile_param(mobile_acc, app_key) + "\n",
-            "accountType": account_type,
-            "appKey": app_key,
-            "clientType": 1,
-            "hasHrCalibrated": 0,
-            "kbValidity": 0,
-            "pwd": _encrypt_mobile_param(pwd_md5, app_key) + "\n",
-            "region": "460|Asia/Shanghai|CN" if self.is_cn else "840|America/New_York|US",
-            "skipValidation": False,
-        }
-
-        yfheader = json.dumps({
-            "appVersion": 1125917087236096,
-            "clientType": 1,
-            "language": "zh-CN" if self.is_cn else "en-US",
-            "mobileName": "sdk_gphone64_arm64,google,Google",
-            "releaseType": 1,
-            "systemVersion": "13",
-            "timezone": 8 if self.is_cn else -5,
-            "versionCode": "404080400",
-        }, separators=(",", ":"))
-
-        headers = {
-            "content-type": "application/json",
-            "accept-encoding": "gzip",
-            "user-agent": "okhttp/4.12.0",
-            "request-time": str(int(time.time() * 1000)),
-            "yfheader": yfheader,
-        }
-
-        try:
-            logger.info(f"[coros] Attempting mobile login for {mobile_acc} (type={account_type}, {self.mobile_base_url})...")
-            resp = requests.post(login_url, json=payload, headers=headers, timeout=12)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                if str(res_json.get("result")) == "0000":
-                    data = res_json.get("data") or {}
-                    self.mobile_access_token = data.get("accessToken")
-                    if self.mobile_access_token:
-                        self._save_cached_mobile_token()
-                        logger.info(f"[coros] Mobile login success for {self.account}")
-                        return True
-
-                # If account not registered (1029) and we haven't overridden yet, try fallback via training hub
-                res_code = str(res_json.get("result"))
-                if res_code == "1029" and override_account is None:
-                    try:
-                        if not self.access_token:
-                            self.login()
-                        if self.access_token and self.user_id:
-                            acc_resp = requests.get(
-                                f"{self.base_url}/account/query?userId={self.user_id}",
-                                headers=self._get_headers(),
-                                timeout=8
-                            )
-                            if acc_resp.status_code == 200:
-                                p_data = acc_resp.json().get("data") or {}
-                                alt_email = p_data.get("email")
-                                alt_mobile = p_data.get("mobile")
-                                if alt_email and alt_email != self.account:
-                                    logger.info(f"[coros] Retrying mobile login with profile email: {alt_email}")
-                                    return self.mobile_login(override_account=alt_email, override_type=2)
-                                elif alt_mobile and alt_mobile != self.account:
-                                    logger.info(f"[coros] Retrying mobile login with profile mobile: {alt_mobile}")
-                                    return self.mobile_login(override_account=alt_mobile, override_type=1)
-                    except Exception as fe:
-                        logger.warning(f"[coros] Mobile fallback query failed: {fe}")
-
-                logger.warning(f"[coros] Mobile login rejected: {res_json.get('result')} {res_json.get('message')}")
-            else:
-                logger.warning(f"[coros] Mobile login HTTP {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"[coros] Mobile login exception for {self.account}: {e}")
+        logger.info(f"[coros] mobile_login permanently disabled to protect user's phone app session ({self.account})")
         self._mobile_login_failed = True
         return False
 
@@ -749,14 +630,11 @@ class CorosAdapter:
 
     def fetch_sleep_data(self, start_date: str, end_date: str) -> Dict[str, Dict[str, Any]]:
         """
-        Fetches sleep statistics between start_date and end_date (inclusive, YYYY-MM-DD).
-        Returns a dict mapping "YYYY-MM-DD" to normalized sleep metrics.
-        Caches results in self._sleep_cache.
+        [PROTECTED FOR USER APP SESSION SAFETY]
+        Fetches sleep statistics only if an explicit non-conflicting token is already available.
+        Does NOT attempt mobile_login, preventing any kickout of the user's official COROS App.
         """
-        if self._mobile_login_failed:
-            return self._sleep_cache
-
-        if not self.mobile_access_token and not self.mobile_login():
+        if not self.mobile_access_token:
             return self._sleep_cache
 
         try:
@@ -786,15 +664,10 @@ class CorosAdapter:
             resp = requests.post(url, json=payload, headers=headers, timeout=12)
             if resp.status_code == 200:
                 res_json = resp.json()
-                # If mobile token expired, refresh and retry once
                 if str(res_json.get("result")) in ["1019", "401", "1001"]:
-                    logger.info(f"[coros] Mobile token expired, re-authenticating...")
+                    logger.info(f"[coros] Mobile token expired/invalid. Not re-authenticating to protect mobile app session.")
                     self.mobile_access_token = None
-                    if self.mobile_login():
-                        url = f"{self.mobile_base_url}/coros/data/statistic/daily?accessToken={self.mobile_access_token}"
-                        headers["accesstoken"] = self.mobile_access_token
-                        resp = requests.post(url, json=payload, headers=headers, timeout=12)
-                        res_json = resp.json()
+                    return self._sleep_cache
 
                 if str(res_json.get("result")) == "0000":
                     stat_data = res_json.get("data") or {}
@@ -871,14 +744,8 @@ class CorosAdapter:
             "source": f"coros_{'cn' if self.is_cn else 'global'}",
         }
 
-        # 1. Fetch sleep data from mobile API (pre-fill cache with 14-day window)
+        # 1. Read sleep data from cache if present (strictly no mobile login to protect phone app session)
         try:
-            if date_str not in self._sleep_cache:
-                t_dt = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
-                s_window = (t_dt - timedelta(days=14)).isoformat()
-                e_window = (t_dt + timedelta(days=1)).isoformat()
-                self.fetch_sleep_data(s_window, e_window)
-
             s_info = self._sleep_cache.get(date_str)
             if s_info:
                 metrics["sleep_duration_seconds"] = s_info.get("sleep_duration_seconds")

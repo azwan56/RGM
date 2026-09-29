@@ -160,13 +160,6 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                             c_acts = coros_adapter.fetch_recent_activities(limit=100)
                         all_activities.extend(c_acts)
 
-                        try:
-                            t_end = date.today().isoformat()
-                            t_start = (date.today() - timedelta(days=14)).isoformat()
-                            coros_adapter.fetch_sleep_data(t_start, t_end)
-                        except Exception as s_err:
-                            logger.warning(f"[sync] COROS sleep prefetch error: {s_err}")
-
                         for i in range(30):
                             d = (date.today() - timedelta(days=i)).isoformat()
                             try:
