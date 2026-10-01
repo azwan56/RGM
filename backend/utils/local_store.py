@@ -2688,6 +2688,9 @@ class LocalStore:
                 "period_label": period_label,
                 "date_range_str": date_range_str,
                 "total_distance_km": 0.0,
+                "total_target_km": 0.0,
+                "team_completion_rate": 0.0,
+                "achieved_members_count": 0,
                 "total_activities_count": 0,
                 "active_members_count": 0,
                 "total_members_count": 0,
@@ -2696,6 +2699,7 @@ class LocalStore:
                 "total_elevation_gain_m": 0,
                 "total_trimp": 0.0,
                 "leaderboard": [],
+                "member_progress_list": [],
                 "podium": [],
                 "hardcore_runner": None,
                 "longest_run": None,
@@ -2774,8 +2778,9 @@ class LocalStore:
                 if dm > member_stats_map[uid]["longest_m"]:
                     member_stats_map[uid]["longest_m"] = dm
 
-        # Format leaderboard
+        # Format leaderboard and member progress list
         leaderboard = []
+        member_progress_list = []
         active_uids = set()
         for uid, stat in member_stats_map.items():
             km = round(stat["distance_m"] / 1000.0, 1)
@@ -2787,24 +2792,70 @@ class LocalStore:
             else:
                 p_str = "—"
             
-            leaderboard.append({
+            # Retrieve member's goal for this period
+            g = LocalStore.get_goal(uid)
+            if period_type == "month":
+                tgts = g.get("monthly_targets") or [200.0] * 12
+                month_idx = target_month - 1
+                if isinstance(tgts, list) and 0 <= month_idx < len(tgts):
+                    t_val = float(tgts[month_idx] or 0.0)
+                else:
+                    t_val = float(g.get("target_distance") or 200.0)
+                target_km = round(t_val, 1)
+            else:
+                # Weekly target
+                w_target = g.get("weekly_target")
+                if w_target is not None and float(w_target) > 0:
+                    target_km = round(float(w_target), 1)
+                else:
+                    m_idx = start_date_obj.month - 1
+                    tgts = g.get("monthly_targets") or [200.0] * 12
+                    if isinstance(tgts, list) and 0 <= m_idx < len(tgts):
+                        m_val = float(tgts[m_idx] or 0.0)
+                    else:
+                        m_val = float(g.get("target_distance") or 200.0)
+                    target_km = round(m_val / 4.0, 1)
+
+            completion_rate = round((km / target_km) * 100.0, 1) if target_km > 0 else 0.0
+            is_achieved = (km >= target_km and target_km > 0)
+            status_text = "已达标" if is_achieved else ("进行中" if target_km > 0 else "未设定")
+
+            item_data = {
                 "user_id": uid,
                 "display_name": stat["display_name"],
                 "avatar_url": stat["avatar_url"],
                 "role": stat["role"],
                 "distance_km": km,
+                "actual_km": km,
+                "target_km": target_km,
+                "completion_rate": completion_rate,
+                "completion_pct": completion_rate,
+                "is_achieved": is_achieved,
+                "status": status_text,
+                "remaining_km": round(max(0.0, target_km - km), 1),
                 "runs_count": stat["activities_count"],
                 "active_days_count": len(stat["run_days"]),
                 "avg_pace_str": p_str,
                 "elevation_gain_m": int(round(stat["elevation_m"])),
                 "trimp": round(stat["trimp"], 1),
                 "longest_km": round(stat["longest_m"] / 1000.0, 2)
-            })
+            }
+            leaderboard.append(item_data)
+            member_progress_list.append(dict(item_data))
 
         # Sort leaderboard by distance descending, then by runs_count
         leaderboard.sort(key=lambda x: (x["distance_km"], x["runs_count"]), reverse=True)
         for i, item in enumerate(leaderboard):
             item["rank"] = i + 1
+
+        # Sort member_progress_list by completion_rate desc, then distance_km desc
+        member_progress_list.sort(key=lambda x: (x["completion_rate"], x["distance_km"]), reverse=True)
+        for i, item in enumerate(member_progress_list):
+            item["progress_rank"] = i + 1
+
+        total_target_km = round(sum(item["target_km"] for item in member_progress_list), 1)
+        achieved_members_count = sum(1 for item in member_progress_list if item["is_achieved"])
+        team_completion_rate = round(total_distance_km / total_target_km * 100.0, 1) if total_target_km > 0 else 0.0
 
         active_count = len(active_uids)
         total_members_count = len(members)
@@ -2852,6 +2903,8 @@ class LocalStore:
             f"━━━━━━━━━━━━━━━━━━",
             f"📅 统计周期：{date_range_str}",
             f"📊 全团总跑量：{total_distance_km} km",
+            f"🎯 团队目标完成度：{team_completion_rate}% (目标 {total_target_km} km)",
+            f"🏅 目标达标人数：{achieved_members_count}/{total_members_count} 人",
             f"🎯 打卡总人次：{total_acts_count} 次",
             f"👥 队员出勤率：{active_count}/{total_members_count} 人 ({attendance_rate}%)",
             f"⏱️ 全团平均配速：{avg_pace_str}",
@@ -2871,6 +2924,12 @@ class LocalStore:
             for item in leaderboard[3:10]:
                 if item["distance_km"] > 0:
                     forward_lines.append(f"第{item['rank']}名：{item['display_name']} · {item['distance_km']} km")
+
+        forward_lines.append("━━━━━━━━━━━━━━━━━━")
+        forward_lines.append("📋 【全员跑量目标与完成度】")
+        for item in member_progress_list:
+            tag = "✅达标" if item["is_achieved"] else f"{item['completion_rate']}%"
+            forward_lines.append(f"• {item['display_name']}：实际 {item['distance_km']} km / 目标 {item['target_km']} km ({tag})")
 
         forward_lines.append("━━━━━━━━━━━━━━━━━━")
         if hardcore_runner and hardcore_runner.get("runs_count", 0) > 0:
@@ -2894,6 +2953,9 @@ class LocalStore:
             "start_date": start_date_obj.isoformat(),
             "end_date": end_date_obj.isoformat(),
             "total_distance_km": total_distance_km,
+            "total_target_km": total_target_km,
+            "team_completion_rate": team_completion_rate,
+            "achieved_members_count": achieved_members_count,
             "total_activities_count": total_acts_count,
             "active_members_count": active_count,
             "total_members_count": total_members_count,
@@ -2902,6 +2964,7 @@ class LocalStore:
             "total_elevation_gain_m": total_elev_int,
             "total_trimp": total_trimp_round,
             "leaderboard": leaderboard,
+            "member_progress_list": member_progress_list,
             "podium": podium,
             "hardcore_runner": hardcore_runner,
             "longest_run": longest_run,

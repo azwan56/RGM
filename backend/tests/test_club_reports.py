@@ -80,14 +80,47 @@ def test_club_periodic_reports_and_permissions():
     assert "战报荣耀跑团" in w_data["forward_text"]
     assert "【荣耀榜单 Top 3】" in w_data["forward_text"]
 
+    # Verify member_progress_list & targets
+    assert "member_progress_list" in w_data
+    assert len(w_data["member_progress_list"]) >= 2
+    for prog in w_data["member_progress_list"]:
+        assert "target_km" in prog
+        assert "distance_km" in prog
+        assert "completion_rate" in prog
+        assert "is_achieved" in prog
+        assert "status" in prog
+        assert prog["target_km"] > 0
+    assert w_data["total_target_km"] > 0
+    assert "team_completion_rate" in w_data
+    assert "achieved_members_count" in w_data
+    assert "【全员跑量目标与完成度】" in w_data["forward_text"]
+
     # 7. Owner Access Test: Monthly Report
     res_month = client.get(f"/api/team/{club_id}/reports", params={"operator_uid": owner_uid, "period_type": "month"})
     assert res_month.status_code == 200
     m_data = res_month.json()
     assert m_data["period_type"] == "month"
     assert round(m_data["total_distance_km"], 1) == 44.1
+    assert "member_progress_list" in m_data
+    assert len(m_data["member_progress_list"]) >= 2
+    assert m_data["member_progress_list"][0]["target_km"] > 0
 
-    # 8. Owner Export Test: PlainText download
+    # 8. Set custom goal for member_1 and re-verify
+    LocalStore.upsert_goal(member_1, {
+        "target_distance": 100.0,
+        "weekly_target": 20.0,
+        "monthly_targets": [100.0] * 12
+    })
+    res_custom = client.get(f"/api/team/{club_id}/reports", params={"operator_uid": owner_uid, "period_type": "week"})
+    custom_data = res_custom.json()
+    m1_item = next(p for p in custom_data["member_progress_list"] if p["user_id"] == member_1)
+    assert m1_item["target_km"] == 20.0
+    assert m1_item["distance_km"] == 23.0 # 15 + 8
+    assert m1_item["is_achieved"] is True
+    assert m1_item["status"] == "已达标"
+    assert m1_item["completion_rate"] == 115.0
+
+    # 9. Owner Export Test: PlainText download
     res_export = client.get(f"/api/team/{club_id}/reports/export", params={"operator_uid": owner_uid, "period_type": "week"})
     assert res_export.status_code == 200
     assert "text/plain" in res_export.headers.get("content-type", "")
@@ -95,3 +128,4 @@ def test_club_periodic_reports_and_permissions():
     content = res_export.text
     assert "战报荣耀跑团" in content
     assert "km" in content
+    assert "【全员跑量目标与完成度】" in content

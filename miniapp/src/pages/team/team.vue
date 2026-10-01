@@ -1167,21 +1167,28 @@
           </view>
         </view>
 
-        <!-- View mode tabs: 🎨 战报海报图片 vs 💬 微信群文本 -->
+        <!-- View mode tabs: 🎨 战报海报图片 vs 📋 全员目标列表 vs 💬 微信群文本 -->
         <view class="report-view-mode-tabs">
           <view
             class="report-view-tab"
             :class="{ active: reportViewMode === 'poster' }"
             @click="reportViewMode = 'poster'"
           >
-            🎨 战报海报图片样式
+            🎨 战报海报
+          </view>
+          <view
+            class="report-view-tab"
+            :class="{ active: reportViewMode === 'table' }"
+            @click="reportViewMode = 'table'"
+          >
+            📋 全员跑量目标列表
           </view>
           <view
             class="report-view-tab"
             :class="{ active: reportViewMode === 'text' }"
             @click="reportViewMode = 'text'"
           >
-            💬 微信群转发文本
+            💬 微信群文本
           </view>
         </view>
 
@@ -1193,7 +1200,7 @@
 
         <!-- Report Body -->
         <scroll-view v-else-if="reportData" scroll-y class="modal-body modal-scroll report-scroll-body">
-          <!-- ── POSTER VIEW (图片海报样式) ── -->
+          <!-- ── 1. POSTER VIEW (图片海报样式) ── -->
           <view v-if="reportViewMode === 'poster'" class="poster-card-wrapper">
             <view class="report-poster-card">
               <!-- Top Branding Header -->
@@ -1295,6 +1302,54 @@
                 </view>
               </view>
 
+              <!-- 📋 Poster Member Progress Summary Section -->
+              <view class="poster-member-progress-box">
+                <view class="pmb-header">
+                  <view class="pmb-title-left">
+                    <text class="pmb-icon">📋</text>
+                    <text class="pmb-title">全员跑量与目标达成</text>
+                  </view>
+                  <view class="pmb-rate-pill">
+                    达标 {{ reportData.achieved_members_count || 0 }}/{{ reportData.total_members_count || 0 }}人
+                  </view>
+                </view>
+                <view class="poster-progress-table">
+                  <view class="ppt-head-row">
+                    <text class="ppt-th th-member">队员</text>
+                    <text class="ppt-th th-target">目标</text>
+                    <text class="ppt-th th-actual">实际</text>
+                    <text class="ppt-th th-rate">完成度</text>
+                  </view>
+                  <view
+                    v-for="(item, idx) in (reportData.member_progress_list || []).slice(0, 8)"
+                    :key="item.user_id"
+                    class="ppt-body-row"
+                  >
+                    <view class="ppt-td td-member">
+                      <text class="ppt-rank-num">{{ idx + 1 }}</text>
+                      <image
+                        class="ppt-mini-avatar"
+                        :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                        mode="aspectFill"
+                      />
+                      <text class="ppt-name-text">{{ item.display_name }}</text>
+                    </view>
+                    <text class="ppt-td td-target font-mono">{{ item.target_km }}k</text>
+                    <text class="ppt-td td-actual font-mono">{{ item.distance_km }}k</text>
+                    <view class="ppt-td td-rate">
+                      <text :class="item.is_achieved ? 'rate-achieved' : 'rate-pending'">{{ item.completion_rate }}%</text>
+                    </view>
+                  </view>
+                  <view
+                    v-if="(reportData.member_progress_list || []).length > 8"
+                    class="ppt-more-btn"
+                    @click="reportViewMode = 'table'"
+                  >
+                    查看全部 {{ (reportData.member_progress_list || []).length }} 位成员目标表格 ➔
+                  </view>
+                </view>
+              </view>
+
               <!-- 💡 Canova Quote Card -->
               <view class="poster-canova-quote">
                 <view class="pcq-header">
@@ -1317,7 +1372,155 @@
             </view>
           </view>
 
-          <!-- ── TEXT VIEW (微信群纯文本预览) ── -->
+          <!-- ── 2. TABLE VIEW (全员跑量与目标完成度完整表格) ── -->
+          <view v-else-if="reportViewMode === 'table'" class="table-mode-container">
+            <!-- Team Goal Overview Card -->
+            <view class="team-goal-overview-card">
+              <view class="tgoc-top">
+                <view class="tgoc-stat-item">
+                  <text class="tgoc-stat-label">团队目标跑量</text>
+                  <text class="tgoc-stat-val font-mono">{{ reportData.total_target_km }} <text class="tgoc-u">KM</text></text>
+                </view>
+                <view class="tgoc-stat-divider"></view>
+                <view class="tgoc-stat-item">
+                  <text class="tgoc-stat-label">实际累计奔跑</text>
+                  <text class="tgoc-stat-val val-orange font-mono">{{ reportData.total_distance_km }} <text class="tgoc-u">KM</text></text>
+                </view>
+                <view class="tgoc-stat-divider"></view>
+                <view class="tgoc-stat-item">
+                  <text class="tgoc-stat-label">全团完成度</text>
+                  <text class="tgoc-stat-val val-green font-mono">{{ reportData.team_completion_rate }}%</text>
+                </view>
+              </view>
+
+              <!-- Progress Bar -->
+              <view class="tgoc-bar-row">
+                <view class="tgoc-bar-bg">
+                  <view
+                    class="tgoc-bar-fill"
+                    :style="{ width: Math.min(reportData.team_completion_rate || 0, 100) + '%' }"
+                  ></view>
+                </view>
+                <text class="tgoc-bar-text">达标人数：{{ reportData.achieved_members_count || 0 }} / {{ reportData.total_members_count || 0 }} 人</text>
+              </view>
+            </view>
+
+            <!-- Table Filter and Sort Bar -->
+            <view class="table-controls-bar">
+              <view class="table-filter-pills">
+                <text
+                  class="tf-pill"
+                  :class="{ active: reportFilter === 'all' }"
+                  @click="reportFilter = 'all'"
+                >
+                  全部 ({{ (reportData.member_progress_list || []).length }})
+                </text>
+                <text
+                  class="tf-pill"
+                  :class="{ active: reportFilter === 'achieved' }"
+                  @click="reportFilter = 'achieved'"
+                >
+                  已达标 ({{ reportData.achieved_members_count || 0 }})
+                </text>
+                <text
+                  class="tf-pill"
+                  :class="{ active: reportFilter === 'pending' }"
+                  @click="reportFilter = 'pending'"
+                >
+                  未达标 ({{ Math.max(0, (reportData.total_members_count || 0) - (reportData.achieved_members_count || 0)) }})
+                </text>
+              </view>
+
+              <view class="table-sort-switch" @click="toggleReportSort">
+                <text class="tss-label">排序: </text>
+                <text class="tss-val">{{ reportSortBy === 'completion' ? '完成度 ⬇️' : '实际跑量 ⬇️' }}</text>
+              </view>
+            </view>
+
+            <!-- Search input if many members -->
+            <view v-if="(reportData.member_progress_list || []).length > 8" class="table-search-row">
+              <input
+                v-model="reportSearch"
+                class="table-search-input"
+                placeholder="🔍 搜索队员姓名..."
+              />
+            </view>
+
+            <!-- Table Card -->
+            <view class="member-table-card">
+              <!-- Table Header -->
+              <view class="mtc-header-row">
+                <text class="mtc-th th-col-member">队员</text>
+                <text class="mtc-th th-col-target">目标跑量</text>
+                <text class="mtc-th th-col-actual">实际跑量</text>
+                <text class="mtc-th th-col-progress">完成度</text>
+              </view>
+
+              <!-- Table Body -->
+              <view v-if="filteredSortedMemberList.length > 0" class="mtc-body-list">
+                <view
+                  v-for="(m, idx) in filteredSortedMemberList"
+                  :key="m.user_id"
+                  class="mtc-row"
+                  :class="{ 'row-achieved': m.is_achieved }"
+                >
+                  <!-- Member Info -->
+                  <view class="mtc-td td-col-member">
+                    <text class="mtc-rank-badge" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</text>
+                    <image
+                      class="mtc-avatar"
+                      :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                      mode="aspectFill"
+                    />
+                    <view class="mtc-name-col">
+                      <view class="mtc-name-row">
+                        <text class="mtc-name">{{ m.display_name }}</text>
+                        <text v-if="m.role === 'owner'" class="mtc-role-pill role-owner">团长</text>
+                        <text v-else-if="m.role === 'coach'" class="mtc-role-pill role-coach">教练</text>
+                      </view>
+                      <text class="mtc-sub-detail">{{ m.runs_count }}次打卡 · {{ m.avg_pace_str }}</text>
+                    </view>
+                  </view>
+
+                  <!-- Target Mileage -->
+                  <view class="mtc-td td-col-target font-mono">
+                    <text class="mtc-target-val">{{ m.target_km }}</text>
+                    <text class="mtc-km-unit">km</text>
+                  </view>
+
+                  <!-- Actual Mileage -->
+                  <view class="mtc-td td-col-actual font-mono">
+                    <text class="mtc-actual-val">{{ m.distance_km }}</text>
+                    <text class="mtc-km-unit">km</text>
+                  </view>
+
+                  <!-- Completion Rate & Visual Bar -->
+                  <view class="mtc-td td-col-progress">
+                    <view class="mtc-rate-top">
+                      <text class="mtc-rate-pct font-mono" :class="m.is_achieved ? 'text-green' : 'text-orange'">
+                        {{ m.completion_rate }}%
+                      </text>
+                      <text class="mtc-status-pill" :class="m.is_achieved ? 'pill-achieved' : 'pill-pending'">
+                        {{ m.status }}
+                      </text>
+                    </view>
+                    <view class="mtc-mini-bar-bg">
+                      <view
+                        class="mtc-mini-bar-fill"
+                        :class="m.is_achieved ? 'fill-green' : 'fill-orange'"
+                        :style="{ width: Math.min(m.completion_rate, 100) + '%' }"
+                      ></view>
+                    </view>
+                  </view>
+                </view>
+              </view>
+              <view v-else class="mtc-empty-row">
+                <text class="mtc-empty-text">未找到符合条件的队员记录</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- ── 3. TEXT VIEW (微信群纯文本预览) ── -->
           <view v-else class="text-mode-container">
             <view class="report-section-box forward-box">
               <view class="forward-header">
@@ -1349,6 +1552,14 @@
             </button>
             <button class="btn-sub-copy" @click="handleCopyReportForwardText">
               📋 复制文本
+            </button>
+          </template>
+          <template v-else-if="reportViewMode === 'table'">
+            <button class="btn-copy-table" @click="handleCopyMemberProgressTable">
+              📋 复制全员明细
+            </button>
+            <button class="btn-copy-forward" @click="handleCopyReportForwardText">
+              💬 复制微信群战报
             </button>
           </template>
           <template v-else>
@@ -1422,9 +1633,89 @@ const clubJoinCodeInput = ref("");
 const showReportModal = ref(false);
 const reportPeriodType = ref<"week" | "month">("week");
 const reportPeriodOffset = ref(0);
-const reportViewMode = ref<"poster" | "text">("poster");
+const reportViewMode = ref<"poster" | "table" | "text">("poster");
 const loadingReport = ref(false);
 const reportData = ref<any>(null);
+const reportSortBy = ref<"completion" | "distance">("completion");
+const reportFilter = ref<"all" | "achieved" | "pending">("all");
+const reportSearch = ref("");
+
+const filteredSortedMemberList = computed(() => {
+  const list = reportData.value?.member_progress_list || [];
+  let res = [...list];
+
+  if (reportSearch.value.trim()) {
+    const q = reportSearch.value.trim().toLowerCase();
+    res = res.filter(
+      (m: any) => m.display_name && m.display_name.toLowerCase().includes(q)
+    );
+  }
+
+  if (reportFilter.value === "achieved") {
+    res = res.filter((m: any) => m.is_achieved);
+  } else if (reportFilter.value === "pending") {
+    res = res.filter((m: any) => !m.is_achieved);
+  }
+
+  if (reportSortBy.value === "completion") {
+    res.sort(
+      (a: any, b: any) =>
+        (b.completion_rate || 0) - (a.completion_rate || 0) ||
+        (b.distance_km || 0) - (a.distance_km || 0)
+    );
+  } else {
+    res.sort(
+      (a: any, b: any) =>
+        (b.distance_km || 0) - (a.distance_km || 0) ||
+        (b.completion_rate || 0) - (a.completion_rate || 0)
+    );
+  }
+
+  return res;
+});
+
+function toggleReportSort() {
+  reportSortBy.value = reportSortBy.value === "completion" ? "distance" : "completion";
+}
+
+function handleCopyMemberProgressTable() {
+  if (!reportData.value) return;
+  const rep = reportData.value;
+  const list = rep.member_progress_list || [];
+  if (list.length === 0) {
+    uni.showToast({ title: "暂无成员目标数据", icon: "none" });
+    return;
+  }
+
+  const lines = [
+    `🏃‍♂️ 【${rep.club_name}】${rep.period_label} 全员跑量目标与达成明细`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `📅 统计周期：${rep.date_range_str}`,
+    `📊 全团总跑量：${rep.total_distance_km} km`,
+    `🎯 团队总目标：${rep.total_target_km} km (完成度 ${rep.team_completion_rate}%)`,
+    `🏅 达标人数：${rep.achieved_members_count}/${rep.total_members_count} 人`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `📋 【全员明细清单】`
+  ];
+
+  list.forEach((m: any, idx: number) => {
+    const tag = m.is_achieved ? "✅ 已达标" : `差 ${m.remaining_km}km`;
+    lines.push(
+      `${idx + 1}. ${m.display_name}：实际 ${m.distance_km} km / 目标 ${m.target_km} km (完成度 ${m.completion_rate}% · ${tag})`
+    );
+  });
+
+  lines.push(`━━━━━━━━━━━━━━━━━━`);
+  lines.push(`数据由【万跑跑团助手】实时自动汇算生成。`);
+
+  const text = lines.join("\n");
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({ title: "全员目标明细已复制！", icon: "success", duration: 2500 });
+    }
+  });
+}
 
 const isAnyModalOpen = computed(() => {
   return (
@@ -6120,6 +6411,576 @@ onPullDownRefresh(async () => {
   text-align: center;
   border: 1rpx solid rgba(255, 255, 255, 0.12);
   line-height: 1.4;
+}
+
+/* ── Poster Member Progress Box ── */
+.poster-member-progress-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1rpx solid rgba(255, 215, 0, 0.25);
+  border-radius: 20rpx;
+  padding: 18rpx;
+  margin-bottom: 20rpx;
+}
+
+.pmb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.pmb-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.pmb-icon {
+  font-size: 24rpx;
+}
+
+.pmb-title {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #ffd700;
+}
+
+.pmb-rate-pill {
+  font-size: 18rpx;
+  font-weight: bold;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1rpx solid rgba(34, 197, 94, 0.3);
+  border-radius: 20rpx;
+  padding: 2rpx 12rpx;
+}
+
+.poster-progress-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.ppt-head-row {
+  display: flex;
+  align-items: center;
+  padding: 8rpx 10rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10rpx;
+  margin-bottom: 6rpx;
+}
+
+.ppt-th {
+  font-size: 18rpx;
+  color: #9ca3af;
+  font-weight: bold;
+}
+
+.th-member {
+  flex: 1.5;
+}
+
+.th-target {
+  width: 90rpx;
+  text-align: center;
+}
+
+.th-actual {
+  width: 90rpx;
+  text-align: center;
+}
+
+.th-rate {
+  width: 100rpx;
+  text-align: right;
+}
+
+.ppt-body-row {
+  display: flex;
+  align-items: center;
+  padding: 10rpx;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.05);
+}
+
+.ppt-td {
+  font-size: 20rpx;
+  color: #e4e4e7;
+}
+
+.td-member {
+  flex: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.ppt-rank-num {
+  font-size: 18rpx;
+  color: #71717a;
+  min-width: 24rpx;
+}
+
+.ppt-mini-avatar {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+}
+
+.ppt-name-text {
+  font-size: 20rpx;
+  color: #ffffff;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150rpx;
+}
+
+.td-target {
+  width: 90rpx;
+  text-align: center;
+  color: #a1a1aa;
+}
+
+.td-actual {
+  width: 90rpx;
+  text-align: center;
+  color: #fc4c02;
+  font-weight: bold;
+}
+
+.td-rate {
+  width: 100rpx;
+  text-align: right;
+  font-weight: bold;
+}
+
+.rate-achieved {
+  color: #4ade80;
+}
+
+.rate-pending {
+  color: #fbbf24;
+}
+
+.ppt-more-btn {
+  text-align: center;
+  font-size: 20rpx;
+  color: #ffd700;
+  padding: 14rpx 0 6rpx;
+  font-weight: bold;
+}
+
+/* ── 2. Table Mode (全员列表界面) ── */
+.table-mode-container {
+  padding: 10rpx 0 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+/* Team Goal Overview Card */
+.team-goal-overview-card {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.08) 0%, rgba(245, 158, 11, 0.03) 100%);
+  border: 1rpx solid rgba(255, 215, 0, 0.3);
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+}
+
+.tgoc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin-bottom: 16rpx;
+}
+
+.tgoc-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.tgoc-stat-label {
+  font-size: 20rpx;
+  color: #9ca3af;
+}
+
+.tgoc-stat-val {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.tgoc-u {
+  font-size: 20rpx;
+  color: #71717a;
+}
+
+.val-orange {
+  color: #fc4c02;
+}
+
+.val-green {
+  color: #4ade80;
+}
+
+.tgoc-stat-divider {
+  width: 1rpx;
+  height: 48rpx;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tgoc-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.tgoc-bar-bg {
+  width: 100%;
+  height: 12rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6rpx;
+  overflow: hidden;
+}
+
+.tgoc-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b 0%, #22c55e 100%);
+  border-radius: 6rpx;
+  transition: width 0.4s ease;
+}
+
+.tgoc-bar-text {
+  font-size: 20rpx;
+  color: #ffd700;
+  text-align: right;
+  font-weight: bold;
+}
+
+/* Controls Bar */
+.table-controls-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.table-filter-pills {
+  display: flex;
+  gap: 10rpx;
+}
+
+.tf-pill {
+  font-size: 20rpx;
+  color: #9ca3af;
+  background: #1c1f2b;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  padding: 6rpx 16rpx;
+  font-weight: bold;
+}
+
+.tf-pill.active {
+  color: #000000;
+  background: #ffd700;
+  border-color: #ffd700;
+}
+
+.table-sort-switch {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 14rpx;
+  padding: 6rpx 14rpx;
+}
+
+.tss-label {
+  font-size: 18rpx;
+  color: #9ca3af;
+}
+
+.tss-val {
+  font-size: 20rpx;
+  color: #ffd700;
+  font-weight: bold;
+}
+
+.table-search-row {
+  margin-top: -4rpx;
+}
+
+.table-search-input {
+  background: #181b26;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 14rpx;
+  padding: 10rpx 18rpx;
+  font-size: 22rpx;
+  color: #ffffff;
+}
+
+/* Member Table Card */
+.member-table-card {
+  background: #151824;
+  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-radius: 20rpx;
+  overflow: hidden;
+}
+
+.mtc-header-row {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 18rpx;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+}
+
+.mtc-th {
+  font-size: 20rpx;
+  color: #9ca3af;
+  font-weight: bold;
+}
+
+.th-col-member {
+  flex: 1.6;
+}
+
+.th-col-target {
+  width: 120rpx;
+  text-align: center;
+}
+
+.th-col-actual {
+  width: 120rpx;
+  text-align: center;
+}
+
+.th-col-progress {
+  width: 170rpx;
+  text-align: right;
+}
+
+.mtc-body-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.mtc-row {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 18rpx;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.04);
+  transition: background 0.2s;
+}
+
+.mtc-row.row-achieved {
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.td-col-member {
+  flex: 1.6;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.mtc-rank-badge {
+  font-size: 20rpx;
+  font-weight: 900;
+  width: 32rpx;
+  text-align: center;
+  color: #71717a;
+}
+
+.mtc-rank-badge.rank-1 {
+  color: #ffd700;
+}
+
+.mtc-rank-badge.rank-2 {
+  color: #c0c0c0;
+}
+
+.mtc-rank-badge.rank-3 {
+  color: #cd7f32;
+}
+
+.mtc-avatar {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.mtc-name-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  overflow: hidden;
+}
+
+.mtc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.mtc-name {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mtc-role-pill {
+  font-size: 16rpx;
+  padding: 0 8rpx;
+  border-radius: 8rpx;
+  font-weight: bold;
+}
+
+.mtc-role-pill.role-owner {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.15);
+}
+
+.mtc-role-pill.role-coach {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.mtc-sub-detail {
+  font-size: 16rpx;
+  color: #71717a;
+}
+
+.td-col-target {
+  width: 120rpx;
+  text-align: center;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2rpx;
+}
+
+.mtc-target-val {
+  font-size: 24rpx;
+  color: #a1a1aa;
+}
+
+.td-col-actual {
+  width: 120rpx;
+  text-align: center;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2rpx;
+}
+
+.mtc-actual-val {
+  font-size: 26rpx;
+  font-weight: 900;
+  color: #fc4c02;
+}
+
+.mtc-km-unit {
+  font-size: 16rpx;
+  color: #71717a;
+}
+
+.td-col-progress {
+  width: 170rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6rpx;
+}
+
+.mtc-rate-top {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.mtc-rate-pct {
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.text-green {
+  color: #4ade80;
+}
+
+.text-orange {
+  color: #fbbf24;
+}
+
+.mtc-status-pill {
+  font-size: 16rpx;
+  padding: 2rpx 8rpx;
+  border-radius: 6rpx;
+  font-weight: bold;
+}
+
+.pill-achieved {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1rpx solid rgba(34, 197, 94, 0.3);
+}
+
+.pill-pending {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.mtc-mini-bar-bg {
+  width: 100%;
+  height: 8rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4rpx;
+  overflow: hidden;
+}
+
+.mtc-mini-bar-fill {
+  height: 100%;
+  border-radius: 4rpx;
+}
+
+.fill-green {
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+}
+
+.fill-orange {
+  background: linear-gradient(90deg, #f59e0b, #fc4c02);
+}
+
+.mtc-empty-row {
+  padding: 40rpx 0;
+  text-align: center;
+}
+
+.mtc-empty-text {
+  font-size: 22rpx;
+  color: #71717a;
+}
+
+/* Button in Table View */
+.btn-copy-table {
+  flex: 1.5;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  color: #000000;
+  font-size: 24rpx;
+  font-weight: 900;
+  border-radius: 16rpx;
+  padding: 16rpx 0;
+  text-align: center;
+  border: none;
+  line-height: 1.4;
+  box-shadow: 0 4rpx 14rpx rgba(245, 158, 11, 0.3);
 }
 
 /* ── Club Suspended Access Block Screen ── */
