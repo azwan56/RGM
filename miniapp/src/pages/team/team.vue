@@ -1478,7 +1478,7 @@
                         <text v-if="m.role === 'owner'" class="mtc-role-pill role-owner">团长</text>
                         <text v-else-if="m.role === 'coach'" class="mtc-role-pill role-coach">教练</text>
                       </view>
-                      <text class="mtc-sub-detail">{{ m.runs_count }}次打卡 · {{ m.avg_pace_str }}</text>
+                      <text class="mtc-sub-detail">{{ m.runs_count > 0 ? (m.runs_count + '次打卡') : '未打卡' }}</text>
                     </view>
                   </view>
 
@@ -1497,17 +1497,23 @@
                   <!-- Completion Rate & Visual Bar -->
                   <view class="mtc-td td-col-progress">
                     <view class="mtc-rate-top">
-                      <text class="mtc-rate-pct font-mono" :class="m.is_achieved ? 'text-green' : 'text-orange'">
+                      <text
+                        class="mtc-rate-pct font-mono"
+                        :class="m.is_achieved ? 'text-green' : ((reportPeriodOffset === -1 || reportData?.is_past_period) ? 'text-red' : 'text-orange')"
+                      >
                         {{ m.completion_rate }}%
                       </text>
-                      <text class="mtc-status-pill" :class="m.is_achieved ? 'pill-achieved' : 'pill-pending'">
-                        {{ m.status }}
+                      <text
+                        class="mtc-status-pill"
+                        :class="m.is_achieved ? 'pill-achieved' : ((reportPeriodOffset === -1 || reportData?.is_past_period) ? 'pill-failed' : 'pill-pending')"
+                      >
+                        {{ m.is_achieved ? '已达标' : ((reportPeriodOffset === -1 || reportData?.is_past_period) ? '未达标' : '进行中') }}
                       </text>
                     </view>
                     <view class="mtc-mini-bar-bg">
                       <view
                         class="mtc-mini-bar-fill"
-                        :class="m.is_achieved ? 'fill-green' : 'fill-orange'"
+                        :class="m.is_achieved ? 'fill-green' : ((reportPeriodOffset === -1 || reportData?.is_past_period) ? 'fill-red' : 'fill-orange')"
                         :style="{ width: Math.min(m.completion_rate, 100) + '%' }"
                       ></view>
                     </view>
@@ -1698,8 +1704,9 @@ function handleCopyMemberProgressTable() {
     `📋 【全员明细清单】`
   ];
 
+  const isPast = reportPeriodOffset.value === -1 || rep.is_past_period;
   list.forEach((m: any, idx: number) => {
-    const tag = m.is_achieved ? "✅ 已达标" : `差 ${m.remaining_km}km`;
+    const tag = m.is_achieved ? "✅ 已达标" : (isPast ? "未达标" : `进行中 (差 ${m.remaining_km}km)`);
     lines.push(
       `${idx + 1}. ${m.display_name}：实际 ${m.distance_km} km / 目标 ${m.target_km} km (完成度 ${m.completion_rate}% · ${tag})`
     );
@@ -5683,7 +5690,7 @@ onPullDownRefresh(async () => {
 }
 
 .report-scroll-body {
-  max-height: 56vh;
+  max-height: 64vh;
   padding-right: 4rpx;
 }
 
@@ -6732,7 +6739,7 @@ onPullDownRefresh(async () => {
 .mtc-header-row {
   display: flex;
   align-items: center;
-  padding: 16rpx 18rpx;
+  padding: 16rpx 16rpx;
   background: rgba(255, 255, 255, 0.04);
   border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
 }
@@ -6744,21 +6751,25 @@ onPullDownRefresh(async () => {
 }
 
 .th-col-member {
-  flex: 1.6;
+  flex: 1;
+  min-width: 0;
 }
 
 .th-col-target {
-  width: 120rpx;
+  width: 90rpx;
+  flex-shrink: 0;
   text-align: center;
 }
 
 .th-col-actual {
-  width: 120rpx;
+  width: 100rpx;
+  flex-shrink: 0;
   text-align: center;
 }
 
 .th-col-progress {
-  width: 170rpx;
+  width: 180rpx;
+  flex-shrink: 0;
   text-align: right;
 }
 
@@ -6770,7 +6781,7 @@ onPullDownRefresh(async () => {
 .mtc-row {
   display: flex;
   align-items: center;
-  padding: 16rpx 18rpx;
+  padding: 16rpx 16rpx;
   border-bottom: 1rpx solid rgba(255, 255, 255, 0.04);
   transition: background 0.2s;
 }
@@ -6780,7 +6791,8 @@ onPullDownRefresh(async () => {
 }
 
 .td-col-member {
-  flex: 1.6;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10rpx;
@@ -6789,9 +6801,10 @@ onPullDownRefresh(async () => {
 .mtc-rank-badge {
   font-size: 20rpx;
   font-weight: 900;
-  width: 32rpx;
+  width: 24rpx;
   text-align: center;
   color: #71717a;
+  flex-shrink: 0;
 }
 
 .mtc-rank-badge.rank-1 {
@@ -6807,14 +6820,16 @@ onPullDownRefresh(async () => {
 }
 
 .mtc-avatar {
-  width: 52rpx;
-  height: 52rpx;
+  width: 44rpx;
+  height: 44rpx;
   border-radius: 50%;
   border: 1rpx solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
 .mtc-name-col {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2rpx;
@@ -6824,7 +6839,8 @@ onPullDownRefresh(async () => {
 .mtc-name-row {
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  gap: 6rpx;
+  min-width: 0;
 }
 
 .mtc-name {
@@ -6834,13 +6850,16 @@ onPullDownRefresh(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 170rpx;
 }
 
 .mtc-role-pill {
   font-size: 16rpx;
   padding: 0 8rpx;
-  border-radius: 8rpx;
+  border-radius: 6rpx;
   font-weight: bold;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .mtc-role-pill.role-owner {
@@ -6854,12 +6873,15 @@ onPullDownRefresh(async () => {
 }
 
 .mtc-sub-detail {
-  font-size: 16rpx;
+  font-size: 17rpx;
   color: #71717a;
+  white-space: nowrap;
+  margin-top: 2rpx;
 }
 
 .td-col-target {
-  width: 120rpx;
+  width: 90rpx;
+  flex-shrink: 0;
   text-align: center;
   display: flex;
   align-items: baseline;
@@ -6868,12 +6890,13 @@ onPullDownRefresh(async () => {
 }
 
 .mtc-target-val {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #a1a1aa;
 }
 
 .td-col-actual {
-  width: 120rpx;
+  width: 100rpx;
+  flex-shrink: 0;
   text-align: center;
   display: flex;
   align-items: baseline;
@@ -6882,7 +6905,7 @@ onPullDownRefresh(async () => {
 }
 
 .mtc-actual-val {
-  font-size: 26rpx;
+  font-size: 24rpx;
   font-weight: 900;
   color: #fc4c02;
 }
@@ -6893,22 +6916,25 @@ onPullDownRefresh(async () => {
 }
 
 .td-col-progress {
-  width: 170rpx;
+  width: 180rpx;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6rpx;
+  gap: 4rpx;
 }
 
 .mtc-rate-top {
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  gap: 6rpx;
+  white-space: nowrap;
 }
 
 .mtc-rate-pct {
-  font-size: 24rpx;
+  font-size: 22rpx;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .text-green {
@@ -6919,11 +6945,17 @@ onPullDownRefresh(async () => {
   color: #fbbf24;
 }
 
+.text-red {
+  color: #f87171;
+}
+
 .mtc-status-pill {
   font-size: 16rpx;
   padding: 2rpx 8rpx;
   border-radius: 6rpx;
   font-weight: bold;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pill-achieved {
@@ -6934,20 +6966,27 @@ onPullDownRefresh(async () => {
 
 .pill-pending {
   color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1rpx solid rgba(245, 158, 11, 0.25);
+}
+
+.pill-failed {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1rpx solid rgba(239, 68, 68, 0.3);
 }
 
 .mtc-mini-bar-bg {
   width: 100%;
-  height: 8rpx;
+  height: 6rpx;
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 4rpx;
+  border-radius: 3rpx;
   overflow: hidden;
 }
 
 .mtc-mini-bar-fill {
   height: 100%;
-  border-radius: 4rpx;
+  border-radius: 3rpx;
 }
 
 .fill-green {
@@ -6956,6 +6995,10 @@ onPullDownRefresh(async () => {
 
 .fill-orange {
   background: linear-gradient(90deg, #f59e0b, #fc4c02);
+}
+
+.fill-red {
+  background: linear-gradient(90deg, #f87171, #ef4444);
 }
 
 .mtc-empty-row {

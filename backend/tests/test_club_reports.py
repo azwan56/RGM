@@ -105,6 +105,14 @@ def test_club_periodic_reports_and_permissions():
     assert len(m_data["member_progress_list"]) >= 2
     assert m_data["member_progress_list"][0]["target_km"] > 0
 
+    # 7b. Test Past Period: status should be 未达标 instead of 进行中
+    res_past = client.get(f"/api/team/{club_id}/reports", params={"operator_uid": owner_uid, "period_type": "month", "year": 2025, "period_index": 1})
+    assert res_past.status_code == 200
+    past_data = res_past.json()
+    assert past_data["is_past_period"] is True
+    unachieved = next(p for p in past_data["member_progress_list"] if not p["is_achieved"])
+    assert unachieved["status"] == "未达标"
+
     # 8. Set custom goal for member_1 and re-verify
     LocalStore.upsert_goal(member_1, {
         "target_distance": 100.0,

@@ -2657,6 +2657,7 @@ class LocalStore:
             
             period_label = f"{target_year}年{target_month}月月报"
             date_range_str = f"{start_date_obj.strftime('%Y.%m.%d')} ~ {end_date_obj.strftime('%Y.%m.%d')}"
+            is_past_period = (target_year < now_year) or (target_year == now_year and target_month < now_month)
         else:
             # period_type == 'week'
             iso_year, iso_week, _ = today.isocalendar()
@@ -2676,6 +2677,7 @@ class LocalStore:
             
             period_label = f"{target_year}年第{target_week}周周报"
             date_range_str = f"{start_date_obj.strftime('%m月%d日')} ~ {end_date_obj.strftime('%m月%d日')}"
+            is_past_period = (target_year < iso_year) or (target_year == iso_year and target_week < iso_week)
 
         members = LocalStore.get_club_members(club_id)
         uids = [m["user_id"] for m in members]
@@ -2687,6 +2689,7 @@ class LocalStore:
                 "period_type": period_type,
                 "period_label": period_label,
                 "date_range_str": date_range_str,
+                "is_past_period": is_past_period,
                 "total_distance_km": 0.0,
                 "total_target_km": 0.0,
                 "team_completion_rate": 0.0,
@@ -2818,7 +2821,14 @@ class LocalStore:
 
             completion_rate = round((km / target_km) * 100.0, 1) if target_km > 0 else 0.0
             is_achieved = (km >= target_km and target_km > 0)
-            status_text = "已达标" if is_achieved else ("进行中" if target_km > 0 else "未设定")
+            if is_achieved:
+                status_text = "已达标"
+            elif is_past_period:
+                status_text = "未达标"
+            elif target_km > 0:
+                status_text = "进行中"
+            else:
+                status_text = "未设定"
 
             item_data = {
                 "user_id": uid,
@@ -2928,7 +2938,12 @@ class LocalStore:
         forward_lines.append("━━━━━━━━━━━━━━━━━━")
         forward_lines.append("📋 【全员跑量目标与完成度】")
         for item in member_progress_list:
-            tag = "✅达标" if item["is_achieved"] else f"{item['completion_rate']}%"
+            if item["is_achieved"]:
+                tag = "✅已达标"
+            elif is_past_period:
+                tag = f"{item['completion_rate']}% (未达标)"
+            else:
+                tag = f"{item['completion_rate']}%"
             forward_lines.append(f"• {item['display_name']}：实际 {item['distance_km']} km / 目标 {item['target_km']} km ({tag})")
 
         forward_lines.append("━━━━━━━━━━━━━━━━━━")
@@ -2950,6 +2965,7 @@ class LocalStore:
             "period_type": period_type,
             "period_label": period_label,
             "date_range_str": date_range_str,
+            "is_past_period": is_past_period,
             "start_date": start_date_obj.isoformat(),
             "end_date": end_date_obj.isoformat(),
             "total_distance_km": total_distance_km,
