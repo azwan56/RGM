@@ -1431,9 +1431,15 @@
                 </text>
               </view>
 
-              <view class="table-sort-switch" @click="toggleReportSort">
-                <text class="tss-label">排序: </text>
-                <text class="tss-val">{{ reportSortBy === 'completion' ? '完成度 ⬇️' : '实际跑量 ⬇️' }}</text>
+              <view class="table-controls-right">
+                <view class="table-poster-action-pill" @click="handleSaveTablePosterToAlbum">
+                  <text class="tpap-icon">📸</text>
+                  <text class="tpap-text">存海报</text>
+                </view>
+                <view class="table-sort-switch" @click="toggleReportSort">
+                  <text class="tss-label">排序: </text>
+                  <text class="tss-val">{{ reportSortBy === 'completion' ? '完成度 ⬇️' : '实际跑量 ⬇️' }}</text>
+                </view>
               </view>
             </view>
 
@@ -1547,6 +1553,13 @@
           style="width: 750px; height: 1340px; position: fixed; left: -9999px; top: -9999px;"
         ></canvas>
 
+        <!-- Hidden Canvas for table list report poster (dynamic height) -->
+        <canvas
+          canvas-id="reportTablePosterCanvas"
+          id="reportTablePosterCanvas"
+          :style="{ width: '750px', height: tablePosterCanvasHeight + 'px', position: 'fixed', left: '-9999px', top: '-9999px' }"
+        ></canvas>
+
         <!-- Footer Actions -->
         <view class="report-footer-actions" v-if="reportData">
           <template v-if="reportViewMode === 'poster'">
@@ -1561,11 +1574,14 @@
             </button>
           </template>
           <template v-else-if="reportViewMode === 'table'">
-            <button class="btn-copy-table" @click="handleCopyMemberProgressTable">
-              📋 复制全员明细
+            <button class="btn-preview-poster" @click="handlePreviewTablePosterImage">
+              🖼️ 预览海报
             </button>
-            <button class="btn-copy-forward" @click="handleCopyReportForwardText">
-              💬 复制微信群战报
+            <button class="btn-save-album" @click="handleSaveTablePosterToAlbum">
+              💾 保存到相册
+            </button>
+            <button class="btn-sub-copy" @click="handleCopyMemberProgressTable">
+              📋 复制明细
             </button>
           </template>
           <template v-else>
@@ -1645,6 +1661,7 @@ const reportData = ref<any>(null);
 const reportSortBy = ref<"completion" | "distance">("completion");
 const reportFilter = ref<"all" | "achieved" | "pending">("all");
 const reportSearch = ref("");
+const tablePosterCanvasHeight = ref(1200);
 
 const filteredSortedMemberList = computed(() => {
   const list = reportData.value?.member_progress_list || [];
@@ -2817,6 +2834,357 @@ async function handleSavePosterToAlbum() {
   } catch (err: any) {
     uni.hideLoading();
     console.error("handleSavePosterToAlbum fail:", err);
+    uni.showToast({ title: "保存失败，请重试", icon: "none" });
+  }
+}
+
+function generateTablePosterImage(): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    if (!reportData.value) {
+      reject(new Error("战报数据为空"));
+      return;
+    }
+
+    const rep = reportData.value;
+    const list: any[] = (filteredSortedMemberList.value && filteredSortedMemberList.value.length > 0)
+      ? filteredSortedMemberList.value
+      : (rep.member_progress_list || []);
+
+    const W = 750;
+    const startY = 415;
+    const rH = 74;
+    const footerH = 115;
+    const dynamicH = Math.max(startY + Math.max(list.length, 1) * rH + footerH, 800);
+
+    tablePosterCanvasHeight.value = dynamicH;
+
+    // Small delay to ensure uni-app / WeChat canvas view has updated its height in DOM
+    await new Promise((r) => setTimeout(r, 60));
+
+    const ctx = uni.createCanvasContext("reportTablePosterCanvas");
+    const H = dynamicH;
+
+    // 1. Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, "#0c0e15");
+    bgGrad.addColorStop(0.3, "#11141e");
+    bgGrad.addColorStop(0.7, "#141724");
+    bgGrad.addColorStop(1, "#0a0b10");
+    ctx.setFillStyle(bgGrad);
+    ctx.fillRect(0, 0, W, H);
+
+    // Outer decorative border
+    drawRoundedRect(ctx, 16, 16, W - 32, H - 32, 24, undefined, "rgba(255, 215, 0, 0.25)");
+
+    // 2. Header Area
+    // Pill tag
+    drawRoundedRect(ctx, 40, 42, 320, 42, 21, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText("👑 跑团专属战报 · 全员达成榜", 52, 71);
+
+    // Club Name
+    ctx.setFontSize(36);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(rep.club_name || "跑团战报", 40, 130);
+
+    // Period Label & Date range
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText(`${rep.period_label} · ${rep.date_range_str}`, 40, 172);
+
+    // Decorative separator line
+    ctx.beginPath();
+    ctx.moveTo(40, 195);
+    ctx.lineTo(W - 40, 195);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.12)");
+    ctx.stroke();
+
+    // 3. Team Goal & Progress Overview Card
+    drawRoundedRect(ctx, 40, 215, W - 80, 155, 20, "#181b26", "rgba(252, 76, 2, 0.35)");
+
+    // Stat 1: 团队目标跑量
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("团队目标跑量", 65, 252);
+    ctx.setFontSize(32);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText(`${rep.total_target_km || 0}`, 65, 294);
+    const tw1 = ctx.measureText(`${rep.total_target_km || 0}`).width;
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("KM", 65 + tw1 + 6, 292);
+
+    // Divider 1
+    ctx.beginPath();
+    ctx.moveTo(270, 235);
+    ctx.lineTo(270, 295);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.1)");
+    ctx.stroke();
+
+    // Stat 2: 实际累计奔跑
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("实际累计奔跑", 290, 252);
+    ctx.setFontSize(32);
+    ctx.setFillStyle("#fc4c02");
+    ctx.fillText(`${rep.total_distance_km || 0}`, 290, 294);
+    const tw2 = ctx.measureText(`${rep.total_distance_km || 0}`).width;
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("KM", 290 + tw2 + 6, 292);
+
+    // Divider 2
+    ctx.beginPath();
+    ctx.moveTo(490, 235);
+    ctx.lineTo(490, 295);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.1)");
+    ctx.stroke();
+
+    // Stat 3: 全团达成率
+    ctx.setFontSize(20);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("全团达成率", 510, 252);
+    ctx.setFontSize(32);
+    ctx.setFillStyle("#22c55e");
+    ctx.fillText(`${rep.team_completion_rate || 0}%`, 510, 294);
+
+    // Progress bar inside overview card
+    const teamPct = Math.min(rep.team_completion_rate || 0, 100);
+    const maxBarW = 380;
+    drawRoundedRect(ctx, 65, 326, maxBarW, 14, 7, "rgba(255, 255, 255, 0.08)");
+    if (teamPct > 0) {
+      drawRoundedRect(ctx, 65, 326, Math.max((teamPct / 100) * maxBarW, 14), 14, 7, "#22c55e");
+    }
+    ctx.setFontSize(17);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText(`达标人数：${rep.achieved_members_count || 0} / ${rep.total_members_count || 0} 人`, 465, 338);
+
+    // 4. Table Header Row
+    const thY = 385;
+    drawRoundedRect(ctx, 40, thY, W - 80, 40, 10, "#191c28", "rgba(255, 255, 255, 0.08)");
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#9ca3af");
+    ctx.fillText("序号 · 队员", 58, thY + 26);
+    ctx.fillText("目标跑量", 325, thY + 26);
+    ctx.fillText("实际跑量", 430, thY + 26);
+    ctx.fillText("完成度 · 状态", 545, thY + 26);
+
+    // 5. Table Rows
+    const isPast = reportPeriodOffset.value === -1 || rep.is_past_period;
+
+    if (list.length === 0) {
+      drawRoundedRect(ctx, 40, startY + 25, W - 80, 60, 10, "#14161f");
+      ctx.setFontSize(20);
+      ctx.setFillStyle("#71717a");
+      ctx.fillText("暂无符合条件的成员记录", 270, startY + 62);
+    } else {
+      list.forEach((m: any, idx: number) => {
+        const rowY = startY + 20 + idx * rH;
+
+        // Row background
+        const rowBg = m.is_achieved ? "rgba(34, 197, 94, 0.06)" : (idx % 2 === 0 ? "#131620" : "#161924");
+        const rowBorder = m.is_achieved ? "rgba(34, 197, 94, 0.22)" : "rgba(255, 255, 255, 0.05)";
+        drawRoundedRect(ctx, 40, rowY, W - 80, 66, 12, rowBg, rowBorder);
+
+        // Rank
+        if (idx === 0) {
+          ctx.setFontSize(22);
+          ctx.setFillStyle("#ffd700");
+          ctx.fillText("🥇", 54, rowY + 41);
+        } else if (idx === 1) {
+          ctx.setFontSize(22);
+          ctx.setFillStyle("#e2e8f0");
+          ctx.fillText("🥈", 54, rowY + 41);
+        } else if (idx === 2) {
+          ctx.setFontSize(22);
+          ctx.setFillStyle("#f97316");
+          ctx.fillText("🥉", 54, rowY + 41);
+        } else {
+          drawRoundedRect(ctx, 52, rowY + 20, 26, 26, 13, "rgba(255, 255, 255, 0.06)");
+          ctx.setFontSize(16);
+          ctx.setFillStyle("#9ca3af");
+          const rankStr = `${idx + 1}`;
+          const rw = ctx.measureText(rankStr).width;
+          ctx.fillText(rankStr, 52 + (26 - rw) / 2, rowY + 39);
+        }
+
+        // Circular Avatar Badge with Initial
+        const avCenterX = 100;
+        const avCenterY = rowY + 33;
+        const avRadius = 18;
+        const avBg = m.is_achieved ? "#15803d" : (idx < 3 ? "#854d0e" : "#374151");
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avCenterX, avCenterY, avRadius, 0, Math.PI * 2);
+        ctx.setFillStyle(avBg);
+        ctx.fill();
+        ctx.restore();
+
+        // Initial char
+        const rawName = (m.display_name || "跑友").trim();
+        const initial = rawName.charAt(0).toUpperCase();
+        ctx.setFontSize(17);
+        ctx.setFillStyle("#ffffff");
+        const iw = ctx.measureText(initial).width;
+        ctx.fillText(initial, avCenterX - iw / 2, avCenterY + 6);
+
+        // Member Name
+        let nameText = rawName;
+        if (nameText.length > 5) {
+          nameText = nameText.slice(0, 4) + "…";
+        }
+        ctx.setFontSize(19);
+        ctx.setFillStyle("#ffffff");
+        ctx.fillText(nameText, 126, rowY + 30);
+
+        // Role Badge if owner/coach
+        const nw = ctx.measureText(nameText).width;
+        if (m.role === 'owner') {
+          drawRoundedRect(ctx, 126 + nw + 6, rowY + 16, 38, 18, 5, "rgba(255, 215, 0, 0.2)", "rgba(255, 215, 0, 0.5)");
+          ctx.setFontSize(12);
+          ctx.setFillStyle("#ffd700");
+          ctx.fillText("团长", 126 + nw + 11, rowY + 30);
+        } else if (m.role === 'coach') {
+          drawRoundedRect(ctx, 126 + nw + 6, rowY + 16, 38, 18, 5, "rgba(96, 165, 250, 0.2)", "rgba(96, 165, 250, 0.5)");
+          ctx.setFontSize(12);
+          ctx.setFillStyle("#60a5fa");
+          ctx.fillText("教练", 126 + nw + 11, rowY + 30);
+        }
+
+        // Subtext: runs count
+        ctx.setFontSize(14);
+        ctx.setFillStyle("#71717a");
+        ctx.fillText(m.runs_count > 0 ? `${m.runs_count}次打卡` : "未打卡", 126, rowY + 52);
+
+        // Col 2: Target km
+        ctx.setFontSize(20);
+        ctx.setFillStyle("#d1d5db");
+        ctx.fillText(`${m.target_km}`, 325, rowY + 41);
+        const tkw = ctx.measureText(`${m.target_km}`).width;
+        ctx.setFontSize(13);
+        ctx.setFillStyle("#71717a");
+        ctx.fillText("km", 325 + tkw + 3, rowY + 41);
+
+        // Col 3: Actual km
+        ctx.setFontSize(22);
+        ctx.setFillStyle("#fc4c02");
+        ctx.fillText(`${m.distance_km}`, 430, rowY + 41);
+        const akw = ctx.measureText(`${m.distance_km}`).width;
+        ctx.setFontSize(13);
+        ctx.setFillStyle("#71717a");
+        ctx.fillText("km", 430 + akw + 3, rowY + 41);
+
+        // Col 4: Completion Rate + Status Pill + Mini progress bar
+        const isDone = !!m.is_achieved;
+        const statusText = isDone ? "已达标" : (isPast ? "未达标" : "进行中");
+        const statusColor = isDone ? "#22c55e" : (isPast ? "#ef4444" : "#f59e0b");
+        const statusBg = isDone ? "rgba(34, 197, 94, 0.18)" : (isPast ? "rgba(239, 68, 68, 0.18)" : "rgba(245, 158, 11, 0.18)");
+        const statusBorder = isDone ? "rgba(34, 197, 94, 0.4)" : (isPast ? "rgba(239, 68, 68, 0.4)" : "rgba(245, 158, 11, 0.4)");
+
+        // Rate text
+        ctx.setFontSize(20);
+        ctx.setFillStyle(statusColor);
+        ctx.fillText(`${m.completion_rate}%`, 545, rowY + 30);
+
+        // Status pill
+        drawRoundedRect(ctx, 624, rowY + 14, 64, 20, 6, statusBg, statusBorder);
+        ctx.setFontSize(12);
+        ctx.setFillStyle(statusColor);
+        ctx.fillText(statusText, 630, rowY + 28);
+
+        // Mini bar
+        const miniBarMaxW = 143;
+        const fillW = Math.max((Math.min(m.completion_rate || 0, 100) / 100) * miniBarMaxW, 0);
+        drawRoundedRect(ctx, 545, rowY + 44, miniBarMaxW, 6, 3, "rgba(255, 255, 255, 0.08)");
+        if (fillW > 0) {
+          drawRoundedRect(ctx, 545, rowY + 44, Math.max(fillW, 6), 6, 3, statusColor);
+        }
+      });
+    }
+
+    // 6. Bottom Brand Stamp
+    const fY = startY + 20 + Math.max(list.length, 1) * rH + 15;
+    ctx.beginPath();
+    ctx.moveTo(40, fY);
+    ctx.lineTo(W - 40, fY);
+    ctx.setStrokeStyle("rgba(255, 255, 255, 0.1)");
+    ctx.stroke();
+
+    ctx.setFontSize(22);
+    ctx.setFillStyle("#ffffff");
+    ctx.fillText("万跑跑团助手", 40, fY + 40);
+
+    ctx.setFontSize(16);
+    ctx.setFillStyle("#71717a");
+    ctx.fillText("跑者成长矩阵 · 全员跑量目标追踪 · 官方认证战报", 40, fY + 68);
+
+    drawRoundedRect(ctx, W - 160, fY + 20, 120, 48, 12, "rgba(255, 215, 0, 0.15)", "rgba(255, 215, 0, 0.4)");
+    ctx.setFontSize(18);
+    ctx.setFillStyle("#ffd700");
+    ctx.fillText("官方战报", W - 138, fY + 50);
+
+    // Scale calculation
+    const scale = H > 2500 ? 1.5 : 2;
+    const destW = Math.round(W * scale);
+    const destH = Math.round(H * scale);
+
+    // Draw and export
+    ctx.draw(false, () => {
+      setTimeout(() => {
+        uni.canvasToTempFilePath({
+          canvasId: "reportTablePosterCanvas",
+          destWidth: destW,
+          destHeight: destH,
+          success: (res) => {
+            resolve(res.tempFilePath);
+          },
+          fail: (err) => {
+            reject(err);
+          }
+        });
+      }, 250);
+    });
+  });
+}
+
+async function handlePreviewTablePosterImage() {
+  uni.showLoading({ title: "正在渲染全员长图海报..." });
+  try {
+    const tempPath = await generateTablePosterImage();
+    uni.hideLoading();
+    uni.previewImage({
+      current: tempPath,
+      urls: [tempPath]
+    });
+    uni.showToast({ title: "长按图片可直接发送给朋友或保存", icon: "none", duration: 3500 });
+  } catch (err: any) {
+    uni.hideLoading();
+    console.error("handlePreviewTablePosterImage fail:", err);
+    uni.showToast({ title: "渲染海报失败，请重试", icon: "none" });
+  }
+}
+
+async function handleSaveTablePosterToAlbum() {
+  uni.showLoading({ title: "正在生成并保存..." });
+  try {
+    const tempPath = await generateTablePosterImage();
+    uni.saveImageToPhotosAlbum({
+      filePath: tempPath,
+      success: () => {
+        uni.hideLoading();
+        uni.showToast({ title: "全员战报已成功保存到手机相册！", icon: "success", duration: 2500 });
+      },
+      fail: (saveErr) => {
+        uni.hideLoading();
+        console.warn("saveImageToPhotosAlbum fail:", saveErr);
+        uni.previewImage({ current: tempPath, urls: [tempPath] });
+        uni.showToast({ title: "长按图片即可直接保存到相册", icon: "none", duration: 3500 });
+      }
+    });
+  } catch (err: any) {
+    uni.hideLoading();
+    console.error("handleSaveTablePosterToAlbum fail:", err);
     uni.showToast({ title: "保存失败，请重试", icon: "none" });
   }
 }
@@ -6692,6 +7060,37 @@ onPullDownRefresh(async () => {
   color: #000000;
   background: #ffd700;
   border-color: #ffd700;
+}
+
+.table-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.table-poster-action-pill {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1rpx solid rgba(255, 215, 0, 0.35);
+  border-radius: 14rpx;
+  padding: 6rpx 14rpx;
+}
+
+.table-poster-action-pill:active {
+  opacity: 0.8;
+  background: rgba(255, 215, 0, 0.22);
+}
+
+.tpap-icon {
+  font-size: 18rpx;
+}
+
+.tpap-text {
+  font-size: 19rpx;
+  color: #ffd700;
+  font-weight: bold;
 }
 
 .table-sort-switch {
