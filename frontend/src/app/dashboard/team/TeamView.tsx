@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import RouteMapPreview from "@/components/RouteMapPreview";
@@ -8,6 +8,7 @@ import CoachPlanReviewModal from "@/components/CoachPlanReviewModal";
 import CoachScheduleImportModal from "@/components/CoachScheduleImportModal";
 import PersonalReportModal from "@/components/PersonalReportModal";
 import PacerClubRadarPanel from "@/components/PacerClubRadarPanel";
+import OrgManagementHub from "@/components/OrgManagementHub";
 import { supabase } from "@/lib/supabase";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
 import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
@@ -168,9 +169,35 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   const [showOrgRosterModal, setShowOrgRosterModal] = useState(false);
   const [orgRosterMembers, setOrgRosterMembers] = useState<any[]>([]);
   const [orgRosterSearch, setOrgRosterSearch] = useState("");
+  const [orgRosterStatusFilter, setOrgRosterStatusFilter] = useState<"all" | "pending" | "confirmed">("all");
   const [loadingOrgRoster, setLoadingOrgRoster] = useState(false);
   const [orgConfirmingUid, setOrgConfirmingUid] = useState<string | null>(null);
   const [orgUpdatingRoleUid, setOrgUpdatingRoleUid] = useState<string | null>(null);
+
+  const managedOrgs = useMemo(
+    () =>
+      userOrgs.filter(
+        (o: any) =>
+          o.is_organizer ||
+          o.role === "owner" ||
+          o.role === "admin" ||
+          (Boolean(user?.id) && o.owner_id === user.id)
+      ),
+    [userOrgs, user?.id]
+  );
+
+  const lastSyncedClubIdRef = useRef<string>("");
+  useEffect(() => {
+    if (!currentClub?.id || managedOrgs.length === 0) return;
+    if (lastSyncedClubIdRef.current === currentClub.id) return;
+    lastSyncedClubIdRef.current = currentClub.id;
+    if (currentClub.org_id) {
+      const matched = managedOrgs.find((o: any) => o.id === currentClub.org_id);
+      if (matched) {
+        setActiveManagedOrg(matched);
+      }
+    }
+  }, [currentClub?.id, currentClub?.org_id, managedOrgs]);
 
   // Organization Cross-Club Report & Sub-Club PK (📊 大群全域报表与分跑团PK) states
   const [showOrgReportModal, setShowOrgReportModal] = useState(false);
@@ -713,6 +740,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   async function openOrgRosterModalFor(org: any) {
     setActiveManagedOrg(org);
     setOrgRosterSearch("");
+    setOrgRosterStatusFilter("all");
     setShowOrgRosterModal(true);
     setLoadingOrgRoster(true);
     try {
@@ -735,6 +763,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setOrgRosterMembers((prev) =>
         prev.map((m) => (m.user_id === targetUid ? { ...m, status: "confirmed" } : m))
       );
+      showToast("✓ 已核对通过该成员实名资料");
+      loadUserOrgs(user.id);
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || "确认成员失败";
       const targetMember = orgRosterMembers.find((m) => m.user_id === targetUid);
@@ -2456,61 +2486,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       ) : !currentClub ? (
         <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
           {activeManagedOrg && (
-            <div className="bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-amber-500/35 rounded-3xl p-6 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-5">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
-                    🏛️ {activeManagedOrg.role === "owner" || activeManagedOrg.owner_id === user?.id ? "大群主理人" : "大群管理员"}
-                  </span>
-                  <h2 className="text-lg sm:text-xl font-black text-white">
-                    【{activeManagedOrg.name}】大群管理工作台
-                  </h2>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
-                    {activeManagedOrg.join_mode === "free" ? "🟢 自由入会" : `🔒 邀请码: ${activeManagedOrg.invite_code || "已设"}`}
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-400">
-                  无需超级管理员权限，可直接管理本大群基本设定、入会方式与邀请码、准入字段（必填 / 选填 / 不显示）及戈友花名册审核。
-                </p>
-              </div>
-              <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-                <button
-                  type="button"
-                  onClick={() => openOrgReportModalFor(activeManagedOrg)}
-                  className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black text-xs font-black transition shadow-lg shadow-emerald-500/20"
-                >
-                  📊 大群报表与分团 PK
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgEventsModalFor(activeManagedOrg)}
-                  className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#FC4C02] to-[#ff6426] hover:from-[#ff6426] hover:to-[#ff7a45] text-white text-xs font-black transition shadow-lg shadow-[#FC4C02]/25"
-                >
-                  🚩 跨跑团联合活动
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgSettingsModalFor(activeManagedOrg)}
-                  className="px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition shadow-lg shadow-amber-500/20"
-                >
-                  ⚙️ 大群设定与邀请码
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgFieldRulesModalFor(activeManagedOrg)}
-                  className="px-4 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-lg shadow-purple-600/20"
-                >
-                  🛡️ 准入信息配置 (必填/选填/不显示)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgRosterModalFor(activeManagedOrg)}
-                  className="px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold transition"
-                >
-                  👥 大群花名册与审核 ({activeManagedOrg.member_count ?? ""})
-                </button>
-              </div>
-            </div>
+            <OrgManagementHub
+              activeOrg={activeManagedOrg}
+              managedOrgs={managedOrgs}
+              currentUserId={user?.id}
+              onSelectOrg={(org) => setActiveManagedOrg(org)}
+              onOpenReport={openOrgReportModalFor}
+              onOpenEvents={openOrgEventsModalFor}
+              onOpenRoster={openOrgRosterModalFor}
+              onOpenSettings={openOrgSettingsModalFor}
+              onOpenFieldRules={openOrgFieldRulesModalFor}
+            />
           )}
           <div className="bg-gradient-to-b from-[#18181c] to-[#121215] border border-white/10 rounded-3xl p-8 sm:p-10 text-center shadow-2xl">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 text-3xl mb-4">
@@ -2766,79 +2752,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       ) : (
         <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
           {activeManagedOrg && (
-            <div className="bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-amber-500/35 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
-                    🏛️ {activeManagedOrg.role === "owner" || activeManagedOrg.owner_id === user?.id ? "大群主理人" : "大群管理员"}
-                  </span>
-                  <h2 className="text-base sm:text-lg font-black text-white">
-                    【{activeManagedOrg.name}】大群设定与准入管理
-                  </h2>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
-                    {activeManagedOrg.join_mode === "free" ? "🟢 自由入会" : `🔒 邀请码: ${activeManagedOrg.invite_code || "已设"}`}
-                  </span>
-                  {userOrgs.filter((o: any) => o.is_organizer || o.role === "owner" || o.role === "admin" || o.owner_id === user?.id).length > 1 && (
-                    <select
-                      value={activeManagedOrg.id}
-                      onChange={(e) => {
-                        const found = userOrgs.find((o: any) => o.id === e.target.value);
-                        if (found) setActiveManagedOrg(found);
-                      }}
-                      className="bg-black/40 border border-white/15 rounded-lg px-2 py-0.5 text-[11px] text-amber-300"
-                    >
-                      {userOrgs
-                        .filter((o: any) => o.is_organizer || o.role === "owner" || o.role === "admin" || o.owner_id === user?.id)
-                        .map((o: any) => (
-                          <option key={o.id} value={o.id}>
-                            切换大群: {o.name}
-                          </option>
-                        ))}
-                    </select>
-                  )}
-                </div>
-                <p className="text-xs text-zinc-400">
-                  无需超级管理员权限，可直接管理大群设定、入会规则与邀请码、准入字段（必填 / 选填 / 不显示）及花名册审核。
-                </p>
-              </div>
-              <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-                <button
-                  type="button"
-                  onClick={() => openOrgReportModalFor(activeManagedOrg)}
-                  className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black text-xs font-black transition shadow-lg shadow-emerald-500/20"
-                >
-                  📊 大群报表与分团 PK
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgEventsModalFor(activeManagedOrg)}
-                  className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-[#FC4C02] to-[#ff6426] hover:from-[#ff6426] hover:to-[#ff7a45] text-white text-xs font-black transition shadow-lg shadow-[#FC4C02]/25"
-                >
-                  🚩 跨跑团联合活动
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgSettingsModalFor(activeManagedOrg)}
-                  className="px-3.5 py-2 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition shadow-lg shadow-amber-500/20"
-                >
-                  ⚙️ 大群设定与邀请码
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgFieldRulesModalFor(activeManagedOrg)}
-                  className="px-3.5 py-2 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-lg shadow-purple-600/20"
-                >
-                  🛡️ 准入信息配置 (必填/选填/不显示)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openOrgRosterModalFor(activeManagedOrg)}
-                  className="px-3.5 py-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold transition"
-                >
-                  👥 大群花名册与审核 ({activeManagedOrg.member_count ?? ""})
-                </button>
-              </div>
-            </div>
+            <OrgManagementHub
+              activeOrg={activeManagedOrg}
+              managedOrgs={managedOrgs}
+              currentUserId={user?.id}
+              onSelectOrg={(org) => setActiveManagedOrg(org)}
+              onOpenReport={openOrgReportModalFor}
+              onOpenEvents={openOrgEventsModalFor}
+              onOpenRoster={openOrgRosterModalFor}
+              onOpenSettings={openOrgSettingsModalFor}
+              onOpenFieldRules={openOrgFieldRulesModalFor}
+            />
           )}
           {/* Header with Multi-Club Selector and Actions */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-white/10 rounded-3xl p-6 shadow-2xl">
@@ -7744,7 +7668,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           onClick={() => setRuleMode("required")}
                           className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
                             ruleMode === "required"
-                              ? "bg-purple-600 text-white shadow"
+                              ? "bg-[#FC4C02] text-white shadow"
                               : "text-zinc-400 hover:text-white"
                           }`}
                         >
@@ -7783,7 +7707,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <div className="flex items-center gap-3 text-xs text-zinc-400">
                 <span>
                   必填:{" "}
-                  <strong className="text-purple-400">
+                  <strong className="text-[#FC4C02]">
                     {orgFieldRules.filter((r) => !(r.mode === "hidden" || r.hidden) && (r.mode === "required" || r.required)).length}
                   </strong>
                 </span>
@@ -7812,7 +7736,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   type="button"
                   disabled={savingOrgFieldRules || loadingOrgFieldRules}
                   onClick={handleSaveOrgFieldRules}
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-lg shadow-purple-600/25 disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl bg-[#FC4C02] hover:bg-[#ff6426] text-white text-xs font-bold transition shadow-lg shadow-[#FC4C02]/25 disabled:opacity-50"
                 >
                   {savingOrgFieldRules ? "正在保存..." : "保存准入规则"}
                 </button>
@@ -7844,19 +7768,59 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               </button>
             </div>
 
-            <input
-              type="text"
-              value={orgRosterSearch}
-              onChange={(e) => setOrgRosterSearch(e.target.value)}
-              placeholder="搜索姓名、班级或戈壁经历..."
-              className="w-full bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white mb-3 focus:outline-none focus:border-amber-500"
-            />
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 mb-3">
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                {[
+                  {
+                    id: "all" as const,
+                    label: `全部 (${orgRosterMembers.length})`,
+                  },
+                  {
+                    id: "pending" as const,
+                    label: `待审核 (${orgRosterMembers.filter((m) => m.status !== "confirmed").length})`,
+                  },
+                  {
+                    id: "confirmed" as const,
+                    label: `已认证 (${orgRosterMembers.filter((m) => m.status === "confirmed").length})`,
+                  },
+                ].map((tab) => {
+                  const active = orgRosterStatusFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setOrgRosterStatusFilter(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        active
+                          ? "bg-[#FC4C02] text-white shadow-sm"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/10"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <input
+                type="text"
+                value={orgRosterSearch}
+                onChange={(e) => setOrgRosterSearch(e.target.value)}
+                placeholder="搜索姓名、班级或戈壁经历..."
+                className="flex-1 bg-[#1c1c20] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#FC4C02]"
+              />
+            </div>
 
             <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
               {loadingOrgRoster ? (
                 <div className="py-12 text-center text-xs text-zinc-400">正在加载大群花名册...</div>
               ) : (
                 orgRosterMembers
+                  .filter((m) => {
+                    if (orgRosterStatusFilter === "pending") return m.status !== "confirmed";
+                    if (orgRosterStatusFilter === "confirmed") return m.status === "confirmed";
+                    return true;
+                  })
                   .filter((m) => {
                     const q = orgRosterSearch.trim().toLowerCase();
                     if (!q) return true;

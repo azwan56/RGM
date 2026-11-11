@@ -15588,6 +15588,7 @@ class LocalStore:
             cursor.execute("""
                 SELECT o.id, o.name, o.logo_url, o.description, o.city, o.join_mode, o.invite_code, o.owner_id,
                        (SELECT COUNT(*) FROM organization_members om WHERE om.org_id = o.id) as member_count,
+                       (SELECT COUNT(*) FROM organization_members om2 WHERE om2.org_id = o.id AND COALESCE(om2.status, 'pending') != 'confirmed') as pending_review_count,
                        (SELECT COUNT(*) FROM clubs sc WHERE sc.org_id = o.id) as sub_clubs_count,
                        m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.id_card,
                        COALESCE(m.role, CASE WHEN o.owner_id = ? THEN 'owner' ELSE 'member' END) as role,
@@ -15613,6 +15614,7 @@ class LocalStore:
                 d["is_organizer"] = is_organizer
                 if not is_organizer:
                     d.pop("invite_code", None)
+                    d.pop("pending_review_count", None)
 
                 d["real_name"] = decrypt_pii(d.get("real_name"))
                 d["date_of_birth"] = decrypt_pii(d.get("date_of_birth"))

@@ -560,3 +560,252 @@ html.theme-light .recharts-tooltip-label,
 html.theme-light .recharts-tooltip-item {
   color: #0f172a !important;
 }
+
+/* 8. 大群管理中台模块化布局与语义卡片系统 (.rgm-org-*) */
+.rgm-org-hub {
+  background: linear-gradient(180deg, #16161c 0%, #121216 100%);
+  border: 1px solid rgba(252, 76, 2, 0.28);
+  border-top: 3px solid #fc4c02;
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.58);
+}
+
+.rgm-org-emblem {
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%);
+  border: 1px solid rgba(252, 76, 2, 0.34);
+  color: #fb923c;
+}
+
+.rgm-org-role-badge {
+  background-color: rgba(252, 76, 2, 0.15);
+  border: 1px solid rgba(252, 76, 2, 0.32);
+  color: #fdba74;
+}
+
+.rgm-org-chip {
+  background-color: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #d4d4d8;
+}
+
+.rgm-org-chip-copy:hover {
+  background-color: rgba(252, 76, 2, 0.14);
+  border-color: rgba(252, 76, 2, 0.4);
+  color: #ffffff;
+}
+
+.rgm-org-switcher {
+  background-color: #0d0d11;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.rgm-org-switcher-pill {
+  color: #a1a1aa;
+}
+
+.rgm-org-switcher-pill:hover {
+  color: #f4f4f6;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.rgm-org-switcher-pill.is-active {
+  background-color: #fc4c02;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(252, 76, 2, 0.32);
+}
+
+.rgm-org-collapse-btn {
+  background-color: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #a1a1aa;
+}
+
+.rgm-org-collapse-btn:hover {
+  background-color: rgba(255, 255, 255, 0.085);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f4f4f6;
+}
+
+.rgm-org-tile {
+  background-color: #191920;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.16s ease, border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.rgm-org-tile:hover {
+  transform: translateY(-1.5px);
+  background-color: #1f1f28;
+  border-color: rgba(252, 76, 2, 0.44);
+  box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+.rgm-org-tile.is-primary {
+  background: linear-gradient(145deg, rgba(252, 76, 2, 0.15) 0%, #191920 78%);
+  border-color: rgba(252, 76, 2, 0.38);
+}
+
+.rgm-org-tile.is-primary:hover {
+  background: linear-gradient(145deg, rgba(252, 76, 2, 0.22) 0%, #202029 78%);
+  border-color: #fc4c02;
+}
+
+.rgm-org-tile-icon {
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #e4e4e7;
+  transition: border-color 0.16s ease, color 0.16s ease, background-color 0.16s ease;
+}
+
+.rgm-org-tile:hover .rgm-org-tile-icon {
+  border-color: rgba(252, 76, 2, 0.38);
+  color: #fb923c;
+}
+
+.rgm-org-tile.is-primary .rgm-org-tile-icon {
+  background-color: #fc4c02;
+  border-color: #fc4c02;
+  color: #ffffff;
+}
+
+.rgm-org-tile-tag {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+}
+
+.rgm-org-tile-tag.is-brand {
+  background-color: rgba(252, 76, 2, 0.18);
+  color: #fdba74;
+}
+
+.rgm-org-tile-tag.is-alert {
+  background-color: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+.rgm-org-tile-tag.is-ok {
+  background-color: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+}
+
+html.theme-light .rgm-org-hub {
+  background-image: none;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-top: 3px solid #fc4c02;
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.048), 0 2px 6px -1px rgba(15, 23, 42, 0.025);
+}
+
+html.theme-light .rgm-org-emblem {
+  background: #fff5ee;
+  border: 1px solid rgba(252, 76, 2, 0.24);
+  color: #fc4c02;
+}
+
+html.theme-light .rgm-org-role-badge {
+  background-color: #fff5ee;
+  border: 1px solid rgba(252, 76, 2, 0.28);
+  color: #c23800;
+}
+
+html.theme-light .rgm-org-chip {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+html.theme-light .rgm-org-chip-copy:hover {
+  background-color: #fff5ee;
+  border-color: rgba(252, 76, 2, 0.38);
+  color: #c23800;
+}
+
+html.theme-light .rgm-org-switcher {
+  background-color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+html.theme-light .rgm-org-switcher-pill {
+  color: #475569;
+}
+
+html.theme-light .rgm-org-switcher-pill:hover {
+  color: #0f172a;
+  background-color: #ffffff;
+}
+
+html.theme-light .rgm-org-switcher-pill.is-active {
+  background-color: #fc4c02;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(252, 76, 2, 0.25);
+}
+
+html.theme-light .rgm-org-collapse-btn {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+html.theme-light .rgm-org-collapse-btn:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.theme-light .rgm-org-tile {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  box-shadow: none;
+}
+
+html.theme-light .rgm-org-tile:hover {
+  background-color: #ffffff;
+  border-color: rgba(252, 76, 2, 0.45);
+  box-shadow: 0 10px 22px -10px rgba(15, 23, 42, 0.09);
+}
+
+html.theme-light .rgm-org-tile.is-primary {
+  background: linear-gradient(145deg, #fff7f2 0%, #ffffff 82%);
+  border-color: rgba(252, 76, 2, 0.34);
+}
+
+html.theme-light .rgm-org-tile.is-primary:hover {
+  background: #fff5ee;
+  border-color: #fc4c02;
+  box-shadow: 0 10px 22px -8px rgba(252, 76, 2, 0.15);
+}
+
+html.theme-light .rgm-org-tile-icon {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+html.theme-light .rgm-org-tile:hover .rgm-org-tile-icon {
+  border-color: rgba(252, 76, 2, 0.34);
+  color: #fc4c02;
+}
+
+html.theme-light .rgm-org-tile.is-primary .rgm-org-tile-icon {
+  background-color: #fc4c02;
+  border-color: #fc4c02;
+  color: #ffffff;
+}
+
+html.theme-light .rgm-org-tile-tag {
+  background-color: #eef2f6;
+  color: #475569;
+}
+
+html.theme-light .rgm-org-tile-tag.is-brand {
+  background-color: #fff0e6;
+  color: #c23800;
+}
+
+html.theme-light .rgm-org-tile-tag.is-alert {
+  background-color: #fff7ed;
+  color: #c2410c;
+}
+
+html.theme-light .rgm-org-tile-tag.is-ok {
+  background-color: #ecfdf5;
+  color: #059669;
+}
