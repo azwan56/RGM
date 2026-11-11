@@ -103,10 +103,10 @@ def _extract_planned_interval_spec(text: Optional[str]) -> Tuple[int, float]:
 def has_large_plan_discrepancy(
     planned_day: Optional[Dict[str, Any]],
     activity: Dict[str, Any],
-    eval_total_km: float,
-    eval_main_km: float,
-    planned_main_km: float,
-    eval_pace_sec: Optional[int],
+    eval_total_km: Optional[float] = None,
+    eval_main_km: Optional[float] = None,
+    planned_main_km: Optional[float] = None,
+    eval_pace_sec: Optional[int] = None,
     phases: Optional[List[Dict[str, Any]]] = None,
     interval_meta: Optional[Dict[str, Any]] = None,
     same_day_runs: Optional[List[Dict[str, Any]]] = None,
@@ -140,7 +140,23 @@ def has_large_plan_discrepancy(
         return True
 
     # ── 1. Distance Discrepancy Check (距离差异) ──
-    act_dist_km = round(float(activity.get("distance_meters") or 0.0) / 1000.0, 2)
+    raw_dist_m = float(activity.get("distance_meters") or 0.0)
+    act_dist_km = round(raw_dist_m / 1000.0, 2) if raw_dist_m > 0 else round(float(activity.get("distance_km") or 0.0), 2)
+    if eval_total_km is None:
+        eval_total_km = act_dist_km
+    if planned_main_km is None:
+        planned_main_km = plan_dist
+    if eval_main_km is None:
+        eval_main_km = eval_total_km
+    if eval_pace_sec is None:
+        eval_pace_sec = parse_pace_str_to_sec(activity.get("avg_pace_str"))
+        if eval_pace_sec is None:
+            mov_s = float(activity.get("moving_time_seconds") or activity.get("elapsed_time_seconds") or 0.0)
+            if act_dist_km > 0.1 and mov_s > 0:
+                p_cand = int(round(mov_s / act_dist_km))
+                if 90 <= p_cand <= 1200:
+                    eval_pace_sec = p_cand
+
     eff_planned_main = planned_main_km if planned_main_km > 0 else plan_dist
 
     # Standalone short warm-up/cool-down recording or single interval rep fragment
@@ -824,7 +840,8 @@ def segment_workout_phases(
         cd_laps = []
 
     # 2C. Check if Core Laps exhibit Alternating Fast/Slow Intervals (>= 3 fast bouts separated by >= 32s/km slower bouts)
-    core_paces = [int(l.get("gap_sec") or l.get("pace_sec") or fast_ref_sec) for l in core_laps]
+    fallback_ref_sec = int(fast_ref_sec or 330)
+    core_paces = [int(l.get("gap_sec") or l.get("pace_sec") or fallback_ref_sec) for l in core_laps]
     interval_meta = None
     phases = []
 
@@ -874,8 +891,8 @@ def segment_workout_phases(
             third = max(1, len(core_laps) // 3)
             first_part = core_laps[:third]
             last_part = core_laps[-third:]
-            p_first = sum(int(x.get("gap_sec") or x["pace_sec"]) for x in first_part) / len(first_part)
-            p_last = sum(int(x.get("gap_sec") or x["pace_sec"]) for x in last_part) / len(last_part)
+            p_first = sum(int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) for x in first_part) / len(first_part)
+            p_last = sum(int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) for x in last_part) / len(last_part)
             delta = p_last - p_first  # negative = sped up, positive = slowed down
 
             if delta <= -12:
@@ -1232,8 +1249,8 @@ def analyze_activity_segments(
     wu_phase = next((p for p in phases if p["phase_type"] == "warmup"), None)
     cd_phase = next((p for p in phases if p["phase_type"] == "cooldown"), None)
 
-    main_dist_km = round(sum(float(p["distance_km"]) for p in main_phases), 2)
-    main_dur_s = sum(int(p["duration_s"]) for p in main_phases)
+    main_dist_km = round(sum(float(p.get("distance_km") or 0.0) for p in main_phases), 2)
+    main_dur_s = sum(int(p.get("duration_s") or 0) for p in main_phases)
     main_pace_sec = (
         interval_meta["work_pace_sec"]
         if (interval_meta and interval_meta.get("work_pace_sec"))
@@ -1281,8 +1298,8 @@ def analyze_activity_segments(
                     main_phases = phases
                 wu_phase = next((p for p in phases if p["phase_type"] == "warmup"), None)
                 cd_phase = next((p for p in phases if p["phase_type"] == "cooldown"), None)
-                main_dist_km = round(sum(float(p["distance_km"]) for p in main_phases), 2)
-                main_dur_s = sum(int(p["duration_s"]) for p in main_phases)
+                main_dist_km = round(sum(float(p.get("distance_km") or 0.0) for p in main_phases), 2)
+                main_dur_s = sum(int(p.get("duration_s") or 0) for p in main_phases)
                 main_pace_sec = (
                     interval_meta["work_pace_sec"]
                     if (interval_meta and interval_meta.get("work_pace_sec"))

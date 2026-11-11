@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { X, Camera, Download, RefreshCw, MapPin, Mountain, Sparkles, Trophy } from "lucide-react";
+import apiClient from "@/lib/apiClient";
 
 interface PersonalShareCardModalProps {
   open: boolean;
@@ -72,8 +73,8 @@ export default function PersonalShareCardModal({
         } else if (actId) {
           qs.set("activity_id", actId);
         }
-        const res = await fetch(`/api/miniapp/personal-share-card/${encodeURIComponent(uid)}?${qs.toString()}`);
-        const data = await res.json();
+        const res = await apiClient.get(`/api/miniapp/personal-share-card/${encodeURIComponent(uid)}?${qs.toString()}`);
+        const data = res.data;
         if (data?.success) {
           setShareData(data);
           setRecentRuns(data.recent_runs || []);

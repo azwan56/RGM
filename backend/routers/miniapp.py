@@ -1021,6 +1021,7 @@ def detect_face_focus_endpoint(req: FaceFocusDetectRequest) -> Dict[str, Any]:
 @router.get("/personal-share-card/{uid}")
 def get_personal_share_card_data(
     uid: str,
+    request: Request = None,
     activity_id: Optional[str] = Query(None, description="Optional specific activity ID"),
     race_id: Optional[str] = Query(None, description="Optional completed race ID or name"),
     target_date: Optional[str] = Query(None, description="Optional YYYY-MM-DD date"),
@@ -1391,8 +1392,17 @@ def get_personal_share_card_data(
             r_info_elev = (selected_race.get("race_info") or {}).get("elevation_gain_m")
             if r_info_elev:
                 elev_gain = round(float(r_info_elev), 1)
-        avg_hr = selected_act.get("average_heartrate")
-        max_hr = selected_act.get("max_heartrate")
+        verified_caller = getattr(getattr(request, "state", None), "user_id", None)
+        caller_uid = LocalStore.resolve_user_id(str(verified_caller).strip()) if verified_caller else None
+        can_view_confidential = (
+            LocalStore.can_view_confidential_runner_data(caller_uid, eff_uid)
+            if caller_uid
+            else False
+        )
+        is_bio_hidden = bool(profile.get("hide_biometrics")) and not can_view_confidential
+
+        avg_hr = None if is_bio_hidden else selected_act.get("average_heartrate")
+        max_hr = None if is_bio_hidden else selected_act.get("max_heartrate")
         trimp_val = round(float(selected_act.get("trimp") or 0.0), 1)
         plan_km = float(day_plan.get("distance_km") or 0.0)
         comp_pct = 100 if selected_race else (int(round((dist_km / plan_km) * 100)) if plan_km > 0 else (100 if dist_km > 0 else 0))
@@ -1417,7 +1427,7 @@ def get_personal_share_card_data(
         }
 
         try:
-            track_resp = get_activity_track(act_id, uid=eff_uid, viewer_uid=eff_uid)
+            track_resp = get_activity_track(act_id, request=None, uid=caller_uid or "", viewer_uid=caller_uid or "")
             tr_obj = track_resp.get("track") if isinstance(track_resp, dict) else None
             if isinstance(tr_obj, dict):
                 raw_pts = tr_obj.get("points") or []
@@ -1542,7 +1552,28 @@ def get_personal_share_card_data(
     else:
         exec_label = "📊 计划执行复盘"
         if actual_data["has_activity"]:
-            from utils.workout_segmentation import has_large_plan_discrepancy
+            from utils.workout_segmentation import has_large_plan_discrepancy, parse_pace_str_to_sec
+
+            def _extract_journal_text(raw_val: Any) -> str:
+                if not raw_val:
+                    return ""
+                obj = raw_val
+                if isinstance(obj, str):
+                    s = obj.strip()
+                    if s.startswith("{") and s.endswith("}"):
+                        try:
+                            parsed = json.loads(s)
+                            if isinstance(parsed, dict):
+                                obj = parsed
+                        except Exception:
+                            pass
+                if isinstance(obj, dict):
+                    for k in ("summary", "critique", "coach_comment", "commentary", "content", "text", "verdict"):
+                        v = obj.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()
+                    return ""
+                return str(obj).strip()
 
             hr_clause = f"，平均心率 {act_hr} bpm" if act_hr else ""
             elev_clause = f"，克服累计爬升 +{act_elev:.0f}m" if act_elev >= 15 else ""
@@ -1555,14 +1586,27 @@ def get_personal_share_card_data(
             else:
                 phys_verdict = "配速输出平稳，步频节奏连贯，很好地贯彻了周期化耐力积累原则。"
 
-            large_discrepancy = (
-                not day_plan.get("has_scheduled_plan")
-                or not matched_plan_day
-                or has_large_plan_discrepancy(
-                    activity=selected_act or actual_data,
-                    planned_day=matched_plan_day,
-                )
-            )
+            act_pace_sec = parse_pace_str_to_sec(act_pace)
+            if act_pace_sec is None and act_km > 0.1 and actual_data.get("moving_time_seconds"):
+                p_cand = int(round(float(actual_data["moving_time_seconds"]) / act_km))
+                if 90 <= p_cand <= 1200:
+                    act_pace_sec = p_cand
+
+            large_discrepancy = True
+            if day_plan.get("has_scheduled_plan") and matched_plan_day:
+                try:
+                    planned_km_val = float(matched_plan_day.get("distance_km") or day_plan.get("distance_km") or 0.0)
+                    large_discrepancy = has_large_plan_discrepancy(
+                        planned_day=matched_plan_day,
+                        activity=selected_act or actual_data,
+                        eval_total_km=float(act_km or 0.0),
+                        eval_main_km=float(act_km or 0.0),
+                        planned_main_km=planned_km_val,
+                        eval_pace_sec=act_pace_sec,
+                    )
+                except Exception as disc_err:
+                    logger.warning(f"[miniapp] Plan discrepancy eval fallback for {eff_uid}: {disc_err}")
+                    large_discrepancy = False
             if large_discrepancy:
                 exec_label = "📊 训练效果复盘"
                 if act_km >= 20:
@@ -1590,7 +1634,9 @@ def get_personal_share_card_data(
                 f"{'结合 +' + str(int(act_elev)) + 'm 地形起伏，显著强化了臀腿离心力量与抗衰减能力。' if act_elev >= 20 else '节奏控制克制精准，在极低机械压力下完成了高质量有氧刺激。'}"
                 f"建议跑后 30 分钟内补充碳水与电解质，保障超量恢复。"
             )
-            raw_journal = _clean_ai_terms(str(selected_act.get("ai_journal") or ("" if large_discrepancy else day_plan.get("coach_notes")) or ""))
+            act_journal_txt = _extract_journal_text((selected_act or {}).get("ai_journal"))
+            plan_notes_txt = "" if large_discrepancy else _extract_journal_text(day_plan.get("coach_notes"))
+            raw_journal = _clean_ai_terms(act_journal_txt or plan_notes_txt)
             commentary_journal = raw_journal if len(raw_journal) >= 15 else commentary_exec
         else:
             commentary_exec = (
