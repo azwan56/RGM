@@ -136,7 +136,8 @@ export function registerApiTelemetryReporter(fn: ApiTelemetryReporter) {
 export async function request<T = any>(
   url: string,
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "GET",
-  data?: any
+  data?: any,
+  _retried401 = false
 ): Promise<T> {
   const token = getToken();
   const storedUid = getStoredUser()?.id || "";
@@ -187,6 +188,17 @@ export async function request<T = any>(
           resolve(res.data as T);
         } else if (res.statusCode === 401) {
           clearSession();
+          if (!_retried401 && !url.includes("/api/auth/wechat/miniapp-login")) {
+            wechatLogin()
+              .then((u) => {
+                if (u && getToken()) {
+                  return request<T>(url, method, data, true).then(resolve, reject);
+                }
+                reject(new Error("Unauthorized"));
+              })
+              .catch(() => reject(new Error("Unauthorized")));
+            return;
+          }
           uni.showToast({ title: "登录已失效，正在重新登录", icon: "none" });
           reject(new Error("Unauthorized"));
         } else {
