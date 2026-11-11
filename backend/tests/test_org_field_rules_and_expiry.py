@@ -498,13 +498,11 @@ def test_sub_club_access_suspension_and_admin_confirmation_flow():
     assert sub_clubs_blocked.status_code == 403
     assert "临时访问权限已到期" in sub_clubs_blocked.json()["detail"]
 
-    # 8. Check my-clubs list flags is_access_suspended = True
+    # 8. Check expired runner is automatically removed from sub-club memberships
     my_clubs = LocalStore.get_user_clubs(runner_uid)
-    sub_c = next(c for c in my_clubs if c["id"] == sub_club_id)
-    assert sub_c["is_access_suspended"] is True
-    assert "暂停使用" in sub_c["suspension_reason"]
+    assert all(c["id"] != sub_club_id for c in my_clubs)
 
-    # 9. Independent club (RGM先锋跑团) is NOT blocked!
+    # 9. Independent club (RGM先锋跑团) is NOT blocked and membership is preserved!
     indep_dash = client.get(f"/api/team/{indep_club_id}/dashboard?user_id={runner_uid}")
     assert indep_dash.status_code == 200
 
@@ -520,10 +518,16 @@ def test_sub_club_access_suspension_and_admin_confirmation_flow():
     })
     assert confirm_res.status_code == 200
 
-    # 11. Now runner is confirmed formal member! All sub-club endpoints are restored (200 OK)!
+    # 11. Now runner is confirmed formal member! Rejoins sub-club and all endpoints are restored (200 OK)!
     st2 = LocalStore.check_org_member_status(org_id, runner_uid)
     assert st2["status"] == "confirmed"
     assert st2["is_valid"] is True
+
+    rejoin_sub = client.post("/api/team/join-club", json={
+        "user_id": runner_uid,
+        "club_id": sub_club_id
+    })
+    assert rejoin_sub.status_code == 200
 
     dash_ok = client.get(f"/api/team/{sub_club_id}/dashboard?user_id={runner_uid}")
     assert dash_ok.status_code == 200
@@ -625,6 +629,284 @@ def test_incomplete_profile_cannot_be_confirmed_and_auto_downgrades():
     st_final = LocalStore.check_org_member_status(org_id, runner_uid)
     assert st_final["status"] == "confirmed"
     assert len(st_final["missing_fields"]) == 0
+
+
+def test_join_org_with_string_health_declaration_and_miniapp_fields():
+    """
+    Verifies that JoinOrganizationRequest accepts string health_declaration and miniapp field aliases
+    (jersey_size, running_shoe_size, full_marathon_pb) without HTTP 422 or [object Object] errors.
+    """
+    client = TestClient(app)
+    ts = int(time.time())
+    owner_uid = f"owner_miniapp_{ts}"
+    runner_uid = f"runner_miniapp_{ts}"
+    invite_code = f"MINI{ts}"[-6:]
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈测试_{ts}",
+        "invite_code": invite_code,
+        "description": "测试小程序表单字段与健康声明兼容性",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Join using the exact miniapp payload that previously caused 422
+    join_res = client.post("/api/org/join", json={
+        "user_id": runner_uid,
+        "invite_code": invite_code,
+        "real_name": "张晓萌",
+        "gender": "female",
+        "date_of_birth": "1988-05-12",
+        "class_name": "港大班 12",
+        "program": "港大班",
+        "class_detail": "12",
+        "gobi_experience": "新戈",
+        "phone": "13912345678",
+        "id_card": "310101198805121234",
+        "emergency_contact": "李四 13800000000",
+        "running_shoe_size": "38",
+        "jersey_size": "M",
+        "full_marathon_pb": "3小时45分",
+        "health_declaration": "本人确认身体健康，无不适合高强度跑步的疾病。"
+    })
+    assert join_res.status_code == 200, f"Join failed: {join_res.text}"
+    data = join_res.json()
+    assert data["success"] is True
+
+    # 3. Verify get_user_organizations returns populated sizes and health declaration
+    orgs = LocalStore.get_user_organizations(runner_uid)
+    assert len(orgs) == 1
+    runner_org = orgs[0]
+    assert runner_org["clothing_size"] == "M"
+    assert runner_org["jersey_size"] == "M"
+    assert runner_org["shoe_size"] == "38"
+    assert runner_org["running_shoe_size"] == "38"
+    assert runner_org["marathon_pb"] == "3小时45分"
+    assert runner_org["full_marathon_pb"] == "3小时45分"
+    assert runner_org["health_declaration"] == "本人确认身体健康，无不适合高强度跑步的疾病。"
+    assert runner_org["emergency_contact"] == "李四 13800000000"
+
+    # 4. Update profile using miniapp update-profile endpoint
+    update_res = client.post(f"/api/org/{org_id}/members/update-profile", json={
+        "user_id": runner_uid,
+        "real_name": "张晓萌",
+        "gender": "female",
+        "date_of_birth": "1988-05-12",
+        "class_name": "港大班 12",
+        "program": "港大班",
+        "class_detail": "12",
+        "gobi_experience": "戈20 A组",
+        "phone": "13912345678",
+        "id_card": "310101198805121234",
+        "emergency_contact": "李四 13800000000",
+        "clothing_size": "L",
+        "jersey_size": "L",
+        "shoe_size": "39",
+        "running_shoe_size": "39",
+        "marathon_pb": "3小时30分",
+        "full_marathon_pb": "3小时30分",
+        "health_declaration": "本人确认身体健康，无不适合高强度跑步的疾病。"
+    })
+    assert update_res.status_code == 200, f"Update failed: {update_res.text}"
+    updated_orgs = LocalStore.get_user_organizations(runner_uid)
+    assert updated_orgs[0]["jersey_size"] == "L"
+    assert updated_orgs[0]["running_shoe_size"] == "39"
+    assert updated_orgs[0]["full_marathon_pb"] == "3小时30分"
+
+
+def test_expired_member_can_fill_info_and_apply_reactivation():
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_react_lead_{ts}"
+    expired_runner_uid = f"u_react_runner_{ts}"
+    invite_code = f"FD_REACT_{ts % 100000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "大群会长", "email": "lead@test.com"})
+    LocalStore.upsert_profile(expired_runner_uid, {"display_name": "未填资料过期跑友", "email": "runner@test.com"})
+
+    # 1. Create org
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦戈恢复测试大群_{ts}",
+        "invite_code": invite_code,
+        "description": "测试过期队员补齐资料并自动申请恢复流程",
+        "city": "上海",
+        "owner_id": owner_uid
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Member joins with minimal / missing info
+    join_res = client.post("/api/org/join", json={
+        "user_id": expired_runner_uid,
+        "invite_code": invite_code,
+    })
+    assert join_res.status_code == 200
+
+    # 3. Simulate 15 days elapsed so member status becomes expired
+    past_15_days = (datetime.utcnow() - timedelta(days=15)).isoformat() + "Z"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE organization_members SET joined_at = ?, status = 'temporary' WHERE org_id = ? AND user_id = ?",
+                     (past_15_days, org_id, expired_runner_uid))
+        conn.commit()
+
+    # Verify status is expired
+    status_info = LocalStore.check_org_member_status(org_id, expired_runner_uid)
+    assert status_info["status"] == "expired"
+    assert status_info["is_valid"] is False
+
+    # 4. Test Admin Grace Period
+    grace_res = client.post(f"/api/org/{org_id}/members/{expired_runner_uid}/grace-period")
+    assert grace_res.status_code == 200
+    status_info_grace = LocalStore.check_org_member_status(org_id, expired_runner_uid)
+    assert status_info_grace["status"] == "temporary"
+    assert status_info_grace["is_valid"] is True
+    assert status_info_grace["days_remaining"] == 14
+
+    # Re-expire them to test user self-fill resumption
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE organization_members SET joined_at = ?, status = 'expired' WHERE org_id = ? AND user_id = ?",
+                     (past_15_days, org_id, expired_runner_uid))
+        conn.commit()
+
+    # 5. Expired runner fills in required profile fields via /api/profile/{uid}
+    update_res = client.put(f"/api/profile/{expired_runner_uid}", json={
+        "real_name": "李复旦",
+        "gender": "male",
+        "date_of_birth": "1988-06-01",
+        "program": "EMBA",
+        "class_detail": "2024春",
+        "class_name": "EMBA 2024春",
+        "gobi_experience": "新戈",
+        "phone": "13912345678"
+    })
+    assert update_res.status_code == 200
+
+    # 6. Verify status in org upgraded to 'pending' with zero missing fields!
+    status_after_fill = LocalStore.check_org_member_status(org_id, expired_runner_uid)
+    assert status_after_fill["status"] == "pending"
+    assert len(status_after_fill["missing_fields"]) == 0
+
+    # 7. Admin confirms member
+    confirm_res = client.post(f"/api/org/{org_id}/members/{expired_runner_uid}/confirm", json={
+        "operator_uid": owner_uid
+    })
+    assert confirm_res.status_code == 200
+
+    # 8. Verify member is now confirmed and fully active
+    status_confirmed = LocalStore.check_org_member_status(org_id, expired_runner_uid)
+    assert status_confirmed["status"] == "confirmed"
+    assert status_confirmed["is_valid"] is True
+
+
+def test_org_organizer_without_super_admin_and_hidden_field_rules():
+    """Verify non-super-admin Org Owner & Org Admin can manage org settings & 3-state field rules (required/optional/hidden), while normal members get 403, and hidden fields never block membership."""
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_org_owner_no_sa_{ts}"
+    admin_uid = f"u_org_admin_no_sa_{ts}"
+    member_uid = f"u_org_member_no_sa_{ts}"
+    invite_code = f"FD3S{ts % 10000}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "非超管大群主理人", "email": f"owner_{ts}@runner.com"})
+    LocalStore.upsert_profile(admin_uid, {"display_name": "非超管大群管理员", "email": f"admin_{ts}@runner.com"})
+    LocalStore.upsert_profile(member_uid, {"display_name": "普通群员", "email": f"member_{ts}@runner.com"})
+
+    # 1. Create org owned by owner_uid (not super admin)
+    create_res = client.post("/api/org/create", json={
+        "name": f"复旦三态字段测试群_{ts}",
+        "invite_code": invite_code,
+        "description": "初始简介",
+        "city": "上海",
+        "owner_id": owner_uid,
+    })
+    assert create_res.status_code == 200
+    org_id = create_res.json()["organization"]["id"]
+
+    # 2. Normal member tries to update org settings or field rules -> 403 Forbidden
+    forbidden_org = client.put(f"/api/org/{org_id}", json={
+        "operator_uid": member_uid,
+        "name": "非法篡改名称",
+    })
+    assert forbidden_org.status_code == 403
+
+    forbidden_rules = client.put(f"/api/org/{org_id}/field-rules", json={
+        "operator_uid": member_uid,
+        "field_rules": [],
+    })
+    assert forbidden_rules.status_code == 403
+
+    # 3. Non-super-admin Owner updates org basic info & join mode -> 200 OK
+    owner_update = client.put(f"/api/org/{org_id}", json={
+        "operator_uid": owner_uid,
+        "name": f"复旦主理人自治大群_{ts}",
+        "city": "上海·杨浦",
+        "description": "由大群主理人直接更新",
+    })
+    assert owner_update.status_code == 200
+    assert owner_update.json()["organization"]["name"] == f"复旦主理人自治大群_{ts}"
+
+    # 4. Promote admin_uid and verify delegated Org Admin can configure 3-state field rules (including 'hidden')
+    client.post("/api/org/join", json={
+        "user_id": admin_uid,
+        "invite_code": invite_code,
+        "real_name": "李管理",
+        "gender": "female",
+        "date_of_birth": "1991-03-15",
+        "class_name": "EMBA 22秋",
+    })
+    role_res = client.post(f"/api/org/{org_id}/members/{admin_uid}/role", json={
+        "operator_uid": owner_uid,
+        "role": "admin",
+    })
+    assert role_res.status_code == 200
+
+    rules = client.get(f"/api/org/{org_id}/field-rules").json()["field_rules"]
+    for r in rules:
+        if r["field"] in ("class_name", "gobi_experience", "id_card"):
+            # Set previously-required class_name and optional gobi_experience/id_card to 'hidden'
+            r["mode"] = "hidden"
+            r["hidden"] = True
+            r["required"] = True  # Even if caller passes True, backend must normalize required=False when hidden=True
+        elif r["field"] == "phone":
+            r["mode"] = "required"
+            r["required"] = True
+            r["hidden"] = False
+
+    admin_rules_res = client.put(f"/api/org/{org_id}/field-rules", json={
+        "operator_uid": admin_uid,
+        "field_rules": rules,
+    })
+    assert admin_rules_res.status_code == 200
+    updated_rules = admin_rules_res.json()["field_rules"]
+
+    class_rule = next(r for r in updated_rules if r["field"] == "class_name")
+    assert class_rule["hidden"] is True
+    assert class_rule["mode"] == "hidden"
+    assert class_rule["required"] is False
+
+    phone_rule = next(r for r in updated_rules if r["field"] == "phone")
+    assert phone_rule["hidden"] is False
+    assert phone_rule["mode"] == "required"
+    assert phone_rule["required"] is True
+
+    # 5. Member joins WITHOUT hidden field 'class_name', but WITH required fields (real_name, gender, date_of_birth, phone)
+    join_res = client.post("/api/org/join", json={
+        "user_id": member_uid,
+        "invite_code": invite_code,
+        "real_name": "张无班级",
+        "gender": "male",
+        "date_of_birth": "1993-07-07",
+        "phone": "13800138000",
+        # class_name is omitted because it is hidden!
+    })
+    assert join_res.status_code == 200
+    membership = join_res.json()["membership"]
+    assert membership["missing_fields"] == []
+    assert membership["status"] == "pending"
+
+
+
 
 
 

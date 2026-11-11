@@ -13,7 +13,8 @@ class VerifyOrgCodeRequest(BaseModel):
 
 class JoinOrganizationRequest(BaseModel):
     user_id: str
-    invite_code: str
+    invite_code: Optional[str] = None
+    org_id: Optional[str] = None
     real_name: Optional[str] = None
     gender: Optional[str] = "male"
     date_of_birth: Optional[str] = None
@@ -27,8 +28,14 @@ class JoinOrganizationRequest(BaseModel):
     clothing_size: Optional[str] = None
     shoe_size: Optional[str] = None
     marathon_pb: Optional[str] = None
-    health_declaration: Optional[bool] = None
+    jersey_size: Optional[str] = None
+    running_shoe_size: Optional[str] = None
+    full_marathon_pb: Optional[str] = None
+    health_declaration: Optional[Any] = None
     extra_data: Optional[Dict[str, Any]] = None
+    inviter_uid: Optional[str] = None
+    via_invite: Optional[bool] = False
+    skip_profile: Optional[bool] = False
 
 class UpdateFieldRulesRequest(BaseModel):
     field_rules: List[Dict[str, Any]]
@@ -49,7 +56,10 @@ class UpdateMemberProfileRequest(BaseModel):
     clothing_size: Optional[str] = None
     shoe_size: Optional[str] = None
     marathon_pb: Optional[str] = None
-    health_declaration: Optional[bool] = None
+    jersey_size: Optional[str] = None
+    running_shoe_size: Optional[str] = None
+    full_marathon_pb: Optional[str] = None
+    health_declaration: Optional[Any] = None
     extra_data: Optional[Dict[str, Any]] = None
 
 class ConfirmMemberRequest(BaseModel):
@@ -62,6 +72,7 @@ class AssignSubClubRequest(BaseModel):
 class CreateOrgRequest(BaseModel):
     name: str
     invite_code: str
+    join_mode: Optional[str] = "invite"
     description: Optional[str] = None
     city: Optional[str] = "上海"
     logo_url: Optional[str] = None
@@ -70,10 +81,17 @@ class CreateOrgRequest(BaseModel):
 class UpdateOrgRequest(BaseModel):
     name: Optional[str] = None
     invite_code: Optional[str] = None
+    join_mode: Optional[str] = None
     description: Optional[str] = None
     city: Optional[str] = None
     logo_url: Optional[str] = None
     owner_id: Optional[str] = None
+    operator_uid: Optional[str] = None
+
+class UpdateOrgJoinModeRequest(BaseModel):
+    operator_uid: str
+    join_mode: Optional[str] = None  # 'free' or 'invite'
+    invite_code: Optional[str] = None
 
 class BindClubRequest(BaseModel):
     club_id: str
@@ -110,25 +128,56 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
     """
     if not req.user_id.strip():
         raise HTTPException(status_code=400, detail="缺少跑者用户ID")
-    if not req.invite_code.strip():
-        raise HTTPException(status_code=400, detail="组织邀请码不能为空")
+    clean_code = (req.invite_code or "").strip()
+    clean_org_id = (req.org_id or "").strip()
+    if not clean_code and not clean_org_id:
+        raise HTTPException(status_code=400, detail="组织专属邀请码与组织ID不能同时为空")
+
+    # 一键入群：由大群有效成员发出的邀请卡片 / 小程序码 → 免大群邀请码
+    skip_code_check = False
+    if clean_org_id and req.via_invite and LocalStore.is_active_org_inviter(clean_org_id, req.inviter_uid):
+        skip_code_check = True
+    if clean_org_id and clean_code:
+        org_by_code = LocalStore.get_organization_by_code(clean_code)
+        if not org_by_code or org_by_code.get("id") != clean_org_id:
+            if skip_code_check:
+                clean_code = ""  # stale/absent code in link — trust the inviter instead
+        else:
+            skip_code_check = True
 
     extra = dict(req.extra_data or {})
     if req.emergency_contact:
         extra["emergency_contact"] = req.emergency_contact.strip()
-    if req.clothing_size:
-        extra["clothing_size"] = req.clothing_size.strip()
-    if req.shoe_size:
-        extra["shoe_size"] = req.shoe_size.strip()
-    if req.marathon_pb:
-        extra["marathon_pb"] = req.marathon_pb.strip()
+    clothing = (req.clothing_size or req.jersey_size or "").strip()
+    if clothing:
+        extra["clothing_size"] = clothing
+        extra["jersey_size"] = clothing
+    shoe = (req.shoe_size or req.running_shoe_size or "").strip()
+    if shoe:
+        extra["shoe_size"] = shoe
+        extra["running_shoe_size"] = shoe
+    pb = (req.marathon_pb or req.full_marathon_pb or "").strip()
+    if pb:
+        extra["marathon_pb"] = pb
+        extra["full_marathon_pb"] = pb
     if req.health_declaration is not None:
-        extra["health_declaration"] = req.health_declaration
+        if isinstance(req.health_declaration, bool):
+            extra["health_declaration"] = req.health_declaration
+        elif isinstance(req.health_declaration, str):
+            clean_hd = req.health_declaration.strip()
+            if clean_hd.lower() in ("false", "0", "否", "no", ""):
+                extra["health_declaration"] = False
+            else:
+                extra["health_declaration"] = True
+                extra["health_declaration_text"] = clean_hd
+        else:
+            extra["health_declaration"] = bool(req.health_declaration)
 
     try:
         res = LocalStore.join_organization(
             user_id=req.user_id,
-            invite_code=req.invite_code,
+            invite_code=clean_code or None,
+            org_id=clean_org_id or None,
             real_name=req.real_name,
             gender=req.gender or "male",
             date_of_birth=req.date_of_birth,
@@ -138,20 +187,27 @@ def join_organization_endpoint(req: JoinOrganizationRequest):
             extra_data=extra,
             program=req.program,
             class_detail=req.class_detail,
-            gobi_experience=req.gobi_experience
+            gobi_experience=req.gobi_experience,
+            skip_code_check=skip_code_check
         )
         status_cn = {
             "confirmed": "正式戈友已认证",
-            "pending": "已提交必填资料，待管理员审核",
-            "temporary": "临时人员（资料待补齐）",
+            "pending": "资料已提交，待管理员审核",
+            "temporary": "临时成员（资料可稍后补填）",
             "expired": "已过期"
-        }.get(res.get("status"), "临时人员")
+        }.get(res.get("status"), "临时成员")
 
-        msg = f"恭喜您成功加入【{res['org_name']}】大群体！当前状态：{status_cn}。"
+        days = res.get('days_remaining', 14)
+        msg = f"恭喜您成功加入【{res['org_name']}】！当前状态：{status_cn}。"
         if res.get("status") == "temporary":
-            msg += f" 您为临时人员（有效期还剩 {res.get('days_remaining', 14)} 天），请在到期前补齐必填资料并由管理员审核批准后方可加入下属跑团。"
+            msg += f" 现在即可直接加入下属跑团，无需审批。请在 {days} 天内补齐必填资料并通过管理员审核，逾期将被自动移出大群下全部跑团。"
         elif res.get("status") == "pending":
-            msg += f" 必填资料已填齐（有效期还剩 {res.get('days_remaining', 14)} 天），正等待大群管理员审核批准后解锁下属跑团。"
+            msg += f" 已可直接加入下属跑团。管理员将在 {days} 天内完成审核。"
+        elif res.get("status") == "expired":
+            msg = (
+                f"您在【{res['org_name']}】的资料补填期限已过，已被移出下属跑团。"
+                f"请补齐全部必填资料提交审核，或联系大群管理员恢复资格。"
+            )
 
         return {
             "success": True,
@@ -188,12 +244,15 @@ def get_org_field_rules_endpoint(org_id: str):
 @router.put("/{org_id}/field-rules")
 def update_org_field_rules_endpoint(org_id: str, req: UpdateFieldRulesRequest):
     """
-    Allows admin to update field requirements (required/optional) for this organization.
+    Allows Org Owner, Org Admin, or Super Admin to update field requirements (required/optional/hidden) for this organization.
     """
-    ok = LocalStore.update_org_field_rules(org_id, req.field_rules)
-    if not ok:
-        raise HTTPException(status_code=404, detail="组织不存在")
-    return {"success": True, "message": "大群准入必填字段要求已更新！", "field_rules": req.field_rules}
+    try:
+        updated_rules = LocalStore.update_org_field_rules(org_id, req.field_rules, req.operator_uid)
+        if not updated_rules:
+            raise HTTPException(status_code=404, detail="组织不存在")
+        return {"success": True, "message": "大群准入字段规则（必填/选填/不显示）已更新！", "field_rules": updated_rules}
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
 
 
 @router.post("/{org_id}/members/update-profile")
@@ -204,14 +263,30 @@ def update_org_member_profile_endpoint(org_id: str, req: UpdateMemberProfileRequ
     extra = dict(req.extra_data or {})
     if req.emergency_contact is not None:
         extra["emergency_contact"] = req.emergency_contact.strip()
-    if req.clothing_size is not None:
-        extra["clothing_size"] = req.clothing_size.strip()
-    if req.shoe_size is not None:
-        extra["shoe_size"] = req.shoe_size.strip()
-    if req.marathon_pb is not None:
-        extra["marathon_pb"] = req.marathon_pb.strip()
+    clothing = (req.clothing_size or req.jersey_size or "").strip()
+    if clothing:
+        extra["clothing_size"] = clothing
+        extra["jersey_size"] = clothing
+    shoe = (req.shoe_size or req.running_shoe_size or "").strip()
+    if shoe:
+        extra["shoe_size"] = shoe
+        extra["running_shoe_size"] = shoe
+    pb = (req.marathon_pb or req.full_marathon_pb or "").strip()
+    if pb:
+        extra["marathon_pb"] = pb
+        extra["full_marathon_pb"] = pb
     if req.health_declaration is not None:
-        extra["health_declaration"] = req.health_declaration
+        if isinstance(req.health_declaration, bool):
+            extra["health_declaration"] = req.health_declaration
+        elif isinstance(req.health_declaration, str):
+            clean_hd = req.health_declaration.strip()
+            if clean_hd.lower() in ("false", "0", "否", "no", ""):
+                extra["health_declaration"] = False
+            else:
+                extra["health_declaration"] = True
+                extra["health_declaration_text"] = clean_hd
+        else:
+            extra["health_declaration"] = bool(req.health_declaration)
 
     try:
         updated = LocalStore.update_org_member_profile(
@@ -258,7 +333,90 @@ def get_organization_endpoint(org_id: str, user_id: Optional[str] = None):
                 detail=f"您在【{org.get('name', '大群')}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法进入大群。如需继续参与，请前往个人中心补齐必填资料并联系管理员确认。"
             )
         org["user_membership"] = status_info
+        # If operator is owner or admin, expose invite_code
+        if status_info.get("role") in ("owner", "admin") or org.get("owner_id") == user_id or user_id in ("admin", "super_admin"):
+            full_org = LocalStore.get_organization_admin(org_id)
+            if full_org and full_org.get("invite_code"):
+                org["invite_code"] = full_org["invite_code"]
     return {"organization": org}
+
+
+@router.get("/{org_id}/invite-info")
+def get_org_invite_info(
+    org_id: str,
+    invite_code: Optional[str] = None,
+    user_id: Optional[str] = None,
+    inviter_uid: Optional[str] = None
+):
+    """
+    Returns public/safe preview info for an invited organization, validating code and member status.
+    Used when a WeChat user taps an organization invite card.
+    """
+    org = LocalStore.get_organization(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="大群体组织不存在！")
+
+    org_admin = LocalStore.get_organization_admin(org_id)
+    member_count = org_admin.get("member_count", 0) if org_admin else 0
+    sub_clubs_count = org_admin.get("sub_clubs_count", 0) if org_admin else 0
+
+    is_member = False
+    member_status = None
+    if user_id:
+        st = LocalStore.check_org_member_status(org_id, user_id)
+        is_member = st.get("is_member", False)
+        member_status = st.get("status")
+
+    clean_code = (invite_code or "").strip().upper()
+    real_code = (org_admin.get("invite_code") if org_admin else (org.get("invite_code") or "")).strip().upper()
+
+    is_code_valid = False
+    if (org.get("join_mode") or "invite") == "free":
+        is_code_valid = True
+    elif clean_code and clean_code == real_code:
+        is_code_valid = True
+    elif inviter_uid and LocalStore.is_active_org_inviter(org_id, inviter_uid):
+        is_code_valid = True
+
+    return {
+        "organization": {
+            "id": org["id"],
+            "name": org["name"],
+            "logo_url": org.get("logo_url"),
+            "city": org.get("city"),
+            "description": org.get("description"),
+            "join_mode": org.get("join_mode") or "invite",
+            "member_count": member_count,
+            "sub_clubs_count": sub_clubs_count,
+        },
+        "is_member": is_member,
+        "member_status": member_status,
+        "is_code_valid": is_code_valid,
+        "one_click_join": is_code_valid,
+        "profile_deadline_days": LocalStore.ORG_PROFILE_DEADLINE_DAYS,
+    }
+
+
+@router.get("/{org_id}/share-info")
+def get_org_share_info(org_id: str, user_id: Optional[str] = None):
+    """
+    Returns share parameters including invite_code for verified org members or admins.
+    """
+    org = LocalStore.get_organization(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="大群体不存在")
+
+    org_admin = LocalStore.get_organization_admin(org_id)
+    real_code = (org_admin.get("invite_code") if org_admin else (org.get("invite_code") or "")).strip().upper()
+
+    return {
+        "org_id": org["id"],
+        "name": org["name"],
+        "logo_url": org.get("logo_url"),
+        "city": org.get("city"),
+        "join_mode": org.get("join_mode") or "invite",
+        "invite_code": real_code,
+    }
 
 
 @router.get("/{org_id}/sub-clubs")
@@ -270,14 +428,19 @@ def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None, reque
     eff_uid = user_id or (request.headers.get("x-user-id") if request else None)
     if eff_uid:
         status_info = LocalStore.check_org_member_status(org_id, eff_uid)
-        if status_info.get("is_member") and (status_info.get("status") in ("expired", "suspended") or not status_info.get("is_valid", True)):
+        if not status_info.get("is_member") and eff_uid not in ("admin", "super_admin"):
+            # Not a member of the organization -> sub-clubs are completely invisible
+            return {"sub_clubs": []}
+
+        if status_info.get("status") in ("expired", "suspended") or not status_info.get("is_valid", True):
             org = LocalStore.get_organization(org_id)
             org_name = org.get("name") if org else "大群"
             raise HTTPException(
                 status_code=403,
                 detail=f"您在【{org_name}】的临时访问权限已到期（超过2周未完成必填字段审核），已无法浏览下属跑团列表。如需继续参与，请前往个人中心补齐必填资料并联系管理员确认。"
             )
-    sub_clubs = LocalStore.get_org_sub_clubs(org_id, user_id)
+
+    sub_clubs = LocalStore.get_org_sub_clubs(org_id, eff_uid)
     return {"sub_clubs": sub_clubs}
 
 
@@ -351,6 +514,34 @@ def confirm_member_endpoint(org_id: str, target_uid: str, req: Optional[ConfirmM
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/{org_id}/members/{target_uid}/grace-period")
+def grant_member_grace_period_endpoint(org_id: str, target_uid: str):
+    """
+    Allows Admin or Owner to grant a fresh 14-day temporary grace period to an expired member.
+    """
+    ok = LocalStore.grant_member_grace_period(org_id, target_uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="未找到对应的大群成员记录")
+    return {"success": True, "message": "已成功为该队员重置14天临时宽限期！"}
+
+
+@router.post("/{org_id}/remove-expired-sub-club-members")
+def remove_expired_sub_club_members_endpoint(org_id: str):
+    """
+    Recalculates organization member statuses and removes all expired members
+    from all sub-clubs belonging to this organization.
+    """
+    org = LocalStore.get_organization(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="大群体组织不存在")
+    res = LocalStore.remove_expired_org_members_from_sub_clubs(org_id)
+    return {
+        "success": True,
+        "message": f"已完成【{org.get('name', org_id)}】下属跑团过期人员清理，共从下属跑团移除 {res['removed_count']} 条过期成员记录。",
+        "result": res
+    }
+
+
 @router.post("/{org_id}/members/{target_uid}/role")
 def update_org_member_role_endpoint(org_id: str, target_uid: str, req: UpdateOrgMemberRoleRequest):
     """
@@ -407,16 +598,63 @@ def list_all_orgs_admin_endpoint():
     return {"organizations": orgs}
 
 
+@router.post("/{org_id}/join-mode")
+def update_org_join_mode_endpoint(org_id: str, req: UpdateOrgJoinModeRequest):
+    """
+    Allows organization organizer (owner / admin) to view/switch between 'free' and 'invite', and customize invite_code.
+    """
+    if req.join_mode and req.join_mode not in ("free", "invite"):
+        raise HTTPException(status_code=400, detail="入会规则仅支持 'free' (自由入会) 或 'invite' (凭专属邀请码入会)")
+    try:
+        updated = LocalStore.update_organization_join_mode(
+            org_id=org_id,
+            operator_uid=req.operator_uid,
+            join_mode=req.join_mode,
+            invite_code=req.invite_code
+        )
+        mode_label = "自由入会（免邀请码）" if updated.get("join_mode") == "free" else "凭专属邀请码入会"
+        return {
+            "success": True,
+            "message": f"大群入会规则已成功切换为【{mode_label}】！",
+            "organization": updated
+        }
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[update_org_join_mode] failed: {e}")
+        raise HTTPException(status_code=500, detail="更新大群入会规则失败")
+
+
 @router.put("/{org_id}")
 def update_org_endpoint(org_id: str, req: UpdateOrgRequest):
     """
-    Updates organization info (name, invite_code, description, city, logo_url, owner_id).
+    Updates organization info (name, invite_code, description, city, logo_url, owner_id, join_mode).
+    Allows Org Owner, Org Admin, or Super Admin.
     """
-    data = req.dict(exclude_unset=True)
+    data = req.model_dump(exclude_unset=True) if hasattr(req, "model_dump") else req.dict(exclude_unset=True)
+    op_uid = data.pop("operator_uid", None)
+    if op_uid and not LocalStore.is_org_organizer(org_id, op_uid):
+        raise HTTPException(status_code=403, detail="只有大群主理人、大群管理员或超级管理员有权修改大群设定！")
+
+    if ("join_mode" in data or "invite_code" in data) and op_uid:
+        try:
+            LocalStore.update_organization_join_mode(
+                org_id=org_id,
+                operator_uid=op_uid,
+                join_mode=data.get("join_mode"),
+                invite_code=data.get("invite_code")
+            )
+        except PermissionError as pe:
+            raise HTTPException(status_code=403, detail=str(pe))
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+
     updated = LocalStore.update_organization(org_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="组织不存在")
-    return {"success": True, "message": "大组织信息更新成功！", "organization": updated}
+    return {"success": True, "message": "大群设定信息更新成功！", "organization": updated}
 
 
 @router.post("/{org_id}/bind-club")
@@ -455,10 +693,123 @@ def create_org_endpoint(req: CreateOrgRequest):
             description=req.description,
             city=req.city or "上海",
             logo_url=req.logo_url,
-            owner_id=req.owner_id
+            owner_id=req.owner_id,
+            join_mode=req.join_mode or "invite"
         )
         return {"success": True, "message": f"大组织【{req.name}】创建成功！", "organization": org}
     except Exception as e:
         logger.error(f"[create_organization] failed: {e}")
         raise HTTPException(status_code=400, detail=f"创建组织失败（邀请码可能已存在）: {str(e)}")
+
+
+class CreateOrgEventRequest(BaseModel):
+    operator_uid: str
+    title: str
+    event_type: Optional[str] = "group_run"  # 'group_run' | 'distance_challenge'
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    meet_time: Optional[str] = None
+    location: Optional[str] = None
+    location_detail: Optional[str] = None
+    target_km: Optional[float] = 15.0
+    pace_requirement: Optional[str] = "A组 / B组 / C组 / 健康组"
+    rules: Optional[str] = None
+    max_participants: Optional[int] = 0
+    scope_club_ids: Optional[Any] = "all"  # 'all' or list of club_ids
+    host_club_id: Optional[str] = None
+    repeat_rule: Optional[str] = "none"
+    repeat_weeks: Optional[int] = 1
+
+
+class AssignOrgMemberClubRequest(BaseModel):
+    operator_uid: str
+    club_id: str
+
+
+@router.get("/{org_id}/reports")
+def get_org_periodic_report_endpoint(
+    org_id: str,
+    operator_uid: Optional[str] = None,
+    period_type: str = "week",
+    year: Optional[int] = None,
+    period_index: Optional[int] = None,
+    period_offset: Optional[int] = None,
+    trail_mode: str = "include",
+):
+    """
+    Returns cross-club periodic report (sub-club PK rankings, deduplicated member rankings, unaffiliated members radar)
+    for Org Owners, Org Admins, or Super Admins.
+    """
+    try:
+        return LocalStore.get_org_periodic_report(
+            org_id=org_id,
+            operator_uid=operator_uid,
+            period_type=period_type,
+            year=year,
+            period_index=period_index,
+            period_offset=period_offset,
+            trail_mode=trail_mode,
+        )
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[get_org_periodic_report] failed: {e}")
+        raise HTTPException(status_code=500, detail="获取大群全域报表失败")
+
+
+@router.get("/{org_id}/events")
+def get_org_events_endpoint(org_id: str, user_id: Optional[str] = None):
+    """
+    Returns all cross-club events and sub-club events under this organization, including per-sub-club participation breakdown.
+    """
+    try:
+        return LocalStore.get_org_events(org_id=org_id, user_id=user_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[get_org_events] failed: {e}")
+        raise HTTPException(status_code=500, detail="获取大群跨跑团活动失败")
+
+
+@router.post("/{org_id}/events")
+def create_org_event_endpoint(org_id: str, req: CreateOrgEventRequest):
+    """
+    Allows Org Owner, Org Admin, or Super Admin to publish a cross-club event (group run or mileage challenge).
+    """
+    if not req.title or not req.title.strip():
+        raise HTTPException(status_code=400, detail="活动名称不能为空")
+    try:
+        data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        return LocalStore.create_org_event(org_id=org_id, operator_uid=req.operator_uid, data=data)
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[create_org_event] failed: {e}")
+        raise HTTPException(status_code=500, detail="发布跨跑团联合活动失败")
+
+
+@router.post("/{org_id}/members/{target_uid}/assign-club")
+def assign_org_member_to_sub_club_endpoint(org_id: str, target_uid: str, req: AssignOrgMemberClubRequest):
+    """
+    Allows Org Owner, Org Admin, or Super Admin to assign an unaffiliated (or any) org member to a sub-club.
+    """
+    try:
+        return LocalStore.assign_org_member_to_sub_club(
+            org_id=org_id,
+            target_uid=target_uid,
+            club_id=req.club_id,
+            operator_uid=req.operator_uid,
+        )
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[assign_org_member_to_sub_club] failed: {e}")
+        raise HTTPException(status_code=500, detail="分配下属跑团失败")
+
 

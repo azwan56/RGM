@@ -1,18 +1,15 @@
 <template>
-  <view class="manual-page">
+  <view class="manual-page" :class="themeClass">
     <!-- Header Banner -->
     <view class="manual-hero">
       <view class="hero-badge">
-        <text class="hero-badge-txt">📖 官方新用户手册</text>
+        <text class="hero-badge-txt">📖 帮助中心</text>
       </view>
-      <text class="hero-title">跑者快速上手与指引</text>
-      <text class="hero-desc">
-        3 分钟快速完成账号登录、手表数据直连、复旦戈大群体实名认证与训练目标规划。
-      </text>
+      <text class="hero-title">帮助与常见问题</text>
 
       <view class="hero-action-row">
-        <button class="hero-nav-btn" @click="goToProfile">
-          前往完善个人档案 ›
+        <button class="hero-nav-btn" @click="goToWizard">
+          打开设定向导 ›
         </button>
       </view>
     </view>
@@ -23,13 +20,12 @@
         <view class="step-num-badge">1</view>
         <view class="card-header-meta">
           <text class="card-header-title">账号注册与一键登录</text>
-          <text class="card-header-sub">微信小程序与 Web 网页端全量打通</text>
         </view>
       </view>
 
       <view class="step-content-box">
         <view class="item-block">
-          <text class="item-title">📱 微信小程序端（日常打卡与交流首选）：</text>
+          <text class="item-title">📱 微信小程序端：</text>
           <text class="item-desc">
             1. 微信搜索「万跑跑团助手」或长按识别跑团码、活动分享海报。
           </text>
@@ -45,7 +41,7 @@
         </view>
 
         <view class="item-block">
-          <text class="item-title">💻 Web 网页管理端（大屏看板与深度分析）：</text>
+          <text class="item-title">💻 Web 网页端：</text>
           <text class="item-desc">
             在电脑浏览器访问 rgm.vanpower.net，支持点击微信扫码秒级登录，数据与小程序实时互通。
           </text>
@@ -58,8 +54,7 @@
       <view class="card-header-row">
         <view class="step-num-badge">2</view>
         <view class="card-header-meta">
-          <text class="card-header-title">绑定运动手表与导入历史</text>
-          <text class="card-header-sub">Garmin 佳明 & COROS 高驰官方直连</text>
+          <text class="card-header-title">手表绑定与历史同步</text>
         </view>
       </view>
 
@@ -67,27 +62,57 @@
         <view class="item-block">
           <text class="item-title">⌚ Garmin (佳明) 手表直连：</text>
           <text class="item-desc">
-            在【我的】→【个人资料与账号】找到“运动手表直连”，点击【绑定佳明账号】。
-          </text>
-          <text class="item-desc">
-            • 国行设备务必选择“中国区 (garmin.cn)”；海外账号选“国际区”。
-          </text>
-          <text class="item-desc">
-            • 输入 Garmin Connect App 账号密码，系统将开启后台静默自动同步，跑步后 1~3 分钟自动出报告。
+            在【我的】→【手表与同步】点击【绑定佳明账号】。国行账号选“中国区 (garmin.cn)”，国际账号选“国际区”。跑步后后台自动同步跑步记录、夜间 HRV、睡眠评分、静息心率与身体电量。
           </text>
         </view>
 
         <view class="item-block">
           <text class="item-title">⚡ COROS (高驰) 手表直连：</text>
           <text class="item-desc">
-            点击【绑定高驰账号】，输入 COROS App 绑定的手机/邮箱及密码完成授权。
+            点击【绑定高驰账号】，输入 COROS App 绑定的手机/邮箱及密码完成授权，自动同步训练负荷、跑力与恢复数据。
+          </text>
+        </view>
+
+        <view class="item-block">
+          <text class="item-title">⌚ 苹果 / 华为 / 颂拓手表（截图或轨迹免密导入）：</text>
+          <text class="item-desc">
+            苹果 (Apple Watch)、华为 (HUAWEI)、颂拓 (SUUNTO) 均暂不支持微信小程序云端直连，情况一致，统一支持：① 截取「苹果健康 → 步行+跑步距离 → 所有已记录的数据」多日列表或各运动 App 单次跑步详情页一键批量识别导入；② 从对应运动 App 导出 FIT / GPX / TCX 轨迹文件发送至微信后一键导入。
           </text>
         </view>
 
         <view class="highlight-tip-box">
           <text class="highlight-tip-title">⚡ 一键导入历史个人最好成绩 (PB)：</text>
           <text class="highlight-tip-desc">
-            绑定佳明后，切换至【训练档案与赛事】标签页，点击“个人最佳成绩 (PB)”右上角的【从 Garmin 一键导入】，系统将自动抓取 5K/10K/半马/全马最快记录！
+            绑定手表后，在【我的】→【训练档案与赛事】点击“个人最佳成绩 (PB)”右上角的【从手表一键导入】，系统将自动抓取 5K/10K/半马/全马最快记录！
+          </text>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── 2.5 自建专属跑团与社交约跑海报 ── -->
+    <view class="manual-card">
+      <view class="card-header-row">
+        <view class="step-num-badge">★</view>
+        <view class="card-header-meta">
+          <text class="card-header-title">自建跑团与约跑海报</text>
+        </view>
+      </view>
+
+      <view class="step-content-box">
+        <view class="item-block">
+          <text class="item-title">🏕️ 一键创建专属跑团：</text>
+          <text class="item-desc">
+            进入底部【跑团】页，点击顶部跑团切换栏右侧的【＋创建】即可组建自己的专属跑团（邀请 1 位新跑友体验或由管理员授权即可解锁）。支持自定义跑团头像、简介、开放自由入团或专属邀请码，并可指定认证教练查看全队体能罗盘。
+          </text>
+        </view>
+
+        <view class="item-block">
+          <text class="item-title">📣 发起约跑、配速列车与朋友圈海报：</text>
+          <text class="item-desc">
+            • 在跑团页点击【发起约跑】，设定集合地点、里程及配速分队（破风/进阶/有氧/养生组），团员可认领领跑兔、摄影或补给职责。
+          </text>
+          <text class="item-desc">
+            • 点击约跑详情页的【生成招募海报 / 完赛战报】，一键保存高清长图转发朋友圈。新跑友微信扫码即可自动开通账号并直接加入约跑所属跑团！
           </text>
         </view>
       </view>
@@ -98,8 +123,7 @@
       <view class="card-header-row">
         <view class="step-num-badge org-badge-bg">3</view>
         <view class="card-header-meta">
-          <text class="card-header-title">加入“复旦戈”大群与实名资料规范</text>
-          <text class="card-header-sub">严格实行“2周实名核验准入制”</text>
+          <text class="card-header-title">加入“复旦戈”大群与实名资料</text>
         </view>
       </view>
 
@@ -107,7 +131,7 @@
         <view class="danger-tip-box">
           <text class="danger-tip-title">⚠️ 2周准入限期铁律（必读）：</text>
           <text class="danger-tip-desc">
-            新加入“复旦戈”后进入 14 天临时访问期。队员必须在 14 天内填齐所有标有红星 * 的必填资料，并由管理员后台审核转正。超期未完成将被系统自动暂停访问该大群及所有从属跑团（如复旦戈闵文跑团）的一切看板、动态、打卡与活动！
+            新加入“复旦戈”后进入 14 天临时访问期。团员必须在 14 天内填齐所有标有红星 * 的必填资料，并由管理员后台审核转正。超期未完成将被系统自动暂停访问该大群及所有分队（如复旦戈闵文跑团）的一切看板、动态、打卡与活动！
           </text>
         </view>
 
@@ -150,7 +174,6 @@
         <view class="step-num-badge">4</view>
         <view class="card-header-meta">
           <text class="card-header-title">生理指标与 Canova 配速体系</text>
-          <text class="card-header-sub">智能测算 VO2Max 与 6 级个性化配速区间</text>
         </view>
       </view>
 
@@ -164,7 +187,7 @@
             2. 静息心率与最大心率：设定清晨静息心率与极限心率，用于精准预警过度疲劳与心脏负荷。
           </text>
           <text class="item-desc">
-            3. 身高体重与跑龄：Canova AI 教练将据此自适应生成 6 级配速区间与超量恢复时间窗口。
+            3. 身高体重与跑龄：Canova 科学教练将据此自适应生成 6 级配速区间与超量恢复时间窗口。
           </text>
         </view>
       </view>
@@ -176,7 +199,6 @@
         <view class="step-num-badge">5</view>
         <view class="card-header-meta">
           <text class="card-header-title">设立训练目标与周/月计划</text>
-          <text class="card-header-sub">跑量规划 · 本周重点目标卡 · 赛事倒计时</text>
         </view>
       </view>
 
@@ -199,9 +221,9 @@
         </view>
 
         <view class="item-block">
-          <text class="item-title">🏁 比赛计划与 AI 赛事情报：</text>
+          <text class="item-title">🏁 比赛计划与赛事情报：</text>
           <text class="item-desc">
-            点击【添加比赛计划】输入赛事名称与日期（支持倒计时提醒、AI 赛道起伏检索与完赛照片战报生成）。
+            点击【添加比赛计划】输入赛事名称与日期（支持倒计时提醒、赛道起伏检索与完赛照片战报生成）。
           </text>
         </view>
       </view>
@@ -212,8 +234,7 @@
       <view class="card-header-row">
         <view class="step-num-badge">?</view>
         <view class="card-header-meta">
-          <text class="card-header-title">常见问答与排错 (FAQ)</text>
-          <text class="card-header-sub">高频问题一键自查解答</text>
+          <text class="card-header-title">常见问答 (FAQ)</text>
         </view>
       </view>
 
@@ -241,17 +262,84 @@
       </view>
     </view>
 
+    <!-- ── 7. 人工客服与技术支持留言 ── -->
+    <view class="manual-card">
+      <view class="card-header-row">
+        <view class="step-num-badge">💬</view>
+        <view class="card-header-meta">
+          <text class="card-header-title">联系技术支持</text>
+        </view>
+      </view>
+
+      <view class="step-content-box">
+        <!-- #ifdef MP-WEIXIN -->
+        <button
+          class="manual-bottom-btn"
+          open-type="contact"
+          style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff;"
+        >
+          💬 微信在线客服
+        </button>
+        <!-- #endif -->
+        <button
+          class="manual-bottom-btn"
+          @click="goToSupport"
+          style="margin-top: 8rpx; background: rgba(252, 76, 2, 0.14); border: 1rpx solid rgba(252, 76, 2, 0.45); color: var(--rgm-brand-text, #fc4c02);"
+        >
+          📝 提交反馈
+        </button>
+      </view>
+    </view>
+
     <!-- Bottom Action Button -->
     <view class="manual-bottom-action">
       <button class="manual-bottom-btn" @click="goToProfile">
-        立即前往完善个人档案与设置
+        完善个人档案
       </button>
+      <!-- #ifdef MP-WEIXIN -->
+      <button class="manual-bottom-btn share-btn-secondary" open-type="share" style="margin-top: 20rpx; background: rgba(52, 199, 89, 0.15); border: 1rpx solid rgba(52, 199, 89, 0.4); color: var(--rgm-green, #34c759);">
+        📢 推荐给跑友
+      </button>
+      <!-- #endif -->
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
+import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import { onShareAppMessage, onShareTimeline, onLoad, onShow } from "@dcloudio/uni-app";
+import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
+
+onShow(() => {
+  applySystemTheme(currentTheme.value);
+});
+
+onLoad(() => {
+  initShareMenu();
+});
+
+onShareAppMessage(() => {
+  return getUnifiedShareAppMessage();
+});
+
+onShareTimeline(() => {
+  return getUnifiedShareTimeline();
+});
+
+// 基础设定统一走 3 步设定向导，手册只保留规则说明与常见问题
+function goToWizard() {
+  uni.navigateTo({ url: "/pages/onboarding/onboarding?step=1" });
+}
+
 function goToProfile() {
+  uni.setStorageSync("auto_scroll_to_required_fields", true);
+  uni.switchTab({
+    url: "/pages/profile/profile",
+  });
+}
+
+function goToSupport() {
+  uni.setStorageSync("auto_open_support", true);
   uni.switchTab({
     url: "/pages/profile/profile",
   });
@@ -261,27 +349,31 @@ function goToProfile() {
 <style scoped>
 .manual-page {
   min-height: 100vh;
-  background-color: #0b0b0d;
-  padding: 24rpx 24rpx 80rpx;
+  background-color: var(--rgm-bg, #0B0B0E);
+  padding: 24rpx 28rpx calc(48rpx + constant(safe-area-inset-bottom)) 28rpx;
+  padding: 24rpx 28rpx calc(48rpx + env(safe-area-inset-bottom)) 28rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 /* ── Hero Banner ── */
 .manual-hero {
-  background: linear-gradient(135deg, rgba(252, 76, 2, 0.18) 0%, #151518 100%);
-  border: 1rpx solid rgba(252, 76, 2, 0.35);
-  border-radius: 32rpx;
-  padding: 36rpx 32rpx;
-  margin-bottom: 28rpx;
+  background: var(--rgm-card, linear-gradient(135deg, rgba(252, 76, 2, 0.18) 0%, #151518 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.22));
   display: flex;
   flex-direction: column;
   gap: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .hero-badge {
   align-self: flex-start;
-  background: rgba(252, 76, 2, 0.2);
-  border: 1rpx solid rgba(252, 76, 2, 0.4);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.2));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.4));
   padding: 6rpx 16rpx;
   border-radius: 20rpx;
 }
@@ -289,49 +381,47 @@ function goToProfile() {
 .hero-badge-txt {
   font-size: 22rpx;
   font-weight: 700;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
 }
 
 .hero-title {
   font-size: 38rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
-.hero-desc {
-  font-size: 24rpx;
-  color: #a0a0a5;
-  line-height: 1.6;
-}
 
 .hero-action-row {
   margin-top: 10rpx;
 }
 
 .hero-nav-btn {
-  background-color: #fc4c02;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-text, #ffffff);
   font-size: 26rpx;
   font-weight: 700;
   border-radius: 20rpx;
   padding: 16rpx 32rpx;
   display: inline-block;
   border: none;
-  box-shadow: 0 4rpx 16rpx rgba(252, 76, 2, 0.3);
+  box-shadow: 0 4rpx 16rpx var(--rgm-brand-glow, rgba(252, 76, 2, 0.3));
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* ── Card ── */
 .manual-card {
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 28rpx;
   padding: 32rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .org-card-border {
   border-color: rgba(245, 158, 11, 0.35);
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.04) 0%, #121215 100%);
+  background: var(--rgm-card, linear-gradient(180deg, rgba(245, 158, 11, 0.04) 0%, #121215 100%));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .card-header-row {
@@ -339,7 +429,7 @@ function goToProfile() {
   flex-direction: row;
   align-items: center;
   gap: 20rpx;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   padding-bottom: 20rpx;
   margin-bottom: 24rpx;
 }
@@ -348,9 +438,9 @@ function goToProfile() {
   width: 56rpx;
   height: 56rpx;
   border-radius: 18rpx;
-  background: rgba(252, 76, 2, 0.15);
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
-  color: #fc4c02;
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
+  color: var(--rgm-brand-text, #fc4c02);
   font-size: 28rpx;
   font-weight: 900;
   display: flex;
@@ -361,7 +451,7 @@ function goToProfile() {
 .org-badge-bg {
   background: rgba(245, 158, 11, 0.15);
   border-color: rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
 }
 
 .card-header-meta {
@@ -373,14 +463,9 @@ function goToProfile() {
 .card-header-title {
   font-size: 30rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
-.card-header-sub {
-  font-size: 22rpx;
-  color: #8e8e93;
-  margin-top: 4rpx;
-}
 
 .step-content-box {
   display: flex;
@@ -397,19 +482,19 @@ function goToProfile() {
 .item-title {
   font-size: 26rpx;
   font-weight: 700;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
 }
 
 .item-desc {
   font-size: 24rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   line-height: 1.6;
 }
 
 /* ── Tip Boxes ── */
 .highlight-tip-box {
-  background: rgba(252, 76, 2, 0.1);
-  border: 1rpx solid rgba(252, 76, 2, 0.25);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.1));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.25));
   border-radius: 20rpx;
   padding: 20rpx;
   display: flex;
@@ -420,12 +505,12 @@ function goToProfile() {
 .highlight-tip-title {
   font-size: 24rpx;
   font-weight: 700;
-  color: #ff7a45;
+  color: var(--rgm-brand-text, #ff7a45);
 }
 
 .highlight-tip-desc {
   font-size: 22rpx;
-  color: #fed7aa;
+  color: var(--rgm-amber, #fed7aa);
   line-height: 1.5;
 }
 
@@ -442,17 +527,17 @@ function goToProfile() {
 .danger-tip-title {
   font-size: 24rpx;
   font-weight: 700;
-  color: #f87171;
+  color: var(--rgm-red, #f87171);
 }
 
 .danger-tip-desc {
   font-size: 22rpx;
-  color: #fca5a5;
+  color: var(--rgm-red, #fca5a5);
   line-height: 1.5;
 }
 
 .tip-footer-note {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.03));
   border-radius: 16rpx;
   padding: 16rpx;
   margin-top: 6rpx;
@@ -460,7 +545,7 @@ function goToProfile() {
 
 .tip-footer-txt {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.5;
 }
 
@@ -470,13 +555,14 @@ function goToProfile() {
 }
 
 .manual-bottom-btn {
-  background: linear-gradient(135deg, #fc4c02 0%, #ff7a45 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff7a45 100%));
+  color: var(--rgm-text, #ffffff);
   font-size: 28rpx;
   font-weight: 700;
   border-radius: 24rpx;
   padding: 24rpx 0;
   border: none;
-  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.35);
+  box-shadow: 0 8rpx 24rpx var(--rgm-brand-glow, rgba(252, 76, 2, 0.35));
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 </style>

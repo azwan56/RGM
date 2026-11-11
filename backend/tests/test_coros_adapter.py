@@ -469,7 +469,9 @@ def test_coros_login_failure_caching_and_sync_error_reporting(monkeypatch):
     """
     from routers.sync import sync_single_user
     from utils.encryption import encrypt_string
+    from utils.coros_adapter import remove_cached_coros_tokens
 
+    remove_cached_coros_tokens("bad_user@runner.cn")
     attempt_count = 0
 
     def mock_post(url, json=None, headers=None, timeout=None):
@@ -516,6 +518,7 @@ def test_coros_login_failure_caching_and_sync_error_reporting(monkeypatch):
     assert "高驰登录失败" in sync_res["error"]
 
     # Clean up
+    remove_cached_coros_tokens("bad_user@runner.cn")
     LocalStore.delete_profile(test_uid)
 
 

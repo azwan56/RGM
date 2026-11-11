@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import TrainingPlanView from "@/components/TrainingPlanView";
+import TrainingTabSwitcher from "@/components/TrainingTabSwitcher";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import {
@@ -35,6 +36,22 @@ export default function CoachPage() {
   const [raceType, setRaceType] = useState("trail");
   const [userRaces, setUserRaces] = useState<any[]>([]);
   const [updatingPriority, setUpdatingPriority] = useState<string | null>(null);
+  const [isCoachOrOwner, setIsCoachOrOwner] = useState(false);
+  const [showRaceSetup, setShowRaceSetup] = useState(false);
+
+  // 支持 ?tab=report 深链（与「训练」三段切换器联动）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "report" || t === "plan") setActiveTab(t);
+  }, []);
+
+  function switchTab(k: "plan" | "report") {
+    setActiveTab(k);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `/dashboard/coach?tab=${k}`);
+    }
+  }
 
   const racePresets = [
     { label: "🏔️ 武功山 50K (越野)", race: "武功山 50K", time: "8:00:00", type: "trail" },
@@ -49,6 +66,16 @@ export default function CoachPage() {
       if (u) {
         setUser(u);
         loadLatestAnalysis(u.id);
+        if (u.is_coach_or_owner || u.is_admin || u.id === "admin" || u.id === "super_admin") {
+          setIsCoachOrOwner(true);
+        } else {
+          apiClient.get(`/api/team/my-clubs/${encodeURIComponent(u.id)}`).then((res) => {
+            const clubs = res.data?.clubs || [];
+            setIsCoachOrOwner(
+              clubs.some((c: any) => c.role === "owner" || c.role === "coach" || c.role === "admin")
+            );
+          }).catch(() => {});
+        }
       } else {
         router.push("/login");
       }
@@ -204,57 +231,21 @@ export default function CoachPage() {
     <div className="min-h-screen bg-[#070708] text-white">
       <Navbar />
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Title Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black flex items-center gap-2.5">
-              <Zap className="w-7 h-7 text-purple-400" />
-              Canova教练
-            </h1>
-            <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              世界级专项化训练哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 负荷与个性化自适应
-            </p>
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* Title Header — 与小程序「训练」页一致：标题 + 三段切换 */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-black">训练</h1>
+            <TrainingTabSwitcher active={activeTab} onChange={(k) => k !== "analysis" && switchTab(k)} />
           </div>
-
-          <div className="flex items-center gap-3">
-            {activeTab === "report" && (
-              <button
-                onClick={handleGenerateAnalysis}
-                disabled={loading}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 active:scale-95 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-                {loading ? "Canova 深度推理中..." : "启动专项推理"}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tab Switcher: Training Plan vs AI Diagnostics */}
-        <div className="flex items-center gap-2 p-1.5 bg-[#121215] border border-white/[0.08] rounded-2xl w-fit">
-          <button
-            onClick={() => setActiveTab("plan")}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition ${
-              activeTab === "plan"
-                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
-                : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            科学周期训练计划 (Training Plan)
-          </button>
-          <button
-            onClick={() => setActiveTab("report")}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition ${
-              activeTab === "report"
-                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
-                : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            <Zap className="w-4 h-4" />
-            Canova 专项诊断与宏观赛历 (Diagnostics)
-          </button>
+          {isCoachOrOwner && (
+            <button
+              onClick={() => router.push("/dashboard/team-coach")}
+              className="self-start md:self-auto flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-300 text-xs font-bold transition"
+            >
+              🧢 跑团教练工作台 ›
+            </button>
+          )}
         </div>
 
         {activeTab === "plan" ? (
@@ -266,69 +257,45 @@ export default function CoachPage() {
           />
         ) : (
           <>
-            {/* Top Control Bar: Athlete Profile & Race Setup */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Athlete Profile & Physiological Form */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-purple-400" /> 跑者生理档案
-              </span>
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${getTsbColor(tsb)}`}>
-                {statusLabel}
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-lg font-black text-white">
-                {athlete?.name || "跑者"}
-                <span className="ml-2 text-xs font-medium text-zinc-400">
-                  {athlete?.gender === "female" ? "♀ 女性" : "♂ 男性"}
-                </span>
-              </div>
-              <div className="text-xs text-zinc-400 flex items-center gap-3">
-                <span>组别: <strong className="text-purple-300">{athlete?.age && athlete.age >= 50 ? "大师组 (Masters)" : athlete?.age && athlete.age >= 40 ? "壮年组 (40+)" : athlete?.age ? `${athlete.age} 岁` : "未登记"}</strong></span>
-                <span>跑龄: <strong className="text-purple-300">{athlete?.years_running || 2} 年</strong></span>
-              </div>
-            </div>
-
-            {/* TSB Metric Indicators */}
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5">
-              <div className="bg-[#18181c] p-2.5 rounded-xl text-center">
-                <div className="text-[10px] text-zinc-400">体能 CTL</div>
-                <div className="text-sm font-black text-cyan-400 mt-0.5">{ctl}</div>
-              </div>
-              <div className="bg-[#18181c] p-2.5 rounded-xl text-center">
-                <div className="text-[10px] text-zinc-400">疲劳 ATL</div>
-                <div className="text-sm font-black text-amber-400 mt-0.5">{atl}</div>
-              </div>
-              <div className="bg-[#18181c] p-2.5 rounded-xl text-center">
-                <div className="text-[10px] text-zinc-400">状态 TSB</div>
-                <div className={`text-sm font-black mt-0.5 ${tsb >= 0 ? "text-emerald-400" : "text-purple-400"}`}>
-                  {tsb > 0 ? `+${tsb}` : tsb}
+            {/* 紧凑备赛摘要条（原「跑者档案 + 目标赛事」双大卡收纳为一行 + 可展开抽屉） */}
+            <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-4 sm:p-5 space-y-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <span className="text-sm font-bold text-white">🎯 {targetRace || "未设定目标赛事"}</span>
+                  {targetTime && <span className="text-zinc-400">目标 {targetTime}</span>}
+                  <span className={`font-bold px-2 py-0.5 rounded-full border ${getTsbColor(tsb)}`}>{statusLabel}</span>
+                  <span className="text-zinc-500">
+                    体能 <b className="text-cyan-400">{ctl}</b> · 疲劳 <b className="text-amber-400">{atl}</b> · 状态{" "}
+                    <b className={tsb >= 0 ? "text-emerald-400" : "text-purple-400"}>{tsb > 0 ? `+${tsb}` : tsb}</b>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => setShowRaceSetup(!showRaceSetup)}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold bg-[#18181c] border border-white/10 hover:border-white/20 text-zinc-300 transition"
+                  >
+                    ⚙️ 切换目标赛事 {showRaceSetup ? "▴" : "▾"}
+                  </button>
+                  <button
+                    onClick={handleGenerateAnalysis}
+                    disabled={loading}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition active:scale-95 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+                    {loading ? "推理中..." : analysis ? "重新诊断" : "启动诊断"}
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {riskWarning && (
-              <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-2xl flex items-start gap-2 text-xs text-red-200">
-                <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <span className="leading-snug">{riskWarning}</span>
-              </div>
-            )}
-          </div>
+              {riskWarning && (
+                <div className="p-2.5 bg-red-950/40 border border-red-500/30 rounded-xl flex items-start gap-2 text-xs text-red-200">
+                  <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <span className="leading-snug">{riskWarning}</span>
+                </div>
+              )}
 
-          {/* Interactive Target Race & Type Customization */}
-          <div className="lg:col-span-2 bg-[#121215] border border-white/[0.08] rounded-3xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5" /> 目标赛事与专项类型设定
-              </span>
-              <span className="text-xs text-zinc-500">
-                Canova 哲学核心：专项性依赛事而变
-              </span>
-            </div>
-
+              {showRaceSetup && (
+                <div className="pt-3 border-t border-white/5 space-y-3">
             {/* User Registered Races Quick Selector */}
             {userRaces.length > 0 && (
               <div className="space-y-1.5 pb-3 border-b border-white/5">
@@ -443,8 +410,9 @@ export default function CoachPage() {
                 />
               </div>
             </div>
-          </div>
-        </div>
+                </div>
+              )}
+            </div>
 
         {/* Coach Analysis Result Display */}
         {analysis ? (

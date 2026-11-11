@@ -1,0 +1,179 @@
+/**
+ * 万跑跑团助手 - 主题 Token (Figma 统一设计规范系统)
+ *
+ * 两套主题共用同一套语义变量（--rgm-*），页面样式里统一引用变量，确保明亮/暗黑双色板完整对齐：
+ * 1. 🌑 经典暗黑 (dark / page 默认)：极深黑曜底板 (#0B0B0E) × 高质感暗黑卡片 (#141418) × 白曜三阶字重 × 万跑品牌橙 (#FC4C02)
+ * 2. ☀️ 竞技亮色 (volt)：60% 纯白/雾灰底板 (#F6F8FA/#FFFFFF) × 30% 深海蓝黑字重 (#0F172A) × 10% 万跑品牌橙 (#FC4C02)
+ */
+
+/* ───────── 🌑 经典暗黑 (Dark Classic v3.0)：统一高质感黑曜石模版系统 ───────── */
+page,
+.theme-dark {
+  /* 60% 表面层级：页面极黑底 < 黑曜石主卡片 < 深灰子板块 < 浮层/槽位 */
+  --rgm-bg: #0B0B0E;
+  --rgm-card: #141418;
+  --rgm-card-2: #1B1B22;
+  --rgm-card-3: #23232C;
+
+  /* 分割线 / 描边 / 子板块中性填色 / 阴影 */
+  --rgm-line: rgba(255, 255, 255, 0.08);
+  --rgm-line-solid: #27272F;
+  --rgm-tint: rgba(255, 255, 255, 0.04);
+  --rgm-tint-2: rgba(255, 255, 255, 0.08);
+  --rgm-shadow: rgba(0, 0, 0, 0.35);
+
+  /* 30% 文字三级（白曜三阶体系） */
+  --rgm-text: #F4F4F6;
+  --rgm-text-2: #A1A1AA;
+  --rgm-text-3: #71717A;
+  /* 「墨水色」：在浅色块/品牌色块内部需要恢复为深色文字时使用 */
+  --rgm-ink: #F4F4F6;
+  --rgm-ink-2: #A1A1AA;
+  --rgm-ink-3: #71717A;
+
+  /* 语义色 */
+  --rgm-green: #10B981;
+  --rgm-amber: #F59E0B;
+  --rgm-blue: #38BDF8;
+  --rgm-purple: #A855F7;
+  --rgm-pink: #EC4899;
+  --rgm-red: #EF4444;
+
+  /* 实心强调块上的文字：纯白高对比 */
+  --rgm-on-bright: #FFFFFF;
+  --rgm-on-bright-2: rgba(255, 255, 255, 0.90);
+  --rgm-on-deep: #FFFFFF;
+  --rgm-on-deep-2: rgba(255, 255, 255, 0.85);
+
+  /* 10% 品牌色 = 万跑品牌活力橙 (#FC4C02) */
+  --rgm-brand: #FC4C02;
+  --rgm-brand-grad: linear-gradient(135deg, #FC4C02 0%, #FF6B2B 100%);
+  --rgm-brand-tint: rgba(252, 76, 2, 0.14);
+  --rgm-brand-line: rgba(252, 76, 2, 0.35);
+  --rgm-brand-glow: rgba(252, 76, 2, 0.25);
+  --rgm-brand-text: #FF7843;
+  --rgm-on-brand: #FFFFFF;
+  --rgm-on-brand-2: rgba(255, 255, 255, 0.90);
+
+  /* 兼容历史组件别名变量 */
+  --rgm-accent: #FC4C02;
+  --rgm-accent-fg: #FFFFFF;
+  --rgm-border: #27272F;
+  --rgm-line-2: rgba(255, 255, 255, 0.12);
+  --rgm-line-strong: rgba(255, 255, 255, 0.20);
+  --rgm-card-sub: #1B1B22;
+  --rgm-bg-card-subtle: #141418;
+  --rgm-text-sub: #A1A1AA;
+}
+
+/* 页面根容器默认背景与文字色（仅作用于微信原生 page 标签，不污染子组件） */
+page {
+  background-color: var(--rgm-bg);
+  color: var(--rgm-text);
+  min-height: 100vh;
+}
+
+/* ───────── ☀️ 竞技亮色 (Volt v3.0)：60-30-10 统一色彩模版系统 ───────── */
+page.theme-volt,
+.theme-volt {
+  /* 60% 表面层级：页面云灰底 < 纯白主卡片 < 极浅雾灰子板块 < 胶囊底槽 */
+  --rgm-bg: #F6F8FA;
+  --rgm-card: #FFFFFF;
+  --rgm-card-2: #F8FAFC;
+  --rgm-card-3: #F1F5F9;
+
+  /* 分割线 / 描边 / 子板块中性填色 / 阴影 */
+  --rgm-line: rgba(15, 23, 42, 0.08);
+  --rgm-line-solid: #E2E8F0;
+  --rgm-tint: #F8FAFC;
+  --rgm-tint-2: #F1F5F9;
+  --rgm-shadow: rgba(15, 23, 42, 0.05);
+
+  /* 30% 文字三级（深海蓝黑三阶体系） */
+  --rgm-text: #0F172A;
+  --rgm-text-2: #475569;
+  --rgm-text-3: #94A3B8;
+  /* 「墨水色」：卡片等表面在深色遮罩 / 品牌色块内部时，用它把文字色恢复为标准三级色 */
+  --rgm-ink: #0F172A;
+  --rgm-ink-2: #475569;
+  --rgm-ink-3: #94A3B8;
+
+  /* 语义色收敛：常规数字指标统一收敛为 #0F172A 深海蓝黑，仅保留完赛绿与预警红 */
+  --rgm-green: #059669;
+  --rgm-amber: #0F172A;
+  --rgm-blue: #0F172A;
+  --rgm-purple: #0F172A;
+  --rgm-pink: #0F172A;
+  --rgm-red: #DC2626;
+
+  /* 实心强调块上的文字：纯白高对比 */
+  --rgm-on-bright: #FFFFFF;
+  --rgm-on-bright-2: rgba(255, 255, 255, 0.90);
+  --rgm-on-deep: #FFFFFF;
+  --rgm-on-deep-2: rgba(255, 255, 255, 0.85);
+
+  /* 10% 品牌色 = 万跑品牌活力橙 (#FC4C02) */
+  --rgm-brand: #FC4C02;
+  --rgm-brand-grad: linear-gradient(135deg, #FC4C02 0%, #EA580C 100%);
+  --rgm-brand-tint: #FFF5EE;
+  --rgm-brand-line: rgba(252, 76, 2, 0.32);
+  --rgm-brand-glow: rgba(252, 76, 2, 0.22);
+  --rgm-brand-text: #C23800;
+  --rgm-on-brand: #FFFFFF;
+  --rgm-on-brand-2: rgba(255, 255, 255, 0.90);
+
+  /* 兼容历史组件别名变量，防止回退到暗色默认值 */
+  --rgm-accent: #FC4C02;
+  --rgm-accent-fg: #FFFFFF;
+  --rgm-border: #E2E8F0;
+  --rgm-line-2: rgba(15, 23, 42, 0.12);
+  --rgm-line-strong: rgba(15, 23, 42, 0.18);
+  --rgm-card-sub: #F1F5F9;
+  --rgm-bg-card-subtle: #F8FAFC;
+  --rgm-text-sub: #475569;
+}
+
+/* ───────── 经典竞技主题的品牌点缀 ───────── */
+.theme-volt .today-workout-card,
+.theme-volt .next-run-card,
+.theme-volt .active-week-header,
+.theme-volt .joined-club-box,
+.theme-volt .upcoming-run-banner-card,
+.theme-volt .coach-critique-card,
+.theme-volt .activity-hero-stats {
+  border-left: 8rpx solid var(--rgm-brand);
+}
+
+/* 原生 input / textarea 的占位符在双模下统一使用辅助文字色 */
+.theme-volt .uni-input-placeholder,
+.theme-volt .uni-textarea-placeholder {
+  color: var(--rgm-text-3) !important;
+}
+.theme-dark .uni-input-placeholder,
+.theme-dark .uni-textarea-placeholder,
+page .uni-input-placeholder,
+page .uni-textarea-placeholder {
+  color: var(--rgm-text-3) !important;
+}
+
+/* ───────── 🔤 全局三档字号缩放变量（标准 1.0x / 大字 1.12x / 特大 1.22x） ───────── */
+page,
+.theme-dark,
+.theme-volt {
+  --rgm-fs: 1;
+}
+
+.font-large {
+  --rgm-fs: 1.12;
+}
+
+.font-xlarge {
+  --rgm-fs: 1.22;
+}
+
+/* 海报预览容器保持 1:1 原始比例，确保与 Canvas 导出长图一致 */
+.report-poster-card,
+.prm-poster-card,
+.poster-card {
+  --rgm-fs: 1;
+}

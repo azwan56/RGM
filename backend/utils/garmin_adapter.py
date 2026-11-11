@@ -33,6 +33,36 @@ try:
         if getattr(gc_client, "_rgm_cn_patched", False):
             return
 
+        import socket
+        import threading
+        from urllib.parse import urlparse
+
+        _sso_tls = threading.local()
+
+        def _get_global_sso_proxies(domain: str) -> Optional[Dict[str, str]]:
+            if "cn" in (domain or "").lower():
+                return None
+            proxy_url = os.getenv("GARMIN_GLOBAL_PROXY", "http://172.18.0.1:1082")
+            try:
+                parsed = urlparse(proxy_url)
+                host = parsed.hostname or "172.18.0.1"
+                port = parsed.port or 1082
+                with socket.create_connection((host, port), timeout=0.3):
+                    return {"http": proxy_url, "https": proxy_url}
+            except Exception:
+                return None
+
+        if getattr(gc_client, "HAS_CFFI", False) and hasattr(gc_client, "cffi_requests"):
+            _orig_cffi_session = gc_client.cffi_requests.Session
+
+            def _proxied_cffi_session(*args: Any, **kwargs: Any) -> Any:
+                active_proxies = getattr(_sso_tls, "proxies", None)
+                if active_proxies and "proxies" not in kwargs:
+                    kwargs["proxies"] = active_proxies
+                return _orig_cffi_session(*args, **kwargs)
+
+            gc_client.cffi_requests.Session = _proxied_cffi_session
+
         def patched_exchange(self, ticket: str, service_url: str | None = None) -> None:
             svc_url = service_url or getattr(self, "_mobile_sso_service_url", f"https://mobile.integration.{self.domain}/gcm/android")
             di_token_url = getattr(self, "_di_token_url", f"https://diauth.{self.domain}/di-oauth2-service/oauth/token")
@@ -50,12 +80,12 @@ try:
             di_refresh = None
             di_client_id = None
             last_err = None
+            exchange_proxies = getattr(_sso_tls, "proxies", None) or _get_global_sso_proxies(self.domain)
 
             for client_id in client_ids:
                 try:
-                    r = self._http_post(
-                        di_token_url,
-                        headers=gc_client._native_headers(
+                    post_kwargs: Dict[str, Any] = {
+                        "headers": gc_client._native_headers(
                             {
                                 "Authorization": gc_client._build_basic_auth(client_id),
                                 "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
@@ -63,14 +93,17 @@ try:
                                 "Cache-Control": "no-cache",
                             }
                         ),
-                        data={
+                        "data": {
                             "client_id": client_id,
                             "service_ticket": ticket,
                             "grant_type": di_grant_type,
                             "service_url": svc_url,
                         },
-                        timeout=30,
-                    )
+                        "timeout": 30,
+                    }
+                    if exchange_proxies:
+                        post_kwargs["proxies"] = exchange_proxies
+                    r = self._http_post(di_token_url, **post_kwargs)
                 except Exception as post_err:
                     logger.warning(f"[garmin] POST to {di_token_url} failed: {post_err}")
                     last_err = post_err
@@ -172,10 +205,158 @@ try:
                     "账号已被锁定，请前往 Garmin 官网重置密码或解锁后再试"
                 )
 
+            if resp_type in (
+                "PHONE_REGISTRATION_REQUIRED",
+                "PHONE_VERIFICATION_REQUIRED",
+                "CN_VERIFICATION_PHONE_NUMBER_NEEDED",
+            ):
+                raise gc_client.GarminConnectAuthenticationError(
+                    "PHONE_REGISTRATION_REQUIRED"
+                )
+
+            if resp_type in ("PASSWORD_CHANGE_REQUIRED", "RESET_PASSWORD"):
+                raise gc_client.GarminConnectAuthenticationError(
+                    "PASSWORD_CHANGE_REQUIRED"
+                )
+
             if res.get("error", {}).get("status-code") == "429":
                 raise gc_client.GarminConnectTooManyRequestsError("Mobile login: 429 in JSON body")
 
             raise gc_client.GarminConnectConnectionError(f"Mobile login failed: {res}")
+
+        orig_widget_login = gc_client.Client._widget_web_login
+        orig_portal_login = gc_client.Client._do_portal_web_login
+
+        def patched_widget_login(self, email: str, password: str) -> None:
+            try:
+                return orig_widget_login(self, email, password)
+            except gc_client.GarminConnectConnectionError as err:
+                msg = str(err)
+                msg_lower = msg.lower()
+                if "update phone number" in msg_lower or "verify phone" in msg_lower:
+                    logger.warning(f"[garmin] Widget login hit phone registration prompt for {email} on {self.domain}: {msg}")
+                    raise gc_client.GarminConnectAuthenticationError(
+                        "PHONE_REGISTRATION_REQUIRED"
+                    ) from err
+                if "change password" in msg_lower or "reset password" in msg_lower:
+                    raise gc_client.GarminConnectAuthenticationError(
+                        "PASSWORD_CHANGE_REQUIRED"
+                    ) from err
+                raise
+
+        def patched_portal_login(self, sess: Any, email: str, password: str) -> None:
+            try:
+                return orig_portal_login(self, sess, email, password)
+            except gc_client.GarminConnectConnectionError as err:
+                msg = str(err)
+                if any(
+                    k in msg
+                    for k in (
+                        "PHONE_REGISTRATION_REQUIRED",
+                        "PHONE_VERIFICATION_REQUIRED",
+                        "CN_VERIFICATION_PHONE_NUMBER_NEEDED",
+                    )
+                ):
+                    logger.warning(f"[garmin] Portal login hit phone registration prompt for {email} on {self.domain}")
+                    raise gc_client.GarminConnectAuthenticationError(
+                        "PHONE_REGISTRATION_REQUIRED"
+                    ) from err
+                if "ACCOUNT_LOCKED" in msg:
+                    raise gc_client.GarminConnectAuthenticationError(
+                        "账号已被锁定，请前往 Garmin 官网重置密码或解锁后再试"
+                    ) from err
+                if "PASSWORD_CHANGE_REQUIRED" in msg:
+                    raise gc_client.GarminConnectAuthenticationError(
+                        "PASSWORD_CHANGE_REQUIRED"
+                    ) from err
+                raise
+
+        # Tune delays and impersonation loops to prevent 70s timeouts and IP 429 rate-limit cascades
+        gc_client.MOBILE_IMPERSONATIONS = ("safari_ios",)
+        gc_client.PORTAL_IMPERSONATIONS = ("chrome120", "safari")
+        gc_client.WIDGET_DELAY_MIN_S = 1.2
+        gc_client.WIDGET_DELAY_MAX_S = 2.2
+        gc_client.LOGIN_DELAY_MIN_S = 2.0
+        gc_client.LOGIN_DELAY_MAX_S = 3.5
+
+        def patched_client_login(
+            self,
+            email: str,
+            password: str,
+            prompt_mfa: Any = None,
+            return_on_mfa: bool = False,
+        ) -> tuple[str | None, Any]:
+            if getattr(gc_client, "HAS_CFFI", False):
+                strategies: list[tuple[str, Any]] = [
+                    ("mobile+cffi", lambda: self._mobile_login_cffi(email, password)),
+                    ("widget+cffi", lambda: self._widget_web_login(email, password)),
+                    ("portal+cffi", lambda: self._portal_web_login_cffi(email, password)),
+                ]
+            else:
+                strategies = [
+                    ("mobile+requests", lambda: self._mobile_login_requests(email, password)),
+                    ("portal+requests", lambda: self._portal_web_login_requests(email, password)),
+                ]
+
+            last_err: Exception | None = None
+            rate_limited_count = 0
+            sso_proxies = _get_global_sso_proxies(self.domain)
+            _sso_tls.proxies = sso_proxies
+            if sso_proxies:
+                logger.info(f"[garmin] Routing global SSO login for {email} ({self.domain}) via non-CN proxy")
+
+            try:
+                for name, run in strategies:
+                    try:
+                        logger.info(f"[garmin] Trying login strategy: {name} for {email} ({self.domain})")
+                        run()
+                        return None, None
+                    except gc_client.GarminConnectAuthenticationError:
+                        raise
+                    except gc_client._MFARequired:
+                        if return_on_mfa:
+                            return "needs_mfa", None
+                        if prompt_mfa:
+                            mfa_code = prompt_mfa()
+                            self._complete_mfa(mfa_code)
+                            return None, None
+                        raise gc_client.GarminConnectAuthenticationError(
+                            "MFA Required but no prompt_mfa mechanism supplied"
+                        )
+                    except gc_client.GarminConnectTooManyRequestsError as e:
+                        logger.warning(f"[garmin] {name} returned 429: {e}")
+                        rate_limited_count += 1
+                        last_err = e
+                        continue
+                    except Exception as e:
+                        err_str = str(e)
+                        logger.warning(f"[garmin] {name} failed: {err_str}")
+                        if getattr(_sso_tls, "proxies", None) and any(
+                            k in err_str.lower()
+                            for k in ("reset by peer", "curl: (56)", "curl: (7)", "proxy", "connect")
+                        ):
+                            logger.warning("[garmin] Proxy connection error detected; retrying strategy directly without proxy")
+                            _sso_tls.proxies = None
+                            try:
+                                run()
+                                return None, None
+                            except (gc_client.GarminConnectAuthenticationError, gc_client._MFARequired):
+                                raise
+                            except Exception as retry_e:
+                                last_err = retry_e
+                                continue
+                        last_err = e
+                        continue
+
+                if rate_limited_count == len(strategies):
+                    raise gc_client.GarminConnectTooManyRequestsError(
+                        "All login strategies rate limited (429). Try again later."
+                    )
+                raise gc_client.GarminConnectConnectionError(
+                    f"All login strategies exhausted: {last_err}"
+                )
+            finally:
+                _sso_tls.proxies = None
 
         def patched_establish(
             self, ticket: str, sess: Any = None, service_url: str | None = None
@@ -218,6 +399,9 @@ try:
         gc_client.Client._exchange_service_ticket = patched_exchange
         gc_client.Client._establish_session = patched_establish
         gc_client.Client._do_mobile_login = patched_mobile_login
+        gc_client.Client._widget_web_login = patched_widget_login
+        gc_client.Client._do_portal_web_login = patched_portal_login
+        gc_client.Client.login = patched_client_login
         gc_client._rgm_cn_patched = True
         logger.info("[garmin] Successfully patched garminconnect client for China & Global SSO support")
 
@@ -228,6 +412,45 @@ except ImportError:
     HAS_GARMINCONNECT = False
 
 TOKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tokens")
+
+
+def _secure_chmod_path(path: str):
+    """Enforces 0700 on directories and 0600 on files for OAuth token caches."""
+    try:
+        if os.path.isdir(path):
+            os.chmod(path, 0o700)
+            for root, dirs, files in os.walk(path):
+                for d in dirs:
+                    os.chmod(os.path.join(root, d), 0o700)
+                for fn in files:
+                    os.chmod(os.path.join(root, fn), 0o600)
+        elif os.path.exists(path):
+            os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
+def remove_cached_garmin_tokens(email: Optional[str]) -> int:
+    """Removes cached Garmin OAuth token files/directories for both CN and Global domains."""
+    if not email or not str(email).strip():
+        return 0
+    import shutil
+    safe_email = str(email).strip().replace("@", "_at_").replace(".", "_")
+    removed = 0
+    if not os.path.exists(TOKEN_DIR):
+        return 0
+    for region_tag in ("cn", "global"):
+        tp = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{region_tag}.json")
+        if os.path.exists(tp):
+            try:
+                if os.path.isdir(tp):
+                    shutil.rmtree(tp, ignore_errors=True)
+                else:
+                    os.remove(tp)
+                removed += 1
+            except Exception as e:
+                logger.warning(f"[garmin] Failed removing cached token {tp}: {e}")
+    return removed
 
 try:
     from utils.geo_utils import wgs84_to_gcj02, downsample_points
@@ -259,24 +482,48 @@ class GarminAdapter:
         self.client: Optional[Garmin] = None
         self.needs_mfa: bool = False
 
-        os.makedirs(TOKEN_DIR, exist_ok=True)
+        os.makedirs(TOKEN_DIR, mode=0o700, exist_ok=True)
+        _secure_chmod_path(TOKEN_DIR)
         safe_email = self.email.replace("@", "_at_").replace(".", "_")
         self.token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if self.is_cn else 'global'}.json")
 
     @staticmethod
     def _format_error(err: str, chosen_domain: str) -> str:
         err_lower = err.lower()
-        if "locked" in err_lower or "account_locked" in err_lower:
+        is_cn_domain = "cn" in (chosen_domain or "").lower()
+        if (
+            "phone_registration_required" in err_lower
+            or "phone_verification_required" in err_lower
+            or "update phone number" in err_lower
+            or "cn_verification_phone_number_needed" in err_lower
+        ):
+            if is_cn_domain:
+                return (
+                    "佳明官方安全策略要求该账号完成手机号绑定校验。请先用手机或电脑浏览器登录佳明中国官网 (connect.garmin.cn) "
+                    "根据提示绑定手机号后，再返回小程序重新绑定。"
+                )
+            return (
+                "佳明官方安全策略要求该国际版账号补充绑定手机号或开启两步验证（Update Phone Number）。"
+                "请先用手机或电脑浏览器登录佳明国际官网 (www.garmin.com/account/profile)，在账号安全设置中添加手机号码"
+                "或开启两步验证（Two-Step Verification）后，再返回小程序重新绑定。"
+            )
+        elif "password_change_required" in err_lower or "reset_password" in err_lower:
+            return "佳明官方要求该账号更新密码后方可登录，请先前往 Garmin 官网修改密码后再返回绑定。"
+        elif "locked" in err_lower or "account_locked" in err_lower:
             return "佳明账号已被锁定，请前往 Garmin 官网解锁或重置密码后再试。"
         elif "429" in err or "rate limit" in err_lower:
             return "佳明官方安全风控拦截（尝试过于频繁），请等待 2~3 分钟后再试。"
         elif "401" in err or "unauthorized" in err_lower or "invalid username or password" in err_lower:
-            region_hint = "中国版 (garmin.cn)" if "cn" in chosen_domain else "国际版 (garmin.com)"
+            region_hint = "中国版 (garmin.cn)" if is_cn_domain else "国际版 (garmin.com)"
             return f"佳明账号或密码错误。您当前选择的是【{region_hint}】，如手表购自海外或账号不同区域请核对后重试。"
         elif "403" in err or "portal login failed" in err_lower:
-            return "佳明官方服务器安全策略拦截 (HTTP 403)。如果您使用的是国内购买的手表，请务必选择【中国版 (garmin.cn)】"
+            region_hint = "中国版 (garmin.cn)" if is_cn_domain else "国际版 (garmin.com)"
+            return f"佳明官方服务器安全策略拦截 (HTTP 403)。您当前选择的是【{region_hint}】，请稍等 1~2 分钟后重试或确认账号所在区域。"
         elif "jwt_web" in err_lower or "cookie not set" in err_lower:
             return "佳明登录凭证解析失败，请检查账号密码或稍后重试。"
+        elif "social profile" in err_lower or "socialprofile" in err_lower:
+            region_hint = "中国版 (garmin.cn)" if is_cn_domain else "国际版 (garmin.com)"
+            return f"佳明账号授权失败（无法获取个人资料）。您当前选择的是【{region_hint}】，请核对账号密码，或尝试切换到另一个区域（中国版/国际版）重试。"
         return err
 
     def login(self, use_token: bool = True) -> bool:
@@ -301,6 +548,7 @@ class GarminAdapter:
             if hasattr(self.client, "client") and hasattr(self.client.client, "dump"):
                 try:
                     self.client.client.dump(self.token_path)
+                    _secure_chmod_path(self.token_path)
                     logger.info(f"[garmin] Successfully saved tokens to {self.token_path}")
                 except Exception as de:
                     logger.warning(f"[garmin] Failed to dump tokens: {de}")
@@ -318,9 +566,22 @@ class GarminAdapter:
                 self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
                 return False
 
+            # If cached token was used and failed (e.g. expired, "Failed to retrieve social profile", 401),
+            # purge stale token and retry with raw credentials
+            if use_token and os.path.exists(self.token_path):
+                logger.info(f"[garmin] Cached token for {self.email} invalid/expired ({err1}). Purging stale token and retrying with credentials...")
+                try:
+                    os.remove(self.token_path)
+                except Exception as rm_err:
+                    logger.warning(f"[garmin] Failed to remove stale token file: {rm_err}")
+                self.client = None
+                return self.login(use_token=False)
+
+            self.client = None
+
             # Only attempt alternate region fallback if error indicates invalid credentials / account region mismatch
             # Do NOT fall back on 429 rate limit or locked account
-            is_cred_error = any(k in err1.lower() for k in ("401", "unauthorized", "invalid username or password"))
+            is_cred_error = any(k in err1.lower() for k in ("401", "unauthorized", "invalid username or password", "social profile"))
             if not is_cred_error:
                 self.last_error = self._format_error(err1, self.domain)
                 return False
@@ -348,6 +609,7 @@ class GarminAdapter:
                 if hasattr(alt_client, "client") and hasattr(alt_client.client, "dump"):
                     try:
                         alt_client.client.dump(alt_token_path)
+                        _secure_chmod_path(alt_token_path)
                         logger.info(f"[garmin] Successfully saved tokens to {alt_token_path}")
                     except Exception as de:
                         logger.warning(f"[garmin] Failed to dump tokens: {de}")
@@ -363,6 +625,7 @@ class GarminAdapter:
             except Exception as e2:
                 err2 = str(e2)
                 logger.error(f"[garmin] Alternate region (is_cn={alt_is_cn}) also failed for {self.email}: {err2}")
+                self.client = None
                 # Prefer primary region's error context
                 self.last_error = self._format_error(err1, self.domain)
                 return False
@@ -374,12 +637,14 @@ class GarminAdapter:
             return False
         try:
             clean_code = mfa_code.strip()
-            logger.info(f"[garmin] Submitting MFA code {clean_code} for {self.email}...")
+            masked_code = f"{clean_code[:1]}****{clean_code[-1:]}" if len(clean_code) >= 2 else "***"
+            logger.info(f"[garmin] Submitting MFA code {masked_code} for {self.email}...")
             self.client.resume_login({}, clean_code)
             # Dump token to disk
             if hasattr(self.client, "client") and hasattr(self.client.client, "dump"):
                 try:
                     self.client.client.dump(self.token_path)
+                    _secure_chmod_path(self.token_path)
                     logger.info(f"[garmin] Successfully dumped tokens to {self.token_path}")
                 except Exception as de:
                     logger.warning(f"[garmin] Failed to dump tokens: {de}")
@@ -548,6 +813,7 @@ class GarminAdapter:
             return normalized
         except Exception as e:
             logger.error(f"[garmin] Error fetching activities for {self.email}: {e}")
+            self.last_error = f"获取佳明活动失败: {e}"
             return []
 
     def fetch_activities_by_date(self, start_date: str = "2026-01-01", end_date: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -569,6 +835,7 @@ class GarminAdapter:
             return normalized
         except Exception as e:
             logger.error(f"[garmin] Error fetching activities by date for {self.email}: {e}")
+            self.last_error = f"获取佳明活动失败: {e}"
             return []
 
     def _normalize_activity(self, act: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -583,7 +850,7 @@ class GarminAdapter:
         
         type_map = {
             "running": "Run",
-            "trail_running": "Run",
+            "trail_running": "TrailRun",
             "treadmill_running": "Run",
             "track_running": "Run",
             "obstacle_run": "Run",
@@ -692,6 +959,8 @@ class GarminAdapter:
             "anaerobic_training_effect": round(float(anaerobic_te), 1) if anaerobic_te else None,
             "splits": act.get("splits") or [],
             "laps": act.get("laps") or [],
+            "splits_data": act.get("splits") or [],
+            "laps_data": act.get("laps") or [],
             "raw_garmin_data": act,
         }
 
@@ -707,26 +976,51 @@ class GarminAdapter:
             "source": f"garmin_{'cn' if self.is_cn else 'global'}",
         }
 
-        # 1. User Summary Baseline (RHR, VO2 Max, Body Battery)
+        # 1. User Summary Baseline & Daytime Dynamics (RHR, VO2 Max, Body Battery, Steps, Active Calories, Stress, All-day HR Min/Max)
         try:
             summary = self.client.get_user_summary(date_str)
             if isinstance(summary, dict):
-                rhr = summary.get("restingHeartRate") or summary.get("userDailySummary", {}).get("restingHeartRate")
+                sub = summary.get("userDailySummary") if isinstance(summary.get("userDailySummary"), dict) else {}
+                rhr = summary.get("restingHeartRate") or sub.get("restingHeartRate")
                 if rhr and rhr > 0:
                     metrics["resting_heart_rate"] = int(rhr)
-                vo2 = summary.get("vo2MaxPrecise") or summary.get("vo2Max") or summary.get("userDailySummary", {}).get("vo2Max")
+                vo2 = summary.get("vo2MaxPrecise") or summary.get("vo2Max") or sub.get("vo2Max")
                 if vo2 and vo2 > 0:
                     metrics["vo2_max"] = round(float(vo2), 1)
-                bb = summary.get("bodyBatteryHighestValue") or summary.get("userDailySummary", {}).get("bodyBatteryHighestValue")
+                bb = summary.get("bodyBatteryHighestValue") or sub.get("bodyBatteryHighestValue")
                 if bb and bb > 0:
                     metrics["body_battery_max"] = int(bb)
-                bb_min = summary.get("bodyBatteryLowestValue") or summary.get("userDailySummary", {}).get("bodyBatteryLowestValue")
+                bb_min = summary.get("bodyBatteryLowestValue") or sub.get("bodyBatteryLowestValue")
                 if bb_min and bb_min > 0:
                     metrics["body_battery_min"] = int(bb_min)
+                bb_cur = summary.get("bodyBatteryMostRecentValue") or sub.get("bodyBatteryMostRecentValue")
+                if bb_cur and bb_cur > 0:
+                    metrics["body_battery_current"] = int(bb_cur)
+
+                steps = summary.get("totalSteps") or sub.get("totalSteps")
+                if steps is not None and int(steps) >= 0:
+                    metrics["steps"] = int(steps)
+                act_kcal = summary.get("activeKilocalories") or sub.get("activeKilocalories")
+                if act_kcal is not None and float(act_kcal) >= 0:
+                    metrics["active_calories"] = int(round(float(act_kcal)))
+
+                stress_avg = summary.get("averageStressLevel") or sub.get("averageStressLevel")
+                if stress_avg is not None and int(stress_avg) > 0:
+                    metrics["stress_avg"] = int(stress_avg)
+                stress_max = summary.get("maxStressLevel") or sub.get("maxStressLevel")
+                if stress_max is not None and int(stress_max) > 0:
+                    metrics["stress_max"] = int(stress_max)
+
+                hr_min = summary.get("minHeartRate") or sub.get("minHeartRate")
+                if hr_min is not None and int(hr_min) > 0:
+                    metrics["hr_min"] = int(hr_min)
+                hr_max = summary.get("maxHeartRate") or sub.get("maxHeartRate")
+                if hr_max is not None and int(hr_max) > 0:
+                    metrics["hr_max"] = int(hr_max)
         except Exception as e:
             logger.warning(f"[garmin] Could not fetch user summary for {date_str}: {e}")
 
-        # 2. Sleep Data (Dedicated Garmin Wellness Daily Sleep Endpoint)
+        # 2. Sleep & Daytime Nap Data (Dedicated Garmin Wellness Daily Sleep Endpoint)
         try:
             sleep_data = self.client.get_sleep_data(date_str)
             if isinstance(sleep_data, dict):
@@ -736,6 +1030,14 @@ class GarminAdapter:
                     if dur and dur > 0:
                         metrics["sleep_duration_seconds"] = int(dur)
                         metrics["sleep_duration_hours"] = round(dur / 3600.0, 1)
+
+                    # Daytime Nap Detection (Garmin napTimeSeconds / dailyNapDTOS)
+                    nap_sec = dto.get("napTimeSeconds") or 0
+                    nap_dtos = dto.get("dailyNapDTOS") or sleep_data.get("dailyNapDTOS") or []
+                    if (not nap_sec or int(nap_sec) <= 0) and isinstance(nap_dtos, list):
+                        nap_sec = sum(int(n.get("napTimeSeconds") or 0) for n in nap_dtos if isinstance(n, dict))
+                    if nap_sec and int(nap_sec) > 0:
+                        metrics["nap_duration_seconds"] = int(nap_sec)
 
                     scores = dto.get("sleepScores")
                     if isinstance(scores, dict):
@@ -779,11 +1081,91 @@ class GarminAdapter:
         except Exception as e:
             logger.warning(f"[garmin] Could not fetch HRV data for {date_str}: {e}")
 
+        # 4. Strict Night-Wear Validation:
+        # If the user did not wear the watch during sleep (neither sleep_duration_seconds nor overnight HRV is present),
+        # do not retain daytime-only RHR, weekly HRV baseline, or uncalibrated body battery as recovery metrics.
+        has_overnight_wear = bool(
+            (metrics.get("sleep_duration_seconds") and float(metrics.get("sleep_duration_seconds") or 0) > 0)
+            or (metrics.get("hrv_last_night_avg") and float(metrics.get("hrv_last_night_avg") or 0) > 0)
+        )
+        if not has_overnight_wear:
+            metrics.pop("resting_heart_rate", None)
+            metrics.pop("body_battery_max", None)
+            metrics.pop("body_battery_min", None)
+            metrics.pop("body_battery_current", None)
+            metrics.pop("hrv_weekly_avg", None)
+            metrics.pop("hrv_status", None)
+            metrics.pop("sleep_score", None)
+            metrics.pop("sleep_duration_hours", None)
+
         return metrics
+
+    @staticmethod
+    def _normalize_garmin_lap_item(lap_dto: Dict[str, Any], default_idx: int) -> Optional[Dict[str, Any]]:
+        if not isinstance(lap_dto, dict):
+            return None
+        dist_m = float(lap_dto.get("distance") or 0.0)
+        mov_s = float(lap_dto.get("movingDuration") or lap_dto.get("duration") or 0.0)
+        elap_s = float(lap_dto.get("elapsedDuration") or lap_dto.get("duration") or mov_s)
+        if dist_m <= 1.0 and mov_s <= 1.0:
+            return None
+
+        avg_spd = float(lap_dto.get("averageMovingSpeed") or lap_dto.get("averageSpeed") or 0.0)
+        if avg_spd > 0.35:
+            p_sec = int(round(1000.0 / avg_spd))
+        elif dist_m >= 20.0 and mov_s > 0:
+            p_sec = int(round(mov_s / (dist_m / 1000.0)))
+        else:
+            p_sec = None
+        if p_sec is not None and not (110 <= p_sec <= 1200):
+            p_sec = None
+
+        gap_spd = float(lap_dto.get("avgGradeAdjustedSpeed") or 0.0)
+        gap_sec = int(round(1000.0 / gap_spd)) if gap_spd > 0.35 else None
+        if gap_sec is not None and not (110 <= gap_sec <= 1200):
+            gap_sec = None
+
+        raw_type = str(lap_dto.get("type") or lap_dto.get("splitType") or lap_dto.get("intensityType") or "").upper()
+        if raw_type.startswith("RWD_"):
+            # Run/Walk Detection summary buckets overlap the full activity distance; never treat as sequential laps
+            return None
+        if "WARMUP" in raw_type:
+            itype = "WARMUP"
+        elif "COOLDOWN" in raw_type:
+            itype = "COOLDOWN"
+        elif "RECOVERY" in raw_type or "REST" in raw_type:
+            itype = "RECOVERY"
+        elif "ACTIVE" in raw_type and raw_type != "INTERVAL":
+            itype = "ACTIVE"
+        else:
+            itype = "AUTO"
+
+        avg_hr = lap_dto.get("averageHR")
+        max_hr = lap_dto.get("maxHR")
+        cad = lap_dto.get("averageRunCadence")
+        pwr = lap_dto.get("averagePower")
+
+        return {
+            "lap_index": int(lap_dto.get("lapIndex") or default_idx),
+            "distance_m": round(dist_m, 1),
+            "duration_s": round(mov_s if mov_s > 0 else elap_s, 1),
+            "elapsed_s": round(elap_s, 1),
+            "pace_sec": p_sec,
+            "pace_str": f"{p_sec // 60}:{p_sec % 60:02d}/km" if p_sec else "—",
+            "gap_sec": gap_sec,
+            "avg_hr": int(round(float(avg_hr))) if avg_hr else None,
+            "max_hr": int(round(float(max_hr))) if max_hr else None,
+            "avg_cadence": int(round(float(cad))) if cad else None,
+            "avg_power": int(round(float(pwr))) if pwr else None,
+            "elev_gain_m": round(float(lap_dto.get("elevationGain") or 0.0), 1),
+            "elev_loss_m": round(float(lap_dto.get("elevationLoss") or 0.0), 1),
+            "intensity_type": itype,
+        }
 
     def fetch_activity_gps_track(self, activity_id: str) -> Optional[Dict[str, Any]]:
         """
-        Fetches GPS polyline coordinates and elevation profile for an activity from Garmin.
+        Fetches GPS polyline coordinates, elevation profile, high-resolution telemetry stream,
+        and per-lap / structured workout splits for an activity from Garmin.
         Transforms WGS-84 coordinates to GCJ-02 (China standard) and downsamples points for smooth rendering.
         """
         clean_id = str(activity_id).replace("garmin_", "").strip()
@@ -792,17 +1174,14 @@ class GarminAdapter:
                 return None
 
         try:
-            logger.info(f"[garmin] Fetching activity details for {clean_id}...")
+            logger.info(f"[garmin] Fetching activity details & splits for {clean_id}...")
             details = self.client.get_activity_details(clean_id)
             if not details or not isinstance(details, dict):
                 logger.warning(f"[garmin] No details returned for activity {clean_id}")
-                return None
+                details = {}
 
             geo = details.get("geoPolylineDTO") or {}
             raw_polyline = geo.get("polyline") or []
-            if not raw_polyline:
-                logger.info(f"[garmin] Activity {clean_id} does not contain polyline coordinates")
-                return None
 
             # Convert WGS-84 coordinates to GCJ-02 (Tencent / WeChat Mini Program map standard)
             gcj_points = []
@@ -816,62 +1195,154 @@ class GarminAdapter:
                         "longitude": gcj_lng
                     })
 
-            if not gcj_points:
-                return None
+            sampled_points = downsample_points(gcj_points, max_points=250) if gcj_points else []
 
-            # Downsample points (e.g. 250 points) for lightweight fast payload
-            sampled_points = downsample_points(gcj_points, max_points=250)
-
-            # Calculate bounds and center
-            min_lat = min(p["latitude"] for p in sampled_points)
-            max_lat = max(p["latitude"] for p in sampled_points)
-            min_lng = min(p["longitude"] for p in sampled_points)
-            max_lng = max(p["longitude"] for p in sampled_points)
-            center_lat = round((min_lat + max_lat) / 2.0, 6)
-            center_lng = round((min_lng + max_lng) / 2.0, 6)
-
-            # Process Elevation Profile
+            # Process Elevation & Full Telemetry Profile (Distance, Time, Speed/Pace, GAP, HR, Cadence, Elevation)
             descriptors = details.get("metricDescriptors") or []
-            desc_map = {m["key"]: m.get("metricsIndex") for m in descriptors if isinstance(m, dict) and "key" in m and "metricsIndex" in m}
+            desc_map = {
+                m["key"]: m.get("metricsIndex")
+                for m in descriptors
+                if isinstance(m, dict) and "key" in m and "metricsIndex" in m
+            }
             elev_idx = desc_map.get("directElevation")
             dist_idx = desc_map.get("sumDistance")
+            mov_idx = desc_map.get("sumMovingDuration") if desc_map.get("sumMovingDuration") is not None else desc_map.get("sumDuration")
+            elap_idx = desc_map.get("sumElapsedDuration") if desc_map.get("sumElapsedDuration") is not None else mov_idx
+            spd_idx = desc_map.get("directSpeed")
+            gap_idx = desc_map.get("directGradeAdjustedSpeed")
             hr_idx = desc_map.get("directHeartRate")
+            cad_idx = desc_map.get("directDoubleCadence") if desc_map.get("directDoubleCadence") is not None else desc_map.get("directRunCadence")
 
             raw_profile = []
+            raw_telemetry = []
             metrics_list = details.get("activityDetailMetrics") or []
-            if elev_idx is not None and dist_idx is not None and metrics_list:
+
+            def _metric_at(arr: List[Any], idx: Optional[int]) -> Optional[float]:
+                if idx is None or idx >= len(arr) or arr[idx] is None:
+                    return None
+                try:
+                    return float(arr[idx])
+                except (ValueError, TypeError):
+                    return None
+
+            if dist_idx is not None and metrics_list:
                 for m_obj in metrics_list:
                     m_vals = m_obj.get("metrics") or []
-                    if len(m_vals) > max(elev_idx, dist_idx):
-                        e = m_vals[elev_idx]
-                        d = m_vals[dist_idx]
-                        if e is not None and d is not None:
-                            hr_val = m_vals[hr_idx] if (hr_idx is not None and len(m_vals) > hr_idx and m_vals[hr_idx] is not None) else None
-                            raw_profile.append({
-                                "dist_km": round(float(d) / 1000.0, 2),
-                                "elevation_m": round(float(e), 1),
-                                "hr": int(hr_val) if hr_val is not None else None
-                            })
+                    d = _metric_at(m_vals, dist_idx)
+                    if d is None:
+                        continue
+                    e = _metric_at(m_vals, elev_idx)
+                    hr_val = _metric_at(m_vals, hr_idx)
+                    spd_val = _metric_at(m_vals, spd_idx)
+                    gap_val = _metric_at(m_vals, gap_idx)
+                    cad_val = _metric_at(m_vals, cad_idx)
+                    t_sec = _metric_at(m_vals, mov_idx)
+                    if t_sec is None:
+                        t_sec = _metric_at(m_vals, elap_idx)
+
+                    p_sec = int(round(1000.0 / spd_val)) if (spd_val and spd_val > 0.35) else None
+                    if p_sec is not None and not (110 <= p_sec <= 1200):
+                        p_sec = None
+                    g_sec = int(round(1000.0 / gap_val)) if (gap_val and gap_val > 0.35) else None
+                    if g_sec is not None and not (110 <= g_sec <= 1200):
+                        g_sec = None
+                    hr_int = int(round(hr_val)) if (hr_val is not None and 35 <= hr_val <= 235) else None
+                    cad_int = int(round(cad_val)) if (cad_val is not None and 80 <= cad_val <= 250) else None
+                    dist_km_val = round(d / 1000.0, 3)
+
+                    if e is not None:
+                        raw_profile.append({
+                            "dist_km": round(d / 1000.0, 2),
+                            "elevation_m": round(e, 1),
+                            "hr": hr_int,
+                            "pace_sec": p_sec,
+                        })
+                    raw_telemetry.append({
+                        "dist_km": dist_km_val,
+                        "elapsed_s": round(t_sec, 1) if t_sec is not None else None,
+                        "pace_sec": p_sec,
+                        "gap_sec": g_sec,
+                        "hr": hr_int,
+                        "cadence": cad_int,
+                        "elevation_m": round(e, 1) if e is not None else None,
+                    })
 
             sampled_elevation = downsample_points(raw_profile, max_points=120) if raw_profile else []
+            sampled_telemetry = downsample_points(raw_telemetry, max_points=240) if raw_telemetry else []
 
-            track_data = {
+            # Fetch per-lap splits & structured workout phases
+            normalized_laps: List[Dict[str, Any]] = []
+            structured_phases: List[Dict[str, Any]] = []
+            try:
+                sp_resp = self.client.get_activity_splits(clean_id)
+                if isinstance(sp_resp, dict):
+                    for i, l_dto in enumerate(sp_resp.get("lapDTOs") or [], start=1):
+                        norm_l = self._normalize_garmin_lap_item(l_dto, i)
+                        if norm_l:
+                            normalized_laps.append(norm_l)
+            except Exception as se:
+                logger.warning(f"[garmin] get_activity_splits warning for {clean_id}: {se}")
+
+            try:
+                ts_resp = self.client.get_activity_typed_splits(clean_id)
+                raw_ts = ts_resp.get("splits") if isinstance(ts_resp, dict) else None
+                if isinstance(raw_ts, list) and len(raw_ts) >= 2:
+                    candidate_phases: List[Dict[str, Any]] = []
+                    for i, s_dto in enumerate(raw_ts, start=1):
+                        norm_s = self._normalize_garmin_lap_item(s_dto, i)
+                        if norm_s:
+                            candidate_phases.append(norm_s)
+                    has_stage_tag = any(
+                        x.get("intensity_type") in ("WARMUP", "COOLDOWN", "RECOVERY")
+                        for x in candidate_phases
+                    )
+                    laps_total_m = sum(float(x.get("distance_m") or 0.0) for x in normalized_laps)
+                    cand_total_m = sum(float(x.get("distance_m") or 0.0) for x in candidate_phases)
+                    seq_valid = (
+                        laps_total_m <= 0
+                        or (0.80 * laps_total_m <= cand_total_m <= 1.20 * laps_total_m)
+                    )
+                    if len(candidate_phases) >= 2 and has_stage_tag and seq_valid:
+                        structured_phases = candidate_phases
+            except Exception as tse:
+                logger.debug(f"[garmin] get_activity_typed_splits notice for {clean_id}: {tse}")
+
+            if not sampled_points and not sampled_telemetry and not normalized_laps:
+                logger.info(f"[garmin] Activity {clean_id} has neither polyline nor telemetry/splits")
+                return None
+
+            track_data: Dict[str, Any] = {
                 "activity_id": f"garmin_{clean_id}",
                 "total_points": len(sampled_points),
                 "original_point_count": len(raw_polyline),
-                "center": {"latitude": center_lat, "longitude": center_lng},
-                "bounds": {
-                    "southwest": {"latitude": min_lat, "longitude": min_lng},
-                    "northeast": {"latitude": max_lat, "longitude": max_lng}
-                },
-                "start_point": sampled_points[0],
-                "end_point": sampled_points[-1],
                 "points": sampled_points,
-                "elevation_profile": sampled_elevation
+                "elevation_profile": sampled_elevation,
+                "telemetry_series": sampled_telemetry,
+                "laps": normalized_laps,
+                "structured_splits": structured_phases,
             }
-            logger.info(f"[garmin] Successfully processed GPS track for {clean_id}: {len(sampled_points)} points, {len(sampled_elevation)} elevation steps")
+            if sampled_points:
+                min_lat = min(p["latitude"] for p in sampled_points)
+                max_lat = max(p["latitude"] for p in sampled_points)
+                min_lng = min(p["longitude"] for p in sampled_points)
+                max_lng = max(p["longitude"] for p in sampled_points)
+                track_data["center"] = {
+                    "latitude": round((min_lat + max_lat) / 2.0, 6),
+                    "longitude": round((min_lng + max_lng) / 2.0, 6),
+                }
+                track_data["bounds"] = {
+                    "southwest": {"latitude": min_lat, "longitude": min_lng},
+                    "northeast": {"latitude": max_lat, "longitude": max_lng},
+                }
+                track_data["start_point"] = sampled_points[0]
+                track_data["end_point"] = sampled_points[-1]
+
+            logger.info(
+                f"[garmin] Processed detail for {clean_id}: {len(sampled_points)} GPS pts, "
+                f"{len(normalized_laps)} laps, {len(sampled_telemetry)} telemetry steps"
+            )
             return track_data
         except Exception as e:
-            logger.error(f"[garmin] Error fetching GPS track for {clean_id}: {e}", exc_info=True)
+            logger.error(f"[garmin] Error fetching GPS track/details for {clean_id}: {e}", exc_info=True)
             return None
 

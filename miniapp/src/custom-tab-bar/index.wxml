@@ -1,13 +1,18 @@
-<view class="tab-bar">
+<!-- hidden：页面弹出底部弹窗（如隐私授权）时临时隐藏，避免盖住按钮 -->
+<view wx:if="{{!hidden}}" class="tab-bar {{theme ? 'theme-' + theme : ''}} {{fontScale && fontScale !== 'normal' ? 'font-' + fontScale : ''}}" role="tablist">
   <view class="tab-bar-border"></view>
   <view
     wx:for="{{list}}"
     wx:key="index"
-    class="tab-bar-item {{item.text.length > 4 ? 'tab-bar-item-long' : ''}}"
+    class="tab-bar-item"
+    role="tab"
+    aria-selected="{{selected === index}}"
+    aria-label="{{item.text}}"
     data-path="{{item.pagePath}}"
     data-index="{{index}}"
     bindtap="switchTab"
   >
+    <image class="tab-bar-icon" src="{{selected === index ? (item.activeSrc || item.selectedIconPath) : (item.src || item.iconPath)}}" mode="aspectFit"></image>
     <text class="tab-bar-text {{selected === index ? 'active' : ''}} {{item.text.length > 4 ? 'text-compact' : ''}}">{{item.text}}</text>
   </view>
 </view>

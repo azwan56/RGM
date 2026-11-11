@@ -13,6 +13,7 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [authInitialTab, setAuthInitialTab] = useState<"wechat" | "watch" | "email">("watch");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -42,7 +43,7 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-20 pb-24 text-center flex flex-col items-center justify-center relative z-10">
         <div className="mb-6 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-zinc-300 backdrop-blur-md">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          阿里云全栈直连 · 纯净 Garmin 佳明生态
+          万跑跑团助手 · 佳明 / 高驰 / 苹果 / 华为 / 颂拓全生态互通
         </div>
 
         <h1 className="text-4xl sm:text-6xl md:text-8xl font-black mb-6 tracking-tight">
@@ -50,8 +51,8 @@ export default function Home() {
         </h1>
 
         <p className="text-zinc-400 text-lg md:text-xl max-w-2xl mx-auto mb-10 font-light leading-relaxed">
-          专为国内跑者与跑团打造的一站式数据管理平台。
-          直连佳明手表自动同步、Canova教练专项化指导、微信小程序随时随地掌握进度。
+          万跑跑团助手 —— 专为跑者与跑团打造的一站式科学训练与跑团管理平台。
+          多品牌运动手表自动同步、Canova 教练专项化指导、网页与微信小程序实时互通。
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -68,16 +69,22 @@ export default function Home() {
           ) : (
             <>
               <button
-                onClick={() => setModalOpen(true)}
+                onClick={() => {
+                  setAuthInitialTab("watch");
+                  setModalOpen(true);
+                }}
                 className="px-8 py-3.5 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-2xl transition-all hover:shadow-lg hover:shadow-[#FC4C02]/30 flex items-center justify-center gap-2 text-sm"
               >
                 立即免费使用
               </button>
               <button
-                onClick={() => setModalOpen(true)}
+                onClick={() => {
+                  setAuthInitialTab("wechat");
+                  setModalOpen(true);
+                }}
                 className="px-6 py-3.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold rounded-2xl transition-all flex items-center justify-center gap-2 text-sm"
               >
-                <Smartphone className="w-4 h-4 text-[#FC4C02]" />
+                <Smartphone className="w-4 h-4 text-[#07C160]" />
                 微信小程序扫码
               </button>
             </>
@@ -118,7 +125,7 @@ export default function Home() {
         </div>
       </main>
 
-      <AuthModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <AuthModal open={modalOpen} initialTab={authInitialTab} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

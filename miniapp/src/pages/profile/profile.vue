@@ -1,5 +1,7 @@
 <template>
-  <view class="profile-page">
+  <view class="profile-page" :class="themeClass">
+    <!-- ── 「我的」首页头部：进入子页面时隐藏，减少滚动长度 ── -->
+    <template v-if="!activeSection">
     <!-- ── 顶部用户卡（无论登录与否始终显示在最顶部）── -->
     <view v-if="!user" class="login-hero-card">
       <view class="login-hero-left">
@@ -8,13 +10,17 @@
         </view>
         <view class="hero-text-wrap">
           <text class="hero-title">微信跑者一键登录</text>
-          <text class="hero-desc">点击下方按钮，开启独立跑步档案与数据管理</text>
         </view>
       </view>
       <!-- 用 button open-type 保证最高优先级点击响应 -->
       <button class="hero-login-btn-native" @click="openAuthModal">
         🟢 微信一键快速登录
       </button>
+      <!-- #ifdef APP-PLUS -->
+      <button class="hero-login-btn-apple" @click="handleAppleLogin" style="margin-top: 16rpx; background: var(--rgm-card-2, #1c1c1e); color: var(--rgm-text, #ffffff); border: 1px solid var(--rgm-line, rgba(255,255,255,0.25)); border-radius: 9999rpx; font-size: 28rpx; height: 80rpx; line-height: 80rpx; display: flex; align-items: center; justify-content: center; font-weight: 600; width: 100%;   --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3); ">
+         通过 Apple 快速登录
+      </button>
+      <!-- #endif -->
     </view>
 
     <!-- ── 已登录状态：展示跑者卡片与修改资料/切换账号 ── -->
@@ -28,63 +34,82 @@
       <view class="user-meta">
         <view class="user-name-row">
           <text class="user-name">{{ profile?.display_name || user?.display_name || "微信跑者" }}</text>
-          <text class="edit-pill">✏️ 修改资料</text>
+          <text class="edit-pill">✏️ 编辑资料</text>
         </view>
-        <text class="user-id">{{ user?.id }} · 点击修改昵称与头像 ›</text>
+        <text v-if="userClub?.name" class="user-id">{{ userClub.name }}</text>
       </view>
-      <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出登录</button>
+      <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出</button>
     </view>
 
-    <!-- ── 新用户入门与操作手册入口横幅 ── -->
-    <view class="manual-entry-banner" @click="goToManual">
-      <view class="manual-entry-left">
-        <text class="manual-entry-icon">📖</text>
-        <view class="manual-entry-meta">
-          <text class="manual-entry-title">新用户入门与操作手册</text>
-          <text class="manual-entry-desc">手表直连 · 大群2周准入 · 必填资料 · 目标设定</text>
+    <!-- ── 🚀 设定向导：仅在未完成时显示；完成后入口移到页面底部「帮助与设置」 ── -->
+    <view v-if="onboardingStatus && !onboardingStatus.is_completed" class="onboard-guide-card" @click="goToOnboarding(1)">
+      <view class="ogc-left">
+        <view class="ogc-icon-circle">🚀</view>
+        <view class="ogc-meta">
+          <view class="ogc-title-row">
+            <text class="ogc-title">设定向导</text>
+            <text class="ogc-progress-tag" :class="{ completed: onboardingStatus?.is_completed }">
+              {{ onboardingStatus?.is_completed ? '100%' : `${onboardingStatus?.percent || 0}%` }}
+            </text>
+          </view>
         </view>
       </view>
-      <text class="manual-entry-arrow">›</text>
+      <view class="ogc-right">
+        <text class="ogc-action-txt">{{ onboardingStatus?.is_completed ? '重设 ›' : '去完善 ›' }}</text>
+      </view>
     </view>
 
-    <!-- ── 顶部切换 Tab：个人资料 vs 训练赛事 ── -->
-    <view class="profile-tabs-nav">
-      <view
-        class="profile-tab-item"
-        :class="{ 'profile-tab-item-active': activeTab === 'profile' }"
-        @click="activeTab = 'profile'"
-      >
-        <text class="profile-tab-icon">👤</text>
-        <text
-          class="profile-tab-title"
-          :class="{ 'profile-tab-title-active': activeTab === 'profile' }"
-        >个人资料与账号</text>
+    <!-- ── 快捷入口：常用的低频功能统一放在顶部一行，避免沉到长页面底部 ── -->
+    <view class="quick-grid">
+      <view class="qg-item" @click="goToOnboarding(1)">
+        <view class="qg-icon-wrap">
+          <text class="qg-icon">🚀</text>
+          <view v-if="onboardingStatus && !onboardingStatus.is_completed" class="qg-dot" />
+        </view>
+        <text class="qg-label">向导</text>
       </view>
-      <view
-        class="profile-tab-item"
-        :class="{ 'profile-tab-item-active': activeTab === 'training' }"
-        @click="activeTab = 'training'"
-      >
-        <text class="profile-tab-icon">🏃</text>
-        <text
-          class="profile-tab-title"
-          :class="{ 'profile-tab-title-active': activeTab === 'training' }"
-        >训练档案与赛事</text>
+      <view class="qg-item" @click="scrollToDeviceCard">
+        <view class="qg-icon-wrap">
+          <text class="qg-icon">⌚</text>
+          <view v-if="!garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected" class="qg-dot" />
+        </view>
+        <text class="qg-label">{{ garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected ? '已绑表' : '绑表' }}</text>
       </view>
+      <view class="qg-item" @click="goToSharePage">
+        <view class="qg-icon-wrap"><text class="qg-icon">📢</text></view>
+        <text class="qg-label">分享</text>
+      </view>
+      <view class="qg-item" @click="goToManual">
+        <view class="qg-icon-wrap"><text class="qg-icon">📖</text></view>
+        <text class="qg-label">帮助</text>
+      </view>
+    </view>
+
+    </template>
+
+    <!-- ── 子页面返回栏：拆分后每个子页面顶部固定显示「‹ 我的」 ── -->
+    <view v-if="activeSection" class="section-back-bar">
+      <view class="sbb-back" @click="closeSection">
+        <text class="sbb-arrow">‹</text>
+        <text class="sbb-back-txt">我的</text>
+      </view>
+      <text class="sbb-title">{{ activeSectionTitle }}</text>
+      <view class="sbb-placeholder" />
     </view>
 
     <!-- ══════════════════════════════════════════════════════════════ -->
     <!-- TAB 1: 个人资料与账号 (Profile & Account)                     -->
     <!-- ══════════════════════════════════════════════════════════════ -->
-    <template v-if="activeTab === 'profile'">
+    <!-- 首页：大群状态 + 跑团 + 功能菜单 -->
+    <template v-if="!activeSection">
       <!-- ── CARD: 大群体成员认证与审核状态卡 (Grand Org Membership & Expiry Status) ── -->
     <view v-if="userOrgs && userOrgs.length > 0" class="section-card org-status-section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🏫</text>
-          <text class="card-title">大群成员认证与准入状态</text>
+          <text class="card-title">大群认证状态</text>
         </view>
-        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
           2周实名核验制
         </text>
       </view>
@@ -95,7 +120,7 @@
             <text class="org-item-name">{{ org.name }}</text>
           </view>
           <view class="org-status-badge" :class="'badge-' + (org.status || 'temporary')">
-            <text v-if="org.status === 'confirmed'">🏅 正式队员 · 已核验</text>
+            <text v-if="org.status === 'confirmed'">🏅 正式成员 · 已核验</text>
             <text v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended">🚫 访问已暂停</text>
             <text v-else-if="org.status === 'pending'">📋 待管理员核验 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
             <text v-else>⏳ 临时状态 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
@@ -104,22 +129,26 @@
 
         <!-- Status Details -->
         <view v-if="org.status === 'confirmed'" class="org-status-desc desc-confirmed">
-          <text class="org-desc-text">✓ 您已完成所有必填字段并通过大团管理员审核确认，已成为正式队员，享有大团及所有从属跑团的永久完整访问与活动参与权限。</text>
+          <button class="org-action-btn btn-secondary" @click="scrollToRequiredFields({ message: '已为您展开大群实名认证资料与个人参数' })">
+            ✏️ 查看/修改认证资料
+          </button>
         </view>
         <view v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended" class="org-status-desc desc-suspended">
-          <text class="org-desc-text warning-text">⚠️ 您的2周临时访问期已到期。由于超期未完成所有必填字段填写并获大团管理员确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！</text>
-          <button class="org-action-btn btn-danger" @click="scrollToRequiredFields">📝 立即补齐必填字段</button>
+          <text class="org-desc-text warning-text">⚠️ 临时访问期已到期，大群内容已暂停访问</text>
+          <button class="org-action-btn btn-danger" @click="scrollToRequiredFields({ message: '请在下方补齐必填项' })">📝 去补齐必填项</button>
         </view>
         <view v-else-if="org.status === 'pending'" class="org-status-desc desc-pending">
-          <text class="org-desc-text">📋 您已填齐必填资料，正在等待大团管理员审核确认。请在 2 周临时期内（剩余 {{ org.days_remaining }} 天）由管理员核验批准成为正式队员。</text>
+          <button class="org-action-btn btn-secondary" @click="scrollToRequiredFields({ message: '已为您展开待审核实名认证资料' })">
+            ✏️ 查看/修改资料
+          </button>
         </view>
         <view v-else class="org-status-desc desc-temporary">
-          <text class="org-desc-text">⏳ 根据大群群规，必须在 2 周内（剩余 {{ org.days_remaining }} 天）完成所有必填字段填写并获得大团管理员确认。2周超期未完成将被暂停大团及从属跑团的一切内容和活动！</text>
+          <text class="org-desc-text">⏳ 请在 {{ org.days_remaining }} 天内补齐必填项，超期将暂停访问</text>
           <view v-if="org.missing_fields && org.missing_fields.length" class="missing-fields-box">
             <text class="missing-title">待补齐必填项：</text>
             <text class="missing-labels">{{ org.missing_fields.map((f: any) => f.label).join('、') }}</text>
           </view>
-          <button class="org-action-btn" @click="scrollToRequiredFields">📝 立即前往补齐必填字段</button>
+          <button class="org-action-btn" @click="scrollToRequiredFields({ message: '请在下方补齐必填字段' })">📝 去补齐必填项</button>
         </view>
       </view>
     </view>
@@ -129,95 +158,346 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🏃</text>
-          <text class="card-title">我的跑团与管理</text>
+          <text class="card-title">我的跑团</text>
         </view>
         <text v-if="userClub" class="club-role-tag" :class="'role-' + (userClub.role || 'member')">
-          {{ userClub.role === 'owner' ? '👑 跑团主理人' : userClub.role === 'coach' ? '🧢 认证教练' : '🏃 核心团员' }}
+          {{ userClub.role === 'owner' ? '👑 团长' : userClub.role === 'coach' ? '🧢 教练' : '🏃 团员' }}
         </text>
         <text v-else class="club-role-tag role-none">
-          未加入跑团
+          未入团
         </text>
       </view>
 
       <!-- Joined Club Summary -->
       <view v-if="userClub" class="joined-club-box">
         <view class="club-mini-info">
-          <image class="mini-logo" :src="userClub.logo_url || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80'" mode="aspectFill" />
+          <image class="mini-logo" :src="userClub.logo_url || '/static/logo-square.png'" mode="aspectFill" />
           <view class="mini-texts">
             <view class="club-title-row">
               <text class="club-title-text">{{ userClub.name }}</text>
               <text v-if="userClubs.length > 1" class="multi-club-badge">{{ userClubs.length }}个跑团</text>
             </view>
-            <text class="club-desc-text">{{ userClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。" }}</text>
+            <text v-if="userClub.description" class="club-desc-text">{{ userClub.description }}</text>
           </view>
         </view>
       </view>
 
       <!-- Unjoined Empty State -->
       <view v-else class="joined-club-box empty-club-box" style="padding: 28rpx; text-align: center;">
-        <text style="font-size: 26rpx; color: #ffffff; font-weight: bold; display: block; margin-bottom: 8rpx;">尚未加入任何跑团</text>
-        <text style="font-size: 22rpx; color: #8e8e93; display: block; line-height: 1.5;">前往跑团大本营浏览平台跑团并选择加入，与队友共同训练打卡！</text>
+        <text style="font-size: 26rpx; color: var(--rgm-text, #ffffff); font-weight: bold; display: block; margin-bottom: 8rpx;">尚未加入跑团</text>
+        <text style="font-size: 22rpx; color: var(--rgm-text-3, #8e8e93); display: block; line-height: 1.5;">浏览跑团或凭邀请码加入</text>
       </view>
 
       <!-- Club Action Buttons -->
       <view class="club-btn-grid">
         <button class="club-act-btn join-btn" @click="goToTeamPage">
-          {{ userClubs.length > 1 ? `⇄ 切换跑团 (${userClubs.length})` : userClub ? '🏃 查看当前跑团' : '🏃 浏览与加入跑团' }}
+          {{ userClubs.length > 1 ? `⇄ 切换(${userClubs.length})` : userClub ? '🏃 跑团' : '🏃 发现' }}
         </button>
         <button class="club-act-btn create-btn" @click="showJoinModal = true">
-          🔑 邀请码加入
+          🔑 凭码入团
+        </button>
+        <button class="club-act-btn self-create-btn" @click="goToCreateMyClub">
+          ✨ 自建跑团
         </button>
       </view>
     </view>
 
+    <!-- ── 功能菜单：原来平铺的长表单拆成 4 个子页面，按需进入 ── -->
+    <view class="section-card profile-menu-card">
+      <view class="pm-item" @click="openSection('device')">
+        <text class="pm-icon">⌚</text>
+        <view class="pm-meta">
+          <text class="pm-title">手表连接</text>
+        </view>
+        <text class="pm-status" :class="{ ok: garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected, warn: !garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected }">{{ deviceStatusText }}</text>
+        <text class="pm-arrow">›</text>
+      </view>
+      <view class="pm-item" @click="openSection('personal')">
+        <text class="pm-icon">👤</text>
+        <view class="pm-meta">
+          <text class="pm-title">个人资料</text>
+        </view>
+        <text v-if="personalNeedsAttention" class="pm-status warn">待补齐</text>
+        <text class="pm-arrow">›</text>
+      </view>
+      <view class="pm-item" @click="openSection('training')">
+        <text class="pm-icon">🏃</text>
+        <view class="pm-meta">
+          <text class="pm-title">训练档案</text>
+        </view>
+        <text class="pm-arrow">›</text>
+      </view>
+      <view class="pm-item" @click="openSection('privacy')">
+        <text class="pm-icon">🔔</text>
+        <view class="pm-meta">
+          <text class="pm-title">通知与隐私</text>
+        </view>
+        <text class="pm-status" :class="{ ok: wechatSubscribeEnabled }">{{ wechatSubscribeEnabled ? '已开启' : '未开启' }}</text>
+        <text class="pm-arrow">›</text>
+      </view>
+      <view class="pm-item pm-item-last" @click="openSection('support')">
+        <text class="pm-icon">💬</text>
+        <view class="pm-meta">
+          <text class="pm-title">帮助与支持</text>
+        </view>
+        <text class="pm-status" :class="{ ok: hasSupportReply }">{{ hasSupportReply ? '已回复' : '在线' }}</text>
+        <text class="pm-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- ── 外观与字号调节 ── -->
+    <view class="section-card profile-menu-card appearance-card">
+      <view class="pm-item">
+        <text class="pm-icon">🔤</text>
+        <view class="pm-meta">
+          <text class="pm-title">字号大小</text>
+        </view>
+        <view class="app-seg-group">
+          <view
+            v-for="opt in FONT_SCALE_OPTIONS"
+            :key="opt.key"
+            class="app-seg-pill"
+            :class="{ active: currentFontScale === opt.key }"
+            @click="setFontScale(opt.key)"
+          >{{ opt.label }}</view>
+        </view>
+      </view>
+      <view class="pm-item pm-item-last">
+        <text class="pm-icon">🎨</text>
+        <view class="pm-meta">
+          <text class="pm-title">界面主题</text>
+        </view>
+        <view class="app-seg-group">
+          <view
+            class="app-seg-pill"
+            :class="{ active: currentTheme === 'dark' }"
+            @click="setTheme('dark')"
+          >🌑 暗黑</view>
+          <view
+            class="app-seg-pill"
+            :class="{ active: currentTheme === 'volt' }"
+            @click="setTheme('volt')"
+          >☀️ 亮色</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 底部退出登录（仅登录后显示） -->
+    <view v-if="user" class="logout-box">
+      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
+    </view>
+    </template>
+
+    <!-- 子页面：手表连接与同步 -->
+    <template v-if="activeSection === 'device'">
+      <!-- ── CARD 2: Device Connection Status Card (Garmin · COROS · Apple Watch · HUAWEI · SUUNTO) ── -->
+    <view id="device-connect-card" class="section-card" :class="{ 'highlight-pulse': isDeviceCardHighlighted }">
+      <view class="card-title-row">
+        <view class="title-with-icon">
+          <text class="title-icon">⌚</text>
+          <text class="card-title">手表连接与同步</text>
+        </view>
+      </view>
+
+      <!-- 24小时全天佩戴手表重要提示横幅（精简 + ⓘ 隐藏说明） -->
+      <view
+        style="background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); border-radius: 14rpx; padding: 14rpx 20rpx; margin-bottom: 20rpx; display: flex; align-items: center; justify-content: space-between;"
+        @click.stop="explainTerm('watch_wear')"
+      >
+        <text style="font-size: 23rpx; font-weight: 700; color: #b45309;">
+          ⌚ 请 24 小时佩戴手表（含睡眠）
+        </text>
+        <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 10rpx;">ⓘ 说明</text>
+      </view>
+
+      <!-- 1. Garmin Status Block -->
+      <view class="device-status-item">
+        <view class="device-item-header">
+          <view class="device-name-wrap">
+            <text class="device-badge garmin-badge">GARMIN</text>
+            <text class="device-name-text">佳明 Garmin</text>
+          </view>
+          <text class="conn-status" :class="{ connected: garminConnected }">
+            {{ garminConnected ? "已连接 ✓" : "未连接" }}
+          </text>
+        </view>
+        <text v-if="garminConnected" class="desc-text" style="margin: 8rpx 0 16rpx 0;">
+          {{ `已绑定：${garminEmail} (${garminDomain})` }}
+        </text>
+        <button
+          v-if="!garminConnected"
+          class="garmin-btn"
+          style="margin-bottom: 20rpx;"
+          @click="openDeviceModal('garmin')"
+        >
+          绑定佳明账号
+        </button>
+        <button
+          v-else
+          class="unbind-btn"
+          style="margin-bottom: 20rpx;"
+          :loading="unbinding"
+          @click="handleUnbindGarmin"
+        >
+          解除佳明绑定
+        </button>
+      </view>
+
+      <!-- 2. COROS Status Block -->
+      <view class="device-status-item" style="border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08)); padding-top: 20rpx;">
+        <view class="device-item-header">
+          <view class="device-name-wrap">
+            <text class="device-badge coros-badge">COROS</text>
+            <text class="device-name-text">高驰 COROS</text>
+          </view>
+          <text
+            class="conn-status"
+            :class="{ connected: corosConnected && !corosNeedsReauth }"
+            :style="corosConnected && corosNeedsReauth ? 'color: #f59e0b; font-weight: 700;' : ''"
+          >
+            {{ !corosConnected ? "未连接" : corosNeedsReauth ? "⚠️ 待短信验证" : "已连接 ✓" }}
+          </text>
+        </view>
+        <text v-if="corosConnected" class="desc-text" style="margin: 8rpx 0 12rpx 0;">
+          {{ `已绑定：${corosAccount} (${corosDomain})` }}
+        </text>
+        <text
+          v-if="corosConnected && corosNeedsReauth"
+          class="desc-text"
+          style="display: block; color: #f59e0b; margin: 0 0 16rpx 0;"
+        >
+          {{ corosAuthError || "高驰安全授权已到期，点击下方按钮免密获取短信验证码即可恢复同步" }}
+        </text>
+        <button
+          v-if="!corosConnected"
+          class="garmin-btn coros-btn"
+          style="margin-bottom: 20rpx;"
+          @click="openDeviceModal('coros')"
+        >
+          绑定高驰账号
+        </button>
+        <view v-else class="btn-group-row" style="display: flex; gap: 16rpx; margin-top: 8rpx; margin-bottom: 20rpx;">
+          <button
+            class="garmin-btn coros-btn"
+            style="flex: 1; margin: 0;"
+            @click="openDeviceModal('coros')"
+          >
+            {{ corosNeedsReauth ? "📱 获取验证码恢复连接" : "🔑 重新授权/改密" }}
+          </button>
+          <button
+            class="unbind-btn"
+            style="flex: 1; margin: 0;"
+            :loading="unbindingCoros"
+            @click="handleUnbindCoros"
+          >
+            解除绑定
+          </button>
+        </view>
+      </view>
+
+      <!-- 3. 苹果 / 华为 / 颂拓（非直连 · 截图与轨迹导入） -->
+      <view class="device-status-item" style="border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08)); padding-top: 20rpx;">
+        <view class="device-item-header">
+          <view class="device-name-wrap">
+            <text class="device-badge apple-badge">苹果 / 华为 / 颂拓</text>
+            <text class="device-name-text">截图/轨迹导入</text>
+          </view>
+          <text class="conn-status" :class="{ connected: appleWatchConnected || huaweiConnected || suuntoConnected }">
+            {{ (appleWatchConnected || huaweiConnected || suuntoConnected) ? "已连接 ✓" : "未连接" }}
+          </text>
+        </view>
+        <button
+          class="garmin-btn apple-watch-btn"
+          style="width: 100%; margin: 0 0 14rpx 0;"
+          :loading="!!importingScreenshotBrand"
+          @click="handleImportWatchScreenshot(activeHealthWatchBrand)"
+        >
+          📸 选运动截图导入
+        </button>
+        <view v-if="!(appleWatchConnected || huaweiConnected || suuntoConnected)" class="btn-group-row" style="display: flex; gap: 16rpx;">
+          <button
+            class="track-import-outline-btn apple-outline"
+            style="flex: 1; margin: 0;"
+            @click="openDeviceModal('apple_watch')"
+          >
+            ⌚ 连接与教程
+          </button>
+          <button
+            class="track-import-outline-btn apple-outline"
+            style="flex: 1; margin: 0;"
+            :loading="!!importingTrackBrand"
+            @click="handleImportWatchTrack(activeHealthWatchBrand)"
+          >
+            📂 导入 FIT/GPX/TCX
+          </button>
+        </view>
+        <view v-else class="btn-group-row" style="display: flex; gap: 16rpx;">
+          <button
+            class="track-import-outline-btn apple-outline"
+            style="flex: 1.4; margin: 0;"
+            :loading="!!importingTrackBrand"
+            @click="handleImportWatchTrack(activeHealthWatchBrand)"
+          >
+            📂 导入 FIT/GPX/TCX
+          </button>
+          <button
+            class="unbind-btn"
+            style="flex: 1; margin: 0;"
+            :loading="unbindingAppleWatch || unbindingHuawei || unbindingSuunto"
+            @click="handleUnbindHealthWatch(activeHealthWatchBrand)"
+          >
+            解除绑定
+          </button>
+        </view>
+      </view>
+
+      <!-- 手表绑定遇到问题快捷入口 -->
+      <view class="device-support-quick-bar" @click="openSection('support')">
+        <text class="dsq-text">💬 遇到问题？联系客服 ›</text>
+      </view>
+    </view>
+
+    </template>
+
+    <!-- 子页面：个人资料与实名信息（实名与大群资料放一起，便于补齐必填项） -->
+    <template v-if="activeSection === 'personal'">
       <!-- ── CARD: 个人实名身份与敏感信息 (AES-256 加密保护) ── -->
     <view id="required-personal-fields" class="section-card section-card-runner-info" :class="{ 'highlight-pulse': isFieldHighlighted }">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🔒</text>
-          <text class="card-title">个人实名身份与敏感信息</text>
+          <text class="card-title">实名身份信息</text>
         </view>
-        <text class="security-chip">AES-256 加密保护</text>
+        <text class="security-chip">AES-256 加密存储</text>
       </view>
-
-      <text class="desc-text" style="margin-bottom: 20rpx;">
-        真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
-      </text>
 
       <view class="form-grid-2">
         <!-- 出生日期 & 动态年龄 -->
         <view class="form-group full-width-group">
           <view class="label-with-tag">
             <view class="label-with-sec">
-              <text class="label">出生日期 (Date of Birth)<text class="required-star"> *</text></text>
+              <text class="label">出生日期<text class="required-star"> *</text></text>
               <text class="field-sec-tag req-tag">大群必填</text>
-              <text class="field-sec-tag">🔒 AES-256 加密</text>
+              <text class="field-sec-tag">🔒 AES-256 加密存储</text>
             </view>
             <text v-if="displayAge !== null" class="age-badge-pill">
               {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
             </text>
           </view>
-          <view class="secure-picker-row">
-            <picker
-              mode="date"
-              :value="profile?.date_of_birth || '1990-01-01'"
-              start="1940-01-01"
-              :end="todayDateStr"
-              @change="onDateOfBirthChange"
-              class="secure-picker-flex"
-            >
-              <view class="picker-input-box">
-                <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
-                  {{ showDob ? (profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)') : (profile?.date_of_birth ? '****-**-**' : '请选择出生年月日 (YYYY-MM-DD)') }}
-                </text>
-                <text class="picker-arrow">📅</text>
-              </view>
-            </picker>
-            <view class="eye-toggle-btn" @click.stop="showDob = !showDob">
-              <text class="eye-icon">{{ showDob ? '👁️' : '🙈' }}</text>
+          <picker
+            mode="date"
+            :value="profile?.date_of_birth || '1990-01-01'"
+            start="1940-01-01"
+            :end="todayDateStr"
+            @change="onDateOfBirthChange"
+          >
+            <view class="picker-input-box">
+              <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
+                {{ profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)' }}
+              </text>
+              <text class="picker-arrow">📅</text>
             </view>
-          </view>
-          <text class="field-privacy-subtip">🛡️ 点击右侧眼睛符号显示/隐藏完整日期，大群体公开名册仅展示组别脱敏保护</text>
+          </picker>
         </view>
 
         <!-- 真实姓名 -->
@@ -227,64 +507,45 @@
             <text class="field-sec-tag req-tag">大群必填</text>
             <text class="field-sec-tag">🔒 加密存储</text>
           </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showRealName"
-              type="text"
-              placeholder="戈友实名认证姓名"
-              :value="profile?.real_name || ''"
-              @input="onInputRealName"
-            />
-            <view class="eye-toggle-btn" @click="showRealName = !showRealName">
-              <text class="eye-icon">{{ showRealName ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="戈友实名认证姓名"
+            :value="profile?.real_name || ''"
+            @input="onInputRealName"
+          />
         </view>
 
         <!-- 联系手机 -->
         <view class="form-group">
           <view class="label-with-tag">
             <text class="label">联系手机</text>
-            <text class="field-sec-tag">🔒 保密</text>
+            <text class="field-sec-tag">🔒 加密存储</text>
           </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showPhone"
-              type="number"
-              maxlength="11"
-              placeholder="紧急联络手机"
-              :value="profile?.phone || ''"
-              @input="onInputPhone"
-            />
-            <view class="eye-toggle-btn" @click="showPhone = !showPhone">
-              <text class="eye-icon">{{ showPhone ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
+          <input
+            class="form-input"
+            type="number"
+            maxlength="11"
+            placeholder="紧急联络手机"
+            :value="profile?.phone || ''"
+            @input="onInputPhone"
+          />
         </view>
 
         <!-- 身份证号码 / 证件号 -->
         <view class="form-group full-width-group">
           <view class="label-with-tag">
             <text class="label">身份证号码 / 证件号 (选填)</text>
-            <text class="field-sec-tag">🔒 密文存储 · 非必要不暴露</text>
+            <text class="field-sec-tag">🔒 密文存储 · 仅本人可见</text>
           </view>
-          <view class="secure-input-wrapper">
-            <input
-              class="form-input secure-input"
-              :password="!showIdCard"
-              type="text"
-              maxlength="18"
-              placeholder="用于赛事保险投保与参赛资格核验"
-              :value="profile?.id_card || ''"
-              @input="onInputIdCard"
-            />
-            <view class="eye-toggle-btn" @click="showIdCard = !showIdCard">
-              <text class="eye-icon">{{ showIdCard ? '👁️' : '🙈' }}</text>
-            </view>
-          </view>
-          <text class="field-privacy-subtip">🛡️ 默认以 *** 隐藏，点击眼睛符号才完整显示。证件号采用 AES-256 密文存储，任何普通成员不可见。</text>
+          <input
+            class="form-input"
+            type="text"
+            maxlength="18"
+            placeholder="用于赛事保险投保与参赛资格核验"
+            :value="profile?.id_card || ''"
+            @input="onInputIdCard"
+          />
         </view>
 
         <!-- 生理性别 -->
@@ -299,35 +560,39 @@
               :class="{ active: (profile?.gender || 'male') === 'male' }"
               @click="onGenderSelect('male')"
             >
-              <text>♂ 男 (Male)</text>
+              <text>♂ 男</text>
             </view>
             <view
               class="gender-pill"
               :class="{ active: profile?.gender === 'female' }"
               @click="onGenderSelect('female')"
             >
-              <text>♀ 女 (Female)</text>
+              <text>♀ 女</text>
             </view>
           </view>
         </view>
       </view>
     </view>
 
+      <!-- ── 渐进式资料：未加入大群时折叠商学院 / 赛事装备资料，避免吓跑普通跑者 ── -->
+    <view v-if="!hasOrgs" class="section-card extra-fields-toggle" @click="showOrgExtraFields = !showOrgExtraFields">
+      <view class="eft-meta">
+        <text class="eft-title">🎓 商学院 / 赛事装备资料</text>
+      </view>
+      <text class="eft-arrow">{{ showOrgExtraFields ? '收起 ▴' : '展开 ▾' }}</text>
+    </view>
+    <view v-if="hasOrgs || showOrgExtraFields">
       <!-- ── CARD: 商学院项目与戈友认证 ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🏫</text>
-          <text class="card-title">商学院项目与戈友认证</text>
+          <text class="card-title">商学院与戈友认证</text>
         </view>
-        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
           大群自动同步
         </text>
       </view>
-
-      <text class="desc-text">
-        在此填写的项目、班级与戈壁经历，将自动同步至您已加入的所有商学院跑团大群（如复旦戈友会）实名花名册，自动流转审核状态。
-      </text>
 
       <view class="form-grid-2">
         <!-- 所属项目 -->
@@ -362,7 +627,7 @@
             :value="profile?.class_detail || ''"
             @input="onInputClassDetail"
           />
-          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: #fbbf24;">
+          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: var(--rgm-amber, #fbbf24);">
             名册组合预览：{{ profile.program }} {{ profile.class_detail }}
           </text>
         </view>
@@ -383,7 +648,6 @@
               <text class="gobi-icon">🌱</text>
               <view class="gobi-info">
                 <text class="gobi-main-title">新戈跑者</text>
-                <text class="gobi-sub-title">首次备赛 / 暂无往届</text>
               </view>
             </view>
             <view
@@ -394,7 +658,6 @@
               <text class="gobi-icon">🏅</text>
               <view class="gobi-info">
                 <text class="gobi-main-title">往届老戈友</text>
-                <text class="gobi-sub-title">参加过戈1至戈21</text>
               </view>
             </view>
           </view>
@@ -441,16 +704,12 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🎽</text>
-          <text class="card-title">赛事活动与装备保障</text>
+          <text class="card-title">赛事与装备</text>
         </view>
-        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.3);">
+        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: var(--rgm-blue, #a5b4fc); border-color: rgba(99, 102, 241, 0.3);">
           物资发放 · 保险
         </text>
       </view>
-
-      <text class="desc-text">
-        用于商学院戈壁拉练、选拔赛与官方马拉松活动定制队服采购、装备物资统一分发及紧急安全联络。
-      </text>
 
       <view class="form-grid-2">
         <!-- 紧急联系人及电话 -->
@@ -463,7 +722,6 @@
             :value="profile?.emergency_contact || ''"
             @input="onInputEmergencyContact"
           />
-          <text class="field-privacy-subtip">建议填写直系亲属或紧急联络人姓名与电话</text>
         </view>
 
         <!-- 队服尺码 -->
@@ -496,6 +754,24 @@
           />
         </view>
 
+        <!-- 急救 / 医护资质认证 (选填 · 用于官兔评估加权) -->
+        <view class="form-group full-width-group">
+          <text class="label">🚑 急救 / 医护资质（选填 · 马拉松官兔优先项）</text>
+          <picker
+            mode="selector"
+            :range="FIRST_AID_CERT_LABELS"
+            :value="firstAidPickerIndex"
+            @change="onFirstAidCertChange"
+          >
+            <view class="picker-input-box">
+              <text :class="{ 'placeholder-text': !profile?.first_aid_cert_type }">
+                {{ FIRST_AID_CERT_LABELS[firstAidPickerIndex] || '暂未持有急救证书' }}
+              </text>
+              <text class="picker-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+
         <!-- 健康状况声明 -->
         <view class="form-group full-width-group">
           <view
@@ -517,96 +793,18 @@
       </view>
     </view>
 
-      <!-- ── CARD 2: Device Connection Status Card (Garmin & COROS) ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <text class="card-title">运动手表数据直连</text>
-      </view>
-
-      <!-- Garmin Status Block -->
-      <view class="device-status-item">
-        <view class="device-item-header">
-          <view class="device-name-wrap">
-            <text class="device-badge garmin-badge">Garmin</text>
-            <text class="device-name-text">佳明手表直连</text>
-          </view>
-          <text class="conn-status" :class="{ connected: garminConnected }">
-            {{ garminConnected ? "已连接 ✓" : "未连接" }}
-          </text>
-        </view>
-        <text class="desc-text" style="margin: 8rpx 0 16rpx 0;">
-          {{ garminConnected
-              ? `已绑定：${garminEmail} (${garminDomain})`
-              : "自动同步跑步心率、配速、步频、HRV 与睡眠体能指标。" }}
-        </text>
-        <button
-          v-if="!garminConnected"
-          class="garmin-btn"
-          style="margin-bottom: 20rpx;"
-          @click="openDeviceModal('garmin')"
-        >
-          绑定佳明账号
-        </button>
-        <button
-          v-else
-          class="unbind-btn"
-          style="margin-bottom: 20rpx;"
-          :loading="unbinding"
-          @click="handleUnbindGarmin"
-        >
-          解除佳明绑定
-        </button>
-      </view>
-
-      <!-- COROS Status Block -->
-      <view class="device-status-item" style="border-top: 1rpx solid rgba(255, 255, 255, 0.08); padding-top: 20rpx;">
-        <view class="device-item-header">
-          <view class="device-name-wrap">
-            <text class="device-badge coros-badge">COROS</text>
-            <text class="device-name-text">高驰手表直连</text>
-          </view>
-          <text class="conn-status" :class="{ connected: corosConnected }">
-            {{ corosConnected ? "已连接 ✓" : "未连接" }}
-          </text>
-        </view>
-        <text class="desc-text" style="margin: 8rpx 0 16rpx 0;">
-          {{ corosConnected
-              ? `已绑定：${corosAccount} (${corosDomain})`
-              : "自动同步高驰 Training Hub 跑步记录与训练负荷。" }}
-        </text>
-        <button
-          v-if="!corosConnected"
-          class="garmin-btn coros-btn"
-          @click="openDeviceModal('coros')"
-        >
-          绑定高驰账号
-        </button>
-        <view v-else class="btn-group-row" style="display: flex; gap: 16rpx; margin-top: 8rpx;">
-          <button
-            class="garmin-btn coros-btn"
-            style="flex: 1; margin: 0;"
-            @click="openDeviceModal('coros')"
-          >
-            🔑 重新授权/改密
-          </button>
-          <button
-            class="unbind-btn"
-            style="flex: 1; margin: 0;"
-            :loading="unbindingCoros"
-            @click="handleUnbindCoros"
-          >
-            解除绑定
-          </button>
-        </view>
-      </view>
     </view>
 
+    </template>
+
+    <!-- 子页面：通知与隐私 -->
+    <template v-if="activeSection === 'privacy'">
       <!-- ── CARD: 🔔 微信接收 Canova教练跑后点评推送 ── -->
     <view class="section-card wechat-notif-card">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🔔</text>
-          <text class="card-title">Canova教练跑后点评推送</text>
+          <text class="card-title">教练点评推送</text>
         </view>
         <view class="notif-status-badge" :class="{ enabled: wechatSubscribeEnabled }">
           <text class="status-dot" />
@@ -614,17 +812,49 @@
         </view>
       </view>
 
-      <text class="wechat-notif-desc">
-        当您户外跑完手表数据自动同步后，Canova 教练出具的针对性专业点评、心率负荷与超量恢复提示，将直接推送到您的手机微信（服务通知），点击一秒直达！
-      </text>
-
       <view class="wechat-notif-actions">
         <button class="enable-subscribe-btn" @click="handleRequestSubscribe">
-          📲 开启微信手机消息提醒
+          📲 开启微信提醒
         </button>
         <button class="test-subscribe-btn" :loading="testingPush" @click="handleTestWechatPush">
-          🧪 测试发送一次
+          🧪 测试推送
         </button>
+      </view>
+    </view>
+
+      <!-- ── CARD: 🔒 跑团训练与身体数据保密设定（仅对教练和师傅开放） ── -->
+    <view v-if="user" class="section-card privacy-guard-card" style="margin-bottom: 24rpx;">
+      <view class="card-title-row">
+        <view class="title-with-badge">
+          <text class="card-title">🔒 数据保密设置</text>
+          <text class="security-chip" style="background: rgba(16, 185, 129, 0.14); color: var(--rgm-green, #34d399); border-color: rgba(16, 185, 129, 0.35);">仅对教练与师傅开放</text>
+        </view>
+      </view>
+
+      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
+        <view style="flex: 1; padding-right: 20rpx;">
+          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+            🗺️ GPS 路线保密
+          </text>
+        </view>
+        <switch
+          :checked="!!profile?.hide_gps_route"
+          color="#10b981"
+          @change="(e: any) => handleToggleDataConfidentiality('hide_gps_route', !!e.detail.value)"
+        />
+      </view>
+
+      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
+        <view style="flex: 1; padding-right: 20rpx;">
+          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+            💓 心率/HRV/睡眠数据保密
+          </text>
+        </view>
+        <switch
+          :checked="!!profile?.hide_biometrics"
+          color="#10b981"
+          @change="(e: any) => handleToggleDataConfidentiality('hide_biometrics', !!e.detail.value)"
+        />
       </view>
     </view>
 
@@ -632,7 +862,7 @@
     <view v-if="user" class="section-card privacy-guard-card">
       <view class="card-title-row">
         <view class="title-with-badge">
-          <text class="card-title">🛡️ 个人隐私与数据安全保障</text>
+          <text class="card-title">🛡️ 隐私与数据安全</text>
           <text class="security-chip">AES-256 加密保护</text>
         </view>
       </view>
@@ -641,58 +871,157 @@
         <view class="privacy-rule-item">
           <text class="privacy-rule-icon">🔒</text>
           <view class="privacy-rule-content">
-            <text class="privacy-rule-title">敏感隐私 AES-256 高强度密文存储</text>
-            <text class="privacy-rule-desc">
-              真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与参赛资格核验。
-            </text>
+            <text class="privacy-rule-title">敏感信息 AES-256 加密存储</text>
           </view>
         </view>
 
         <view class="privacy-rule-item">
           <text class="privacy-rule-icon">👁️</text>
           <view class="privacy-rule-content">
-            <text class="privacy-rule-title">大群体名册严格自动脱敏</text>
-            <text class="privacy-rule-desc">
-              在团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
-            </text>
+            <text class="privacy-rule-title">名册自动脱敏</text>
           </view>
         </view>
 
         <view class="privacy-rule-item">
           <text class="privacy-rule-icon">🧹</text>
           <view class="privacy-rule-content">
-            <text class="privacy-rule-title">随时一键彻底清除个人隐私</text>
-            <text class="privacy-rule-desc">
-              您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。原有运动里程与活动记录将以匿名形式保留，以保障跑团队伍统计完整性。
-            </text>
+            <text class="privacy-rule-title">可随时清除个人隐私</text>
           </view>
         </view>
       </view>
 
       <view class="privacy-actions-row">
         <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
-          🧹 一键清除所有个人隐私数据
+          🧹 清除个人隐私数据
         </button>
       </view>
     </view>
 
+    </template>
+
+    <!-- 子页面：帮助与技术支持 -->
+    <template v-if="activeSection === 'support'">
+      <!-- 1. 微信一对一在线客服卡片 -->
+      <view class="section-card support-card">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">💬</text>
+            <text class="card-title">在线客服</text>
+          </view>
+        </view>
+
+        <!-- 账号与设备诊断摘要（一键复制，方便粘贴给客服） -->
+        <view class="support-diag-box" @click="handleCopyDiagnosticInfo">
+          <view class="sdiag-left">
+            <text class="sdiag-label">诊断信息</text>
+            <text class="sdiag-val">跑者：{{ profile?.display_name || user?.display_name || '微信跑者' }}</text>
+            <text class="sdiag-val">手表：{{ deviceStatusText }}</text>
+          </view>
+          <view class="sdiag-copy-pill">
+            <text>📋 复制</text>
+          </view>
+        </view>
+
+        <button
+          class="support-contact-btn"
+          open-type="contact"
+          :session-from="supportSessionFrom"
+          send-message-title="万跑跑团助手 · 技术支持"
+        >
+          💬 联系客服
+        </button>
+      </view>
+
+      <!-- 2. 站内问题反馈留言表单（自动携带诊断信息） -->
+      <view class="section-card support-card">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">📝</text>
+            <text class="card-title">问题留言</text>
+          </view>
+        </view>
+
+        <view class="support-cat-row">
+          <view
+            v-for="cat in SUPPORT_CATEGORIES"
+            :key="cat.value"
+            class="support-cat-chip"
+            :class="{ active: supportCategory === cat.value }"
+            @click="supportCategory = cat.value"
+          >
+            <text>{{ cat.label }}</text>
+          </view>
+        </view>
+
+        <textarea
+          class="support-textarea"
+          placeholder="请详细描述您遇到的问题（例如：绑定佳明时提示密码错误、某次跑步轨迹未显示等）..."
+          :maxlength="500"
+          v-model="supportContent"
+        />
+
+        <input
+          class="form-input support-contact-input"
+          type="text"
+          placeholder="选填：您的微信号或手机号（方便必要时联系您）"
+          v-model="supportContact"
+        />
+
+        <button
+          class="support-submit-btn"
+          :loading="submittingTicket"
+          :disabled="submittingTicket"
+          @click="handleSubmitSupportTicket"
+        >
+          📨 提交问题留言
+        </button>
+      </view>
+
+      <!-- 3. 我的反馈记录与管理员回复 -->
+      <view v-if="mySupportTickets.length > 0" class="section-card support-card">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">📋</text>
+            <text class="card-title">我的反馈记录 ({{ mySupportTickets.length }})</text>
+          </view>
+        </view>
+
+        <view class="support-ticket-list">
+          <view v-for="tkt in mySupportTickets" :key="tkt.id" class="support-ticket-item">
+            <view class="stkt-header">
+              <text class="stkt-cat">{{ getSupportCatLabel(tkt.category) }}</text>
+              <text class="stkt-status" :class="{ resolved: tkt.status === 'resolved' || !!tkt.admin_reply }">
+                {{ (tkt.status === 'resolved' || tkt.admin_reply) ? '✓ 已回复/已解决' : '⏳ 待处理' }}
+              </text>
+            </view>
+            <text class="stkt-content">{{ tkt.content }}</text>
+            <text class="stkt-time">提交于 {{ formatSupportTime(tkt.created_at) }}</text>
+
+            <view v-if="tkt.admin_reply" class="stkt-reply-box">
+              <text class="stkt-reply-title">👨‍💻 技术支持回复：</text>
+              <text class="stkt-reply-text">{{ tkt.admin_reply }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </template>
+
+    <!-- 子页面「个人资料」专属保存按钮 -->
+    <template v-if="activeSection === 'personal'">
           <!-- Tab 1 专属保存设置 -->
     <view v-if="user" class="save-box">
       <button class="save-btn" :loading="saving" @click="handleSaveAll">
-        💾 保存个人资料与账号设置
+        💾 保存个人资料
       </button>
     </view>
 
-      <!-- 底部退出登录（仅登录后显示） -->
-    <view v-if="user" class="logout-box">
-      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
-    </view>
     </template>
 
     <!-- ══════════════════════════════════════════════════════════════ -->
     <!-- TAB 2: 训练档案与赛事 (Training Metrics & Races)              -->
     <!-- ══════════════════════════════════════════════════════════════ -->
-    <template v-if="activeTab === 'training'">
+    <!-- 子页面：训练档案与赛事 -->
+    <template v-if="activeSection === 'training'">
       <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
     <view class="section-card">
       <view class="card-title-row">
@@ -735,7 +1064,7 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">💓</text>
-          <text class="card-title">运动体能与生理指标</text>
+          <text class="card-title">生理指标</text>
         </view>
         <button
           class="import-garmin-btn"
@@ -747,16 +1076,13 @@
         </button>
       </view>
 
-      <text class="desc-text" style="margin-bottom: 20rpx;">
-        Canova 教练根据静息心率与最大摄氧量 (VO2Max) 智能自适应训练配速区间与超量恢复。
-      </text>
-
       <view class="form-grid-2">
         <!-- 最大摄氧量 VO2Max -->
         <view class="form-group">
           <view class="label-with-tag">
             <text class="label">最大摄氧量 (VO2Max)</text>
-            <text class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
+            <text v-if="(garminConnected || corosConnected || appleConnected || huaweiConnected) && profile?.vo2max" class="estimate-pill-btn" style="color: #059669; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3);">⌚ 手表实测直读</text>
+            <text v-else class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
           </view>
           <input
             class="form-input"
@@ -834,16 +1160,12 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🎯</text>
-          <text class="card-title">个人跑量目标规划 (2026)</text>
+          <text class="card-title">跑量目标 (2026)</text>
         </view>
         <view class="target-badge" :class="{ locked: goalMode === 'custom' }">
           {{ goalMode === 'custom' ? '按月自定义' : `全年统一: ${targetDistance} km/月` }}
         </view>
       </view>
-
-      <text class="desc-text">
-        设定您个人的月跑量计划。支持全年统一均值设定，也可针对秋冬重点备赛期按月自定义递增规划。数据仅保存在您个人的跑者档案中。
-      </text>
 
       <!-- Goal Mode Switcher -->
       <view class="goal-mode-selector">
@@ -859,7 +1181,7 @@
           :class="{ active: goalMode === 'custom' }"
           @click="setGoalMode('custom')"
         >
-          按月自定义 (备赛期进阶)
+          按月自定义
         </view>
       </view>
 
@@ -876,29 +1198,34 @@
           block-size="20"
           @change="(e: any) => onTargetSliderChange(e.detail.value)"
         />
-        <text v-if="goalMode === 'custom'" class="locked-tip">
-          💡 已开启按月自定义模式，下方可针对每个月份独立调整
-        </text>
-        <text v-else class="uniform-tip">
-          拖动滑块即可一键将您的 1~12 月跑量目标统一设为 {{ targetDistance }} km
+        <text v-if="goalMode !== 'custom'" class="uniform-tip">
+          每月 {{ targetDistance }} km
         </text>
       </view>
 
       <!-- 12 Months Grid -->
       <view class="custom-months-section">
         <view class="custom-months-header">
-          <text class="cm-title">各月跑量细化目标 (km)</text>
+          <text class="cm-title">各月跑量 (km · 🔒1~{{ currentCalendarMonth }}月已锁定)</text>
           <text v-if="goalMode === 'custom'" class="sync-uniform-action" @click="syncUniformToAll">
-            重置为统一 {{ targetDistance }}km
+            未开始月份设为 {{ targetDistance }}km
           </text>
         </view>
 
         <view class="months-grid">
-          <view v-for="m in 12" :key="m" class="month-cell">
-            <text class="month-label">{{ m }}月</text>
+          <view
+            v-for="m in 12"
+            :key="m"
+            class="month-cell"
+            :class="{ 'month-locked': m <= currentCalendarMonth }"
+            @click="m <= currentCalendarMonth ? handleLockedMonthTap(m) : noop()"
+          >
+            <text class="month-label">{{ m }}月 {{ m <= currentCalendarMonth ? '🔒' : '✏️' }}</text>
             <input
               class="month-input"
+              :class="{ 'month-input-disabled': m <= currentCalendarMonth }"
               type="number"
+              :disabled="m <= currentCalendarMonth"
               :value="monthlyTargets[m - 1]"
               @input="(e: any) => onMonthTargetInput(m - 1, e.detail.value)"
             />
@@ -910,12 +1237,12 @@
       <view class="weekly-plan-section">
         <view class="custom-months-header">
           <view class="title-with-icon">
-            <text class="cm-title">🏃 常规周跑量计划</text>
+            <text class="cm-title">🏃 周跑量计划</text>
           </view>
-          <text class="weekly-target-badge">{{ weeklyTarget }} km / 周</text>
+          <text class="weekly-target-badge">下周计划 {{ weeklyTarget }} km / 周</text>
         </view>
         <text class="weekly-desc-tip">
-          周跑量计划无需按 52 周单独设定，设定常规周目标即可自动应用于全年的每周训练进度与负荷追踪。
+          🔒 本周 {{ currentWeekLockedTarget }} km 已锁定，修改自下周生效
         </text>
 
         <!-- Quick selection pills -->
@@ -944,13 +1271,13 @@
             @change="(e: any) => onWeeklySliderChange(e.detail.value)"
           />
           <text class="uniform-tip">
-            滑动调整每周常规跑步目标：{{ weeklyTarget }} km（相当于月均约 {{ Math.round(weeklyTarget * 4.3) }} km）
+            {{ weeklyTarget }} km/周 ≈ 月均 {{ Math.round(weeklyTarget * 4.3) }} km
           </text>
         </view>
 
         <view class="weekly-save-action">
           <button class="save-weekly-btn" :loading="savingWeekly" @click="handleSaveWeeklyOnly">
-            单独保存周跑量目标 ({{ weeklyTarget }}km)
+            保存周计划 ({{ weeklyTarget }}km)
           </button>
         </view>
       </view>
@@ -959,7 +1286,7 @@
     <!-- Tab 2 专属保存设置 (置于跑量目标配置下方，一目了然触手可及) -->
     <view v-if="user" class="save-box">
       <button class="save-btn" :loading="saving" @click="handleSaveAll">
-        🎯 保存训练目标与生理参数
+        🎯 保存训练档案
       </button>
     </view>
 
@@ -968,7 +1295,7 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🏁</text>
-          <text class="card-title">比赛计划与倒计时</text>
+          <text class="card-title">比赛计划</text>
         </view>
         <button class="add-race-header-btn" @click="openAddRaceModal">+ 添加比赛</button>
       </view>
@@ -990,6 +1317,13 @@
                 <text class="badge-text">{{ race.days_left }} 天{{ race.days_left < 30 ? " 冲刺" : "" }}</text>
               </view>
               <view class="race-quick-actions">
+                <view
+                  v-if="race.status === 'completed' || race.is_completed"
+                  class="race-action-pill share-race-pill"
+                  @click.stop="openCompletedRaceShareCard(race)"
+                >
+                  <text class="pill-text">📸 完赛分享卡</text>
+                </view>
                 <view class="race-action-pill edit-pill" @click.stop="openEditRaceModal(race)">
                   <text class="pill-text">{{ (race.status === 'completed' || race.is_completed) ? '🏅 记录' : '✏️ 编辑' }}</text>
                 </view>
@@ -1011,6 +1345,9 @@
             <view class="completed-summary-row">
               <text class="comp-badge-tag">{{ race.performance_badge || '顺利完赛' }}</text>
               <text v-if="race.diff_str" class="comp-diff-text">比目标 {{ race.diff_str }}</text>
+              <view class="comp-share-card-btn" @click.stop="openCompletedRaceShareCard(race)">
+                <text class="comp-share-card-txt">📸 完赛分享卡</text>
+              </view>
             </view>
             <text v-if="race.finish_notes" class="comp-notes-text">“{{ race.finish_notes }}”</text>
             <!-- Photos row in card -->
@@ -1029,10 +1366,9 @@
                 <text class="card-add-txt">加照片</text>
               </view>
             </view>
-            <text v-if="race.photos && race.photos.length > 0" class="card-photo-hint">长按照片可删除或放大 🔍</text>
           </view>
           <view v-else-if="race.is_past" class="race-past-tip" @click.stop="openEditRaceModal(race)">
-            <text class="past-tip-text">⚠️ 比赛日已过，点击标记完赛与填报成绩 ➔</text>
+            <text class="past-tip-text">⚠️ 比赛日已过，去填报成绩 ➔</text>
           </view>
           <view class="race-priority-row">
             <text class="race-priority-lbl">定位调整:</text>
@@ -1059,7 +1395,7 @@
           <view class="race-info-toggle-row">
             <view class="race-info-toggle-trigger" @click="toggleRaceInfo(getRaceKey(race, idx))">
               <text class="race-info-toggle-label">
-                {{ hasRaceInfo(race) ? '📋 赛事情报已填写 (点击展开/编辑)' : '📋 赛事情报未填 (点击展开)' }}
+                {{ hasRaceInfo(race) ? '📋 赛事情报 · 已填' : '📋 赛事情报 · 未填' }}
               </text>
               <text class="race-info-toggle-arrow">{{ expandedRaceInfo[getRaceKey(race, idx)] ? '▲' : '▼' }}</text>
             </view>
@@ -1068,13 +1404,10 @@
               :loading="searchingRaceInfo[getRaceKey(race, idx)]"
               :disabled="searchingRaceInfo[getRaceKey(race, idx)]"
               @click.stop="handleAutoFetchRaceInfo(race)"
-            >⚡ AI 填情报</button>
+            >⚡ 自动填情报</button>
           </view>
 
           <view v-if="expandedRaceInfo[getRaceKey(race, idx)]" class="race-info-panel">
-            <view class="race-info-panel-hint">
-              <text class="panel-hint-text">💡 支持手动编辑或一键自动填录，修改后点击下方保存生效</text>
-            </view>
 
 
             <!-- ── 越野赛专属字段 ── -->
@@ -1238,13 +1571,42 @@
               </view>
 
               <view class="race-info-row">
-                <text class="race-info-label">赛道净爬升 (m)</text>
+                <text class="race-info-label">报名赛程 (km)</text>
                 <input
                   class="race-info-input"
                   type="digit"
-                  placeholder="如 120"
-                  :value="getRaceInfoVal(race, 'net_elevation_gain_m')"
-                  @input="(e: any) => setRaceInfoVal(race, 'net_elevation_gain_m', parseFloat(e.detail.value) || null)"
+                  placeholder="如 42.195 / 21.0975 / 10"
+                  :value="getRaceInfoVal(race, 'race_distance_km')"
+                  @input="(e: any) => setRaceInfoVal(race, 'race_distance_km', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">累计爬升 D+ (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 50"
+                  :value="getRaceInfoVal(race, 'elevation_gain_m') || getRaceInfoVal(race, 'net_elevation_gain_m')"
+                  @input="(e: any) => { const v = parseFloat(e.detail.value) || null; setRaceInfoVal(race, 'elevation_gain_m', v); setRaceInfoVal(race, 'net_elevation_gain_m', v); }"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">累计下降 D- (m)</text>
+                <input
+                  class="race-info-input"
+                  type="digit"
+                  placeholder="如 50"
+                  :value="getRaceInfoVal(race, 'elevation_loss_m')"
+                  @input="(e: any) => setRaceInfoVal(race, 'elevation_loss_m', parseFloat(e.detail.value) || null)"
+                />
+              </view>
+              <view class="race-info-row">
+                <text class="race-info-label">关门时间说明</text>
+                <input
+                  class="race-info-input"
+                  placeholder="如: 全马6小时15分"
+                  :value="getRaceInfoVal(race, 'cutoff_notes')"
+                  @input="(e: any) => setRaceInfoVal(race, 'cutoff_notes', e.detail.value)"
                 />
               </view>
             </template>
@@ -1311,15 +1673,15 @@
         </view>
       </view>
       <view v-else class="empty-race">
-        <text class="desc-text">暂无比赛计划，点击下方按钮开始规划备战吧！</text>
-        <button class="add-race-empty-btn" @click="openAddRaceModal">+ 立即添加第一场比赛</button>
+        <text class="desc-text">暂无比赛计划</text>
+        <button class="add-race-empty-btn" @click="openAddRaceModal">+ 添加比赛</button>
       </view>
     </view>
 
     <!-- Tab 2 专属保存设置（底部备用） -->
     <view v-if="user" class="save-box save-box-bottom">
       <button class="save-btn" :loading="saving" @click="handleSaveAll">
-        🎯 保存训练目标与生理参数
+        🎯 保存训练档案
       </button>
     </view>
     </template>
@@ -1337,9 +1699,8 @@
         <scroll-view scroll-y class="auth-scroll-body">
           <view class="modal-body">
           <view class="wx-brand-hero">
-            <text class="wx-hero-icon">🏃</text>
-            <text class="wx-hero-title">RGM 跑团助手</text>
-            <text class="wx-hero-desc">科学耐力训练 · Garmin / COROS 手表直连</text>
+            <image class="wx-hero-logo" src="/static/logo-square.png" mode="aspectFit" />
+            <text class="wx-hero-title">万跑跑团助手</text>
           </view>
 
           <!-- 1. 当前已登录会话简况 -->
@@ -1348,7 +1709,6 @@
               <view class="status-user-info">
                 <text class="status-title">当前登录跑者：</text>
                 <text class="status-val bold">{{ profile?.display_name || user.display_name || "微信跑者" }}</text>
-                <text class="status-sub">({{ user.id }})</text>
               </view>
               <button class="status-logout-btn" @click="handleConfirmLogout">退出登录</button>
             </view>
@@ -1356,6 +1716,7 @@
               <text class="status-label">手表连接: </text>
               <text class="status-val text-green" v-if="garminConnected">佳明已绑定 ({{ garminEmail || '账号' }})</text>
               <text class="status-val text-green" v-else-if="corosConnected">高驰已绑定 ({{ corosAccount || '账号' }})</text>
+              <text class="status-val text-green" v-else-if="appleWatchConnected || huaweiConnected || suuntoConnected">苹果 / 华为 / 颂拓已激活</text>
               <text class="status-val text-muted" v-else>未绑定运动设备</text>
             </view>
           </view>
@@ -1383,10 +1744,7 @@
             <!-- 模式 1: 微信独立授权登录 -->
             <view v-if="authTab === 'wechat'" class="auth-flow-box">
               <view class="auth-intro-box">
-                <text class="auth-intro-title">🛡️ 微信独立授权登录</text>
-                <text class="auth-intro-desc">
-                  系统将使用您当前的微信账号建立专属独立跑者档案。每个微信号独立隔离，绝不混淆他人数据。
-                </text>
+                <text class="auth-intro-title">🛡️ 微信授权登录</text>
               </view>
 
               <!-- 微信原生头像与微信昵称快捷获取 -->
@@ -1406,7 +1764,7 @@
                   </button>
 
                   <view class="nickname-input-box">
-                    <text class="field-label">微信昵称 (点击下方键盘可一键填入)</text>
+                    <text class="field-label">微信昵称</text>
                     <input
                       type="nickname"
                       class="large-input nickname-input"
@@ -1439,15 +1797,22 @@
               >
                 🟢 授权并创建新跑者身份
               </button>
+
+              <!-- #ifdef APP-PLUS -->
+              <button
+                class="apple-auth-modal-btn"
+                @click="handleAppleLogin"
+                style="margin-top: 20rpx; background: #000000; color: #ffffff; border: 1px solid var(--rgm-line, rgba(255,255,255,0.25)); border-radius: 12rpx; font-size: 28rpx; height: 84rpx; line-height: 84rpx; display: flex; align-items: center; justify-content: center; font-weight: 600;   --rgm-text: var(--rgm-on-deep); --rgm-text-2: var(--rgm-on-deep-2); --rgm-text-3: var(--rgm-on-deep-2); "
+              >
+                 通过 Apple 登录 (Sign in with Apple)
+              </button>
+              <!-- #endif -->
             </view>
 
             <!-- 模式 2: 已有手表账号验证登录 / 档案恢复 -->
             <view v-else class="auth-flow-box device-login-box">
               <view class="auth-intro-box">
-                <text class="auth-intro-title">🔐 运动手表安全验证登录</text>
-                <text class="auth-intro-desc">
-                  已在平台拥有训练数据的跑者，可直接输入绑定的佳明或高驰手表账号密码。官方验证通过后，将自动恢复您的独立跑者档案。
-                </text>
+                <text class="auth-intro-title">🔐 手表账号验证恢复档案</text>
               </view>
 
               <!-- 品牌切换 -->
@@ -1474,17 +1839,17 @@
                 <view class="domain-btn-wrap">
                   <view
                     class="domain-chip"
-                    :class="{ active: deviceDomain === 'garmin.com' }"
-                    @click="deviceDomain = 'garmin.com'"
-                  >
-                    <text>国际区 (.com)</text>
-                  </view>
-                  <view
-                    class="domain-chip"
                     :class="{ active: deviceDomain === 'garmin.cn' }"
                     @click="deviceDomain = 'garmin.cn'"
                   >
                     <text>中国区 (.cn)</text>
+                  </view>
+                  <view
+                    class="domain-chip"
+                    :class="{ active: deviceDomain === 'garmin.com' }"
+                    @click="deviceDomain = 'garmin.com'"
+                  >
+                    <text>国际区 (.com)</text>
                   </view>
                 </view>
               </view>
@@ -1496,9 +1861,9 @@
                   <input
                     class="large-input"
                     :value="deviceAccount"
-                    :placeholder="deviceBrand === 'garmin' ? '例如 azwan56@hotmail.com' : '请输入高驰账号'"
+                    :placeholder="deviceBrand === 'garmin' ? '例如 runner@example.com' : '请输入高驰账号'"
                     placeholder-class="placeholder-style"
-                    @input="deviceAccount = $event.detail.value"
+                    @input="deviceAccount = $event.detail.value; deviceNeedsMfa = false"
                   />
                 </view>
 
@@ -1513,6 +1878,22 @@
                     @input="devicePassword = $event.detail.value"
                   />
                 </view>
+
+                <view v-if="deviceNeedsMfa" class="device-form-item">
+                  <text class="field-label" style="color: #fbbf24;">📱 6位安全验证码（短信 / 邮箱）</text>
+                  <input
+                    type="number"
+                    maxlength="6"
+                    class="large-input"
+                    :value="deviceMfaCode"
+                    placeholder="请输入收到的 6 位安全验证码"
+                    placeholder-class="placeholder-style"
+                    @input="deviceMfaCode = $event.detail.value"
+                  />
+                  <text v-if="deviceMfaHint" style="font-size: 21rpx; color: #fbbf24; margin-top: 6rpx; display: block;">
+                    {{ deviceMfaHint }}
+                  </text>
+                </view>
               </view>
 
               <!-- 登录按钮 -->
@@ -1521,7 +1902,7 @@
                 :loading="deviceLoggingIn"
                 @click="doDeviceLogin"
               >
-                🔐 验证账号并恢复跑者档案
+                {{ deviceNeedsMfa ? "✅ 提交验证码并登录" : "🔐 验证账号并恢复跑者档案" }}
               </button>
             </view>
           </view>
@@ -1530,31 +1911,46 @@
       </view>
     </view>
 
-    <!-- Large & Modern Device Bind Modal (Garmin & COROS) -->
+    <!-- Large & Modern Device Bind Modal (Garmin · COROS · Apple Watch · HUAWEI) -->
     <view v-if="showGarminModal" class="modal-mask" @click="showGarminModal = false" @touchmove.stop.prevent>
       <view class="modal-content" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">连接运动手表数据</text>
+          <text class="modal-title">连接手表</text>
           <view class="close-hit" @click="showGarminModal = false">
             <text class="close-btn">✕</text>
           </view>
         </view>
 
-        <!-- Brand Switcher Tabs -->
-        <view class="brand-switch-row">
+        <!-- 弹窗内 24 小时佩戴提示 -->
+        <view style="background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); border-radius: 14rpx; padding: 16rpx 20rpx; margin: 0 0 20rpx 0;">
+          <text style="display: block; font-size: 24rpx; font-weight: 700; color: #b45309;">
+            ⚠️ 请保持 24 小时佩戴手表（含夜间睡眠）
+          </text>
+        </view>
+
+        <!-- 3-Group Brand Switcher Grid -->
+        <view class="brand-switch-grid-4">
           <view
-            class="brand-switch-btn"
+            class="brand-switch-btn brand-garmin"
             :class="{ active: selectedBrand === 'garmin' }"
             @click="selectedBrand = 'garmin'"
           >
             Garmin 佳明
           </view>
           <view
-            class="brand-switch-btn"
+            class="brand-switch-btn brand-coros"
             :class="{ active: selectedBrand === 'coros' }"
             @click="selectedBrand = 'coros'"
           >
             COROS 高驰
+          </view>
+          <view
+            class="brand-switch-btn brand-apple"
+            style="grid-column: span 2;"
+            :class="{ active: selectedBrand === 'apple_watch' || selectedBrand === 'huawei' || selectedBrand === 'suunto' }"
+            @click="selectedBrand = 'apple_watch'"
+          >
+            ⌚ 苹果 / 华为 / 颂拓
           </view>
         </view>
 
@@ -1564,8 +1960,8 @@
             <!-- MFA Verification Step -->
             <view v-if="needsMfa" class="mfa-section">
               <view class="mfa-alert-box">
-                <text class="mfa-alert-title">🔒 佳明官方双重安全验证</text>
-                <text class="mfa-alert-desc">佳明已向您的注册邮箱或手机发送了 6 位安全验证码，请输入以完成绑定：</text>
+                <text class="mfa-alert-title">🔒 佳明安全验证</text>
+                <text class="mfa-alert-desc">验证码已发送至您的注册邮箱或手机</text>
               </view>
               <text class="field-label">6 位安全验证码</text>
               <input
@@ -1579,10 +1975,10 @@
                 v-model="inputMfaCode"
               />
               <button class="large-primary-btn" :loading="binding" @click="handleBindGarmin">
-                确认验证码并完成绑定
+                确认绑定
               </button>
               <button class="text-cancel-btn" @click="needsMfa = false">
-                返回修改账号与密码
+                返回修改账号
               </button>
             </view>
 
@@ -1595,14 +1991,14 @@
                   :class="{ active: inputDomain === 'garmin.cn' }"
                   @click="inputDomain = 'garmin.cn'"
                 >
-                  中国版 (garmin.cn)
+                  中国区 (garmin.cn)
                 </view>
                 <view
                   class="domain-btn"
                   :class="{ active: inputDomain === 'garmin.com' }"
                   @click="inputDomain = 'garmin.com'"
                 >
-                  国际版 (garmin.com)
+                  国际区 (garmin.com)
                 </view>
               </view>
 
@@ -1629,55 +2025,134 @@
               />
 
               <button class="large-primary-btn" :loading="binding" @click="handleBindGarmin">
-                确认连接佳明并立即同步
+                连接佳明
               </button>
             </view>
           </view>
 
           <!-- ── COROS TAB ── -->
           <view v-else-if="selectedBrand === 'coros'">
-            <text class="field-label">高驰账号所属区域</text>
-            <view class="domain-selector">
-              <view
-                class="domain-btn"
-                :class="{ active: inputCorosDomain === 'teamcnapi.coros.com' }"
-                @click="inputCorosDomain = 'teamcnapi.coros.com'"
-              >
-                中国区 (teamcnapi)
+            <!-- COROS 2FA Verification Step -->
+            <view v-if="needsCoros2fa" class="mfa-section">
+              <view class="mfa-alert-box coros-mfa-box">
+                <text class="mfa-alert-title">🔒 高驰安全验证</text>
+                <text class="mfa-alert-desc">验证码已发送至您的注册手机</text>
               </view>
-              <view
-                class="domain-btn"
-                :class="{ active: inputCorosDomain === 'teamapi.coros.com' }"
-                @click="inputCorosDomain = 'teamapi.coros.com'"
-              >
-                国际区 (teamapi)
+              <text class="field-label">6 位手机验证码</text>
+              <input
+                class="large-input center-input"
+                type="number"
+                maxlength="6"
+                :adjust-position="false"
+                :cursor-spacing="30"
+                placeholder="请输入 6 位短信验证码"
+                placeholder-class="placeholder-style"
+                v-model="inputCoros2faCode"
+              />
+              <button class="large-primary-btn coros-primary-btn" :loading="bindingCoros" @click="handleBindCoros">
+                确认绑定
+              </button>
+              <button class="text-cancel-btn" @click="needsCoros2fa = false">
+                返回修改账号
+              </button>
+            </view>
+
+            <!-- Standard COROS Credential Step -->
+            <view v-else>
+              <text class="field-label">高驰账号所属区域</text>
+              <view class="domain-selector">
+                <view
+                  class="domain-btn"
+                  :class="{ active: inputCorosDomain === 'teamcnapi.coros.com' }"
+                  @click="inputCorosDomain = 'teamcnapi.coros.com'"
+                >
+                  中国区 (teamcnapi)
+                </view>
+                <view
+                  class="domain-btn"
+                  :class="{ active: inputCorosDomain === 'teamapi.coros.com' }"
+                  @click="inputCorosDomain = 'teamapi.coros.com'"
+                >
+                  国际区 (teamapi)
+                </view>
+              </view>
+
+              <text class="field-label">高驰注册账号（手机号或邮箱）</text>
+              <input
+                class="large-input"
+                type="text"
+                :adjust-position="false"
+                :cursor-spacing="30"
+                placeholder="例如 13800000000 或 user@email.com"
+                placeholder-class="placeholder-style"
+                v-model="inputCorosAccount"
+              />
+
+              <text class="field-label">
+                {{
+                  corosConnected && corosHasSavedPassword && inputCorosAccount.trim().toLowerCase() === corosAccount.trim().toLowerCase()
+                    ? "高驰登录密码（未改密可留空，直接获取短信验证码）"
+                    : "高驰登录密码"
+                }}
+              </text>
+              <input
+                class="large-input"
+                type="password"
+                :adjust-position="false"
+                :cursor-spacing="30"
+                :placeholder="
+                  corosConnected && corosHasSavedPassword && inputCorosAccount.trim().toLowerCase() === corosAccount.trim().toLowerCase()
+                    ? '留空自动使用已存密码，改密则填新密码'
+                    : '请输入您的 COROS 密码'
+                "
+                placeholder-class="placeholder-style"
+                v-model="inputCorosPassword"
+              />
+
+              <button class="large-primary-btn coros-primary-btn" :loading="bindingCoros" @click="handleBindCoros">
+                {{
+                  corosConnected && corosHasSavedPassword && !inputCorosPassword.trim() && inputCorosAccount.trim().toLowerCase() === corosAccount.trim().toLowerCase()
+                    ? "📱 发送短信验证码（免输密码）"
+                    : "连接高驰"
+                }}
+              </button>
+            </view>
+          </view>
+
+          <!-- ── 苹果 / 华为 / 颂拓 统一免密导入 TAB ── -->
+          <view v-else class="watch-guide-pane">
+            <view class="watch-guide-card apple-guide-card">
+              <text class="watch-guide-title">⌚ 苹果 / 华为 / 颂拓 · 导入方式</text>
+              <view class="watch-step-list">
+                <text class="watch-step-item">📸 截图：「苹果健康 → 步行+跑步距离 → 所有已记录的数据」列表，或各运动 App 跑步详情图</text>
+                <text class="watch-step-item">📂 轨迹：从运动 App 导出 FIT/GPX/TCX 文件到微信后导入</text>
               </view>
             </view>
 
-            <text class="field-label">高驰注册账号（手机号或邮箱）</text>
-            <input
-              class="large-input"
-              type="text"
-              :adjust-position="false"
-              :cursor-spacing="30"
-              placeholder="例如 13800000000 或 user@email.com"
-              placeholder-class="placeholder-style"
-              v-model="inputCorosAccount"
-            />
+            <button
+              class="large-primary-btn apple-primary-btn"
+              style="margin-bottom: 16rpx;"
+              :loading="!!importingScreenshotBrand"
+              @click="handleImportWatchScreenshot(activeHealthWatchBrand, true)"
+            >
+              📸 选运动截图导入
+            </button>
 
-            <text class="field-label">高驰登录密码</text>
-            <input
-              class="large-input"
-              type="password"
-              :adjust-position="false"
-              :cursor-spacing="30"
-              placeholder="请输入您的 COROS 密码"
-              placeholder-class="placeholder-style"
-              v-model="inputCorosPassword"
-            />
+            <button
+              class="modal-outline-btn apple-modal-outline"
+              style="margin-bottom: 16rpx;"
+              :loading="!!importingTrackBrand"
+              @click="handleImportWatchTrack(activeHealthWatchBrand, true)"
+            >
+              📂 导入 FIT/GPX/TCX
+            </button>
 
-            <button class="large-primary-btn coros-primary-btn" :loading="bindingCoros" @click="handleBindCoros">
-              确认连接高驰并立即同步
+            <button
+              class="modal-outline-btn apple-modal-outline"
+              :loading="bindingHealthWatch"
+              @click="handleBindHealthWatch(activeHealthWatchBrand)"
+            >
+              {{ (appleWatchConnected || huaweiConnected || suuntoConnected) ? '✓ 已激活（刷新）' : '⌚ 标记已连接' }}
             </button>
           </view>
         </view>
@@ -1695,14 +2170,14 @@
         </view>
 
         <view class="modal-body">
-          <text class="field-label">跑团专属 6 位邀请码</text>
+          <text class="field-label">跑团专属邀请码</text>
           <input
             class="large-input center-input"
             type="text"
-            maxlength="6"
+            maxlength="12"
             :adjust-position="false"
             :cursor-spacing="30"
-            placeholder="请输入 6 位跑团邀请码"
+            placeholder="请输入跑团邀请码"
             placeholder-class="placeholder-style"
             v-model="inviteCodeInput"
           />
@@ -1714,17 +2189,17 @@
     </view>
 
 
-    <!-- ── Edit Profile Modal (修改昵称与头像) ── -->
+    <!-- ── Edit Profile Modal (修改个人资料与身体参数) ── -->
     <view v-if="showEditProfileModal" class="modal-mask" @click="showEditProfileModal = false" @touchmove.stop.prevent>
       <view class="modal-content edit-profile-modal" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">修改个人资料与头像</text>
+          <text class="modal-title">编辑资料</text>
           <view class="close-hit" @click="showEditProfileModal = false">
             <text class="close-btn">✕</text>
           </view>
         </view>
 
-        <view class="modal-body">
+        <scroll-view scroll-y class="modal-body modal-scroll" style="max-height: 72vh;">
           <!-- 1. 头像选择与上传 -->
           <view class="avatar-edit-box">
             <image
@@ -1747,12 +2222,11 @@
                 🖼️ 相册 / 拍照
               </button>
             </view>
-            <text class="avatar-hint">头像将同步展示于跑团花名册、大盘排行榜与教练视窗</text>
           </view>
 
           <!-- 2. 昵称编辑 -->
           <view class="edit-field-wrap">
-            <text class="field-label">跑者昵称 (Display Name)</text>
+            <text class="field-label">跑者昵称 *</text>
             <input
               type="nickname"
               class="large-input edit-name-input"
@@ -1762,18 +2236,104 @@
               @blur="onEditNameBlur"
               @input="onEditNameInput"
             />
-            <text class="input-hint">可轻触输入框上方快捷气泡自动填入微信昵称，或直接输入</text>
           </view>
 
-          <!-- 3. 保存按钮 -->
+          <!-- 3. 生理性别 -->
+          <view class="edit-field-wrap">
+            <text class="field-label">生理性别 *</text>
+            <view class="modal-gender-row">
+              <view
+                class="gender-pill"
+                :class="{ active: editGender === 'male' }"
+                @click="editGender = 'male'"
+              >
+                <text class="gender-pill-txt">🚹 男跑者</text>
+              </view>
+              <view
+                class="gender-pill"
+                :class="{ active: editGender === 'female' }"
+                @click="editGender = 'female'"
+              >
+                <text class="gender-pill-txt">🚺 女跑者</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 4. 出生日期 -->
+          <view class="edit-field-wrap">
+            <text class="field-label">出生日期 *</text>
+            <picker mode="date" :value="editDob || '1990-01-01'" start="1940-01-01" :end="todayDateStr" @change="onEditDobChange">
+              <view class="modal-picker-box">
+                <text class="modal-picker-val">{{ editDob || "请选择出生日期" }}</text>
+                <text class="modal-picker-arrow">📅 ›</text>
+              </view>
+            </picker>
+          </view>
+
+          <!-- 5. 身高与体重 -->
+          <view class="modal-row-2">
+            <view class="modal-col-half">
+              <text class="field-label">身高 (cm)</text>
+              <input
+                class="large-input"
+                type="digit"
+                placeholder="175"
+                placeholder-class="placeholder-style"
+                v-model="editHeight"
+              />
+            </view>
+            <view class="modal-col-half">
+              <text class="field-label">体重 (kg)</text>
+              <input
+                class="large-input"
+                type="digit"
+                placeholder="65"
+                placeholder-class="placeholder-style"
+                v-model="editWeight"
+              />
+            </view>
+          </view>
+
+          <!-- 6. 跑龄 -->
+          <view class="edit-field-wrap" style="margin-top: 14rpx;">
+            <text class="field-label">跑步年限 (年)</text>
+            <input
+              class="large-input"
+              type="number"
+              placeholder="2"
+              placeholder-class="placeholder-style"
+              v-model="editYearsRunning"
+            />
+          </view>
+
+          <!-- 7. 快捷导航直达 -->
+          <view class="modal-direct-links">
+            <view class="direct-link-card" @click="jumpToFullProfileFromModal">
+              <text class="dlc-icon">📜</text>
+              <view class="dlc-texts">
+                <text class="dlc-title">实名认证、手表绑定与目标</text>
+              </view>
+              <text class="dlc-arrow">›</text>
+            </view>
+            <view class="direct-link-card secondary" @click="jumpToOnboardingFromModal">
+              <text class="dlc-icon">🚀</text>
+              <view class="dlc-texts">
+                <text class="dlc-title">跑者设定向导</text>
+              </view>
+              <text class="dlc-arrow">›</text>
+            </view>
+          </view>
+
+          <!-- 8. 保存按钮 -->
           <button
             class="large-primary-btn save-profile-btn"
             :loading="savingProfile"
             @click="handleSaveProfile"
           >
-            保存并立即生效
+            保存
           </button>
-        </view>
+          <view style="height: 20rpx;"></view>
+        </scroll-view>
       </view>
     </view>
 
@@ -1788,7 +2348,7 @@
         </view>
 
         <scroll-view scroll-y class="race-modal-scroll">
-          <!-- 1. 比赛名称 & AI 快速填充 -->
+          <!-- 1. 比赛名称 & 自动快速填充 -->
           <view class="m-field-wrap">
             <text class="m-field-lbl">比赛名称</text>
             <view class="m-input-ai-row">
@@ -1804,7 +2364,7 @@
                 :loading="modalSearchingRaceInfo"
                 :disabled="modalSearchingRaceInfo"
                 @click="handleModalAutoFetchRaceInfo"
-              >⚡ AI 填情报</button>
+              >⚡ 自动填情报</button>
             </view>
           </view>
 
@@ -1854,23 +2414,23 @@
 
           <!-- 4. 赛事定位分级 -->
           <view class="m-field-wrap">
-            <text class="m-field-lbl">赛事定位分级 (Canova A/B/C)</text>
+            <text class="m-field-lbl">赛事分级</text>
             <view class="priority-segmented">
               <view
                 class="seg-item"
                 :class="{ active: raceForm.priority == 1 || raceForm.priority === 'A' }"
                 @click="raceForm.priority = 1"
-              >A 标 (核心突破)</view>
+              >A 标 (核心)</view>
               <view
                 class="seg-item"
                 :class="{ active: raceForm.priority == 2 || raceForm.priority === 'B' }"
                 @click="raceForm.priority = 2"
-              >B 标 (以赛代练)</view>
+              >B 标 (代练)</view>
               <view
                 class="seg-item"
                 :class="{ active: raceForm.priority == 3 || raceForm.priority === 'C' }"
                 @click="raceForm.priority = 3"
-              >C 标 (模拟拉练)</view>
+              >C 标 (拉练)</view>
             </view>
           </view>
 
@@ -1882,25 +2442,33 @@
                 class="status-seg-item"
                 :class="{ active: raceForm.status !== 'completed' }"
                 @click="raceForm.status = 'upcoming'"
-              >🟢 备战中 (Upcoming)</view>
+              >🟢 备战中</view>
               <view
                 class="status-seg-item completed-item"
                 :class="{ active: raceForm.status === 'completed' }"
                 @click="raceForm.status = 'completed'"
-              >🏅 已完赛 (Completed)</view>
+              >🏅 已完赛</view>
             </view>
           </view>
 
           <!-- 完赛详情面板（当选择已完赛时展开） -->
           <view v-if="raceForm.status === 'completed'" class="m-completion-section">
             <view class="m-completion-header">
-              <text class="comp-sec-title">🏅 完赛成绩与记录回填</text>
-              <button
-                class="m-auto-match-btn"
-                :loading="matchingWatchActivity"
-                :disabled="matchingWatchActivity"
-                @click="handleModalMatchActivity"
-              >⚡ 从手表记录一键提取</button>
+              <text class="comp-sec-title">🏅 完赛记录</text>
+              <view style="display:flex; gap:12rpx;">
+                <button
+                  v-if="raceForm.id"
+                  class="m-auto-match-btn"
+                  style="background:var(--rgm-brand-tint, rgba(251,191,36,0.18)); border-color:var(--rgm-brand-line, #fbbf24); color:var(--rgm-brand-text, #fbbf24);"
+                  @click="openCompletedRaceShareCard(raceForm)"
+                >📸 完赛分享卡</button>
+                <button
+                  class="m-auto-match-btn"
+                  :loading="matchingWatchActivity"
+                  :disabled="matchingWatchActivity"
+                  @click="handleModalMatchActivity"
+                >⚡ 从手表提取</button>
+              </view>
             </view>
 
             <view class="m-field-wrap">
@@ -1930,6 +2498,29 @@
               />
             </view>
 
+            <!-- 担任官方配速员（官兔）履历标记 -->
+            <view class="m-field-wrap" style="padding: 16rpx 20rpx; border-radius: 18rpx; background: rgba(252, 76, 2, 0.08); border: 1rpx solid rgba(252, 76, 2, 0.25);">
+              <view style="display: flex; align-items: center; justify-content: space-between;">
+                <text style="font-size: 24rpx; font-weight: 700; color: #fc4c02;">🐰 本场担任官方配速员（官兔）</text>
+                <switch
+                  :checked="Boolean(raceForm.was_official_pacer)"
+                  color="#FC4C02"
+                  style="transform: scale(0.8);"
+                  @change="onToggleRaceOfficialPacer"
+                />
+              </view>
+              <view v-if="raceForm.was_official_pacer" style="margin-top: 12rpx;">
+                <text class="m-field-lbl">官兔领跑组别目标时间 (HH:MM:SS)</text>
+                <input
+                  class="m-input-txt font-mono"
+                  type="text"
+                  v-model="raceForm.pacer_target_time"
+                  placeholder="如: 03:30:00"
+                  placeholder-class="placeholder-style"
+                />
+              </view>
+            </view>
+
             <view class="m-field-wrap">
               <view class="m-photo-lbl-row">
                 <text class="m-field-lbl">完赛照片 / 证书 / 奖牌</text>
@@ -1952,7 +2543,7 @@
                 </view>
               </view>
               <view v-else class="modal-photo-empty" @click="handleChooseRacePhoto">
-                <text class="empty-photo-text">暂无照片，点击此处或上方按钮上传成绩证书、奖牌或冲线照 📸</text>
+                <text class="empty-photo-text">点击上传证书、奖牌或冲线照 📸</text>
               </view>
             </view>
           </view>
@@ -2197,7 +2788,7 @@
             </view>
             <view class="purge-detail-item red-item">
               <text class="purge-dot red-dot">✕</text>
-              <text class="purge-item-text">各大跑团/大群体花名册中的实名认证登记</text>
+              <text class="purge-item-text">各大跑团/大群花名册中的实名认证登记</text>
             </view>
 
             <view class="purge-divider"></view>
@@ -2224,17 +2815,43 @@
         </view>
       </view>
     </view>
+    <!-- 个人打卡 & 已完赛赛事分享朋友圈卡片弹窗 -->
+    <PersonalShareCardModal
+      :visible="showRaceShareCard"
+      :race-id="activeShareRaceId"
+      @close="showRaceShareCard = false"
+    />
+
+    <!-- 微信隐私保护指引授权弹窗 -->
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import {
+  currentTheme,
+  themeClass,
+  setTheme,
+  applySystemTheme,
+  currentFontScale,
+  setFontScale,
+  FONT_SCALE_OPTIONS,
+  type ThemeMode,
+} from "../../utils/theme";
+import { explainTerm } from "../../utils/glossary";
+import { trackClick, trackModal, trackFunnelStep } from "../../utils/telemetry";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
+import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
+import { ref, computed, watch } from "vue";
+import { onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
+import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
+
 import {
   request,
   getStoredUser,
   clearSession,
   authenticateWechatUser,
+  authenticateAppleUser,
   deviceLogin,
   uploadAvatarFile,
   uploadRacePhoto,
@@ -2243,9 +2860,17 @@ import {
   UserProfile,
   bindCoros,
   unbindCoros,
+  bindHealthWatch,
+  unbindHealthWatch,
+  chooseAndImportTrackFile,
+  chooseAndImportScreenshot,
   resolveActiveClub,
   setActiveClubId,
   syncTabBarIndex,
+  submitSupportTicket,
+  fetchMySupportTickets,
+  formatBeijingTime,
+  type SupportTicket,
 } from "../../utils/api";
 
 const defaultProfile = {
@@ -2259,6 +2884,11 @@ const defaultProfile = {
   coros_connected: false,
   coros_account: "",
   coros_domain: "teamcnapi.coros.com",
+  apple_watch_connected: false,
+  huawei_connected: false,
+  huawei_account: "",
+  suunto_connected: false,
+  suunto_account: "",
   gender: "male",
   date_of_birth: "",
   real_name: "",
@@ -2271,6 +2901,7 @@ const defaultProfile = {
   emergency_contact: "",
   clothing_size: "",
   shoe_size: "",
+  first_aid_cert_type: "",
   health_declaration: true,
   vo2max: null,
   years_running: 3,
@@ -2278,18 +2909,35 @@ const defaultProfile = {
   weight: 65,
   max_heart_rate: 190,
   resting_heart_rate: 56,
+  hide_gps_route: false,
+  hide_biometrics: false,
 };
 
 const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
 const GOBI_EDITIONS = Array.from({ length: 21 }, (_, i) => `戈${21 - i}`);
 const GOBI_GROUPS = ["A组", "B组", "C组"];
 const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
+const FIRST_AID_CERT_CODES = ["", "red_cross", "aha", "medical_pro"];
+const FIRST_AID_CERT_LABELS = [
+  "暂未持有急救证书",
+  "红十字会救护员证 (CPR/AED)",
+  "AHA HeartSaver 急救证",
+  "执业医师 / 护士医护资质",
+];
+const firstAidPickerIndex = computed(() => {
+  const code = String(profile.value?.first_aid_cert_type || "");
+  const idx = FIRST_AID_CERT_CODES.indexOf(code);
+  return idx >= 0 ? idx : 0;
+});
 
 const user = ref<UserProfile | null>(null);
 const profile = ref<any>(defaultProfile);
 const races = ref<any[]>([]);
 const userClub = ref<any>(null);
 const userOrgs = ref<any[]>([]);
+// 渐进式资料：已加入大群才默认展开商学院 / 赛事装备资料
+const hasOrgs = computed(() => (userOrgs.value?.length || 0) > 0);
+const showOrgExtraFields = ref(false);
 const purgingPrivacy = ref(false);
 const showDob = ref(false);
 const showRealName = ref(false);
@@ -2297,23 +2945,220 @@ const showPhone = ref(false);
 const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
 
-const activeTab = ref<"profile" | "training">("profile");
+// 「我的」页拆分为首页 + 子页面（页内切换，共用同一份状态与保存逻辑，弹窗不受影响）
+type ProfileSection = "" | "device" | "personal" | "training" | "privacy" | "support";
+const activeSection = ref<ProfileSection>("");
+const SECTION_TITLES: Record<string, string> = {
+  device: "手表连接与同步",
+  personal: "个人资料与实名信息",
+  training: "训练档案与赛事",
+  privacy: "通知与隐私",
+  support: "帮助与技术支持",
+};
+const activeSectionTitle = computed(() => SECTION_TITLES[activeSection.value] || "");
+const activeHealthWatchBrand = computed<"apple_watch" | "huawei" | "suunto">(() => {
+  if (suuntoConnected.value) return "suunto";
+  if (huaweiConnected.value) return "huawei";
+  return "apple_watch";
+});
+const deviceStatusText = computed(() => {
+  const names: string[] = [];
+  if (garminConnected.value) names.push("佳明");
+  if (corosConnected.value) names.push("高驰");
+  if (appleWatchConnected.value || huaweiConnected.value || suuntoConnected.value) {
+    names.push("苹果/华为/颂拓");
+  }
+  return names.length ? `${names.join("、")}已连接` : "未连接";
+});
+// 有大群且未提交/已过期时，在菜单上提示补齐资料
+const personalNeedsAttention = computed(() =>
+  (userOrgs.value || []).some((o: any) => o.status !== "confirmed" && o.status !== "pending")
+);
+
+// ── 帮助与技术支持 (Support & Feedback) 状态 ──
+const SUPPORT_CATEGORIES = [
+  { value: "device_sync", label: "⌚ 手表绑定/同步" },
+  { value: "club_org", label: "🏕️ 跑团/大群认证" },
+  { value: "training_data", label: "📊 训练数据/配速" },
+  { value: "other", label: "💡 其他问题建议" },
+];
+const supportCategory = ref("device_sync");
+const supportContent = ref("");
+const supportContact = ref("");
+const submittingTicket = ref(false);
+const mySupportTickets = ref<SupportTicket[]>([]);
+
+const hasSupportReply = computed(() =>
+  mySupportTickets.value.some((t) => !!t.admin_reply)
+);
+
+const supportSessionFrom = computed(() => {
+  const uid = user.value?.id || "guest";
+  const name = profile.value?.display_name || user.value?.display_name || "跑者";
+  return `uid=${uid}|name=${name}|watch=${deviceStatusText.value}`;
+});
+
+function getSupportCatLabel(catVal: string): string {
+  const found = SUPPORT_CATEGORIES.find((c) => c.value === catVal);
+  return found ? found.label : "💬 问题反馈";
+}
+
+function formatSupportTime(iso?: string): string {
+  return formatBeijingTime(iso, true);
+}
+
+async function loadMySupportTickets() {
+  const uid = user.value?.id || getStoredUser()?.id;
+  if (!uid) return;
+  try {
+    const list = await fetchMySupportTickets(uid);
+    mySupportTickets.value = list;
+  } catch (e) {
+    // ignore background fetch error
+  }
+}
+
+function handleCopyDiagnosticInfo() {
+  const uid = user.value?.id || "未登录";
+  const name = profile.value?.display_name || user.value?.display_name || "微信跑者";
+  const clubNames = (userClubs.value || []).map((c: any) => c.name).join("、") || "暂未加入";
+  let sysStr = "";
+  try {
+    const sys = uni.getSystemInfoSync();
+    sysStr = `${sys.brand || ""} ${sys.model || ""} (${sys.system || ""})`.trim();
+  } catch (e) {}
+  const text = `【万跑跑团助手 · 诊断信息】\n跑者昵称：${name}\n跑者ID：${uid}\n绑定手表：${deviceStatusText.value}\n所属跑团：${clubNames}${sysStr ? `\n手机型号：${sysStr}` : ""}`;
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({
+        title: "诊断信息已复制，可直接粘贴给客服",
+        icon: "none",
+        duration: 2500,
+      });
+    },
+  });
+}
+
+async function handleSubmitSupportTicket() {
+  const uid = user.value?.id || getStoredUser()?.id;
+  if (!uid) {
+    openAuthModal();
+    return;
+  }
+  const content = supportContent.value.trim();
+  if (content.length < 2) {
+    uni.showToast({ title: "请填写您遇到的具体问题", icon: "none" });
+    return;
+  }
+  submittingTicket.value = true;
+  try {
+    let sysInfo: Record<string, any> = {};
+    try {
+      const sys = uni.getSystemInfoSync();
+      sysInfo = {
+        brand: sys.brand,
+        model: sys.model,
+        system: sys.system,
+        platform: sys.platform,
+        SDKVersion: (sys as any).SDKVersion,
+      };
+    } catch (e) {}
+    sysInfo.watch_status = deviceStatusText.value;
+    sysInfo.clubs = (userClubs.value || []).map((c: any) => c.name);
+
+    const res = await submitSupportTicket({
+      user_id: uid,
+      category: supportCategory.value,
+      content,
+      contact_info: supportContact.value.trim(),
+      device_info: sysInfo,
+    });
+    supportContent.value = "";
+    await loadMySupportTickets();
+    uni.showModal({
+      title: "✅ 留言已提交",
+      content: res?.message || "我们已收到您的问题反馈（已自动附带跑者 ID 与手表状态），技术支持核查后将在此页面回复您。如需发送截图，也可点击上方「微信一对一在线客服」。",
+      showCancel: false,
+      confirmText: "好的",
+    });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "提交失败，请稍后重试", icon: "none" });
+  } finally {
+    submittingTicket.value = false;
+  }
+}
+
+function openSection(key: ProfileSection) {
+  if (!user.value && key !== "support") {
+    openAuthModal();
+    return;
+  }
+  activeSection.value = key;
+  if (key === "support") {
+    loadMySupportTickets();
+  }
+  uni.pageScrollTo({ scrollTop: 0, duration: 0 });
+}
+function closeSection() {
+  activeSection.value = "";
+  uni.pageScrollTo({ scrollTop: 0, duration: 0 });
+}
+// 退出登录后回到「我的」首页
+watch(user, (u) => {
+  if (!u) activeSection.value = "";
+});
 const isFieldHighlighted = ref(false);
 
-function scrollToRequiredFields() {
-  activeTab.value = "profile";
+function scrollToRequiredFields(options?: { message?: string }) {
+  activeSection.value = "personal";
   setTimeout(() => {
-    uni.pageScrollTo({ selector: "#required-personal-fields", duration: 400 });
+    try {
+      uni.createSelectorQuery()
+        .selectViewport().scrollOffset()
+        .select("#required-personal-fields").boundingClientRect()
+        .exec((res: any) => {
+          const scrollInfo = res?.[0];
+          const rect = res?.[1];
+          if (rect && scrollInfo) {
+            const targetTop = Math.max(0, scrollInfo.scrollTop + rect.top - 20);
+            uni.pageScrollTo({ scrollTop: targetTop, duration: 400 });
+          } else {
+            uni.pageScrollTo({ selector: "#required-personal-fields", duration: 400 });
+          }
+        });
+    } catch (e) {
+      uni.pageScrollTo({ selector: "#required-personal-fields", duration: 400 });
+    }
     isFieldHighlighted.value = true;
+    uni.showToast({
+      title: options?.message || "已定位至个人资料编辑区，可直接修改",
+      icon: "none",
+      duration: 2200
+    });
     setTimeout(() => {
       isFieldHighlighted.value = false;
-    }, 2800);
-  }, 150);
+    }, 3200);
+  }, 220);
 }
 
 function goToManual() {
   uni.navigateTo({
     url: "/pages/manual/manual",
+  });
+}
+
+const onboardingStatus = ref<any>(null);
+
+function goToOnboarding(step: number = 1) {
+  uni.navigateTo({
+    url: `/pages/onboarding/onboarding?step=${step}`,
+  });
+}
+
+function goToSharePage() {
+  uni.navigateTo({
+    url: "/pages/share/share",
   });
 }
 
@@ -2468,6 +3313,13 @@ const raceForm = ref<{
   race_date: string;
   target_time: string;
   priority: number | string;
+  status?: string;
+  finish_time?: string;
+  finish_notes?: string;
+  photo_url?: string;
+  photos?: string[];
+  was_official_pacer?: boolean;
+  pacer_target_time?: string;
   race_info: Record<string, any>;
 }>({
   id: "",
@@ -2476,6 +3328,8 @@ const raceForm = ref<{
   race_date: "",
   target_time: "3:30:00",
   priority: 1,
+  was_official_pacer: false,
+  pacer_target_time: "",
   race_info: {},
 });
 
@@ -2508,13 +3362,32 @@ const garminDomain = ref("garmin.cn");
 const corosConnected = ref(false);
 const corosAccount = ref("");
 const corosDomain = ref("teamcnapi.coros.com");
+const corosNeedsReauth = ref(false);
+const corosAuthError = ref("");
+const corosHasSavedPassword = ref(false);
 
-const selectedBrand = ref<"garmin" | "coros">("garmin");
+const appleWatchConnected = ref(false);
+const huaweiConnected = ref(false);
+const huaweiAccount = ref("");
+const inputHuaweiAccount = ref("");
+const suuntoConnected = ref(false);
+const suuntoAccount = ref("");
+const inputSuuntoAccount = ref("");
+const bindingHealthWatch = ref(false);
+const unbindingAppleWatch = ref(false);
+const unbindingHuawei = ref(false);
+const unbindingSuunto = ref(false);
+const importingTrackBrand = ref<"" | "apple_watch" | "huawei" | "suunto">("");
+const importingScreenshotBrand = ref<"" | "apple_watch" | "huawei" | "suunto">("");
+
+const selectedBrand = ref<"garmin" | "coros" | "apple_watch" | "huawei" | "suunto">("garmin");
 const inputCorosAccount = ref("");
 const inputCorosPassword = ref("");
 const inputCorosDomain = ref("teamcnapi.coros.com");
 const bindingCoros = ref(false);
 const unbindingCoros = ref(false);
+const needsCoros2fa = ref(false);
+const inputCoros2faCode = ref("");
 
 const loggingIn = ref(false);
 
@@ -2523,8 +3396,11 @@ const authTab = ref<"wechat" | "device">("wechat");
 const deviceBrand = ref<"garmin" | "coros">("garmin");
 const deviceAccount = ref("");
 const devicePassword = ref("");
-const deviceDomain = ref("garmin.com");
+const deviceDomain = ref("garmin.cn");
 const deviceLoggingIn = ref(false);
+const deviceNeedsMfa = ref(false);
+const deviceMfaCode = ref("");
+const deviceMfaHint = ref("");
 const runnerNickName = ref("");
 const runnerAvatar = ref("");
 const recentAccounts = ref<any[]>([]);
@@ -2536,12 +3412,40 @@ const defaultAvatar =
 const showEditProfileModal = ref(false);
 const editDisplayName = ref("");
 const editAvatarUrl = ref("");
+const editGender = ref("male");
+const editDob = ref("");
+const editHeight = ref<number | string>("");
+const editWeight = ref<number | string>("");
+const editYearsRunning = ref<number | string>("");
 const savingProfile = ref(false);
 
 function openEditProfileModal() {
   editDisplayName.value = profile.value?.display_name || user.value?.display_name || "";
   editAvatarUrl.value = profile.value?.avatar_url || user.value?.avatar_url || "";
+  editGender.value = profile.value?.gender || "male";
+  editDob.value = profile.value?.date_of_birth || "";
+  editHeight.value = profile.value?.height_cm || profile.value?.height || "";
+  editWeight.value = profile.value?.weight_kg || profile.value?.weight || "";
+  editYearsRunning.value = profile.value?.years_running !== undefined && profile.value?.years_running !== null ? profile.value?.years_running : 2;
   showEditProfileModal.value = true;
+}
+
+function onEditDobChange(e: any) {
+  editDob.value = e.detail?.value || "";
+}
+
+function jumpToFullProfileFromModal() {
+  showEditProfileModal.value = false;
+  setTimeout(() => {
+    scrollToRequiredFields({ message: "已为您展开大群实名认证与个人档案区域" });
+  }, 120);
+}
+
+function jumpToOnboardingFromModal() {
+  showEditProfileModal.value = false;
+  setTimeout(() => {
+    goToOnboarding(1);
+  }, 120);
 }
 
 function onEditNameBlur(e: any) {
@@ -2609,7 +3513,14 @@ async function handleSaveProfile() {
   }
   savingProfile.value = true;
   try {
-    const payload: any = { display_name: name };
+    const payload: any = {
+      display_name: name,
+      gender: editGender.value,
+      date_of_birth: editDob.value,
+      height_cm: editHeight.value ? Number(editHeight.value) : undefined,
+      weight_kg: editWeight.value ? Number(editWeight.value) : undefined,
+      years_running: editYearsRunning.value !== "" && editYearsRunning.value !== null ? Number(editYearsRunning.value) : undefined,
+    };
     if (editAvatarUrl.value) {
       payload.avatar_url = editAvatarUrl.value;
     }
@@ -2617,6 +3528,19 @@ async function handleSaveProfile() {
     if (profile.value) {
       profile.value.display_name = name;
       if (editAvatarUrl.value) profile.value.avatar_url = editAvatarUrl.value;
+      profile.value.gender = editGender.value;
+      profile.value.date_of_birth = editDob.value;
+      if (editHeight.value) {
+        profile.value.height_cm = Number(editHeight.value);
+        profile.value.height = Number(editHeight.value);
+      }
+      if (editWeight.value) {
+        profile.value.weight_kg = Number(editWeight.value);
+        profile.value.weight = Number(editWeight.value);
+      }
+      if (editYearsRunning.value !== "" && editYearsRunning.value !== null) {
+        profile.value.years_running = Number(editYearsRunning.value);
+      }
     }
     if (user.value) {
       user.value.display_name = name;
@@ -2624,7 +3548,7 @@ async function handleSaveProfile() {
       uni.setStorageSync("rgm_user", user.value);
       recordRecentUser(user.value);
     }
-    uni.showToast({ title: "资料保存成功 🎉", icon: "success" });
+    uni.showToast({ title: "资料与身体参数已更新 🎉", icon: "success" });
     showEditProfileModal.value = false;
   } catch (err: any) {
     uni.showToast({ title: err?.message || "保存失败", icon: "none" });
@@ -2648,24 +3572,37 @@ const inviteCodeInput = ref("");
 const joiningClub = ref(false);
 const userClubs = ref<any[]>([]);
 
+const currentCalendarMonth = new Date().getMonth() + 1;
 const targetDistance = ref(200);
 const weeklyTarget = ref(50);
+const currentWeekLockedTarget = ref(50);
 const savingWeekly = ref(false);
 const monthlyTargets = ref<number[]>(Array(12).fill(200));
 const goalMode = ref<"uniform" | "custom">("uniform");
 const saving = ref(false);
 
+function handleLockedMonthTap(m: number) {
+  uni.showToast({
+    title: `${m}月计划已开始，锁定不可更改（仅可修改未开始的月份）`,
+    icon: "none",
+  });
+}
+
 function setGoalMode(mode: "uniform" | "custom") {
   goalMode.value = mode;
   if (mode === "uniform") {
-    monthlyTargets.value = Array(12).fill(targetDistance.value);
+    monthlyTargets.value = monthlyTargets.value.map((oldVal, idx) =>
+      idx + 1 <= currentCalendarMonth ? oldVal : Number(targetDistance.value)
+    );
   }
 }
 
 function onTargetSliderChange(val: number) {
   if (goalMode.value === "custom") return;
   targetDistance.value = val;
-  monthlyTargets.value = Array(12).fill(val);
+  monthlyTargets.value = monthlyTargets.value.map((oldVal, idx) =>
+    idx + 1 <= currentCalendarMonth ? oldVal : Number(val)
+  );
 }
 
 function setWeeklyTarget(km: number) {
@@ -2684,10 +3621,16 @@ async function handleSaveWeeklyOnly() {
   }
   savingWeekly.value = true;
   try {
-    await request(`/api/profile/${encodeURIComponent(uid)}/goal`, "PUT", {
+    const res: any = await request(`/api/profile/${encodeURIComponent(uid)}/goal`, "PUT", {
       weekly_target: Number(weeklyTarget.value),
+      next_weekly_target: Number(weeklyTarget.value),
+      target_period: "next_week",
+      enforce_started_lock: true,
     });
-    uni.showToast({ title: `周目标已单独生效 (${weeklyTarget.value}km)`, icon: "success" });
+    if (res?.data?.current_week_target) {
+      currentWeekLockedTarget.value = Number(res.data.current_week_target);
+    }
+    uni.showToast({ title: `下周计划已设为 ${weeklyTarget.value}km（本周已锁定不变）`, icon: "none" });
   } catch (err: any) {
     uni.showToast({ title: err?.message || "保存失败", icon: "none" });
   } finally {
@@ -2696,8 +3639,10 @@ async function handleSaveWeeklyOnly() {
 }
 
 function syncUniformToAll() {
-  monthlyTargets.value = Array(12).fill(targetDistance.value);
-  uni.showToast({ title: `已将全部月份统一设为 ${targetDistance.value}km`, icon: "none" });
+  monthlyTargets.value = monthlyTargets.value.map((oldVal, idx) =>
+    idx + 1 <= currentCalendarMonth ? oldVal : Number(targetDistance.value)
+  );
+  uni.showToast({ title: `已将未开始月份设为 ${targetDistance.value}km（已开始月份锁定不变）`, icon: "none" });
 }
 
 function noop() {}
@@ -2759,7 +3704,7 @@ function closeAuthModal() {
 function showTermsModal() {
   uni.showModal({
     title: "用户服务协议",
-    content: "欢迎使用 RGM 跑团助手。本小程序提供科学耐力训练、心率与体能分析及跑团互动服务。我们承诺严格保护您的个人运动健康隐私，数据仅用于训练分析与展示。",
+    content: "欢迎使用万跑跑团助手。本小程序提供科学耐力训练、心率与体能分析及跑团互动服务。我们承诺严格保护您的个人运动健康隐私，数据仅用于训练分析与展示。",
     showCancel: false,
   });
 }
@@ -2767,7 +3712,7 @@ function showTermsModal() {
 function showPrivacyModal() {
   uni.showModal({
     title: "隐私政策",
-    content: "RGM 跑团助手严格遵循法律法规保护用户隐私。您的 Garmin 账号、跑步轨迹、心率等生理指标仅在您主动授权绑定后同步，绝不对外共享。",
+    content: "万跑跑团助手严格遵循法律法规保护用户隐私。您的 Garmin 账号、跑步轨迹、心率等生理指标仅在您主动授权绑定后同步，绝不对外共享。",
     showCancel: false,
   });
 }
@@ -2820,6 +3765,26 @@ async function doConfirmLogin() {
   }
 }
 
+async function handleAppleLogin() {
+  uni.showLoading({ title: "正在连接 Apple 登录...", mask: true });
+  try {
+    const logged = await authenticateAppleUser();
+    user.value = logged;
+    recordRecentUser(logged);
+    showAuthModal.value = false;
+    uni.hideLoading();
+    uni.showToast({ title: `欢迎回来，${logged.display_name}！`, icon: "success", duration: 2000 });
+    await loadProfileData();
+  } catch (err: any) {
+    uni.hideLoading();
+    uni.showModal({
+      title: "Apple 登录提示",
+      content: err?.message || "登录未完成，请重试",
+      showCancel: false,
+    });
+  }
+}
+
 async function doDeviceLogin() {
   const acc = deviceAccount.value.trim();
   const pwd = devicePassword.value.trim();
@@ -2827,16 +3792,31 @@ async function doDeviceLogin() {
     uni.showToast({ title: "请输入手表账号和密码", icon: "none" });
     return;
   }
+  if (deviceNeedsMfa.value && !deviceMfaCode.value.trim()) {
+    uni.showToast({ title: "请输入 6 位安全验证码", icon: "none" });
+    return;
+  }
   deviceLoggingIn.value = true;
   uni.showLoading({ title: "正在验证手表账号...", mask: true });
   try {
     const domain = deviceBrand.value === "garmin" ? deviceDomain.value : "teamcnapi.coros.com";
-    const logged = await deviceLogin({
+    const logged: any = await deviceLogin({
       brand: deviceBrand.value,
       account: acc,
       password: pwd,
       domain: domain,
+      mfa_code: deviceNeedsMfa.value ? deviceMfaCode.value.trim() : undefined,
     });
+    if (logged?.needs_2fa || logged?.needs_mfa) {
+      uni.hideLoading();
+      deviceNeedsMfa.value = true;
+      deviceMfaHint.value = logged.message || "官方已发送 6 位安全验证码，请输入后再次点击登录";
+      uni.showToast({ title: "请输入安全验证码", icon: "none", duration: 2500 });
+      return;
+    }
+    deviceNeedsMfa.value = false;
+    deviceMfaCode.value = "";
+    deviceMfaHint.value = "";
     user.value = logged;
     recordRecentUser(logged);
     showAuthModal.value = false;
@@ -2869,6 +3849,12 @@ function handleConfirmLogout() {
         user.value = null;
         profile.value = defaultProfile;
         garminConnected.value = false;
+        corosConnected.value = false;
+        appleWatchConnected.value = false;
+        huaweiConnected.value = false;
+        huaweiAccount.value = "";
+        suuntoConnected.value = false;
+        suuntoAccount.value = "";
         userClub.value = null;
         races.value = [];
         uni.showToast({ title: "已退出登录", icon: "none" });
@@ -2902,11 +3888,16 @@ async function loadProfileData() {
   const uid = user.value.id;
 
   try {
-    const [res, clubRes, orgRes] = await Promise.all([
+    const [res, clubRes, orgRes, onboardRes] = await Promise.all([
       request(`/api/profile/${uid}`),
       request(`/api/team/my-clubs/${uid}`),
       request(`/api/org/my-orgs/${uid}`),
+      request(`/api/profile/${uid}/onboarding-status`).catch(() => null),
     ]);
+
+    if (onboardRes) {
+      onboardingStatus.value = onboardRes;
+    }
 
     userOrgs.value = orgRes?.organizations || [];
 
@@ -2926,6 +3917,13 @@ async function loadProfileData() {
       user.value.id = res.profile.id || uid;
       if (res.profile.avatar_url) user.value.avatar_url = res.profile.avatar_url;
       if (res.profile.display_name) user.value.display_name = res.profile.display_name;
+      user.value.garmin_connected = !!res.profile.garmin_connected;
+      user.value.coros_connected = !!res.profile.coros_connected;
+      user.value.apple_watch_connected = !!res.profile.apple_watch_connected;
+      user.value.huawei_connected = !!res.profile.huawei_connected;
+      user.value.huawei_account = res.profile.huawei_account || "";
+      user.value.suunto_connected = !!res.profile.suunto_connected;
+      user.value.suunto_account = res.profile.suunto_account || "";
       uni.setStorageSync("rgm_user", user.value);
       garminConnected.value = !!res.profile.garmin_connected;
       garminEmail.value = res.profile.garmin_email || "";
@@ -2934,15 +3932,39 @@ async function loadProfileData() {
       corosConnected.value = !!res.profile.coros_connected;
       corosAccount.value = res.profile.coros_account || "";
       corosDomain.value = res.profile.coros_domain || "teamcnapi.coros.com";
+      corosNeedsReauth.value = !!res.profile.coros_needs_reauth;
+      corosAuthError.value = res.profile.coros_auth_error || "";
+      corosHasSavedPassword.value = !!res.profile.coros_has_saved_password;
       inputCorosDomain.value = corosDomain.value;
+      appleWatchConnected.value = !!res.profile.apple_watch_connected;
+      huaweiConnected.value = !!res.profile.huawei_connected;
+      huaweiAccount.value = res.profile.huawei_account || "";
+      if (huaweiAccount.value) {
+        inputHuaweiAccount.value = huaweiAccount.value;
+      }
+      suuntoConnected.value = !!res.profile.suunto_connected;
+      suuntoAccount.value = res.profile.suunto_account || "";
+      if (suuntoAccount.value) {
+        inputSuuntoAccount.value = suuntoAccount.value;
+      }
     } else {
       garminConnected.value = false;
       corosConnected.value = false;
+      corosNeedsReauth.value = false;
+      corosAuthError.value = "";
+      corosHasSavedPassword.value = false;
+      appleWatchConnected.value = false;
+      huaweiConnected.value = false;
+      huaweiAccount.value = "";
+      suuntoConnected.value = false;
+      suuntoAccount.value = "";
     }
 
     if (res?.goal) {
       targetDistance.value = res.goal.target_distance || 200;
-      weeklyTarget.value = res.goal.weekly_target || Math.round((res.goal.target_distance || 200) / 4) || 50;
+      const fallbackWk = Math.round((res.goal.target_distance || 200) / 4) || 50;
+      weeklyTarget.value = res.goal.next_weekly_target || res.goal.weekly_target || fallbackWk;
+      currentWeekLockedTarget.value = res.goal.current_week_target || res.goal.weekly_target || fallbackWk;
       if (res.goal.monthly_targets && Array.isArray(res.goal.monthly_targets)) {
         monthlyTargets.value = res.goal.monthly_targets;
         const allSame = res.goal.monthly_targets.every((v: number) => v === res.goal.target_distance);
@@ -2961,6 +3983,8 @@ async function loadProfileData() {
     userClubs.value = clubs;
     userClub.value = resolveActiveClub(clubs);
 
+    loadMySupportTickets();
+
     // ── Check if user has temporary or suspended org memberships → show reminder ──
     checkOrgMembershipReminder(uid, userOrgs.value);
   } catch (err) {
@@ -2976,8 +4000,8 @@ async function checkOrgMembershipReminder(uid: string, orgsList?: any[]) {
     if (suspendedMemberships.length > 0) {
       const firstOrg = suspendedMemberships[0];
       uni.showModal({
-        title: "⚠️ 大群体访问已被暂停",
-        content: `您在【${firstOrg.name}】的2周临时访问期已过。由于超期未完成必填字段并获管理员审核确认，已暂停浏览使用该大团及其从属跑团的一切内容和活动！请立即补齐必填资料并联系管理员核验。`,
+        title: "⚠️ 大群访问已被暂停",
+        content: `您在【${firstOrg.name}】的2周临时访问期已过。由于超期未完成必填字段并获管理员审核确认，已暂停浏览使用该大群及其分队的一切内容和活动！请立即补齐必填资料并联系管理员核验。`,
         confirmText: "立即补齐",
         cancelText: "知道了",
         confirmColor: "#ef4444",
@@ -2998,8 +4022,8 @@ async function checkOrgMembershipReminder(uid: string, orgsList?: any[]) {
       const orgNames = incompleteMemberships.map((o: any) => o.name).join("、");
       const remainingDays = firstOrg.days_remaining !== undefined && firstOrg.days_remaining !== null ? firstOrg.days_remaining : 14;
       const contentText = orgCount > 1
-        ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成（临时访问期还剩 ${remainingDays} 天）。请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`
-        : `您在【${firstOrg.name}】中${missingLabels ? '还缺少：' + missingLabels + '。' : '有必填资料尚未完成。'}（临时访问期还剩 ${remainingDays} 天）请在2周内补齐并获得管理员审核批准，超期将被暂停大团及从属跑团的浏览与活动！`;
+        ? `您在 ${orgCount} 个大群（${orgNames}）中有必填资料尚未完成（临时访问期还剩 ${remainingDays} 天）。请在2周内补齐并获得管理员审核批准，超期将被暂停大群及分队的浏览与活动！`
+        : `您在【${firstOrg.name}】中${missingLabels ? '还缺少：' + missingLabels + '。' : '有必填资料尚未完成。'}（临时访问期还剩 ${remainingDays} 天）请在2周内补齐并获得管理员审核批准，超期将被暂停大群及分队的浏览与活动！`;
       uni.showModal({
         title: "📋 跑者档案待完善",
         content: contentText,
@@ -3289,6 +4313,15 @@ async function handleCardQuickUploadPhoto(race: any) {
   }
 }
 
+const showRaceShareCard = ref(false);
+const activeShareRaceId = ref("");
+
+function openCompletedRaceShareCard(race: any) {
+  if (!race) return;
+  activeShareRaceId.value = String(race.id || race.name || "");
+  showRaceShareCard.value = true;
+}
+
 function handleCardPhotoAction(photoUrl: string, race: any) {
   uni.showActionSheet({
     itemList: ["放大查看大图 🔍", "删除此照片 🗑️"],
@@ -3387,6 +4420,8 @@ function openAddRaceModal() {
     finish_notes: "",
     photo_url: "",
     photos: [],
+    was_official_pacer: false,
+    pacer_target_time: "",
     race_info: {},
   };
   raceModalMode.value = "add";
@@ -3407,6 +4442,8 @@ function openEditRaceModal(race: any) {
     finish_notes: race.finish_notes || "",
     photo_url: race.photo_url || "",
     photos: race.photos ? [...race.photos] : [],
+    was_official_pacer: Boolean(race.was_official_pacer),
+    pacer_target_time: race.pacer_target_time || race.target_time || "",
     race_info: { ...(race.race_info || {}) },
   };
   raceModalMode.value = "edit";
@@ -3444,6 +4481,10 @@ async function handleSaveRaceModal() {
       finish_notes: raceForm.value.finish_notes ? raceForm.value.finish_notes.trim() : undefined,
       photo_url: raceForm.value.photo_url || undefined,
       photos: raceForm.value.photos || [],
+      was_official_pacer: Boolean(raceForm.value.was_official_pacer),
+      pacer_target_time: raceForm.value.was_official_pacer
+        ? (raceForm.value.pacer_target_time || raceForm.value.target_time || "").trim()
+        : "",
       race_info: raceForm.value.race_info,
     };
     const res = await request(`/api/profile/${uid}/races`, "POST", payload);
@@ -3506,11 +4547,15 @@ async function handleModalAutoFetchRaceInfo() {
     return;
   }
   modalSearchingRaceInfo.value = true;
-  uni.showLoading({ title: "AI 检索赛事情报中..." });
+  uni.showLoading({ title: "检索赛事情报中..." });
   try {
     const res = await request("/api/profile/race-intel-lookup", "POST", {
       race_name: raceForm.value.name.trim(),
       race_type: raceForm.value.race_type,
+      target_time: raceForm.value.target_time,
+      race_date: raceForm.value.race_date,
+      race_id: raceForm.value.id,
+      user_id: user.value?.id,
     });
     uni.hideLoading();
     if (res?.success && res?.race_info) {
@@ -3623,15 +4668,23 @@ async function handleAutoFetchRaceInfo(race: any) {
     const res = await request("/api/profile/race-intel-lookup", "POST", {
       race_name: race.name.trim(),
       race_type: race.race_type,
+      target_time: race.target_time,
+      race_date: race.race_date,
+      race_id: race.id,
+      user_id: user.value?.id,
     });
     uni.hideLoading();
     if (res?.success && res?.race_info) {
+      race.race_info = {
+        ...(race.race_info || {}),
+        ...res.race_info,
+      };
       raceInfoDrafts.value[raceKey] = {
         ...(raceInfoDrafts.value[raceKey] || {}),
         ...res.race_info,
       };
       expandedRaceInfo.value[raceKey] = true;
-      uni.showToast({ title: "已自动填充赛事情报 ✓", icon: "success" });
+      uni.showToast({ title: "已同步官方赛事情报 ✓", icon: "success" });
     } else {
       uni.showToast({ title: res?.message || "未能检索到，请手动填写", icon: "none" });
     }
@@ -3647,7 +4700,14 @@ async function handleAutoFetchRaceInfo(race: any) {
 
 function goToTeamPage() {
   uni.switchTab({
-    url: "/pages/team/rank",
+    url: "/pages/team/team",
+  });
+}
+
+function goToCreateMyClub() {
+  uni.setStorageSync("team_open_create_club", true);
+  uni.switchTab({
+    url: "/pages/team/team",
   });
 }
 
@@ -3672,19 +4732,15 @@ async function handleJoinClub() {
     const msg = e.message || "加入失败，请核对邀请码";
     if (msg.includes("大群体") || msg.includes("戈友")) {
       uni.showModal({
-        title: "戈友大群体认证提示",
+        title: "大群认证提示",
         content: msg,
         confirmText: "前往认证",
         cancelText: "知道了",
         success: (modalRes) => {
           if (modalRes.confirm) {
             showJoinModal.value = false;
-            uni.navigateTo({
-              url: "/pages/team/team",
-              fail: () => {
-                uni.switchTab({ url: "/pages/team/rank" });
-              }
-            });
+            // 跑团首页已是 Tab 页，只能用 switchTab
+            uni.switchTab({ url: "/pages/team/team" });
           }
         }
       });
@@ -3697,6 +4753,13 @@ async function handleJoinClub() {
 }
 
 function onMonthTargetInput(idx: number, val: string) {
+  if (idx + 1 <= currentCalendarMonth) {
+    uni.showToast({
+      title: `${idx + 1}月计划已开始，锁定不可更改！`,
+      icon: "none",
+    });
+    return;
+  }
   const num = parseInt(val, 10) || 0;
   monthlyTargets.value[idx] = num;
   monthlyTargets.value = [...monthlyTargets.value];
@@ -3842,6 +4905,20 @@ function onInputShoeSize(e: any) {
   profile.value.shoe_size = e.detail?.value || "";
 }
 
+function onFirstAidCertChange(e: any) {
+  const idx = Number(e.detail?.value || 0);
+  if (!profile.value) profile.value = {};
+  profile.value.first_aid_cert_type = FIRST_AID_CERT_CODES[idx] ?? "";
+}
+
+function onToggleRaceOfficialPacer(e: any) {
+  const checked = Boolean(e.detail?.value);
+  raceForm.value.was_official_pacer = checked;
+  if (checked && !raceForm.value.pacer_target_time && raceForm.value.target_time) {
+    raceForm.value.pacer_target_time = raceForm.value.target_time;
+  }
+}
+
 function onToggleHealthDeclaration() {
   if (!profile.value) profile.value = {};
   profile.value.health_declaration = !(profile.value.health_declaration !== false);
@@ -3953,27 +5030,63 @@ async function handleSaveAll() {
       emergency_contact: profile.value?.emergency_contact || null,
       clothing_size: profile.value?.clothing_size || null,
       shoe_size: profile.value?.shoe_size || null,
+      first_aid_cert_type: profile.value?.first_aid_cert_type ?? "",
       health_declaration: profile.value?.health_declaration !== undefined ? profile.value?.health_declaration : true,
       vo2max: profile.value?.vo2max !== undefined && profile.value?.vo2max !== null && profile.value?.vo2max !== "" ? Number(profile.value.vo2max) : null,
       years_running: profile.value?.years_running,
+      hide_gps_route: !!profile.value?.hide_gps_route,
+      hide_biometrics: !!profile.value?.hide_biometrics,
     });
 
-    const finalMonthlyTargets = goalMode.value === "uniform"
-      ? Array(12).fill(Number(targetDistance.value))
-      : monthlyTargets.value.map((v) => Number(v) || 0);
+    const finalMonthlyTargets = monthlyTargets.value.map((v, idx) => {
+      if (idx + 1 <= currentCalendarMonth) return Number(v) || 0;
+      return goalMode.value === "uniform" ? Number(targetDistance.value) : (Number(v) || 0);
+    });
 
-    await request(`/api/profile/${encodeURIComponent(uid)}/goal`, "PUT", {
+    const goalRes: any = await request(`/api/profile/${encodeURIComponent(uid)}/goal`, "PUT", {
       target_distance: Number(targetDistance.value),
       weekly_target: Number(weeklyTarget.value),
+      next_weekly_target: Number(weeklyTarget.value),
       period_type: "monthly",
       monthly_targets: finalMonthlyTargets,
+      enforce_started_lock: true,
     });
+    if (goalRes?.data?.monthly_targets) {
+      monthlyTargets.value = goalRes.data.monthly_targets;
+    }
+    if (goalRes?.data?.current_week_target) {
+      currentWeekLockedTarget.value = Number(goalRes.data.current_week_target);
+    }
 
-    uni.showToast({ title: "个人资料与目标已保存", icon: "success" });
+    uni.showToast({ title: "个人资料与未开始周/月计划已保存", icon: "success" });
   } catch (err: any) {
     uni.showToast({ title: err?.message || "保存失败", icon: "none" });
   } finally {
     saving.value = false;
+  }
+}
+
+async function handleToggleDataConfidentiality(
+  field: "hide_gps_route" | "hide_biometrics",
+  val: boolean
+) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!profile.value) profile.value = {};
+  profile.value[field] = val;
+  try {
+    await request(`/api/profile/${uid}`, "PUT", {
+      [field]: val,
+    });
+    uni.showToast({
+      title: val ? "已设为仅对教练和师傅开放 🔒" : "已恢复对跑团公开 ✓",
+      icon: "none",
+    });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "保存保密设置失败", icon: "none" });
   }
 }
 
@@ -4045,6 +5158,7 @@ async function handleBindGarmin() {
       email: inputEmail.value.trim(),
       password: inputPassword.value.trim(),
       domain: inputDomain.value,
+      inviter_uid: uni.getStorageSync("rgm_pending_inviter_uid") || undefined,
     };
     if (needsMfa.value && inputMfaCode.value.trim()) {
       payload.mfa_code = inputMfaCode.value.trim();
@@ -4068,12 +5182,18 @@ async function handleBindGarmin() {
         uni.setStorageSync("rgm_token", res.token);
       }
     }
-    uni.showToast({ title: "绑定并同步成功", icon: "success" });
     showGarminModal.value = false;
+    trackFunnelStep("bind_garmin_success", "成功绑定佳明手表", { domain: inputDomain.value });
     needsMfa.value = false;
     inputMfaCode.value = "";
     inputPassword.value = "";
     await loadProfileData();
+    uni.showModal({
+      title: "⌚ 佳明绑定成功 · 佩戴提醒",
+      content: "为确保小程序获取夜间 HRV、晨起静息心率与睡眠恢复等必要数据，请保持 24 小时全天（含夜间睡眠）佩戴手表！若夜间不佩戴导致恢复数据缺失，系统与教练将无法给出正确的训练建议。",
+      showCancel: false,
+      confirmText: "我知道了",
+    });
   } catch (err: any) {
     uni.showModal({
       title: "绑定提示",
@@ -4100,8 +5220,20 @@ async function handleUnbindGarmin() {
   }
 }
 
-function openDeviceModal(brand: "garmin" | "coros" = "garmin") {
+function openDeviceModal(brand: "garmin" | "coros" | "apple_watch" | "huawei" | "suunto" = "garmin") {
+  const brandNames: Record<string, string> = {
+    garmin: "佳明 Garmin",
+    coros: "高驰 COROS",
+    apple_watch: "Apple Watch",
+    huawei: "华为运动健康",
+    suunto: "颂拓 Suunto",
+  };
+  trackModal("device_bind", `打开设备绑定弹窗：${brandNames[brand] || brand}`, "open", { brand });
   selectedBrand.value = brand;
+  needsMfa.value = false;
+  inputMfaCode.value = "";
+  needsCoros2fa.value = false;
+  inputCoros2faCode.value = "";
   if (brand === "coros") {
     if (corosAccount.value) {
       inputCorosAccount.value = corosAccount.value;
@@ -4110,8 +5242,171 @@ function openDeviceModal(brand: "garmin" | "coros" = "garmin") {
     if (corosDomain.value) {
       inputCorosDomain.value = corosDomain.value;
     }
+  } else if (brand === "huawei") {
+    if (huaweiAccount.value) {
+      inputHuaweiAccount.value = huaweiAccount.value;
+    }
+  } else if (brand === "suunto") {
+    if (suuntoAccount.value) {
+      inputSuuntoAccount.value = suuntoAccount.value;
+    }
   }
   showGarminModal.value = true;
+}
+
+async function handleBindHealthWatch(brand: "apple_watch" | "huawei" | "suunto") {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  bindingHealthWatch.value = true;
+  try {
+    const acc =
+      brand === "huawei"
+        ? (inputHuaweiAccount.value.trim() || "华为运动健康")
+        : brand === "suunto"
+        ? (inputSuuntoAccount.value.trim() || "Suunto App")
+        : "Apple Health";
+    const res = await bindHealthWatch(uid, brand, acc);
+    uni.showToast({
+      title:
+        res?.message ||
+        (brand === "apple_watch"
+          ? "Apple Watch 已连接 ✓"
+          : brand === "suunto"
+          ? "颂拓手表已绑定 ✓"
+          : "华为手表已绑定 ✓"),
+      icon: "success",
+    });
+    showGarminModal.value = false;
+    trackFunnelStep("bind_health_watch_success", "成功连接健康手表", { brand });
+    await loadProfileData();
+    uni.showModal({
+      title: "⌚ 手表连接成功 · 佩戴提醒",
+      content: "为确保小程序获取夜间 HRV、晨起静息心率与睡眠恢复等必要数据，请保持 24 小时全天（含夜间睡眠）佩戴手表！若夜间不佩戴导致恢复数据缺失，系统与教练将无法给出正确的训练建议。",
+      showCancel: false,
+      confirmText: "我知道了",
+    });
+  } catch (err: any) {
+    uni.showModal({
+      title: "绑定提示",
+      content: err?.message || "连接失败，请稍后重试",
+      showCancel: false,
+    });
+  } finally {
+    bindingHealthWatch.value = false;
+  }
+}
+
+async function handleUnbindHealthWatch(brand: "apple_watch" | "huawei" | "suunto") {
+  const uid = user.value?.id;
+  if (!uid) return;
+  unbindingAppleWatch.value = true;
+  unbindingHuawei.value = true;
+  unbindingSuunto.value = true;
+  try {
+    const tasks: Promise<any>[] = [];
+    if (appleWatchConnected.value) tasks.push(unbindHealthWatch(uid, "apple_watch"));
+    if (huaweiConnected.value) tasks.push(unbindHealthWatch(uid, "huawei"));
+    if (suuntoConnected.value) tasks.push(unbindHealthWatch(uid, "suunto"));
+    if (tasks.length === 0) tasks.push(unbindHealthWatch(uid, brand));
+    await Promise.all(tasks);
+    uni.showToast({
+      title: "已解除手表绑定",
+      icon: "success",
+    });
+    await loadProfileData();
+  } catch (err: any) {
+    uni.showToast({ title: "解除失败", icon: "none" });
+  } finally {
+    unbindingAppleWatch.value = false;
+    unbindingHuawei.value = false;
+    unbindingSuunto.value = false;
+  }
+}
+
+async function handleImportWatchTrack(brand: "apple_watch" | "huawei" | "suunto", closeModalAfter: boolean = false) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  importingTrackBrand.value = brand;
+  try {
+    const res = await chooseAndImportTrackFile(uid, brand);
+    if (res?.success) {
+      trackFunnelStep("import_track_file_success", "成功导入运动轨迹文件", { brand });
+      if (closeModalAfter) {
+        showGarminModal.value = false;
+      }
+      await loadProfileData();
+      const act = res.activity;
+      const summary = act
+        ? `${res.message}\n\n配速：${act.avg_pace_str || "—"} /km\n用时：${Math.round((act.duration_sec || 0) / 60)} 分钟\n平均心率：${act.avg_hr || "—"} bpm`
+        : (res.message || "轨迹导入成功！");
+      uni.showModal({
+        title: "🎉 轨迹导入成功",
+        content: summary,
+        showCancel: false,
+        confirmText: "太棒了",
+      });
+    }
+  } catch (err: any) {
+    if (err?.message === "CANCEL" || err?.message === "__CANCEL__") return;
+    uni.showModal({
+      title: "轨迹导入提示",
+      content: err?.message || "请先将 FIT、GPX 或 TCX 轨迹文件发送到微信聊天（如「文件传输助手」），再点击导入选择该文件。",
+      showCancel: false,
+    });
+  } finally {
+    importingTrackBrand.value = "";
+  }
+}
+
+async function handleImportWatchScreenshot(brand: "apple_watch" | "huawei" | "suunto", closeModalAfter: boolean = false) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  importingScreenshotBrand.value = brand;
+  try {
+    const res = await chooseAndImportScreenshot(uid, brand);
+    if (res?.success) {
+      trackFunnelStep("import_screenshot_success", "成功导入运动截图", { brand, count: (res.records || []).length });
+      if (closeModalAfter) {
+        showGarminModal.value = false;
+      }
+      await loadProfileData();
+      const recs: any[] = res.records || [];
+      const previewLines = recs
+        .slice(0, 6)
+        .map((r: any) => `• ${r.date}：${r.distance_km} km${r.avg_hr ? ` · ${r.avg_hr}bpm` : ""}`)
+        .join("\n");
+      const moreLine = recs.length > 6 ? `\n…等共 ${recs.length} 条记录` : "";
+      const summary = previewLines
+        ? `${res.message}\n\n${previewLines}${moreLine}`
+        : (res.message || "截图识别导入成功！");
+      uni.showModal({
+        title: "🎉 运动截图导入成功",
+        content: summary,
+        showCancel: false,
+        confirmText: "太棒了",
+      });
+    }
+  } catch (err: any) {
+    if (err?.message === "CANCEL" || err?.message === "__CANCEL__") return;
+    uni.showModal({
+      title: "运动截图导入提示",
+      content:
+        err?.message ||
+        "请上传清晰的运动截图（支持「苹果健康 → 步行+跑步距离 → 所有已记录的数据」列表截图，或「华为运动健康」单次跑步详情截图）。",
+      showCancel: false,
+    });
+  } finally {
+    importingScreenshotBrand.value = "";
+  }
 }
 
 async function handleBindCoros() {
@@ -4122,18 +5417,42 @@ async function handleBindCoros() {
   }
   const acc = inputCorosAccount.value.trim();
   const pwd = inputCorosPassword.value.trim();
-  if (!acc || !pwd) {
+  const canReuseSavedPwd =
+    corosConnected.value &&
+    corosHasSavedPassword.value &&
+    !!corosAccount.value &&
+    acc.toLowerCase() === corosAccount.value.trim().toLowerCase();
+  if (!acc || (!pwd && !canReuseSavedPwd)) {
     uni.showToast({ title: "请输入高驰账号与密码", icon: "none" });
     return;
   }
+  if (needsCoros2fa.value && !inputCoros2faCode.value.trim()) {
+    uni.showToast({ title: "请输入 6 位短信验证码", icon: "none" });
+    return;
+  }
+
   bindingCoros.value = true;
   try {
-    const res = await bindCoros({
+    const payload: any = {
       uid: uid,
       account: acc,
       password: pwd,
       domain: inputCorosDomain.value,
-    });
+    };
+    if (needsCoros2fa.value && inputCoros2faCode.value.trim()) {
+      payload.code = inputCoros2faCode.value.trim();
+    }
+
+    const res = await bindCoros(payload);
+
+    if (res?.needs_2fa) {
+      needsCoros2fa.value = true;
+      trackFunnelStep("bind_coros_2fa_prompt", "高驰绑定触发短信两步验证");
+      uni.showToast({ title: "已向手机发送验证码", icon: "none" });
+      return;
+    }
+
+    trackFunnelStep("bind_coros_success", "成功绑定高驰手表", { domain: inputCorosDomain.value });
 
     if (res?.uid && user.value && res.uid !== user.value.id) {
       user.value.id = res.uid;
@@ -4144,10 +5463,17 @@ async function handleBindCoros() {
         uni.setStorageSync("rgm_token", res.token);
       }
     }
-    uni.showToast({ title: "高驰绑定并同步成功", icon: "success" });
     showGarminModal.value = false;
+    needsCoros2fa.value = false;
+    inputCoros2faCode.value = "";
     inputCorosPassword.value = "";
     await loadProfileData();
+    uni.showModal({
+      title: "⌚ 高驰绑定成功 · 佩戴提醒",
+      content: "为确保小程序获取夜间 HRV、晨起静息心率与睡眠恢复等必要数据，请保持 24 小时全天（含夜间睡眠）佩戴手表！若夜间不佩戴导致恢复数据缺失，系统与教练将无法给出正确的训练建议。",
+      showCancel: false,
+      confirmText: "我知道了",
+    });
   } catch (err: any) {
     uni.showModal({
       title: "高驰绑定提示",
@@ -4195,19 +5521,148 @@ async function handleImportGarminPb() {
 }
 
 onShow(() => {
+  applySystemTheme(currentTheme.value);
   syncTabBarIndex(4);
-  loadProfileData();
-  if (uni.getStorageSync("auto_scroll_to_required_fields")) {
+  const autoBrand = uni.getStorageSync("auto_open_device_brand");
+  if (autoBrand) {
+    uni.removeStorageSync("auto_open_device_brand");
+  }
+  const profilePromise = loadProfileData();
+  if (uni.getStorageSync("auto_open_edit_profile")) {
+    uni.removeStorageSync("auto_open_edit_profile");
+    activeSection.value = "";
+    Promise.resolve(profilePromise).finally(() => {
+      openEditProfileModal();
+    });
+  } else if (uni.getStorageSync("auto_open_support")) {
+    uni.removeStorageSync("auto_open_support");
+    activeSection.value = "support";
+    setTimeout(() => {
+      loadMySupportTickets();
+    }, 300);
+  } else if (uni.getStorageSync("auto_scroll_to_required_fields")) {
     uni.removeStorageSync("auto_scroll_to_required_fields");
-    activeTab.value = "profile";
+    activeSection.value = "personal";
     setTimeout(() => {
       scrollToRequiredFields();
     }, 450);
+  } else if (uni.getStorageSync("auto_scroll_to_device") || autoBrand) {
+    uni.removeStorageSync("auto_scroll_to_device");
+    scrollToDeviceCard();
+    if (autoBrand) {
+      Promise.resolve(profilePromise).finally(() => {
+        openDeviceModal(autoBrand as any);
+      });
+    }
   }
+});
+
+// ── 从各页面"去绑定手表"跳转过来时，定位并高亮手表直连卡片 ──
+const isDeviceCardHighlighted = ref(false);
+function scrollToDeviceCard() {
+  activeSection.value = "device";
+  setTimeout(() => {
+    uni.pageScrollTo({ selector: "#device-connect-card", duration: 400 });
+    isDeviceCardHighlighted.value = true;
+    setTimeout(() => {
+      isDeviceCardHighlighted.value = false;
+    }, 2600);
+  }, 450);
+}
+onLoad(() => {
+  initShareMenu();
+});
+
+onShareAppMessage(() => {
+  return getUnifiedShareAppMessage();
+});
+
+onShareTimeline(() => {
+  return getUnifiedShareTimeline();
 });
 </script>
 
 <style scoped>
+/* 顶部快捷入口宫格 */
+.quick-grid {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  padding: 24rpx 12rpx;
+  margin-bottom: 24rpx;
+  border-radius: 24rpx;
+  background: var(--rgm-card, #141418);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+.qg-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;
+}
+.qg-item:active {
+  opacity: 0.7;
+}
+.qg-icon-wrap {
+  position: relative;
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 24rpx;
+  background: var(--rgm-brand-tint, rgba(255, 107, 0, 0.12));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qg-icon {
+  font-size: 40rpx;
+}
+.qg-dot {
+  position: absolute;
+  top: 6rpx;
+  right: 6rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: #ef4444;
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
+}
+.qg-label {
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #d4d4d8);
+}
+
+/* 渐进式资料折叠入口 */
+.extra-fields-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.eft-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  flex: 1;
+  min-width: 0;
+}
+.eft-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--rgm-text, #f4f4f5);
+}
+.eft-desc {
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+.eft-arrow {
+  font-size: 24rpx;
+  color: var(--rgm-brand-text, #ff8533);
+  flex-shrink: 0;
+}
+
 /* ── Pulse Animation for Required Fields Focus ── */
 .highlight-pulse {
   animation: fieldPulse 1.2s ease-in-out 2 !important;
@@ -4224,10 +5679,98 @@ onShow(() => {
   }
 }
 
+/* ── 🚀 Onboard Guide Card ── */
+.onboard-guide-card {
+  background: var(--rgm-brand-tint, linear-gradient(135deg, rgba(252, 76, 2, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  border-radius: 24rpx;
+  padding: 22rpx 26rpx;
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 6rpx 20rpx var(--rgm-shadow, rgba(0, 0, 0, 0.25));
+}
+
+.ogc-left {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  flex: 1;
+}
+
+.ogc-icon-circle {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34rpx;
+  flex-shrink: 0;
+}
+
+.ogc-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.ogc-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.ogc-title {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: var(--rgm-text, #ffffff);
+}
+
+.ogc-progress-tag {
+  font-size: 18rpx;
+  font-weight: bold;
+  color: var(--rgm-brand-text, #f97316);
+  background: var(--rgm-brand-tint, rgba(249, 115, 22, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(249, 115, 22, 0.3));
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+}
+
+.ogc-progress-tag.completed {
+  color: var(--rgm-green, #10b981);
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.ogc-desc {
+  font-size: 20rpx;
+  color: var(--rgm-text-2, #d1d5db);
+  line-height: 1.4;
+}
+
+.ogc-right {
+  margin-left: 16rpx;
+  flex-shrink: 0;
+}
+
+.ogc-action-txt {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: var(--rgm-brand-text, #fc4c02);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.12));
+  padding: 8rpx 18rpx;
+  border-radius: 16rpx;
+}
+
 /* ── Manual Entry Banner ── */
 .manual-entry-banner {
-  background: linear-gradient(90deg, rgba(252, 76, 2, 0.12) 0%, rgba(255, 255, 255, 0.03) 100%);
-  border: 1rpx solid rgba(252, 76, 2, 0.28);
+  background: var(--rgm-brand-tint, linear-gradient(90deg, rgba(252, 76, 2, 0.12) 0%, rgba(255, 255, 255, 0.03) 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.28));
   border-radius: 24rpx;
   padding: 20rpx 24rpx;
   margin-bottom: 24rpx;
@@ -4258,18 +5801,197 @@ onShow(() => {
 .manual-entry-title {
   font-size: 26rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .manual-entry-desc {
   font-size: 20rpx;
-  color: #a0a0a5;
+  color: var(--rgm-text-2, #a0a0a5);
 }
 
 .manual-entry-arrow {
   font-size: 32rpx;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   font-weight: bold;
+}
+
+.share-entry-banner {
+  background: linear-gradient(90deg, rgba(52, 199, 89, 0.14) 0%, rgba(255, 255, 255, 0.03) 100%);
+  border: 1rpx solid rgba(52, 199, 89, 0.35);
+}
+
+.share-banner-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.share-badge-btn {
+  font-size: 22rpx;
+  color: var(--rgm-text, #ffffff);
+  background: var(--rgm-brand, #10b981);
+  border-radius: 9999rpx;
+  padding: 4rpx 16rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  border: none;
+  font-weight: 600;
+  margin: 0;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
+}
+
+.share-badge-btn::after {
+  border: none;
+}
+
+.share-badge-pill {
+  font-size: 24rpx;
+  color: var(--rgm-green, #34c759);
+  font-weight: 600;
+  background: rgba(52, 199, 89, 0.15);
+  border: 1rpx solid rgba(52, 199, 89, 0.3);
+  border-radius: 9999rpx;
+  padding: 6rpx 18rpx;
+  white-space: nowrap;
+}
+
+/* ── 「我的」功能菜单 ── */
+.profile-menu-card {
+  padding: 8rpx 28rpx;
+}
+
+.pm-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 28rpx 0;
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
+  gap: 20rpx;
+}
+
+.pm-item-last {
+  border-bottom: none;
+}
+
+.pm-icon {
+  font-size: 40rpx;
+  width: 56rpx;
+  text-align: center;
+}
+
+.pm-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.pm-title {
+  font-size: 29rpx;
+  font-weight: 600;
+  color: var(--rgm-text, #ffffff);
+}
+
+
+.pm-status {
+  font-size: 22rpx;
+  color: var(--rgm-text-3, #8e8e93);
+  white-space: nowrap;
+}
+
+.pm-status.ok {
+  color: var(--rgm-green, #34c759);
+}
+
+.pm-status.warn {
+  color: var(--rgm-red, #f87171);
+}
+
+.pm-arrow {
+  font-size: 36rpx;
+  color: var(--rgm-text-3, #48484a);
+}
+
+.appearance-card .pm-item {
+  padding: 22rpx 0;
+}
+
+.app-seg-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+  padding: 6rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-3, rgba(255, 255, 255, 0.06));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  flex-shrink: 0;
+}
+
+.app-seg-pill {
+  padding: 10rpx 20rpx;
+  border-radius: 13rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--rgm-text-2, #a1a1aa);
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.app-seg-pill.active {
+  background: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-on-brand, #ffffff);
+  font-weight: 700;
+  box-shadow: 0 4rpx 12rpx var(--rgm-brand-glow, rgba(252, 76, 2, 0.28));
+}
+
+/* ── 子页面返回栏 ── */
+.section-back-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin: -30rpx -30rpx 24rpx -30rpx;
+  padding: 24rpx 30rpx;
+  background: var(--rgm-bg, rgba(11, 11, 13, 0.96));
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+
+.sbb-back {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+  width: 140rpx;
+}
+
+.sbb-arrow {
+  font-size: 44rpx;
+  line-height: 1;
+  color: var(--rgm-brand-text, #fc4c02);
+}
+
+.sbb-back-txt {
+  font-size: 28rpx;
+  color: var(--rgm-brand-text, #fc4c02);
+  font-weight: 600;
+}
+
+.sbb-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--rgm-text, #ffffff);
+}
+
+.sbb-placeholder {
+  width: 140rpx;
 }
 
 /* ── Segmented Profile Tabs Nav ── */
@@ -4277,11 +5999,12 @@ onShow(() => {
   display: flex;
   flex-direction: row;
   align-items: center;
-  background: #151518;
+  background: var(--rgm-card, #151518);
   border-radius: 24rpx;
   padding: 8rpx;
   margin-bottom: 28rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .profile-tab-item {
@@ -4297,8 +6020,8 @@ onShow(() => {
 }
 
 .profile-tab-item-active {
-  background: rgba(252, 76, 2, 0.16);
-  border: 1rpx solid rgba(252, 76, 2, 0.45);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.16));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.45));
 }
 
 .profile-tab-icon {
@@ -4308,38 +6031,41 @@ onShow(() => {
 .profile-tab-title {
   font-size: 26rpx;
   font-weight: 600;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .profile-tab-title-active {
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   font-weight: 700;
 }
 
 .profile-page {
   min-height: 100vh;
-  background-color: #0b0b0d;
-  padding: 30rpx 30rpx calc(240rpx + constant(safe-area-inset-bottom)) 30rpx;
-  padding: 30rpx 30rpx calc(240rpx + env(safe-area-inset-bottom)) 30rpx;
+  background-color: var(--rgm-bg, #0B0B0E);
+  padding: 24rpx 28rpx calc(130rpx + constant(safe-area-inset-bottom)) 28rpx;
+  padding: 24rpx 28rpx calc(130rpx + env(safe-area-inset-bottom)) 28rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 /* Required field asterisk */
 .required-star {
-  color: #f87171;
+  color: var(--rgm-red, #f87171);
   font-size: inherit;
   font-weight: bold;
 }
 
 .login-hero-card {
-  background: linear-gradient(135deg, rgba(7, 193, 96, 0.22) 0%, #151518 100%);
+  background: var(--rgm-card, linear-gradient(135deg, rgba(7, 193, 96, 0.22) 0%, #151518 100%));
   border: 1rpx solid rgba(7, 193, 96, 0.45);
-  border-radius: 32rpx;
-  padding: 32rpx;
-  margin-bottom: 24rpx;
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.22));
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .login-hero-left {
@@ -4369,13 +6095,13 @@ onShow(() => {
 .hero-title {
   font-size: 32rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .hero-desc {
   font-size: 22rpx;
-  color: #a0a0a5;
+  color: var(--rgm-text-2, #a0a0a5);
   margin-top: 6rpx;
   display: block;
   line-height: 1.4;
@@ -4386,51 +6112,55 @@ onShow(() => {
   width: 100%;
   height: 88rpx;
   line-height: 88rpx;
-  background-color: #07c160;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #07c160);
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
   border-radius: 20rpx;
   border: none;
   text-align: center;
   margin-top: 4rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .hero-login-btn-text,
 .modal-wx-btn-text {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
 }
 
 .switch-user-btn {
   padding: 0 20rpx;
-  background-color: #242429;
-  color: #8e8e93;
+  background-color: var(--rgm-card-3, #242429);
+  color: var(--rgm-text-3, #8e8e93);
   font-size: 24rpx;
   border-radius: 16rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   height: 56rpx;
   line-height: 56rpx;
   margin: 0;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .user-card {
-  background: linear-gradient(135deg, #1c1c20 0%, #131316 100%);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  border-radius: 32rpx;
-  padding: 32rpx;
-  margin-bottom: 24rpx;
+  background: var(--rgm-card, linear-gradient(135deg, #1c1c20 0%, #131316 100%));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.22));
   display: flex;
   align-items: center;
   gap: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .avatar {
   width: 100rpx;
   height: 100rpx;
   border-radius: 50rpx;
-  border: 2rpx solid rgba(252, 76, 2, 0.4);
+  border: 2rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.4));
 }
 
 .user-meta {
@@ -4440,23 +6170,24 @@ onShow(() => {
 .user-name {
   font-size: 32rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .user-id {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 6rpx;
   display: block;
 }
 
 .wechat-quick-card {
-  background: linear-gradient(135deg, rgba(7, 193, 96, 0.15) 0%, #151518 100%);
+  background: var(--rgm-card, linear-gradient(135deg, rgba(7, 193, 96, 0.15) 0%, #151518 100%));
   border: 1rpx solid rgba(7, 193, 96, 0.3);
   border-radius: 28rpx;
   padding: 28rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .wx-tip-row {
@@ -4477,34 +6208,37 @@ onShow(() => {
 .wx-tip-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .wx-tip-sub {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 4rpx;
   display: block;
 }
 
 .wx-login-action-btn {
-  background: #07c160;
-  color: #ffffff;
+  background: var(--rgm-brand, #07c160);
+  color: var(--rgm-text, #ffffff);
   font-size: 28rpx;
   font-weight: bold;
   border-radius: 18rpx;
   height: 80rpx;
   line-height: 80rpx;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .section-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
-  border-radius: 28rpx;
-  padding: 28rpx;
-  margin-bottom: 24rpx;
+  background-color: var(--rgm-card, #151518);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.22));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .card-title-row {
@@ -4527,23 +6261,24 @@ onShow(() => {
 .card-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .conn-status {
   font-size: 22rpx;
   font-weight: bold;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .conn-status.connected {
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
 }
 
 /* ── Wechat Notification Card ── */
 .wechat-notif-card {
-  background: linear-gradient(135deg, rgba(252, 82, 0, 0.08) 0%, #151518 100%);
-  border: 1rpx solid rgba(252, 82, 0, 0.25);
+  background: var(--rgm-card, linear-gradient(135deg, rgba(252, 82, 0, 0.08) 0%, #151518 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 82, 0, 0.25));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .notif-status-badge {
@@ -4552,7 +6287,7 @@ onShow(() => {
   gap: 8rpx;
   padding: 6rpx 16rpx;
   border-radius: 20rpx;
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.06));
 }
 
 .notif-status-badge.enabled {
@@ -4568,21 +6303,22 @@ onShow(() => {
 
 .notif-status-badge.enabled .status-dot {
   background-color: #30d158;
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
 }
 
 .notif-status-badge .status-text {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   font-weight: bold;
 }
 
 .notif-status-badge.enabled .status-text {
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
 }
 
 .wechat-notif-desc {
   font-size: 24rpx;
-  color: #a0a0a5;
+  color: var(--rgm-text-2, #a0a0a5);
   line-height: 1.5;
   display: block;
   margin-bottom: 20rpx;
@@ -4595,8 +6331,8 @@ onShow(() => {
 
 .enable-subscribe-btn {
   flex: 2;
-  background: linear-gradient(135deg, #fc5200 0%, #e04800 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc5200 0%, #e04800 100%));
+  color: var(--rgm-text, #ffffff);
   font-size: 26rpx;
   font-weight: bold;
   height: 72rpx;
@@ -4605,13 +6341,14 @@ onShow(() => {
   border: none;
   text-align: center;
   margin: 0;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .test-subscribe-btn {
   flex: 1;
-  background-color: #242429;
-  color: #fc5200;
-  border: 1rpx solid rgba(252, 82, 0, 0.4);
+  background-color: var(--rgm-card-3, #242429);
+  color: var(--rgm-brand-text, #fc5200);
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 82, 0, 0.4));
   font-size: 24rpx;
   font-weight: bold;
   height: 72rpx;
@@ -4619,29 +6356,31 @@ onShow(() => {
   border-radius: 18rpx;
   text-align: center;
   margin: 0;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .desc-text {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.4;
   margin-bottom: 20rpx;
   display: block;
 }
 
 .garmin-btn {
-  background-color: #0a84ff;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #0a84ff);
+  color: var(--rgm-text, #ffffff);
   font-size: 26rpx;
   font-weight: bold;
   border-radius: 18rpx;
   height: 72rpx;
   line-height: 72rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .unbind-btn {
   background-color: rgba(255, 69, 58, 0.15);
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
   font-size: 26rpx;
   font-weight: bold;
   border-radius: 18rpx;
@@ -4651,8 +6390,9 @@ onShow(() => {
 
 /* Club Management Card */
 .club-card-highlight {
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
-  background: linear-gradient(135deg, rgba(252, 76, 2, 0.08) 0%, #151518 100%);
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
+  background: var(--rgm-card, linear-gradient(135deg, rgba(252, 76, 2, 0.08) 0%, #151518 100%));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .club-role-tag {
@@ -4664,90 +6404,95 @@ onShow(() => {
 
 .role-owner {
   background-color: rgba(255, 159, 10, 0.25);
-  color: #ff9f0a;
+  color: var(--rgm-amber, #ff9f0a);
 }
 
 .role-coach {
-  background-color: rgba(191, 90, 242, 0.25);
-  color: #bf5af2;
+  background-color: var(--rgm-brand-tint, rgba(191, 90, 242, 0.25));
+  color: var(--rgm-brand-text, #bf5af2);
 }
 
 .role-member {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #8e8e93;
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.1));
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .joined-club-box {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .club-mini-info {
   display: flex;
   align-items: center;
   gap: 20rpx;
-  margin-bottom: 16rpx;
 }
 
 .mini-logo {
   width: 80rpx;
   height: 80rpx;
   border-radius: 18rpx;
+  flex-shrink: 0;
 }
 
 .mini-texts {
   flex: 1;
+  min-width: 0;
 }
 
 .club-title-row {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  margin-bottom: 4rpx;
+  margin-bottom: 6rpx;
+  flex-wrap: wrap;
 }
 
 .multi-club-badge {
   font-size: 18rpx;
-  color: #fc4c02;
-  background: rgba(252, 76, 2, 0.15);
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  color: var(--rgm-brand-text, #fc4c02);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
   padding: 2rpx 10rpx;
   border-radius: 8rpx;
   font-weight: bold;
 }
 
-.mini-club-name {
+.mini-club-name,
+.club-title-text {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
-.mini-club-desc {
+.mini-club-desc,
+.club-desc-text {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-2, #8e8e93);
   margin-top: 6rpx;
   display: block;
-  line-height: 1.3;
+  line-height: 1.45;
 }
 
 .invite-copy-row {
   display: flex;
   align-items: center;
   font-size: 24rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   padding-top: 14rpx;
 }
 
 .invite-lbl {
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .invite-code {
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   font-weight: bold;
   font-family: monospace;
   font-size: 26rpx;
@@ -4755,45 +6500,63 @@ onShow(() => {
 }
 
 .copy-action {
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   font-size: 22rpx;
   margin-left: 8rpx;
 }
 
 .empty-club-box {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .club-btn-grid {
   display: flex;
-  gap: 20rpx;
+  gap: 14rpx;
 }
 
 .club-act-btn {
   flex: 1;
-  height: 84rpx;
-  line-height: 84rpx;
-  font-size: 26rpx;
+  min-width: 0;
+  margin: 0;
+  padding: 0 10rpx;
+  height: 76rpx;
+  line-height: 1.25;
+  font-size: 24rpx;
   font-weight: bold;
-  border-radius: 20rpx;
+  border-radius: 18rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.club-act-btn::after {
+  border: none;
 }
 
 .club-act-btn.join-btn {
-  background-color: #242429;
-  color: #ffffff;
-  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  background-color: var(--rgm-card-3, #242429);
+  color: var(--rgm-text, #ffffff);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .club-act-btn.create-btn {
-  background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%));
+  color: var(--rgm-text, #ffffff);
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
+}
+
+.club-act-btn.self-create-btn {
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.14));
+  color: var(--rgm-brand-text, #fc4c02);
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
 }
 
 /* Races */
@@ -4804,10 +6567,11 @@ onShow(() => {
   line-height: 52rpx;
   font-size: 22rpx;
   font-weight: bold;
-  color: #ffffff;
-  background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
+  color: var(--rgm-text, #ffffff);
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%));
   border-radius: 14rpx;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .add-race-header-btn::after {
@@ -4821,9 +6585,9 @@ onShow(() => {
   line-height: 72rpx;
   font-size: 24rpx;
   font-weight: bold;
-  color: #fc4c02;
-  background-color: rgba(252, 76, 2, 0.12);
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  color: var(--rgm-brand-text, #fc4c02);
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.12));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
   border-radius: 16rpx;
 }
 
@@ -4838,9 +6602,10 @@ onShow(() => {
 }
 
 .race-item {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 20rpx;
   padding: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-top {
@@ -4871,8 +6636,8 @@ onShow(() => {
 }
 
 .edit-pill {
-  background-color: rgba(255, 255, 255, 0.08);
-  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.15));
 }
 
 .del-pill {
@@ -4882,23 +6647,23 @@ onShow(() => {
 
 .pill-text {
   font-size: 18rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   font-weight: 500;
 }
 
 .del-pill .pill-text {
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
 }
 
 .race-name {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .race-badge {
   background-color: rgba(10, 132, 255, 0.15);
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   padding: 4rpx 14rpx;
   border-radius: 10rpx;
   font-size: 20rpx;
@@ -4906,18 +6671,18 @@ onShow(() => {
 }
 
 .race-badge.urgent {
-  background-color: rgba(252, 76, 2, 0.2);
-  color: #fc4c02;
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.2));
+  color: var(--rgm-brand-text, #fc4c02);
 }
 
 .race-badge.completed-badge {
   background-color: rgba(52, 199, 89, 0.2);
-  color: #34c759;
+  color: var(--rgm-green, #34c759);
   border: 1rpx solid rgba(52, 199, 89, 0.35);
 }
 
 .race-finish-time-tag {
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
   font-weight: bold;
 }
 
@@ -4942,7 +6707,7 @@ onShow(() => {
 .comp-badge-tag {
   font-size: 20rpx;
   font-weight: bold;
-  color: #34c759;
+  color: var(--rgm-green, #34c759);
   background-color: rgba(52, 199, 89, 0.15);
   padding: 2rpx 10rpx;
   border-radius: 6rpx;
@@ -4951,12 +6716,12 @@ onShow(() => {
 .comp-diff-text {
   font-size: 20rpx;
   font-weight: 600;
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
 }
 
 .comp-notes-text {
   font-size: 20rpx;
-  color: #d4d4d8;
+  color: var(--rgm-text-2, #d4d4d8);
   font-style: italic;
 }
 
@@ -4971,7 +6736,7 @@ onShow(() => {
   width: 100rpx;
   height: 100rpx;
   border-radius: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.15));
   flex-shrink: 0;
 }
 
@@ -4979,8 +6744,8 @@ onShow(() => {
   width: 100rpx;
   height: 100rpx;
   border-radius: 12rpx;
-  border: 2rpx dashed rgba(255, 107, 0, 0.5);
-  background: rgba(255, 107, 0, 0.08);
+  border: 2rpx dashed var(--rgm-brand-line, rgba(255, 107, 0, 0.5));
+  background: var(--rgm-brand-tint, rgba(255, 107, 0, 0.08));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4990,7 +6755,7 @@ onShow(() => {
 }
 
 .card-add-photo-btn:active {
-  background: rgba(255, 107, 0, 0.2);
+  background: var(--rgm-brand-tint, rgba(255, 107, 0, 0.2));
 }
 
 .card-add-photo-btn .card-add-icon {
@@ -5000,7 +6765,7 @@ onShow(() => {
 
 .card-add-photo-btn .card-add-txt {
   font-size: 18rpx;
-  color: #ff6b00;
+  color: var(--rgm-brand-text, #ff6b00);
   font-weight: 600;
   margin-top: 4rpx;
   line-height: 1;
@@ -5008,7 +6773,7 @@ onShow(() => {
 
 .card-photo-hint {
   font-size: 18rpx;
-  color: #71717a;
+  color: var(--rgm-text-3, #71717a);
   margin-top: 6rpx;
   display: block;
 }
@@ -5023,17 +6788,18 @@ onShow(() => {
 
 .past-tip-text {
   font-size: 20rpx;
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
   font-weight: 500;
 }
 
 /* Status Segmented in Modal */
 .status-segmented {
   display: flex;
-  background-color: #242429;
+  background-color: var(--rgm-card-3, #242429);
   border-radius: 14rpx;
   padding: 6rpx;
   gap: 8rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .status-seg-item {
@@ -5043,17 +6809,17 @@ onShow(() => {
   font-weight: 600;
   padding: 14rpx 0;
   border-radius: 10rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 
 .status-seg-item.active {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.1));
+  color: var(--rgm-text, #ffffff);
 }
 
 .status-seg-item.completed-item.active {
   background: linear-gradient(135deg, rgba(52, 199, 89, 0.3) 0%, rgba(52, 199, 89, 0.5) 100%);
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   border: 1rpx solid rgba(52, 199, 89, 0.4);
 }
 
@@ -5078,7 +6844,7 @@ onShow(() => {
 .comp-sec-title {
   font-size: 24rpx;
   font-weight: bold;
-  color: #34c759;
+  color: var(--rgm-green, #34c759);
 }
 
 .m-auto-match-btn {
@@ -5088,9 +6854,9 @@ onShow(() => {
   line-height: 48rpx;
   font-size: 20rpx;
   font-weight: bold;
-  color: #fc4c02;
-  background-color: rgba(252, 76, 2, 0.15);
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  color: var(--rgm-brand-text, #fc4c02);
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
   border-radius: 10rpx;
 }
 
@@ -5113,12 +6879,12 @@ onShow(() => {
 }
 
 .finish-time-diff-badge.faster {
-  color: #34c759;
+  color: var(--rgm-green, #34c759);
   background-color: rgba(52, 199, 89, 0.15);
 }
 
 .finish-time-diff-badge.slower {
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
   background-color: rgba(56, 189, 248, 0.15);
 }
 
@@ -5136,9 +6902,9 @@ onShow(() => {
   line-height: 46rpx;
   font-size: 20rpx;
   font-weight: 500;
-  color: #e4e4e7;
-  background-color: rgba(255, 255, 255, 0.1);
-  border: 1rpx solid rgba(255, 255, 255, 0.15);
+  color: var(--rgm-text, #e4e4e7);
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.1));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.15));
   border-radius: 10rpx;
 }
 
@@ -5159,7 +6925,7 @@ onShow(() => {
   height: 120rpx;
   border-radius: 14rpx;
   overflow: hidden;
-  border: 1rpx solid rgba(255, 255, 255, 0.2);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.2));
 }
 
 .modal-photo-img {
@@ -5180,24 +6946,25 @@ onShow(() => {
   border-radius: 50%;
   font-size: 20rpx;
   font-weight: bold;
+  --rgm-text: var(--rgm-on-deep); --rgm-text-2: var(--rgm-on-deep-2); --rgm-text-3: var(--rgm-on-deep-2);
 }
 
 .modal-photo-empty {
   padding: 20rpx;
-  background-color: rgba(255, 255, 255, 0.02);
-  border: 1rpx dashed rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.02));
+  border: 1rpx dashed var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 14rpx;
   text-align: center;
 }
 
 .empty-photo-text {
   font-size: 20rpx;
-  color: #71717a;
+  color: var(--rgm-text-3, #71717a);
 }
 
 
 .race-type-tag {
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
 }
 
 .race-name-group {
@@ -5215,19 +6982,19 @@ onShow(() => {
 
 .p-tag-a {
   background-color: rgba(244, 63, 94, 0.2);
-  color: #fb7185;
+  color: var(--rgm-red, #fb7185);
   border: 1rpx solid rgba(244, 63, 94, 0.35);
 }
 
 .p-tag-b {
   background-color: rgba(56, 189, 248, 0.2);
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
   border: 1rpx solid rgba(56, 189, 248, 0.35);
 }
 
 .p-tag-c {
   background-color: rgba(161, 161, 170, 0.2);
-  color: #d4d4d8;
+  color: var(--rgm-text-2, #d4d4d8);
   border: 1rpx solid rgba(161, 161, 170, 0.35);
 }
 
@@ -5237,12 +7004,12 @@ onShow(() => {
   gap: 12rpx;
   margin-top: 14rpx;
   padding-top: 12rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.06);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
 }
 
 .race-priority-lbl {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .priority-actions {
@@ -5256,9 +7023,9 @@ onShow(() => {
   height: 40rpx;
   line-height: 40rpx;
   font-size: 18rpx;
-  color: #a1a1aa;
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: var(--rgm-text-2, #a1a1aa);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.05));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 8rpx;
 }
 
@@ -5268,21 +7035,21 @@ onShow(() => {
 
 .min-p-btn.active:nth-child(1) {
   background-color: rgba(244, 63, 94, 0.25);
-  color: #fb7185;
+  color: var(--rgm-red, #fb7185);
   border-color: #f43f5e;
   font-weight: bold;
 }
 
 .min-p-btn.active:nth-child(2) {
   background-color: rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
   border-color: #38bdf8;
   font-weight: bold;
 }
 
 .min-p-btn.active:nth-child(3) {
   background-color: rgba(161, 161, 170, 0.25);
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   border-color: #a1a1aa;
   font-weight: bold;
 }
@@ -5302,19 +7069,19 @@ onShow(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12rpx 16rpx;
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.04));
   border-radius: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.07);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.07));
 }
 
 .race-info-toggle-label {
   font-size: 22rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 
 .race-info-toggle-arrow {
   font-size: 20rpx;
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .race-ai-fetch-btn {
@@ -5324,9 +7091,9 @@ onShow(() => {
   line-height: 60rpx;
   font-size: 20rpx;
   font-weight: bold;
-  color: #c084fc;
-  background-color: rgba(168, 85, 247, 0.15);
-  border: 1rpx solid rgba(168, 85, 247, 0.35);
+  color: var(--rgm-brand-text, #c084fc);
+  background-color: var(--rgm-brand-tint, rgba(168, 85, 247, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(168, 85, 247, 0.35));
   border-radius: 12rpx;
   white-space: nowrap;
 }
@@ -5338,29 +7105,29 @@ onShow(() => {
 .race-info-panel-hint {
   padding: 8rpx 12rpx;
   margin-bottom: 12rpx;
-  background-color: rgba(168, 85, 247, 0.08);
+  background-color: var(--rgm-brand-tint, rgba(168, 85, 247, 0.08));
   border-radius: 8rpx;
 }
 
 .panel-hint-text {
   font-size: 20rpx;
-  color: #c084fc;
+  color: var(--rgm-brand-text, #c084fc);
 }
 
 .race-info-panel {
   margin-top: 12rpx;
   padding: 18rpx 16rpx;
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.03));
   border-radius: 16rpx;
 
-  border: 1rpx solid rgba(255, 255, 255, 0.07);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.07));
 }
 
 .race-info-section-title {
   display: block;
   font-size: 22rpx;
   font-weight: 600;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   margin-bottom: 12rpx;
   letter-spacing: 0.5rpx;
 }
@@ -5375,7 +7142,7 @@ onShow(() => {
 
 .race-info-label {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   flex: 0 0 auto;
   min-width: 180rpx;
 }
@@ -5384,12 +7151,13 @@ onShow(() => {
   flex: 1;
   height: 56rpx;
   line-height: 56rpx;
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 10rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   padding: 0 16rpx;
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-info-picker {
@@ -5398,16 +7166,17 @@ onShow(() => {
   align-items: center;
   justify-content: space-between;
   height: 56rpx;
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 10rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   padding: 0 16rpx;
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .picker-arrow-sm {
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
   font-size: 20rpx;
   margin-left: 8rpx;
 }
@@ -5419,10 +7188,11 @@ onShow(() => {
   line-height: 72rpx;
   font-size: 26rpx;
   font-weight: 600;
-  color: #ffffff;
-  background: linear-gradient(135deg, #1c7ed6 0%, #339af0 100%);
+  color: var(--rgm-text, #ffffff);
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #1c7ed6 0%, #339af0 100%));
   border-radius: 16rpx;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .race-info-save-btn::after {
@@ -5448,7 +7218,7 @@ onShow(() => {
 .m-field-lbl {
   display: block;
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 10rpx;
   font-weight: 500;
 }
@@ -5462,13 +7232,14 @@ onShow(() => {
 .m-input-txt {
   height: 72rpx;
   line-height: 72rpx;
-  background-color: #202026;
+  background-color: var(--rgm-card-2, #202026);
   border-radius: 16rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   padding: 0 20rpx;
   font-size: 26rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .m-ai-fill-btn {
@@ -5478,9 +7249,9 @@ onShow(() => {
   line-height: 72rpx;
   font-size: 22rpx;
   font-weight: bold;
-  color: #c084fc;
-  background-color: rgba(168, 85, 247, 0.18);
-  border: 1rpx solid rgba(168, 85, 247, 0.4);
+  color: var(--rgm-brand-text, #c084fc);
+  background-color: var(--rgm-brand-tint, rgba(168, 85, 247, 0.18));
+  border: 1rpx solid var(--rgm-brand-line, rgba(168, 85, 247, 0.4));
   border-radius: 16rpx;
   white-space: nowrap;
 }
@@ -5491,23 +7262,24 @@ onShow(() => {
 
 .m-picker-box {
   height: 72rpx;
-  background-color: #202026;
+  background-color: var(--rgm-card-2, #202026);
   border-radius: 16rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   padding: 0 20rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .m-picker-txt {
   font-size: 26rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .m-picker-arrow {
   font-size: 20rpx;
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .m-row-2 {
@@ -5521,33 +7293,35 @@ onShow(() => {
 
 .priority-segmented {
   display: flex;
-  background-color: #202026;
+  background-color: var(--rgm-card-2, #202026);
   border-radius: 16rpx;
   padding: 6rpx;
   gap: 6rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .seg-item {
   flex: 1;
   text-align: center;
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   padding: 14rpx 0;
   border-radius: 12rpx;
   transition: all 0.2s;
 }
 
 .seg-item.active {
-  background-color: #fc4c02;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .m-race-info-block {
   margin: 10rpx 0 24rpx;
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.03));
   border-radius: 20rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   overflow: hidden;
 }
 
@@ -5556,18 +7330,18 @@ onShow(() => {
   align-items: center;
   justify-content: space-between;
   padding: 18rpx 20rpx;
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.04));
 }
 
 .m-info-title {
   font-size: 22rpx;
   font-weight: bold;
-  color: #c084fc;
+  color: var(--rgm-brand-text, #c084fc);
 }
 
 .m-info-arrow {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .m-race-info-fields {
@@ -5577,32 +7351,34 @@ onShow(() => {
 .m-sublbl {
   display: block;
   font-size: 20rpx;
-  color: #71717a;
+  color: var(--rgm-text-3, #71717a);
   margin-bottom: 8rpx;
 }
 
 .m-subinput {
   height: 60rpx;
   line-height: 60rpx;
-  background-color: #16161a;
+  background-color: var(--rgm-card, #16161a);
   border-radius: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   padding: 0 16rpx;
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .m-subpicker {
   height: 60rpx;
-  background-color: #16161a;
+  background-color: var(--rgm-card, #16161a);
   border-radius: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   padding: 0 16rpx;
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   display: flex;
   align-items: center;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .m-actions-row {
@@ -5616,10 +7392,11 @@ onShow(() => {
   height: 80rpx;
   line-height: 80rpx;
   font-size: 26rpx;
-  color: #8e8e93;
-  background-color: #242429;
+  color: var(--rgm-text-3, #8e8e93);
+  background-color: var(--rgm-card-3, #242429);
   border-radius: 20rpx;
   border: none;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .m-cancel-btn::after {
@@ -5632,10 +7409,11 @@ onShow(() => {
   line-height: 80rpx;
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
-  background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
+  color: var(--rgm-text, #ffffff);
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%));
   border-radius: 20rpx;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .m-save-btn::after {
@@ -5650,7 +7428,7 @@ onShow(() => {
 
 .m-del-txt {
   font-size: 22rpx;
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
 }
 
 /* PB Grid */
@@ -5663,21 +7441,22 @@ onShow(() => {
 }
 
 .pb-item {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 20rpx;
   padding: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .pb-label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   display: block;
 }
 
 .pb-val {
   font-size: 28rpx;
   font-weight: bold;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   font-family: monospace;
   margin-top: 6rpx;
   display: block;
@@ -5686,8 +7465,8 @@ onShow(() => {
 .import-garmin-btn {
   font-size: 20rpx;
   font-weight: bold;
-  background-color: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-text, #ffffff);
   padding: 0 16rpx;
   height: 48rpx;
   line-height: 48rpx;
@@ -5708,19 +7487,20 @@ onShow(() => {
 
 .label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 8rpx;
 }
 
 .form-input {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 16rpx;
   height: 72rpx;
   line-height: 72rpx;
   padding: 0 16rpx;
   font-size: 26rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .full-width-group {
@@ -5737,23 +7517,23 @@ onShow(() => {
 .age-badge-pill {
   font-size: 20rpx;
   font-weight: bold;
-  color: #fc4c02;
-  background-color: rgba(252, 76, 2, 0.15);
+  color: var(--rgm-brand-text, #fc4c02);
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
 }
 
 .estimate-pill-btn {
   font-size: 20rpx;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   font-weight: bold;
   padding: 2rpx 8rpx;
 }
 
 .picker-input-box {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 16rpx;
   height: 72rpx;
   display: flex;
@@ -5761,11 +7541,12 @@ onShow(() => {
   justify-content: space-between;
   padding: 0 16rpx;
   font-size: 26rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .placeholder-text {
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .picker-arrow {
@@ -5783,17 +7564,18 @@ onShow(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 16rpx;
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .gender-pill.active {
-  background-color: rgba(252, 76, 2, 0.15);
-  border-color: #fc4c02;
-  color: #fc4c02;
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+  border-color: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-brand-text, #fc4c02);
   font-weight: bold;
 }
 
@@ -5807,19 +7589,21 @@ onShow(() => {
 
 .program-pill {
   padding: 12rpx 20rpx;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 16rpx;
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   transition: all 0.2s;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .program-pill.active {
-  background-color: #f59e0b;
-  border-color: #f59e0b;
+  background-color: var(--rgm-brand, #f59e0b);
+  border-color: var(--rgm-brand, #f59e0b);
   color: #000000;
   font-weight: bold;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* 戈壁经历选择卡片 */
@@ -5835,9 +7619,10 @@ onShow(() => {
   align-items: center;
   gap: 16rpx;
   padding: 18rpx;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .gobi-type-btn.active {
@@ -5857,22 +7642,23 @@ onShow(() => {
 .gobi-main-title {
   font-size: 24rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .gobi-sub-title {
   font-size: 18rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 4rpx;
 }
 
 /* 往届老戈友展开框 */
 .gobi-vet-box {
-  background-color: #141416;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #141416);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 20rpx;
   margin-top: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .vet-row {
@@ -5882,7 +7668,7 @@ onShow(() => {
 
 .vet-label {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   width: 140rpx;
   shrink: 0;
 }
@@ -5901,18 +7687,20 @@ onShow(() => {
   flex: 1;
   text-align: center;
   padding: 12rpx 0;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 14rpx;
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .grp-pill.active {
-  background-color: #f59e0b;
-  border-color: #f59e0b;
+  background-color: var(--rgm-brand, #f59e0b);
+  border-color: var(--rgm-brand, #f59e0b);
   color: #000000;
   font-weight: bold;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* 健康状况声明勾选卡片 */
@@ -5921,9 +7709,10 @@ onShow(() => {
   align-items: flex-start;
   gap: 16rpx;
   padding: 20rpx;
-  background-color: #141416;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #141416);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .health-decl-box.active {
@@ -5935,7 +7724,7 @@ onShow(() => {
   width: 36rpx;
   height: 36rpx;
   border-radius: 8rpx;
-  border: 2rpx solid rgba(255, 255, 255, 0.2);
+  border: 2rpx solid var(--rgm-line, rgba(255, 255, 255, 0.2));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5946,10 +7735,11 @@ onShow(() => {
 .health-decl-box.active .health-checkbox {
   background-color: #6366f1;
   border-color: #6366f1;
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
 }
 
 .check-mark {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-size: 24rpx;
   font-weight: bold;
 }
@@ -5962,13 +7752,13 @@ onShow(() => {
 .health-title {
   font-size: 24rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   margin-bottom: 6rpx;
 }
 
 .health-desc {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.4;
 }
 
@@ -5976,24 +7766,25 @@ onShow(() => {
 .target-badge {
   font-size: 24rpx;
   font-weight: bold;
-  color: #fc4c02;
-  background-color: rgba(252, 76, 2, 0.1);
+  color: var(--rgm-brand-text, #fc4c02);
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.1));
   padding: 6rpx 16rpx;
   border-radius: 12rpx;
 }
 
 .target-badge.locked {
-  color: #06b6d4;
+  color: var(--rgm-blue, #06b6d4);
   background-color: rgba(6, 182, 212, 0.1);
 }
 
 .goal-mode-selector {
   display: flex;
-  background-color: #121214;
+  background-color: var(--rgm-card, #121214);
   border-radius: 18rpx;
   padding: 6rpx;
   margin-bottom: 24rpx;
   gap: 8rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .goal-mode-btn {
@@ -6001,15 +7792,16 @@ onShow(() => {
   text-align: center;
   padding: 14rpx 0;
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   border-radius: 14rpx;
   transition: all 0.2s ease;
 }
 
 .goal-mode-btn.active {
-  background-color: #242428;
-  color: #ffffff;
+  background-color: var(--rgm-card-3, #242428);
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .slider-wrapper {
@@ -6018,7 +7810,7 @@ onShow(() => {
 
 .locked-tip {
   font-size: 20rpx;
-  color: #06b6d4;
+  color: var(--rgm-blue, #06b6d4);
   margin-top: 10rpx;
   text-align: center;
   display: block;
@@ -6026,17 +7818,18 @@ onShow(() => {
 
 .uniform-tip {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 10rpx;
   text-align: center;
   display: block;
 }
 
 .custom-months-section {
-  background-color: #121214;
+  background-color: var(--rgm-card, #121214);
   border-radius: 20rpx;
   padding: 20rpx;
   margin-top: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .custom-months-header {
@@ -6048,13 +7841,13 @@ onShow(() => {
 
 .cm-title {
   font-size: 22rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
 }
 
 .sync-uniform-action {
   font-size: 20rpx;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
 }
 
 .months-grid {
@@ -6064,18 +7857,19 @@ onShow(() => {
 }
 
 .month-cell {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
   border-radius: 14rpx;
   padding: 10rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .month-label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 4rpx;
 }
 
@@ -6084,22 +7878,23 @@ onShow(() => {
   text-align: center;
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 /* Weekly Plan Section */
 .weekly-plan-section {
-  background-color: #121214;
+  background-color: var(--rgm-card, #121214);
   border-radius: 20rpx;
   padding: 24rpx 20rpx;
   margin-top: 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .weekly-target-badge {
   background: rgba(16, 185, 129, 0.15);
   border: 1rpx solid rgba(16, 185, 129, 0.35);
-  color: #34d399;
+  color: var(--rgm-green, #34d399);
   font-size: 22rpx;
   font-weight: bold;
   border-radius: 12rpx;
@@ -6108,7 +7903,7 @@ onShow(() => {
 
 .weekly-desc-tip {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.5;
   margin: 10rpx 0 16rpx 0;
   display: block;
@@ -6124,18 +7919,20 @@ onShow(() => {
 .weekly-pill {
   padding: 8rpx 20rpx;
   border-radius: 14rpx;
-  background: #1c1c20;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background: var(--rgm-card-2, #1c1c20);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   font-size: 22rpx;
   font-weight: 600;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .weekly-pill.active {
-  background: #10b981;
-  border-color: #10b981;
-  color: #ffffff;
+  background: var(--rgm-brand, #10b981);
+  border-color: var(--rgm-brand, #10b981);
+  color: var(--rgm-text, #ffffff);
   box-shadow: 0 4rpx 12rpx rgba(16, 185, 129, 0.4);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .weekly-save-action {
@@ -6147,7 +7944,7 @@ onShow(() => {
 .save-weekly-btn {
   background: rgba(16, 185, 129, 0.15);
   border: 1rpx solid rgba(16, 185, 129, 0.4);
-  color: #34d399;
+  color: var(--rgm-green, #34d399);
   font-size: 22rpx;
   font-weight: bold;
   border-radius: 14rpx;
@@ -6169,8 +7966,8 @@ onShow(() => {
 .save-btn {
   width: 100%;
   height: 92rpx;
-  background: linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%));
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
   border-radius: 22rpx;
@@ -6178,7 +7975,8 @@ onShow(() => {
   align-items: center;
   justify-content: center;
   border: none;
-  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.3);
+  box-shadow: 0 8rpx 24rpx var(--rgm-brand-glow, rgba(252, 76, 2, 0.3));
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .logout-box {
@@ -6187,12 +7985,13 @@ onShow(() => {
 }
 
 .logout-btn {
-  background-color: #1c1c1e;
-  color: #8e8e93;
+  background-color: var(--rgm-card-2, #1c1c1e);
+  color: var(--rgm-text-3, #8e8e93);
   font-size: 28rpx;
   border-radius: 24rpx;
   height: 88rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 /* Modals */
@@ -6213,6 +8012,7 @@ onShow(() => {
   box-sizing: border-box;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  --rgm-text: var(--rgm-on-deep); --rgm-text-2: var(--rgm-on-deep-2); --rgm-text-3: var(--rgm-on-deep-2);
 }
 
 .garmin-fast-link {
@@ -6225,17 +8025,18 @@ onShow(() => {
 
 .garmin-link-txt {
   font-size: 24rpx;
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
 }
 
 .modal-content {
   width: 670rpx;
-  background-color: #18181c;
+  background-color: var(--rgm-card, #18181c);
   border-radius: 36rpx;
   padding: 44rpx 40rpx;
   box-sizing: border-box;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   margin-bottom: 60rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .modal-header {
@@ -6248,20 +8049,21 @@ onShow(() => {
 .modal-title {
   font-size: 34rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .close-btn {
   font-size: 36rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .auth-tabs {
   display: flex;
-  background-color: #121214;
+  background-color: var(--rgm-card, #121214);
   border-radius: 20rpx;
   padding: 6rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .auth-tab {
@@ -6269,19 +8071,20 @@ onShow(() => {
   text-align: center;
   padding: 16rpx 0;
   font-size: 26rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   border-radius: 16rpx;
 }
 
 .auth-tab.active {
-  background-color: #2c2c2e;
-  color: #ffffff;
+  background-color: var(--rgm-card-3, #2c2c2e);
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .auth-desc {
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 24rpx;
   line-height: 1.4;
   display: block;
@@ -6289,7 +8092,7 @@ onShow(() => {
 
 .field-label {
   font-size: 24rpx;
-  color: #aeaeb2;
+  color: var(--rgm-text-2, #aeaeb2);
   margin-top: 16rpx;
   margin-bottom: 8rpx;
   display: block;
@@ -6298,14 +8101,15 @@ onShow(() => {
 .large-input {
   width: 100%;
   height: 96rpx;
-  background-color: #242429;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-3, #242429);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 20rpx;
   padding: 0 28rpx;
   font-size: 30rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   box-sizing: border-box;
   margin-bottom: 12rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .center-input {
@@ -6313,25 +8117,26 @@ onShow(() => {
   font-size: 36rpx;
   font-family: monospace;
   font-weight: bold;
-  color: #fc4c02;
+  color: var(--rgm-brand-text, #fc4c02);
   letter-spacing: 6rpx;
 }
 
 .large-textarea {
   width: 100%;
   height: 150rpx;
-  background-color: #242429;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-3, #242429);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 20rpx;
   padding: 20rpx 28rpx;
   font-size: 26rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   box-sizing: border-box;
   margin-bottom: 12rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .placeholder-style {
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .domain-selector {
@@ -6346,43 +8151,92 @@ onShow(() => {
   padding: 20rpx 0;
   font-size: 26rpx;
   border-radius: 20rpx;
-  background-color: #242429;
-  color: #8e8e93;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  background-color: var(--rgm-card-3, #242429);
+  color: var(--rgm-text-3, #8e8e93);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .domain-btn.active {
-  background-color: #0a84ff;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #0a84ff);
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
-  border-color: #0a84ff;
+  border-color: var(--rgm-brand, #0a84ff);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* Multi-device & Brand Switcher Styling */
+.device-brands-sub {
+  font-size: 20rpx;
+  color: var(--rgm-text-3, #8e8e93);
+  font-weight: 500;
+}
+
 .brand-switch-row {
   display: flex;
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 18rpx;
   padding: 6rpx;
   margin-bottom: 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+
+.brand-switch-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12rpx;
+  margin-bottom: 24rpx;
 }
 
 .brand-switch-btn {
   flex: 1;
   text-align: center;
-  padding: 16rpx 0;
-  font-size: 26rpx;
+  padding: 18rpx 12rpx;
+  font-size: 25rpx;
   font-weight: 600;
-  color: #8e8e93;
-  border-radius: 14rpx;
+  color: var(--rgm-text-3, #8e8e93);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  border-radius: 16rpx;
   transition: all 0.2s ease;
 }
 
 .brand-switch-btn.active {
-  background-color: #2c2c30;
-  color: #ffffff;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.4);
+  background-color: var(--rgm-card-3, #2c2c30);
+  color: var(--rgm-text, #ffffff);
+  box-shadow: 0 2rpx 8rpx var(--rgm-shadow, rgba(0, 0, 0, 0.4));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+
+.brand-switch-btn.brand-garmin.active {
+  background: rgba(0, 122, 195, 0.16);
+  border-color: #007AC3;
+  color: #007AC3;
+}
+
+.brand-switch-btn.brand-coros.active {
+  background: rgba(230, 0, 18, 0.14);
+  border-color: #E60012;
+  color: #E60012;
+}
+
+.brand-switch-btn.brand-apple.active {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: #10b981;
+  color: #10b981;
+}
+
+.brand-switch-btn.brand-huawei.active {
+  background: rgba(207, 10, 44, 0.16);
+  border-color: #CF0A2C;
+  color: #CF0A2C;
+}
+
+.brand-switch-btn.brand-suunto.active {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: #f59e0b;
+  color: #f59e0b;
 }
 
 .device-status-item {
@@ -6411,53 +8265,191 @@ onShow(() => {
 
 .garmin-badge {
   background: rgba(0, 122, 255, 0.15);
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   border: 1rpx solid rgba(0, 122, 255, 0.3);
 }
 
 .coros-badge {
-  background: rgba(252, 76, 2, 0.15);
-  color: #fc4c02;
-  border: 1rpx solid rgba(252, 76, 2, 0.3);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+  color: var(--rgm-brand-text, #fc4c02);
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
+}
+
+.apple-badge {
+  background: rgba(16, 185, 129, 0.16);
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.35);
+}
+
+.huawei-badge {
+  background: rgba(207, 10, 44, 0.16);
+  color: #CF0A2C;
+  border: 1rpx solid rgba(207, 10, 44, 0.35);
+}
+
+.suunto-badge {
+  background: rgba(245, 158, 11, 0.16);
+  color: #f59e0b;
+  border: 1rpx solid rgba(245, 158, 11, 0.35);
 }
 
 .device-name-text {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .coros-btn {
-  background-color: #fc4c02 !important;
+  background-color: var(--rgm-brand, #fc4c02) !important;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .coros-primary-btn {
-  background-color: #fc4c02 !important;
+  background-color: var(--rgm-brand, #fc4c02) !important;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
+}
+
+.apple-watch-btn,
+.apple-primary-btn {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.huawei-watch-btn,
+.huawei-primary-btn {
+  background-color: #CF0A2C !important;
+  color: #ffffff !important;
+}
+
+.suunto-watch-btn,
+.suunto-primary-btn {
+  background-color: #d97706 !important;
+  color: #ffffff !important;
+}
+
+.track-import-outline-btn {
+  background-color: var(--rgm-card-2, #1a1a1e);
+  font-size: 24rpx;
+  font-weight: bold;
+  border-radius: 18rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  padding: 0 12rpx;
+}
+
+.track-import-outline-btn::after {
+  border: none;
+}
+
+.track-import-outline-btn.apple-outline {
+  color: #10b981;
+  border: 1rpx solid rgba(16, 185, 129, 0.45);
+}
+
+.track-import-outline-btn.huawei-outline {
+  color: #CF0A2C;
+  border: 1rpx solid rgba(207, 10, 44, 0.45);
+}
+
+.track-import-outline-btn.suunto-outline {
+  color: #f59e0b;
+  border: 1rpx solid rgba(245, 158, 11, 0.45);
+}
+
+.watch-guide-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.watch-guide-card {
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 12rpx;
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+}
+
+.watch-guide-card.apple-guide-card {
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.watch-guide-card.huawei-guide-card {
+  border-color: rgba(207, 10, 44, 0.35);
+}
+
+.watch-guide-card.suunto-guide-card {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.watch-guide-title {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: var(--rgm-text, #ffffff);
+  display: block;
+  margin-bottom: 10rpx;
+}
+
+.watch-guide-desc {
+  font-size: 23rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+  line-height: 1.5;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.watch-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.watch-step-item {
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #d4d4d8);
+  line-height: 1.45;
+  display: block;
+}
+
+.apple-modal-outline {
+  color: #10b981 !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+.huawei-modal-outline {
+  color: #CF0A2C !important;
+  border-color: rgba(207, 10, 44, 0.4) !important;
+}
+
+.suunto-modal-outline {
+  color: #f59e0b !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
 }
 
 .large-primary-btn {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background-color: #fc4c02;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
   border-radius: 24rpx;
   margin-top: 24rpx;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .large-wx-btn {
   width: 100%;
   height: 96rpx;
-  background-color: #07c160;
+  background-color: var(--rgm-brand, #07c160);
   border-radius: 24rpx;
   margin-top: 24rpx;
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .bottom-wx-login-btn {
@@ -6472,7 +8464,7 @@ onShow(() => {
 }
 
 .bottom-btn-text {
-  color: #07c160;
+  color: var(--rgm-green, #07c160);
   font-size: 28rpx;
   font-weight: bold;
 }
@@ -6488,32 +8480,43 @@ onShow(() => {
   margin-bottom: 8rpx;
 }
 
+.wx-hero-logo {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 24rpx;
+  background-color: #ffffff;
+  display: block;
+  margin: 0 auto 14rpx;
+  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.25);
+}
+
 .wx-hero-title {
   font-size: 32rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .wx-hero-desc {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 8rpx;
   display: block;
   line-height: 1.4;
 }
 
 .wx-account-status-card {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .status-title {
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 12rpx;
   display: block;
 }
@@ -6526,30 +8529,31 @@ onShow(() => {
 }
 
 .status-label {
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .status-val {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
 }
 
 .text-green {
-  color: #07c160 !important;
+  color: var(--rgm-green, #07c160) !important;
 }
 
 .text-muted {
-  color: #8e8e93 !important;
+  color: var(--rgm-text-3, #8e8e93) !important;
 }
 
 .wx-feature-bullets {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 20rpx;
   display: flex;
   flex-direction: column;
   gap: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .bullet-item {
@@ -6564,7 +8568,7 @@ onShow(() => {
 
 .bullet-text {
   font-size: 24rpx;
-  color: #d1d1d6;
+  color: var(--rgm-text-2, #d1d1d6);
 }
 
 .modal-outline-btn {
@@ -6572,22 +8576,22 @@ onShow(() => {
   height: 84rpx;
   line-height: 84rpx;
   background-color: transparent;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   font-size: 26rpx;
   border-radius: 20rpx;
   margin-top: 20rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
 }
 
 .user-badge-right {
   padding: 8rpx 16rpx;
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
   border-radius: 12rpx;
 }
 
 .badge-text-right {
   font-size: 22rpx;
-  color: #ff6b35;
+  color: var(--rgm-brand-text, #ff6b35);
   font-weight: bold;
 }
 
@@ -6599,8 +8603,8 @@ onShow(() => {
 }
 
 .recent-accounts-section {
-  background-color: rgba(255, 255, 255, 0.04);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 20rpx;
   margin-bottom: 20rpx;
@@ -6608,7 +8612,7 @@ onShow(() => {
 
 .recent-title {
   font-size: 24rpx;
-  color: #aeaeb2;
+  color: var(--rgm-text-2, #aeaeb2);
   margin-bottom: 14rpx;
   display: block;
 }
@@ -6623,10 +8627,11 @@ onShow(() => {
   display: flex;
   align-items: center;
   gap: 16rpx;
-  background-color: #222227;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  background-color: var(--rgm-card-2, #222227);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   border-radius: 16rpx;
   padding: 14rpx 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .recent-acc-avatar {
@@ -6644,12 +8649,12 @@ onShow(() => {
 .recent-acc-name {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .recent-acc-meta {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .recent-acc-card.current-acc {
@@ -6672,17 +8677,17 @@ onShow(() => {
 
 .acc-badge.owner {
   background-color: rgba(255, 179, 0, 0.2);
-  color: #ffb300;
+  color: var(--rgm-amber, #ffb300);
 }
 
 .acc-badge.coach {
   background-color: rgba(0, 210, 190, 0.2);
-  color: #00d2be;
+  color: var(--rgm-blue, #00d2be);
 }
 
 .current-acc-tag {
   font-size: 22rpx;
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
   font-weight: bold;
 }
 
@@ -6701,12 +8706,12 @@ onShow(() => {
 
 .status-sub {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .status-logout-btn {
   font-size: 22rpx;
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
   background: rgba(255, 69, 58, 0.12);
   border: 1rpx solid rgba(255, 69, 58, 0.3);
   border-radius: 12rpx;
@@ -6716,8 +8721,8 @@ onShow(() => {
 }
 
 .recover-acc-box {
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.03));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 18rpx 20rpx;
   margin-top: 16rpx;
@@ -6726,7 +8731,7 @@ onShow(() => {
 
 .recover-title {
   font-size: 22rpx;
-  color: #aeaeb2;
+  color: var(--rgm-text-2, #aeaeb2);
   display: block;
   margin-bottom: 12rpx;
   font-weight: 500;
@@ -6741,12 +8746,13 @@ onShow(() => {
 .recover-input {
   flex: 1;
   height: 68rpx;
-  background-color: #1a1a1f;
-  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  background-color: var(--rgm-card-2, #1a1a1f);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
   border-radius: 14rpx;
   padding: 0 16rpx;
   font-size: 24rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .recover-btn {
@@ -6754,16 +8760,17 @@ onShow(() => {
   line-height: 68rpx;
   padding: 0 24rpx;
   font-size: 24rpx;
-  color: #ffffff;
-  background-color: #00d2be;
+  color: var(--rgm-text, #ffffff);
+  background-color: var(--rgm-brand, #00d2be);
   border-radius: 14rpx;
   font-weight: bold;
   margin: 0;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .recent-acc-action {
   font-size: 22rpx;
-  color: #00d2be;
+  color: var(--rgm-blue, #00d2be);
   font-weight: 500;
 }
 
@@ -6778,23 +8785,24 @@ onShow(() => {
 .divider-line {
   flex: 1;
   height: 1rpx;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.1));
 }
 
 .divider-text {
   font-size: 20rpx;
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
 }
 
 .avatar-nickname-flex {
   display: flex;
   align-items: center;
   gap: 20rpx;
-  background-color: #1a1a1f;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1f);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 20rpx;
   margin-bottom: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .wx-avatar-btn {
@@ -6803,7 +8811,7 @@ onShow(() => {
   border-radius: 55rpx;
   padding: 0;
   margin: 0;
-  background-color: #2c2c34;
+  background-color: var(--rgm-card-3, #2c2c34);
   border: 2rpx dashed rgba(7, 193, 96, 0.6);
   display: flex;
   flex-direction: column;
@@ -6812,6 +8820,7 @@ onShow(() => {
   position: relative;
   overflow: hidden;
   line-height: normal;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .wx-avatar-btn::after {
@@ -6834,6 +8843,7 @@ onShow(() => {
   color: #07c160;
   text-align: center;
   padding: 2rpx 0;
+  --rgm-text: var(--rgm-on-deep); --rgm-text-2: var(--rgm-on-deep-2); --rgm-text-3: var(--rgm-on-deep-2);
 }
 
 .nickname-input-box {
@@ -6857,14 +8867,14 @@ onShow(() => {
 .auth-intro-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #07c160;
+  color: var(--rgm-green, #07c160);
   display: block;
   margin-bottom: 8rpx;
 }
 
 .auth-intro-desc {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.5;
   display: block;
 }
@@ -6889,16 +8899,16 @@ onShow(() => {
 .terms-text-wrap {
   flex: 1;
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.4;
 }
 
 .terms-text {
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .terms-link {
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   text-decoration: underline;
 }
 
@@ -6906,13 +8916,14 @@ onShow(() => {
   width: 100%;
   height: 92rpx;
   line-height: 92rpx;
-  background-color: #07c160;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #07c160);
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
   border-radius: 24rpx;
   border: none;
   margin-top: 10rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* MFA Verification Styles */
@@ -6933,21 +8944,30 @@ onShow(() => {
 .mfa-alert-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ff9f0a;
+  color: var(--rgm-amber, #ff9f0a);
   display: block;
   margin-bottom: 8rpx;
 }
 
 .mfa-alert-desc {
   font-size: 22rpx;
-  color: #d1d1d6;
+  color: var(--rgm-text-2, #d1d1d6);
   line-height: 1.4;
   display: block;
 }
 
+.coros-mfa-box {
+  background-color: var(--rgm-brand-tint, rgba(252, 76, 2, 0.12));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.3));
+}
+
+.coros-mfa-box .mfa-alert-title {
+  color: var(--rgm-brand-text, #fc4c02);
+}
+
 .text-cancel-btn {
   background: transparent;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   font-size: 24rpx;
   text-align: center;
   margin-top: 16rpx;
@@ -6967,14 +8987,15 @@ onShow(() => {
   position: absolute;
   bottom: -4rpx;
   right: -4rpx;
-  background: #fc4c02;
-  border: 2rpx solid #141416;
+  background: var(--rgm-brand, #fc4c02);
+  border: 2rpx solid var(--rgm-line-solid, #141416);
   border-radius: 50%;
   width: 36rpx;
   height: 36rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .camera-icon {
@@ -6992,7 +9013,7 @@ onShow(() => {
 .edit-pill {
   font-size: 20rpx;
   background: rgba(10, 132, 255, 0.15);
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   border: 1rpx solid rgba(10, 132, 255, 0.3);
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
@@ -7001,8 +9022,9 @@ onShow(() => {
 
 .edit-profile-modal {
   width: 660rpx;
-  background-color: #161619;
+  background-color: var(--rgm-card, #161619);
   border-radius: 36rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .avatar-edit-box {
@@ -7016,8 +9038,8 @@ onShow(() => {
   width: 160rpx;
   height: 160rpx;
   border-radius: 50%;
-  border: 4rpx solid #fc4c02;
-  box-shadow: 0 8rpx 24rpx rgba(252, 76, 2, 0.25);
+  border: 4rpx solid var(--rgm-brand, #fc4c02);
+  box-shadow: 0 8rpx 24rpx var(--rgm-brand-glow, rgba(252, 76, 2, 0.25));
   margin-bottom: 24rpx;
 }
 
@@ -7040,19 +9062,19 @@ onShow(() => {
 
 .avatar-sub-btn.wx-pick {
   background: rgba(7, 193, 96, 0.15);
-  color: #07c160;
+  color: var(--rgm-green, #07c160);
   border: 1rpx solid rgba(7, 193, 96, 0.35);
 }
 
 .avatar-sub-btn.album-pick {
   background: rgba(10, 132, 255, 0.15);
-  color: #0a84ff;
+  color: var(--rgm-blue, #0a84ff);
   border: 1rpx solid rgba(10, 132, 255, 0.35);
 }
 
 .avatar-hint {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   text-align: center;
   margin-top: 4rpx;
 }
@@ -7065,23 +9087,125 @@ onShow(() => {
   margin-top: 8rpx;
 }
 
-.input-hint {
-  font-size: 22rpx;
-  color: #636366;
-  margin-top: 10rpx;
-  display: block;
-  line-height: 1.4;
-}
 
 .save-profile-btn {
   margin-top: 10rpx;
-  background-color: #fc4c02;
+  background-color: var(--rgm-brand, #fc4c02);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
+}
+
+.modal-gender-row {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 8rpx;
+}
+
+.gender-pill {
+  flex: 1;
+  height: 76rpx;
+  background: var(--rgm-card-2, #222226);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+
+.gender-pill.active {
+  border-color: var(--rgm-brand, #fc4c02);
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.15));
+}
+
+.gender-pill-txt {
+  font-size: 26rpx;
+  color: var(--rgm-text, #ffffff);
+  font-weight: 500;
+}
+
+.modal-picker-box {
+  height: 84rpx;
+  background: var(--rgm-card-2, #222226);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
+  border-radius: 16rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
+}
+
+.modal-picker-val {
+  font-size: 26rpx;
+  color: var(--rgm-text, #ffffff);
+}
+
+.modal-picker-arrow {
+  font-size: 24rpx;
+  color: var(--rgm-text-3, #8e8e93);
+}
+
+.modal-row-2 {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 10rpx;
+}
+
+.modal-col-half {
+  flex: 1;
+}
+
+.modal-direct-links {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin: 24rpx 0 20rpx;
+}
+
+.direct-link-card {
+  background: rgba(10, 132, 255, 0.08);
+  border: 1rpx solid rgba(10, 132, 255, 0.25);
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.direct-link-card.secondary {
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.08));
+  border-color: var(--rgm-brand-line, rgba(252, 76, 2, 0.25));
+}
+
+.dlc-icon {
+  font-size: 30rpx;
+}
+
+.dlc-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.dlc-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--rgm-text, #ffffff);
+}
+
+
+.dlc-arrow {
+  font-size: 26rpx;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 /* Auth Modal Tabs & Device Login */
 .auth-tab-row {
   display: flex;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.06));
   border-radius: 16rpx;
   padding: 6rpx;
   margin-bottom: 24rpx;
@@ -7094,15 +9218,16 @@ onShow(() => {
   padding: 16rpx 0;
   font-size: 24rpx;
   font-weight: 600;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   border-radius: 12rpx;
   transition: all 0.2s;
 }
 
 .auth-tab-item.active {
-  background: #1c1c1e;
-  color: #00d2be;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.3);
+  background: var(--rgm-card-2, #1c1c1e);
+  color: var(--rgm-blue, #00d2be);
+  box-shadow: 0 2rpx 8rpx var(--rgm-shadow, rgba(0, 0, 0, 0.3));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .brand-tab-group {
@@ -7117,16 +9242,16 @@ onShow(() => {
   padding: 16rpx 0;
   font-size: 24rpx;
   font-weight: bold;
-  border: 1rpx solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: #aeaeb2;
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  color: var(--rgm-text-2, #aeaeb2);
   border-radius: 14rpx;
 }
 
 .brand-tab-btn.active {
   border-color: #00d2be;
   background: rgba(0, 210, 190, 0.12);
-  color: #00d2be;
+  color: var(--rgm-blue, #00d2be);
 }
 
 .domain-select-box {
@@ -7138,7 +9263,7 @@ onShow(() => {
 
 .domain-label {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .domain-btn-wrap {
@@ -7150,15 +9275,15 @@ onShow(() => {
   padding: 8rpx 18rpx;
   font-size: 22rpx;
   border-radius: 10rpx;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
-  color: #8e8e93;
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .domain-chip.active {
   background: rgba(0, 210, 190, 0.15);
   border-color: #00d2be;
-  color: #00d2be;
+  color: var(--rgm-blue, #00d2be);
   font-weight: bold;
 }
 
@@ -7176,9 +9301,10 @@ onShow(() => {
 }
 
 .device-confirm-btn {
-  background: linear-gradient(135deg, #00d2be, #00a896) !important;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #00d2be, #00a896)) !important;
   margin-top: 24rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .modal-mask.auth-modal-mask {
@@ -7210,13 +9336,14 @@ onShow(() => {
 /* ── Privacy Guard Card & Privacy Controls ── */
 .privacy-guard-card {
   border: 1rpx solid rgba(16, 185, 129, 0.25) !important;
-  background: linear-gradient(180deg, rgba(16, 185, 129, 0.04) 0%, rgba(18, 18, 20, 0.95) 100%);
+  background: var(--rgm-card, linear-gradient(180deg, rgba(16, 185, 129, 0.04) 0%, rgba(18, 18, 20, 0.95) 100%));
   margin-top: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .security-chip {
   font-size: 20rpx;
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
   background: rgba(16, 185, 129, 0.12);
   border: 1rpx solid rgba(16, 185, 129, 0.25);
   padding: 4rpx 14rpx;
@@ -7228,11 +9355,11 @@ onShow(() => {
   display: flex;
   flex-direction: column;
   gap: 20rpx;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.03));
   border-radius: 20rpx;
   padding: 24rpx;
   margin: 16rpx 0 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
 }
 
 .privacy-rule-item {
@@ -7256,12 +9383,12 @@ onShow(() => {
 .privacy-rule-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #e5e7eb;
+  color: var(--rgm-text, #e5e7eb);
 }
 
 .privacy-rule-desc {
   font-size: 22rpx;
-  color: #9ca3af;
+  color: var(--rgm-text-2, #9ca3af);
   line-height: 1.5;
 }
 
@@ -7274,7 +9401,7 @@ onShow(() => {
   height: 84rpx;
   background: rgba(239, 68, 68, 0.12);
   border: 1rpx solid rgba(239, 68, 68, 0.35);
-  color: #f87171;
+  color: var(--rgm-red, #f87171);
   font-size: 26rpx;
   font-weight: 600;
   border-radius: 16rpx;
@@ -7296,7 +9423,7 @@ onShow(() => {
 
 .field-sec-tag {
   font-size: 18rpx;
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
   background: rgba(16, 185, 129, 0.12);
   border: 1rpx solid rgba(16, 185, 129, 0.25);
   padding: 2rpx 8rpx;
@@ -7304,7 +9431,7 @@ onShow(() => {
 }
 
 .field-sec-tag.req-tag {
-  color: #f87171 !important;
+  color: var(--rgm-red, #f87171) !important;
   background: rgba(239, 68, 68, 0.15) !important;
   border-color: rgba(239, 68, 68, 0.35) !important;
   font-weight: bold;
@@ -7316,8 +9443,8 @@ onShow(() => {
 }
 
 .org-status-item {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.03));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 24rpx;
   margin-top: 16rpx;
@@ -7360,7 +9487,7 @@ onShow(() => {
 .org-item-name {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .org-status-badge {
@@ -7373,26 +9500,26 @@ onShow(() => {
 }
 
 .badge-confirmed {
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
   background: rgba(16, 185, 129, 0.15);
   border: 1rpx solid rgba(16, 185, 129, 0.3);
 }
 
 .badge-pending {
-  color: #60a5fa;
+  color: var(--rgm-blue, #60a5fa);
   background: rgba(59, 130, 246, 0.15);
   border: 1rpx solid rgba(59, 130, 246, 0.3);
 }
 
 .badge-temporary {
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
   background: rgba(245, 158, 11, 0.15);
   border: 1rpx solid rgba(245, 158, 11, 0.3);
 }
 
 .badge-expired,
 .badge-suspended {
-  color: #f87171;
+  color: var(--rgm-red, #f87171);
   background: rgba(239, 68, 68, 0.18);
   border: 1rpx solid rgba(239, 68, 68, 0.4);
 }
@@ -7403,13 +9530,13 @@ onShow(() => {
 
 .org-desc-text {
   font-size: 22rpx;
-  color: #d1d5db;
+  color: var(--rgm-text-2, #d1d5db);
   line-height: 1.5;
   display: block;
 }
 
 .warning-text {
-  color: #fca5a5 !important;
+  color: var(--rgm-red, #fca5a5) !important;
   font-weight: 500;
 }
 
@@ -7423,18 +9550,18 @@ onShow(() => {
 
 .missing-title {
   font-size: 20rpx;
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
   font-weight: bold;
 }
 
 .missing-labels {
   font-size: 20rpx;
-  color: #fef3c7;
+  color: var(--rgm-text, #fef3c7);
 }
 
 .org-action-btn {
   margin-top: 16rpx;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #f59e0b, #d97706));
   color: #000000;
   font-size: 24rpx;
   font-weight: bold;
@@ -7442,16 +9569,25 @@ onShow(() => {
   padding: 12rpx 28rpx;
   line-height: 1.4;
   border: none;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .org-action-btn.btn-danger {
   background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
+}
+
+.org-action-btn.btn-secondary {
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-blue, #38bdf8);
+  border: 1rpx solid rgba(56, 189, 248, 0.35);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .field-privacy-subtip {
   font-size: 20rpx;
-  color: #9ca3af;
+  color: var(--rgm-text-2, #9ca3af);
   margin-top: 8rpx;
   line-height: 1.4;
   display: block;
@@ -7507,8 +9643,8 @@ onShow(() => {
 .secure-picker-row .eye-toggle-btn {
   position: static;
   transform: none;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1rpx solid rgba(255, 255, 255, 0.12);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.06));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
   border-radius: 16rpx;
   width: 80rpx;
   height: 80rpx;
@@ -7523,21 +9659,22 @@ onShow(() => {
 .purge-modal-content {
   width: 90% !important;
   max-width: 640rpx !important;
-  background: #141416 !important;
+  background: var(--rgm-card, #141416) !important;
   border-radius: 32rpx !important;
   border: 1rpx solid rgba(239, 68, 68, 0.3) !important;
   padding: 0 !important;
   overflow: hidden;
-  box-shadow: 0 16rpx 48rpx rgba(0, 0, 0, 0.7);
+  box-shadow: 0 16rpx 48rpx var(--rgm-shadow, rgba(0, 0, 0, 0.7));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .purge-modal-header {
   padding: 32rpx 36rpx 20rpx;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
 }
 
 .text-red {
-  color: #ef4444 !important;
+  color: var(--rgm-red, #ef4444) !important;
 }
 
 .purge-modal-body {
@@ -7569,18 +9706,18 @@ onShow(() => {
 .purge-warn-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #fca5a5;
+  color: var(--rgm-red, #fca5a5);
 }
 
 .purge-warn-desc {
   font-size: 22rpx;
-  color: #d1d5db;
+  color: var(--rgm-text-2, #d1d5db);
   line-height: 1.5;
 }
 
 .purge-details-box {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.03));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 32rpx;
@@ -7594,11 +9731,11 @@ onShow(() => {
 }
 
 .red-header {
-  color: #f87171;
+  color: var(--rgm-red, #f87171);
 }
 
 .green-header {
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
 }
 
 .purge-detail-item {
@@ -7616,23 +9753,23 @@ onShow(() => {
 }
 
 .red-dot {
-  color: #ef4444;
+  color: var(--rgm-red, #ef4444);
 }
 
 .green-dot {
-  color: #10b981;
+  color: var(--rgm-green, #10b981);
 }
 
 .purge-item-text {
   flex: 1;
   font-size: 22rpx;
-  color: #d1d5db;
+  color: var(--rgm-text-2, #d1d5db);
   line-height: 1.4;
 }
 
 .purge-divider {
   height: 1rpx;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
   margin: 18rpx 0;
 }
 
@@ -7644,9 +9781,9 @@ onShow(() => {
 .purge-cancel-btn {
   flex: 1;
   height: 84rpx;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1rpx solid rgba(255, 255, 255, 0.15);
-  color: #e5e7eb;
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.15));
+  color: var(--rgm-text, #e5e7eb);
   font-size: 26rpx;
   font-weight: 600;
   border-radius: 18rpx;
@@ -7659,7 +9796,7 @@ onShow(() => {
   flex: 1;
   height: 84rpx;
   background: linear-gradient(135deg, #ef4444, #dc2626) !important;
-  color: #ffffff !important;
+  color: var(--rgm-text, #ffffff) !important;
   font-size: 26rpx;
   font-weight: bold;
   border-radius: 18rpx;
@@ -7667,5 +9804,248 @@ onShow(() => {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4rpx 16rpx rgba(239, 68, 68, 0.35);
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
 }
+
+/* ── 帮助与技术支持 (Support & Feedback) 样式 ── */
+.device-support-quick-bar {
+  margin-top: 20rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.08));
+  border: 1rpx dashed var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dsqb-text {
+  font-size: 23rpx;
+  color: var(--rgm-text-2, #d4d4d8);
+}
+
+.dsqb-link {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text, #fc4c02);
+  flex-shrink: 0;
+}
+
+.support-diag-box {
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.sdiag-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.sdiag-label {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text, #fc4c02);
+}
+
+.sdiag-val {
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+
+.sdiag-copy-pill {
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.14));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text, #fc4c02);
+  flex-shrink: 0;
+}
+
+.support-contact-btn {
+  width: 100%;
+  height: 88rpx;
+  border-radius: 22rpx;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  box-shadow: 0 6rpx 20rpx rgba(16, 185, 129, 0.3);
+  --rgm-text: var(--rgm-on-bright);
+}
+
+.support-cat-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-bottom: 20rpx;
+}
+
+.support-cat-chip {
+  padding: 12rpx 22rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.05));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
+  font-size: 23rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+
+.support-cat-chip.active {
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.16));
+  border-color: var(--rgm-brand, #fc4c02);
+  color: var(--rgm-brand-text, #fc4c02);
+  font-weight: 700;
+}
+
+.support-textarea {
+  width: 100%;
+  min-height: 180rpx;
+  box-sizing: border-box;
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
+  border-radius: 20rpx;
+  padding: 20rpx 22rpx;
+  font-size: 26rpx;
+  color: var(--rgm-text, #ffffff);
+  margin-bottom: 18rpx;
+  line-height: 1.5;
+}
+
+.support-contact-input {
+  margin-bottom: 22rpx;
+}
+
+.support-submit-btn {
+  width: 100%;
+  height: 86rpx;
+  border-radius: 22rpx;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ea580c 100%));
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  --rgm-text: var(--rgm-on-brand);
+}
+
+.support-ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.support-ticket-item {
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.09));
+  border-radius: 20rpx;
+  padding: 22rpx 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.stkt-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stkt-cat {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text, #fc4c02);
+}
+
+.stkt-status {
+  font-size: 21rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint, rgba(245, 158, 11, 0.15));
+  color: var(--rgm-brand-text, #fbbf24);
+  font-weight: 600;
+}
+
+.stkt-status.resolved {
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--rgm-green, #34d399);
+}
+
+.stkt-content {
+  font-size: 25rpx;
+  color: var(--rgm-text, #f4f4f5);
+  line-height: 1.5;
+}
+
+.stkt-time {
+  font-size: 21rpx;
+  color: var(--rgm-text-3, #71717a);
+}
+
+.stkt-reply-box {
+  margin-top: 8rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1rpx solid rgba(16, 185, 129, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.stkt-reply-title {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.stkt-reply-text {
+  font-size: 24rpx;
+  color: var(--rgm-text, #e4e4e7);
+  line-height: 1.5;
+}
+
+.share-race-pill {
+  background: var(--rgm-brand-tint, linear-gradient(135deg, rgba(251, 191, 36, 0.22), rgba(252, 76, 2, 0.22)));
+  border: 1rpx solid var(--rgm-brand-line, rgba(251, 191, 36, 0.55));
+  color: var(--rgm-brand-text, #fbbf24);
+}
+
+.comp-share-card-btn {
+  margin-left: auto;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #fbbf24, #fc4c02);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 14rpx rgba(252, 76, 2, 0.35);
+}
+
+.comp-share-card-txt {
+  font-size: 21rpx;
+  font-weight: 800;
+  color: #090b10;
+}
+
 </style>
+

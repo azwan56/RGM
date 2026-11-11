@@ -106,7 +106,7 @@ def test_push_notification(req: TestPushRequest):
         "success": True,
         "user_id": canonical_uid,
         "display_name": profile.get("display_name"),
-        "wechat_openid": openid,
+        "wechat_bound": bool(openid),
         "template_id_configured": bool(tmpl_id),
         "template_id": tmpl_id or "未配置 (请在 .env 设置 WECHAT_SUBSCRIBE_TEMPLATE_ID)",
         "wechat_sent": result.get("wechat_sent"),

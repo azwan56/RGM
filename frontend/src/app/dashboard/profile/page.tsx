@@ -26,12 +26,18 @@ export interface RacePlan {
   diff_seconds?: number;
   diff_str?: string;
   performance_badge?: string;
+  was_official_pacer?: boolean;
+  pacer_target_time?: string;
+  pacer_error_str?: string;
 }
 
 import GarminConnectModal from "@/components/GarminConnectModal";
+import PersonalShareCardModal from "@/components/PersonalShareCardModal";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<any>(null);
+  const [shareCardModalOpen, setShareCardModalOpen] = useState(false);
+  const [activeShareRaceId, setActiveShareRaceId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importingGarmin, setImportingGarmin] = useState(false);
@@ -85,12 +91,15 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [emergencyContact, setEmergencyContact] = useState("");
   const [clothingSize, setClothingSize] = useState("");
   const [shoeSize, setShoeSize] = useState("");
+  const [firstAidCertType, setFirstAidCertType] = useState("");
   const [healthDeclaration, setHealthDeclaration] = useState(true);
 
   const [showRealName, setShowRealName] = useState(false);
   const [showIdCard, setShowIdCard] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
   const [showDob, setShowDob] = useState(false);
+  const [hideGpsRoute, setHideGpsRoute] = useState(false);
+  const [hideBiometrics, setHideBiometrics] = useState(false);
 
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
@@ -155,11 +164,11 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     return "青年组 (<30)";
   }
 
-  // PB (HH:MM:SS or MM:SS)
-  const [marathonPb, setMarathonPb] = useState("3:09:30");
-  const [halfPb, setHalfPb] = useState("1:30:57");
-  const [tenKPb, setTenKPb] = useState("40:26");
-  const [fiveKPb, setFiveKPb] = useState("19:24");
+  // PB (HH:MM:SS or MM:SS) — initialized empty so new users never inherit founder PBs
+  const [marathonPb, setMarathonPb] = useState("");
+  const [halfPb, setHalfPb] = useState("");
+  const [tenKPb, setTenKPb] = useState("");
+  const [fiveKPb, setFiveKPb] = useState("");
 
   // Goals
   const [targetDistance, setTargetDistance] = useState<number>(200);
@@ -187,25 +196,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     setMonthlyTargets(Array(12).fill(targetDistance));
   }
 
-  // Race Plans
-  const [races, setRaces] = useState<RacePlan[]>([
-    {
-      id: "race_1",
-      name: "Chiang Dao 160",
-      race_type: "越野跑 100英里",
-      race_date: "2026-12-04",
-      target_time: "40:00:00",
-      days_left: 108,
-    },
-    {
-      id: "race_2",
-      name: "武功山",
-      race_type: "越野跑 50K",
-      race_date: "2026-09-12",
-      target_time: "8:00:00",
-      days_left: 25,
-    },
-  ]);
+  // Race Plans — initialized empty so new users never inherit founder races
+  const [races, setRaces] = useState<RacePlan[]>([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -250,9 +242,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         if (profile.emergency_contact) setEmergencyContact(profile.emergency_contact);
         if (profile.clothing_size) setClothingSize(profile.clothing_size);
         if (profile.shoe_size) setShoeSize(profile.shoe_size);
+        if (profile.first_aid_cert_type !== undefined && profile.first_aid_cert_type !== null) {
+          setFirstAidCertType(profile.first_aid_cert_type || "");
+        }
         if (profile.health_declaration !== undefined && profile.health_declaration !== null) {
           setHealthDeclaration(Boolean(profile.health_declaration));
         }
+        setHideGpsRoute(Boolean(profile.hide_gps_route));
+        setHideBiometrics(Boolean(profile.hide_biometrics));
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.date_of_birth) {
@@ -265,10 +262,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         if (profile.years_running) setYearsRunning(profile.years_running);
         if (profile.max_heart_rate) setMaxHr(profile.max_heart_rate);
         if (profile.resting_heart_rate) setRestHr(profile.resting_heart_rate);
-        if (profile.marathon_pb) setMarathonPb(secsToTime(profile.marathon_pb));
-        if (profile.half_pb) setHalfPb(secsToTime(profile.half_pb));
-        if (profile.ten_k_pb) setTenKPb(secsToTime(profile.ten_k_pb));
-        if (profile.five_k_pb) setFiveKPb(secsToTime(profile.five_k_pb));
+        setMarathonPb(profile.marathon_pb ? secsToTime(profile.marathon_pb) : "");
+        setHalfPb(profile.half_pb ? secsToTime(profile.half_pb) : "");
+        setTenKPb(profile.ten_k_pb ? secsToTime(profile.ten_k_pb) : "");
+        setFiveKPb(profile.five_k_pb ? secsToTime(profile.five_k_pb) : "");
       }
       if (goal) {
         setTargetDistance(goal.target_distance || 200);
@@ -287,9 +284,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           setGoalMode("uniform");
         }
       }
-      if (userRaces && Array.isArray(userRaces) && userRaces.length > 0) {
-        setRaces(userRaces);
-      }
+      setRaces(Array.isArray(userRaces) ? userRaces : []);
 
       try {
         const orgRes = await apiClient.get(`/api/org/my-orgs/${uid}`);
@@ -474,6 +469,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       const res = await apiClient.post("/api/profile/race-intel-lookup", {
         race_name: race.name.trim(),
         race_type: race.race_type,
+        target_time: race.target_time,
+        race_date: race.race_date,
+        race_id: race.id,
+        user_id: user?.id,
       });
 
       if (res.data?.success && res.data?.race_info) {
@@ -506,8 +505,21 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     }
   }
 
-  function removeRace(index: number) {
+  async function removeRace(index: number) {
+    const targetRace = races[index];
     setRaces(races.filter((_, idx) => idx !== index));
+    if (user?.id && targetRace?.id) {
+      try {
+        const res = await apiClient.delete(
+          `/api/profile/${encodeURIComponent(user.id)}/races/${encodeURIComponent(targetRace.id)}`
+        );
+        if (Array.isArray(res.data?.races)) {
+          setRaces(res.data.races);
+        }
+      } catch (err) {
+        console.error("Failed to delete race from server:", err);
+      }
+    }
   }
 
   const [uploadingPhotoIdx, setUploadingPhotoIdx] = useState<number | null>(null);
@@ -814,7 +826,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         emergency_contact: emergencyContact.trim() || null,
         clothing_size: clothingSize.trim() || null,
         shoe_size: shoeSize.trim() || null,
+        first_aid_cert_type: firstAidCertType,
         health_declaration: healthDeclaration,
+        hide_gps_route: hideGpsRoute,
+        hide_biometrics: hideBiometrics,
         date_of_birth: dateOfBirth || null,
         vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
@@ -1567,6 +1582,26 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 />
                 <span className="text-[11px] text-zinc-500 mt-1 block">欧洲码 (EUR)，如 40、41、42、42.5、43</span>
               </div>
+
+              {/* 急救 / 医护资质认证 */}
+              <div className="sm:col-span-2">
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  🚑 急救 / 医护资质认证（选填 · 用于马拉松官兔与急救跑者资格加权）
+                </label>
+                <select
+                  value={firstAidCertType}
+                  onChange={(e) => setFirstAidCertType(e.target.value)}
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                >
+                  <option value="">暂未持有急救证书</option>
+                  <option value="red_cross">红十字会救护员证 (Red Cross CPR/AED)</option>
+                  <option value="aha">美国心脏协会 AHA HeartSaver 急救证</option>
+                  <option value="medical_pro">执业医师 / 护士医护专业资质</option>
+                </select>
+                <span className="text-[11px] text-zinc-500 mt-1 block">
+                  上海马拉松、北京马拉松等头部标牌赛事选拔官方配速员时对持有急救/医护资质的跑者给予优先录取权重
+                </span>
+              </div>
             </div>
 
             {/* 健康状况声明 */}
@@ -1734,6 +1769,42 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
+                <div className="space-y-1">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>🗺️ 对非教练团友隐藏跑步 GPS 轨迹</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    开启后，跑团动态墙与分享页对普通成员隐藏起终点与详细街道轨迹（主教练诊断不受影响）
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={hideGpsRoute}
+                  onChange={(e) => setHideGpsRoute(e.target.checked)}
+                  className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
+                />
+              </label>
+
+              <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
+                <div className="space-y-1">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>💓 对非教练团友隐藏 HRV 与生理恢复</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    开启后，夜间 HRV、静息心率与睡眠恢复评分仅本人与跑团认证教练可见（与小程序实时同步）
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={hideBiometrics}
+                  onChange={(e) => setHideBiometrics(e.target.checked)}
+                  className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
+                />
+              </label>
+            </div>
+
             <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <p className="text-xs text-zinc-500">
                 若您不再需要参与赛事资格审核，可随时一键清除所有个人实名与认证记录。
@@ -1868,15 +1939,21 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs text-zinc-400">最大摄氧量 (VO2Max)</label>
-                  <button
-                    type="button"
-                    onClick={handleEstimateVo2max}
-                    disabled={estimatingVo2}
-                    className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
-                    title="基于您在上方填写的 5K/10K/半马/全马 PB 成绩自动测算 VDOT"
-                  >
-                    <span>⚡ 依据 PB 测算</span>
-                  </button>
+                  {(garminConnected || corosConnected) && vo2max !== "" && Number(vo2max) > 0 ? (
+                    <span className="text-[11px] text-emerald-500 font-bold flex items-center gap-1" title="已直接采用手表 VO2Max 数据，不另作推算">
+                      ⌚ 手表实测直读
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleEstimateVo2max}
+                      disabled={estimatingVo2}
+                      className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
+                      title="仅在无手表 VO2Max 数据时，基于 PB 成绩推算"
+                    >
+                      <span>⚡ 依据 PB 测算</span>
+                    </button>
+                  )}
                 </div>
                 <input
                   type="number"
@@ -2294,25 +2371,39 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   {/* ── Completed Race Details & Photo Section ── */}
                   {(race.status === "completed" || race.is_completed) && (
                     <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-4 space-y-4">
-                      <div className="flex items-center justify-between border-b border-emerald-500/10 pb-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/10 pb-2.5">
                         <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
                           <Trophy className="w-4 h-4 text-amber-400" />
                           <span>已完赛成绩记录与荣誉证书</span>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleMatchActivity(idx)}
-                          disabled={matchingActivityIdx === idx}
-                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-[#FC4C02]/20 hover:bg-[#FC4C02]/30 text-[#FC4C02] border border-[#FC4C02]/30 transition active:scale-95 disabled:opacity-50"
-                        >
-                          {matchingActivityIdx === idx ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Zap className="w-3.5 h-3.5" />
-                          )}
-                          <span>⚡ 从手表记录一键提取成绩</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveShareRaceId(String(race.id || race.name || ""));
+                              setShareCardModalOpen(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-400 to-[#FC4C02] text-black hover:opacity-95 transition active:scale-95 shadow"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>📸 生成完赛分享卡</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleMatchActivity(idx)}
+                            disabled={matchingActivityIdx === idx}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-[#FC4C02]/20 hover:bg-[#FC4C02]/30 text-[#FC4C02] border border-[#FC4C02]/30 transition active:scale-95 disabled:opacity-50"
+                          >
+                            {matchingActivityIdx === idx ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Zap className="w-3.5 h-3.5" />
+                            )}
+                            <span>⚡ 从手表记录一键提取成绩</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2362,6 +2453,42 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                             className="w-full bg-[#18181f] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
                           />
                         </div>
+                      </div>
+
+                      {/* Official Pacer Track Record Toggle */}
+                      <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-wrap items-center justify-between gap-3">
+                        <label className="inline-flex items-center gap-2 text-xs text-zinc-200 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(race.was_official_pacer)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              updateRace(idx, "was_official_pacer", checked);
+                              if (checked && !race.pacer_target_time && race.target_time) {
+                                updateRace(idx, "pacer_target_time", race.target_time);
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-white/20 text-[#FC4C02] bg-[#18181c]"
+                          />
+                          <span className="font-bold">🐰 本场担任官方配速员（官兔）完赛</span>
+                        </label>
+                        {race.was_official_pacer && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-zinc-400">官兔目标组别用时：</span>
+                            <input
+                              type="text"
+                              value={race.pacer_target_time || race.target_time || ""}
+                              onChange={(e) => updateRace(idx, "pacer_target_time", e.target.value)}
+                              placeholder="如 03:30:00"
+                              className="w-28 bg-[#18181f] border border-[#FC4C02]/40 rounded-lg px-2.5 py-1 text-xs font-mono text-white"
+                            />
+                            {race.pacer_error_str && (
+                              <span className="px-2 py-0.5 rounded bg-[#FC4C02]/15 text-[#FC4C02] text-[11px] font-mono font-bold">
+                                误差 {race.pacer_error_str}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Photo Upload & Gallery */}
@@ -2627,12 +2754,47 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                                 </select>
                               </div>
                               <div>
-                                <label className="text-zinc-400 block mb-1">赛道净爬升 (m)</label>
+                                <label className="text-zinc-400 block mb-1">报名赛程 (km)</label>
                                 <input
                                   type="number"
-                                  placeholder="如 120"
-                                  value={race.race_info?.net_elevation_gain_m ?? ""}
-                                  onChange={(e) => updateRaceInfo(idx, "net_elevation_gain_m", e.target.value ? Number(e.target.value) : null)}
+                                  step="0.001"
+                                  placeholder="如 42.195 / 21.0975 / 10"
+                                  value={race.race_info?.race_distance_km ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "race_distance_km", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">累计爬升 D+ (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 50"
+                                  value={race.race_info?.elevation_gain_m ?? race.race_info?.net_elevation_gain_m ?? ""}
+                                  onChange={(e) => {
+                                    const v = e.target.value ? Number(e.target.value) : null;
+                                    updateRaceInfo(idx, "elevation_gain_m", v);
+                                    updateRaceInfo(idx, "net_elevation_gain_m", v);
+                                  }}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">累计下降 D- (m)</label>
+                                <input
+                                  type="number"
+                                  placeholder="如 50"
+                                  value={race.race_info?.elevation_loss_m ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "elevation_loss_m", e.target.value ? Number(e.target.value) : null)}
+                                  className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-zinc-400 block mb-1">关门时间说明</label>
+                                <input
+                                  type="text"
+                                  placeholder="如: 全马6小时15分 / 半马3小时10分"
+                                  value={race.race_info?.cutoff_notes ?? ""}
+                                  onChange={(e) => updateRaceInfo(idx, "cutoff_notes", e.target.value || null)}
                                   className="w-full bg-[#202026] border border-white/10 rounded-lg px-3 py-2 text-white"
                                 />
                               </div>
@@ -2871,6 +3033,13 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         onSuccess={() => {
           if (user?.id) loadProfile(user.id);
         }}
+      />
+
+      <PersonalShareCardModal
+        open={shareCardModalOpen}
+        onClose={() => setShareCardModalOpen(false)}
+        uid={user?.id}
+        raceId={activeShareRaceId}
       />
     </div>
   );

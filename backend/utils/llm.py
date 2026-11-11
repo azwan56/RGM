@@ -39,9 +39,10 @@ class LLMClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        enable_search: bool = False,
     ) -> str:
-        """Calls DashScope / OpenAI compatible LLM endpoint."""
+        """Calls DashScope / OpenAI compatible LLM endpoint, optionally with live web search grounding."""
         client = self._get_client()
         if not client:
             logger.warning("[llm] LLM client not configured (no API key). Returning fallback response.")
@@ -49,12 +50,36 @@ class LLMClient:
 
         target_model = model or self.model
         try:
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+            kwargs: Dict[str, Any] = {
+                "model": target_model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if enable_search:
+                kwargs["extra_body"] = {
+                    "enable_search": True,
+                    "search_options": {
+                        "forced_search": True,
+                        "search_strategy": "pro",
+                    },
+                }
+            try:
+                response = client.chat.completions.create(**kwargs)
+            except Exception as search_err:
+                if enable_search:
+                    logger.warning(f"[llm] Search-enabled call failed ({search_err}), retrying with basic forced_search...")
+                    try:
+                        kwargs["extra_body"] = {
+                            "enable_search": True,
+                            "search_options": {"forced_search": True},
+                        }
+                        response = client.chat.completions.create(**kwargs)
+                    except Exception:
+                        kwargs.pop("extra_body", None)
+                        response = client.chat.completions.create(**kwargs)
+                else:
+                    raise search_err
             content = response.choices[0].message.content
             return content or ""
         except Exception as e:

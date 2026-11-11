@@ -1,15 +1,17 @@
 .tab-bar {
+  --rgm-fs: 1;
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 48px;
-  background-color: #121214;
+  height: 54px;
+  background-color: #141418;
   display: flex;
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
   box-sizing: content-box;
   z-index: 500;
+  box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.35);
 }
 
 .tab-bar-border {
@@ -24,37 +26,65 @@
 
 .tab-bar-item {
   flex: 1;
-  text-align: center;
+  min-width: 0;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-  height: 48px;
+  height: 54px;
   padding: 0 1px;
   box-sizing: border-box;
 }
 
-.tab-bar-item.tab-bar-item-long {
-  flex: 1.35;
+.tab-bar-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 2px;
 }
 
 .tab-bar-text {
-  font-size: 13px;
-  color: #d4d4d8;
+  font-size: 11px;
+  line-height: 1.25;
+  color: #a1a1aa;
   font-weight: 400;
   letter-spacing: 0;
+  max-width: 100%;
   white-space: nowrap !important;
   word-break: keep-all !important;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   transition: color 0.15s ease, font-weight 0.15s ease;
 }
 
 .tab-bar-text.text-compact {
-  font-size: 12px;
-  letter-spacing: -0.3px;
+  font-size: 10px;
+  letter-spacing: -0.2px;
 }
 
 .tab-bar-text.active {
   color: #fc4c02 !important;
   font-weight: 600 !important;
+}
+
+/* 明亮主题（竞技亮色 Volt v3.0）：与 styles/theme.css 同一套 60-30-10 配色 */
+.tab-bar.theme-volt {
+  background-color: #FFFFFF;
+  box-shadow: 0 -4rpx 16rpx rgba(15, 23, 42, 0.05);
+}
+.tab-bar.theme-volt .tab-bar-border {
+  background-color: #E2E8F0;
+}
+.tab-bar.theme-volt .tab-bar-text {
+  color: #64748B;
+}
+.tab-bar.theme-volt .tab-bar-text.active {
+  color: #FC4C02 !important;
+  font-weight: 800 !important;
+}
+
+.tab-bar.font-large {
+  --rgm-fs: 1.12;
+}
+.tab-bar.font-xlarge {
+  --rgm-fs: 1.2;
 }

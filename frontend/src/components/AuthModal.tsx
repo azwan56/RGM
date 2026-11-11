@@ -1,25 +1,90 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { X, Mail, Lock, Smartphone, QrCode } from "lucide-react";
+import { X, Mail, Lock, Smartphone, Watch, Globe, ShieldCheck, QrCode } from "lucide-react";
+import WeChatQrLoginPanel from "./WeChatQrLoginPanel";
 
 interface AuthModalProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: "wechat" | "watch" | "email";
 }
 
-export default function AuthModal({ open, onClose }: AuthModalProps) {
-  const [tab, setTab] = useState<"email" | "phone">("email");
+export default function AuthModal({ open, onClose, initialTab = "watch" }: AuthModalProps) {
+  const router = useRouter();
+  const [tab, setTab] = useState<"wechat" | "watch" | "email">(initialTab);
+
+  useEffect(() => {
+    if (open) {
+      setTab(initialTab);
+    }
+  }, [open, initialTab]);
+
+  function getPostLoginRedirect(): string {
+    if (typeof window !== "undefined" && localStorage.getItem("rgm_pending_club_invite")) {
+      return "/dashboard/team";
+    }
+    return "/dashboard";
+  }
+
+  // Watch Direct Login (COROS phone/email or Garmin phone/email)
+  const [brand, setBrand] = useState<"coros" | "garmin">("coros");
+  const [watchDomain, setWatchDomain] = useState<string>("teamcnapi.coros.com");
+  const [watchAccount, setWatchAccount] = useState("");
+  const [watchPassword, setWatchPassword] = useState("");
+  const [needsMfa, setNeedsMfa] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaNotice, setMfaNotice] = useState("");
+
+  // Email / Unified Account Login & Signup
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   if (!open) return null;
+
+  function switchBrand(nextBrand: "coros" | "garmin") {
+    setBrand(nextBrand);
+    setWatchDomain(nextBrand === "coros" ? "teamcnapi.coros.com" : "garmin.cn");
+    setNeedsMfa(false);
+    setMfaCode("");
+    setErrorMsg("");
+  }
+
+  async function handleWatchAuth(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg("");
+
+    try {
+      const { data, error } = await supabase.auth.signInWithWatch({
+        brand,
+        account: watchAccount,
+        password: watchPassword,
+        domain: watchDomain,
+        mfaCode: needsMfa ? mfaCode : undefined,
+      });
+
+      if (error) throw error;
+      if (data?.needsMfa) {
+        setNeedsMfa(true);
+        setMfaNotice(data.message || "已向您的注册手机或邮箱发送 6 位安全验证码，请输入验证码完成登录");
+        return;
+      }
+
+      onClose();
+      router.push(getPostLoginRedirect());
+    } catch (err: any) {
+      setErrorMsg(err.message || "手表账号验证失败，请核对手机号/邮箱与密码");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleEmailAuth(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +99,7 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
         });
         if (error) throw error;
         onClose();
+        router.push(getPostLoginRedirect());
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -41,9 +107,10 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
         });
         if (error) throw error;
         onClose();
+        router.push(getPostLoginRedirect());
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "认证失败，请检查输入");
+      setErrorMsg(err.message || "认证失败，请检查输入的账号与密码");
     } finally {
       setLoading(false);
     }
@@ -61,55 +128,244 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
         </button>
 
         {/* Title */}
-        <div className="mb-6 text-center">
+        <div className="mb-5 text-center">
+          <img
+            src="/logo.png"
+            alt="万跑跑团助手 Logo"
+            width={52}
+            height={52}
+            fetchPriority="low"
+            className="w-13 h-13 rounded-2xl object-contain bg-white mx-auto mb-3 shadow-lg shadow-[#FC4C02]/20"
+          />
           <h2 className="text-2xl font-black text-white">
-            {isSignUp ? "加入 RGM 跑团" : "登录 RGM 跑团"}
+            {tab === "email" && isSignUp ? "注册万跑跑团助手账号" : "登录万跑跑团助手"}
           </h2>
-          <p className="text-xs text-zinc-400 mt-1.5">
-            连接 Garmin 佳明数据，开启专属 AI 马拉松训练
+          <p className="text-xs text-zinc-400 mt-1">
+            支持高驰手机号 / 佳明账号直接登录，与微信小程序数据实时互通
           </p>
         </div>
 
         {/* Auth Mode Tabs */}
-        <div className="flex bg-white/5 p-1 rounded-2xl mb-6 border border-white/5">
+        <div className="flex bg-white/5 p-1 rounded-2xl mb-5 border border-white/5 gap-1">
           <button
-            onClick={() => setTab("email")}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            type="button"
+            onClick={() => { setTab("wechat"); setErrorMsg(""); }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+              tab === "wechat" ? "bg-[#07C160] text-white shadow-md" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <QrCode className="w-3.5 h-3.5 shrink-0" />
+            微信扫码
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTab("watch"); setErrorMsg(""); }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+              tab === "watch" ? "bg-[#FC4C02] text-white shadow-md" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Watch className="w-3.5 h-3.5 shrink-0" />
+            高驰 / 佳明直登
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTab("email"); setErrorMsg(""); }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 ${
               tab === "email" ? "bg-[#FC4C02] text-white shadow-md" : "text-zinc-400 hover:text-white"
             }`}
           >
-            <Mail className="w-3.5 h-3.5" />
-            邮箱登录
-          </button>
-          <button
-            onClick={() => setTab("phone")}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-              tab === "phone" ? "bg-[#FC4C02] text-white shadow-md" : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            微信小程序免密
+            <Mail className="w-3.5 h-3.5 shrink-0" />
+            邮箱 / 账号
           </button>
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs leading-relaxed">
             {errorMsg}
           </div>
         )}
 
-        {tab === "email" ? (
+        {tab === "wechat" ? (
+          <WeChatQrLoginPanel
+            onSuccess={() => {
+              onClose();
+              router.push(getPostLoginRedirect());
+            }}
+          />
+        ) : tab === "watch" ? (
+          <form onSubmit={handleWatchAuth} className="space-y-4">
+            {/* Brand Switcher */}
+            <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
+              <button
+                type="button"
+                onClick={() => switchBrand("coros")}
+                className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                  brand === "coros" ? "bg-emerald-600 text-white shadow" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                COROS 高驰（手机号/邮箱）
+              </button>
+              <button
+                type="button"
+                onClick={() => switchBrand("garmin")}
+                className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                  brand === "garmin" ? "bg-[#0A84FF] text-white shadow" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                Garmin 佳明（手机号/邮箱）
+              </button>
+            </div>
+
+            {needsMfa ? (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                  <span className="text-amber-400 font-bold text-xs block mb-1">🔒 安全验证码确认</span>
+                  <span className="text-xs text-zinc-300 block leading-relaxed">{mfaNotice}</span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">6 位短信 / 邮箱验证码</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="请输入 6 位验证码"
+                    className="w-full px-4 py-2.5 bg-white/5 border border-amber-500/50 rounded-xl text-center text-lg tracking-widest font-mono text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-[#FC4C02]/20 hover:opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? "正在验证..." : "提交验证码并进入控制台"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNeedsMfa(false)}
+                  className="w-full text-center text-xs text-zinc-400 hover:text-white"
+                >
+                  返回修改账号密码
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Region Switcher */}
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="flex items-center gap-1">
+                    <Globe className="w-3.5 h-3.5" /> 账号所属区域
+                  </span>
+                  <div className="flex bg-white/5 p-0.5 rounded-lg border border-white/10">
+                    {brand === "coros" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setWatchDomain("teamcnapi.coros.com")}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                            watchDomain === "teamcnapi.coros.com" ? "bg-white/15 text-white" : "text-zinc-400"
+                          }`}
+                        >
+                          中国区（默认）
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWatchDomain("teamapi.coros.com")}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                            watchDomain === "teamapi.coros.com" ? "bg-white/15 text-white" : "text-zinc-400"
+                          }`}
+                        >
+                          国际区
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setWatchDomain("garmin.cn")}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                            watchDomain === "garmin.cn" ? "bg-white/15 text-white" : "text-zinc-400"
+                          }`}
+                        >
+                          中国版 (garmin.cn)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWatchDomain("garmin.com")}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                            watchDomain === "garmin.com" ? "bg-white/15 text-white" : "text-zinc-400"
+                          }`}
+                        >
+                          国际版 (garmin.com)
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                    {brand === "coros" ? "高驰账号（11位手机号 或 邮箱）" : "佳明账号（手机号 或 邮箱）"}
+                  </label>
+                  <div className="relative">
+                    <Smartphone className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      required
+                      value={watchAccount}
+                      onChange={(e) => setWatchAccount(e.target.value)}
+                      placeholder={brand === "coros" ? "直接输入高驰手机号（如 181xxxx）或邮箱" : "输入佳明邮箱或手机号"}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02] transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                    {brand === "coros" ? "高驰登录密码" : "佳明登录密码"}
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
+                    <input
+                      type="password"
+                      required
+                      value={watchPassword}
+                      onChange={(e) => setWatchPassword(e.target.value)}
+                      placeholder={brand === "coros" ? "输入高驰 App 登录密码" : "输入佳明 Connect 登录密码"}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02] transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 p-2.5 bg-white/[0.03] rounded-xl border border-white/5 text-[11px] text-zinc-400 leading-relaxed">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>已在微信小程序绑定过手表的跑友，输入手机号与手表密码即可直接进入同一跑者档案，无需注册邮箱。</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-[#FC4C02]/20 hover:opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? "正在验证..." : "验证并进入控制台"}
+                </button>
+              </>
+            )}
+          </form>
+        ) : (
           <form onSubmit={handleEmailAuth} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">邮箱地址</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                {isSignUp ? "注册邮箱地址" : "手机号 / 邮箱 / 手表绑定账号"}
+              </label>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                 <input
-                  type="email"
+                  type={isSignUp ? "email" : "text"}
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="runner@example.com"
+                  placeholder={isSignUp ? "runner@example.com" : "输入手机号（如 181xxxx）或邮箱"}
                   className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02] transition-all"
                 />
               </div>
@@ -124,7 +380,7 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="至少 6 位字符"
+                  placeholder={isSignUp ? "至少 6 位字符" : "输入登录密码或绑定的手表密码"}
                   className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02] transition-all"
                 />
               </div>
@@ -144,18 +400,10 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
                 onClick={() => setIsSignUp(!isSignUp)}
                 className="text-xs text-zinc-400 hover:text-white transition-colors"
               >
-                {isSignUp ? "已有账号？直接登录" : "还没有账号？点击免费注册"}
+                {isSignUp ? "已有账号？直接登录" : "还没有邮箱账号？点击免费注册"}
               </button>
             </div>
           </form>
-        ) : (
-          <div className="text-center py-6">
-            <div className="w-36 h-36 mx-auto bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center mb-4">
-              <QrCode className="w-20 h-20 text-[#FC4C02]" />
-            </div>
-            <p className="text-xs text-zinc-300 font-medium">使用微信扫码打开 RGM 小程序</p>
-            <p className="text-[11px] text-zinc-500 mt-1">支持微信一键登录与手表数据秒级同步</p>
-          </div>
         )}
       </div>
     </div>

@@ -1,21 +1,26 @@
 <template>
-  <view class="coach-page">
+  <view class="coach-page" :class="themeClass">
     <!-- Header -->
     <view class="coach-header">
       <view class="header-left">
         <view class="title-row">
           <text class="title-icon">⚡</text>
-          <text class="page-title">Canova教练</text>
+          <text class="page-title">训练</text>
+          <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
         </view>
-        <text class="page-subtitle">世界级专项化哲学 · 5K/半马/全马/越野因赛制宜 · 动态 TSB 与个性化自适应</text>
       </view>
 
-      <button class="re-analyze-btn" :loading="loading" :disabled="loading" @click="handleReAnalyze">
-        <text class="btn-text">{{ loading ? "Canova 推理中..." : "启动专项推理" }}</text>
-      </button>
+      <view style="display: flex; align-items: center; gap: 12rpx;">
+        <button class="re-analyze-btn" @click="openCoachChatModal">
+          <text class="btn-text">💬 问教练</text>
+        </button>
+        <button v-if="activeTab === 'analysis'" class="re-analyze-btn" :loading="loading" :disabled="loading" @click="handleReAnalyze">
+          <text class="btn-text">{{ loading ? "测算中..." : "🔄 重算" }}</text>
+        </button>
+      </view>
     </view>
 
-    <!-- ── TAB BAR: PLAN VS ANALYSIS ── -->
+    <!-- ── 分段切换：课表 / 教练诊断 / 身体数据 ── -->
     <view class="coach-tab-bar">
       <view
         class="coach-tab-item"
@@ -23,29 +28,71 @@
         @click="activeTab = 'plan'"
       >
         <text class="tab-icon">📅</text>
-        <text class="tab-title">科学周期课表</text>
+        <text class="tab-title">课表</text>
       </view>
       <view
         class="coach-tab-item"
         :class="{ active: activeTab === 'analysis' }"
         @click="activeTab = 'analysis'"
       >
-        <text class="tab-icon">⚡</text>
-        <text class="tab-title">Canova 专项诊断</text>
+        <text class="tab-icon">🎯</text>
+        <text class="tab-title">诊断</text>
+      </view>
+      <view class="coach-tab-item" @click="goToBodyData">
+        <text class="tab-icon">📊</text>
+        <text class="tab-title">数据 ›</text>
       </view>
     </view>
 
     <!-- ── PLAN TAB CONTENT ── -->
     <view v-if="activeTab === 'plan'" class="plan-tab-section">
+      <!-- 夜间未佩戴手表 · 恢复数据缺失预警横幅（精简一行 + ⓘ 隐藏说明） -->
+      <view
+        v-if="recoveryDataAvailability?.night_wear_missing || analysis?.recovery_data_availability?.night_wear_missing"
+        style="margin: 0 0 18rpx 0; padding: 14rpx 20rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
+        @click.stop="explainTerm('watch_wear')"
+      >
+        <text style="font-size: 23rpx; font-weight: 700; color: #b45309;">
+          ⚠️ {{ recoveryDataAvailability?.recovery_status_label || analysis?.recovery_data_availability?.recovery_status_label || '夜间未佩戴 · 恢复数据缺失' }}
+        </text>
+        <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 12rpx;">ⓘ 详情</text>
+      </view>
       <!-- Top Bar -->
       <view class="plan-top-bar">
         <view class="plan-title-box">
-          <text class="plan-main-title">{{ plan ? plan.title : '个人科学周期训练课表' }}</text>
-          <text v-if="plan" class="plan-status-pill">执行中 · {{ plan.weeks_count }}周周期</text>
+          <view style="display: flex; align-items: center; gap: 8rpx;">
+            <text class="plan-main-title">{{ plan ? plan.title : '周期训练课表' }}</text>
+            <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
+          </view>
+          <view v-if="plan" class="plan-status-pills-row">
+            <text class="plan-status-pill">{{ plan.weeks_count }}周周期</text>
+            <text
+              v-if="plan.review_status === 'published' || plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review)"
+              class="plan-coach-verified-pill"
+            >
+              🧢 {{ plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.reviewed_by_name) || '教练' }}已审
+            </text>
+          </view>
         </view>
-        <button class="plan-config-toggle-btn" @click="showPlanConfig = !showPlanConfig">
-          <text class="btn-text">{{ showPlanConfig ? '收起定制' : (plan ? '重新制定计划' : '制定训练计划') }}</text>
-        </button>
+        <view style="display: flex; align-items: center; gap: 10rpx; flex-shrink: 0;">
+          <button
+            v-if="planBackups.length > 0 && !isPreviewPlan"
+            class="plan-config-toggle-btn"
+            :loading="rollingBackPlan"
+            @click="handleRollbackUserPlan"
+          >
+            <text class="btn-text">↩ 回退</text>
+          </button>
+          <button
+            class="plan-config-toggle-btn"
+            @click="showCoachPersonalReport = true"
+          >
+            <text class="btn-text">📊 周报/月报</text>
+          </button>
+          <button class="plan-config-toggle-btn" @click="showPlanConfig = !showPlanConfig">
+            <text class="btn-text">{{ showPlanConfig ? '收起' : (plan ? '⚙️ 定制' : '✨ 定制') }}</text>
+          </button>
+        </view>
       </view>
 
       <!-- 🏆 Target Race Completed Switch Banner -->
@@ -55,20 +102,29 @@
           <text class="banner-sub">建议切换至核心 A 标</text>
         </view>
         <text class="banner-desc">
-          「{{ plan.target_race_name }}」已顺利完赛！依据周期化备赛逻辑，您的下一个宏观备赛终极目标应锚定为核心 A 标「{{ recommendedRace.name }}」（{{ recommendedRace.race_type || '核心突破' }} · {{ recommendedRace.race_date }}）。中途其他 B/C 标赛事将作为实战代练自动融入新课表！
+          「{{ plan.target_race_name }}」已完赛，建议切换下一核心目标「{{ recommendedRace.name }}」（{{ recommendedRace.race_date }}）。
         </text>
-        <button class="banner-switch-btn" @click="handleApplyRecommendedRace">
-          切换为「{{ recommendedRace.name }}」并重新定制课表 ➔
-        </button>
+        <view style="display:flex; gap:14rpx; margin-top:8rpx;">
+          <button
+            class="banner-switch-btn"
+            style="flex:0.85; background:var(--rgm-brand-tint, rgba(251,191,36,0.18)); border:1rpx solid var(--rgm-brand-line, #fbbf24); color:var(--rgm-brand-text, #fbbf24);"
+            @click="openCompletedTargetRaceShareCard"
+          >
+            📸 生成完赛分享卡
+          </button>
+          <button class="banner-switch-btn" style="flex:1.15;" @click="handleApplyRecommendedRace">
+            切换为「{{ recommendedRace.name }}」 ➔
+          </button>
+        </view>
       </view>
 
       <!-- Plan Setup Panel -->
       <view v-if="showPlanConfig || !plan" class="plan-setup-card">
         <view class="card-title-row">
           <text class="section-icon">🎯</text>
-          <text class="card-title">设定训练目标与周期参数</text>
+          <text class="card-title">计划参数</text>
+          <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
         </view>
-        <text class="setup-hint">系统将结合您的周岁年龄、TSB状态与近 18 个月比赛表现科学推演</text>
 
         <!-- Goal Type Toggle -->
         <view class="goal-type-toggle-row">
@@ -77,23 +133,21 @@
             :class="{ active: planGoalType === 'race_prep' }"
             @click="planGoalType = 'race_prep'"
           >
-            <text class="goal-btn-title">🏅 赛事突破备战</text>
-            <text class="goal-btn-sub">全马/半马/越野倒排周期</text>
+            <text class="goal-btn-title">🏅 赛事备战</text>
           </view>
           <view
             class="goal-type-btn"
             :class="{ active: planGoalType === 'fitness_maintenance' }"
             @click="planGoalType = 'fitness_maintenance'"
           >
-            <text class="goal-btn-title">🏔️ 非赛期体能进阶</text>
-            <text class="goal-btn-sub">有氧/门槛/速度/爬坡强化</text>
+            <text class="goal-btn-title">🏔️ 日常进阶</text>
           </view>
         </view>
 
         <!-- If Race: Quick Select & Inputs -->
         <view v-if="planGoalType === 'race_prep'" class="race-setup-inputs">
           <view v-if="userRaces.length" class="registered-races-row">
-            <text class="registered-label">🚩 快速套用（优先推荐 A 标核心赛事）：</text>
+            <text class="registered-label">🚩 已登记赛事：</text>
             <view class="registered-chips">
               <view
                 v-for="r in userRaces"
@@ -128,7 +182,7 @@
 
         <!-- If Non-Race: Focus Options -->
         <view v-else class="maintenance-options-row">
-          <text class="input-label">选择当前周期专项强化方向：</text>
+          <text class="input-label">专项强化方向</text>
           <view class="maint-chips-grid">
             <view
               v-for="m in maintenanceList"
@@ -138,57 +192,95 @@
               @click="planMaintenanceFocus = m.id"
             >
               <text class="maint-name">{{ m.name }}</text>
-              <text class="maint-desc">{{ m.desc }}</text>
             </view>
           </view>
         </view>
 
-        <!-- Weeks & Days Selectors -->
+        <!-- Weeks & Days Wheel Picker + Stepper -->
         <view class="picker-row">
           <view class="picker-col">
-            <text class="input-label">周期总周数：</text>
-            <view class="options-pills">
-              <view
-                v-for="w in [4, 6, 8, 12]"
-                :key="w"
-                class="opt-pill"
-                :class="{ active: planWeeksCount === w }"
-                @click="planWeeksCount = w"
+            <text class="input-label">周期总周数</text>
+            <view class="wheel-stepper-box">
+              <view class="ws-step-btn" @click.stop="stepPlanWeeks(-1)">−</view>
+              <picker
+                mode="selector"
+                class="ws-picker-mid"
+                :range="planWeekOptionLabels"
+                :value="Math.max(0, planWeekOptions.indexOf(planWeeksCount))"
+                @change="(e: any) => planWeeksCount = planWeekOptions[Number(e.detail.value)] || 8"
               >
-                <text class="pill-text">{{ w }}周</text>
-              </view>
+                <view class="ws-picker-val-wrap">
+                  <text class="ws-picker-val">{{ planWeeksCount }} 周</text>
+                  <text class="ws-picker-caret">▾</text>
+                </view>
+              </picker>
+              <view class="ws-step-btn" @click.stop="stepPlanWeeks(1)">+</view>
             </view>
           </view>
 
           <view class="picker-col">
-            <text class="input-label">每周跑步天数：</text>
-            <view class="options-pills">
-              <view
-                v-for="d in [3, 4, 5, 6]"
-                :key="d"
-                class="opt-pill"
-                :class="{ active: planDaysPerWeek === d }"
-                @click="planDaysPerWeek = d"
+            <text class="input-label">每周跑步天数</text>
+            <view class="wheel-stepper-box">
+              <view class="ws-step-btn" @click.stop="stepPlanDays(-1)">−</view>
+              <picker
+                mode="selector"
+                class="ws-picker-mid"
+                :range="planDayOptionLabels"
+                :value="Math.max(0, planDayOptions.indexOf(planDaysPerWeek))"
+                @change="(e: any) => planDaysPerWeek = planDayOptions[Number(e.detail.value)] || 4"
               >
-                <text class="pill-text">{{ d }}天/周</text>
-              </view>
+                <view class="ws-picker-val-wrap">
+                  <text class="ws-picker-val">{{ planDaysPerWeek }} 天/周</text>
+                  <text class="ws-picker-caret">▾</text>
+                </view>
+              </picker>
+              <view class="ws-step-btn" @click.stop="stepPlanDays(1)">+</view>
             </view>
           </view>
         </view>
 
-        <!-- Goal Anchor Hint in Miniapp -->
-        <view class="goal-anchor-box">
+        <!-- Goal Anchor Hint in Miniapp (Clickable to open unified GoalSheetModal) -->
+        <view class="goal-anchor-box" @click="openCoachGoalSheet('week')">
           <text class="anchor-icon">🎯</text>
-          <text class="anchor-text">当前自定周目标：{{ userGoal?.weekly_target || 50 }} km/周 (系统将自动以此为基准)</text>
+          <text class="anchor-text">周目标基准：{{ userGoal?.next_weekly_target || userGoal?.weekly_target || 50 }} km/周</text>
+          <text style="margin-left: auto; font-size: 22rpx; font-weight: 700; color: #fc4c02;">调整 ›</text>
         </view>
 
         <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
-          <text class="btn-text">{{ generatingPlan ? 'Canova 计划推演中...' : '生成科学定制训练课表' }}</text>
+          <text class="btn-text">{{ generatingPlan ? '推演中...' : '✨ 生成课表预览' }}</text>
         </button>
       </view>
 
       <!-- Active Plan Details -->
       <view v-if="plan && plan.schedule_data" class="plan-body">
+        <!-- Pending Confirmation Banner for Newly Generated Preview Plan -->
+        <view
+          v-if="isPreviewPlan"
+          style="margin-bottom:24rpx;padding:20rpx 22rpx;border-radius:22rpx;background:var(--rgm-brand-tint, rgba(245,158,11,0.18));border:2rpx solid var(--rgm-brand-line, rgba(245,158,11,0.5));"
+        >
+          <view style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8rpx;">
+            <text style="font-size:25rpx;font-weight:800;color:var(--rgm-brand-text, #fbbf24);">🛡️ 预览待确认（未写入）</text>
+            <text style="font-size:20rpx;font-weight:700;padding:4rpx 14rpx;border-radius:999rpx;background:var(--rgm-tint-2, rgba(245,158,11,0.25));color:var(--rgm-text, #fde68a);">预览</text>
+          </view>
+          <text style="font-size:22rpx;color:var(--rgm-text-2, #fde68a);line-height:1.45;display:block;margin-bottom:14rpx;">
+            请审阅下方各周安排，点击「确认启用」后正式覆盖原计划。
+          </text>
+          <view style="display:flex;gap:16rpx;">
+            <button
+              style="flex:1;margin:0;height:68rpx;line-height:68rpx;border-radius:16rpx;font-size:24rpx;font-weight:700;background:var(--rgm-card, rgba(255,255,255,0.12));color:var(--rgm-text, #e4e4e7);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.2));"
+              @click="handleDiscardGeneratedPlan"
+            >
+              ✕ 放弃
+            </button>
+            <button
+              style="flex:1.6;margin:0;height:68rpx;line-height:68rpx;border-radius:16rpx;font-size:24rpx;font-weight:800;background:linear-gradient(135deg, #10b981, #059669);color:#ffffff;"
+              :loading="confirmingPlan"
+              @click="handleConfirmGeneratedPlan"
+            >
+              ✅ 确认启用
+            </button>
+          </view>
+        </view>
         <!-- Baseline Snapshot Card -->
         <view v-if="plan.schedule_data.current_fitness_snapshot" class="snapshot-card">
           <view class="snap-item">
@@ -199,24 +291,40 @@
           <view class="snap-item">
             <text class="snap-label">VO2Max</text>
             <text class="snap-val text-purple">{{ plan.schedule_data.current_fitness_snapshot.vo2max || '—' }}</text>
-            <text class="snap-sub">VDOT基准</text>
+            <text class="snap-sub">{{ plan.schedule_data.current_fitness_snapshot.vo2max_source === 'watch' ? '手表实测' : '生理基准' }}</text>
           </view>
           <view class="snap-item">
-            <text class="snap-label">CTL / TSB</text>
+            <text class="snap-label">体能 / 状态 <text class="term-info" @click.stop="explainTerm('fitness')">ⓘ</text></text>
             <text class="snap-val text-cyan">{{ plan.schedule_data.current_fitness_snapshot.ctl || 0 }} / {{ plan.schedule_data.current_fitness_snapshot.tsb || 0 }}</text>
-            <text class="snap-sub">即时负荷</text>
           </view>
           <view class="snap-item">
             <text class="snap-label">18m最长跑</text>
             <text class="snap-val text-amber">{{ plan.schedule_data.current_fitness_snapshot.max_long_run_18m_km || '—' }} km</text>
-            <text class="snap-sub">实战上限</text>
           </view>
         </view>
 
-        <!-- Canova Overview Quote -->
-        <view v-if="plan.overview_summary" class="overview-box">
-          <text class="overview-icon">🎯</text>
-          <text class="overview-text">{{ plan.overview_summary }}</text>
+        <!-- Coach Review Note Box -->
+        <view
+          v-if="plan.coach_review_note || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.coach_review_note)"
+          class="coach-review-note-box"
+        >
+          <text class="crn-icon">👨‍🏫</text>
+          <view class="crn-content">
+            <text class="crn-title">教练【{{ plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.reviewed_by_name) || '跑团教练' }}】执行叮嘱：</text>
+            <text class="crn-text">{{ plan.coach_review_note || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.coach_review_note) }}</text>
+          </view>
+        </view>
+
+        <!-- Canova Overview Quote & Macro Roadmap -->
+        <view v-if="plan.overview_summary || (plan.schedule_data && plan.schedule_data.macro_roadmap)" class="overview-box">
+          <view v-if="plan.overview_summary" style="display:flex;align-items:flex-start;gap:12rpx;">
+            <text class="overview-icon">🎯</text>
+            <text class="overview-text">{{ plan.overview_summary }}</text>
+          </view>
+          <view v-if="plan.schedule_data && plan.schedule_data.macro_roadmap" style="margin-top:14rpx;padding:16rpx;background:var(--rgm-card-2, rgba(0,0,0,0.28));border-radius:16rpx;border:1rpx solid var(--rgm-line-solid, rgba(175,82,222,0.3));">
+            <text style="font-size:22rpx;font-weight:800;color:var(--rgm-brand-text, #d8b4fe);display:block;margin-bottom:6rpx;">🗺️ 阶段宏观周期大纲 (教练规划)：</text>
+            <text style="font-size:22rpx;color:var(--rgm-text-2, #e4e4e7);line-height:1.5;white-space:pre-wrap;">{{ plan.schedule_data.macro_roadmap }}</text>
+          </view>
         </view>
 
         <!-- Horizontal Week Scroll -->
@@ -256,10 +364,13 @@
               <text class="phase-tag">{{ activeMiniWeek.phase }}</text>
             </view>
             <text class="focus-text">重点：{{ activeMiniWeek.key_focus }}</text>
+            <text class="week-summary-banner-line">
+              📊 {{ activeMiniWeek.summary_banner_text || `周跑量：${activeMiniWeek.weekly_mileage_km || 0}公里。执行：${activeMiniWeek.actual_mileage_km || 0}公里，完成度${activeMiniWeek.compliance_rate || 0}%；力量：${activeMiniWeek.strength_sessions_done || 0}次。` }}
+            </text>
           </view>
           <view class="active-week-right">
             <text class="mileage-val">{{ activeMiniWeek.weekly_mileage_km || 0 }} km</text>
-            <text class="mileage-label">本周总跑量</text>
+            <text class="mileage-label">周跑量</text>
           </view>
         </view>
 
@@ -271,7 +382,7 @@
             <text class="align-status-detail">课表 {{ activeMiniWeek.weekly_mileage_km || 0 }}k / 目标 {{ userGoal?.weekly_target || 50 }}k ({{ getAlignmentRatio(activeMiniWeek) }}%)</text>
           </view>
           <button class="sync-goal-mini-btn" :loading="syncingGoal" @click="handleSyncToGoals">
-            <text class="sync-mini-btn-text">同步至目标</text>
+            <text class="sync-mini-btn-text">同步</text>
           </button>
         </view>
 
@@ -287,8 +398,16 @@
               <view class="day-date-box">
                 <text class="day-name">{{ day.day_of_week }}</text>
                 <text class="day-date">{{ day.date ? day.date.substring(5) : '' }}</text>
+                <text v-if="day.swapped_from" class="swap-pill">🔁 与{{ day.swapped_from }}对换</text>
               </view>
               <view class="badge-group">
+                <text v-if="day.feeling_tag" class="rpe-pill" style="background:rgba(16,185,129,0.16);color:#10b981;border:1rpx solid rgba(16,185,129,0.35);">{{ day.feeling_tag }}</text>
+                <text v-if="day.rpe != null" class="rpe-pill">RPE {{ day.rpe }}</text>
+                <text
+                  v-if="day.recovery_pct != null"
+                  class="rec-pill"
+                  :class="day.recovery_pct >= 67 ? 'rec-good' : day.recovery_pct >= 34 ? 'rec-mid' : 'rec-low'"
+                >恢复 {{ day.recovery_pct }}%</text>
                 <text v-if="isDayMissed(day)" class="missed-badge">✗ 缺跑</text>
                 <text v-if="day.completed && day.actual_distance_km" class="actual-km-badge">实跑 {{ day.actual_distance_km }}k</text>
                 <text class="type-badge" :class="getWorkoutBadgeClass(day.workout_type)">
@@ -304,13 +423,40 @@
                 <text class="dist-unit">km</text>
               </view>
 
-              <!-- Pace & Heart Rate -->
-              <view v-if="day.workout_type !== 'rest' && (day.target_pace || day.target_hr_zone)" class="metrics-row">
-                <text v-if="day.target_pace && day.target_pace !== '—'" class="metric-pill">⏱️ {{ day.target_pace }}</text>
-                <text v-if="day.target_hr_zone && day.target_hr_zone !== '—'" class="metric-pill hr-pill">❤️ {{ day.target_hr_zone }}</text>
+              <!-- Pace & Heart Rate & Biometrics -->
+              <view class="metrics-row" style="flex-wrap:wrap;">
+                <text v-if="day.workout_type !== 'rest' && day.target_pace && day.target_pace !== '—'" class="metric-pill">⏱️ {{ day.target_pace }}</text>
+                <text v-if="day.workout_type !== 'rest' && day.target_hr_zone && day.target_hr_zone !== '—'" class="metric-pill hr-pill">❤️ {{ day.target_hr_zone }}</text>
+                <text v-if="day.biometrics_text" class="metric-pill" :class="{ 'bio-warn-pill': day.low_hrv_alert }">💓 指标 {{ day.biometrics_text }}</text>
+                <text v-if="day.actual_execution_text" class="metric-pill exec-pill">🏃 执行: {{ day.actual_execution_text }}</text>
               </view>
 
               <text class="workout-desc">{{ day.description }}</text>
+
+              <!-- Athlete Self-Feel Notes & Photos -->
+              <view
+                v-if="day.feeling_tag || day.athlete_notes || (day.workout_photos && day.workout_photos.length)"
+                class="athlete-notes-box"
+              >
+                <view style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4rpx;">
+                  <text class="athlete-notes-title">💬 训练感受与备注：</text>
+                  <text v-if="day.feeling_tag" style="font-size:20rpx;font-weight:700;color:#10b981;">{{ day.feeling_tag }}</text>
+                </view>
+                <text v-if="day.athlete_notes" class="athlete-notes-content">{{ day.athlete_notes }}</text>
+                <view
+                  v-if="day.workout_photos && day.workout_photos.length"
+                  style="display:flex;flex-wrap:wrap;gap:12rpx;margin-top:10rpx;"
+                >
+                  <image
+                    v-for="(pUrl, pIdx) in day.workout_photos"
+                    :key="pIdx"
+                    :src="pUrl"
+                    mode="aspectFill"
+                    style="width:112rpx;height:112rpx;border-radius:14rpx;border:1rpx solid rgba(255,255,255,0.15);"
+                    @click.stop="previewCoachWorkoutPhotos(day.workout_photos, Number(pIdx))"
+                  />
+                </view>
+              </view>
 
               <!-- Coach Notes -->
               <view v-if="day.coach_notes" class="coach-notes-box">
@@ -327,16 +473,60 @@
                 @click="handleToggleComplete(activeMiniWeek.week_index, dIdx, day)"
               >
                 <text class="btn-text">
-                  {{ day.completed ? (day.actual_distance_km ? `✅ 已打卡 ${day.actual_distance_km}km` : '✅ 已完成') : (isDayMissed(day) ? '❌ 缺跑 · 补卡' : '打卡') }}
+                  {{ day.completed ? (day.actual_distance_km ? `✅ 已打卡 ${day.actual_distance_km}k` : '✅ 已完成') : (isDayMissed(day) ? '❌ 补卡' : '打卡') }}
                 </text>
               </button>
               <button
                 class="action-edit-btn"
                 @click="openEditWorkoutModal(activeMiniWeek.week_index, dIdx, day)"
               >
-                <text class="btn-text">微调/批注</text>
+                <text class="btn-text">{{ day.completed ? '📝 感受/备注/照片' : '📝 记录/调休' }}</text>
               </button>
             </view>
+          </view>
+        </view>
+
+        <!-- ── Weekly Summary & Injury Self-Report Box (默认折叠，教练评语常驻) ── -->
+        <view v-if="activeMiniWeek" style="margin-top:20rpx;padding:24rpx;border-radius:24rpx;background:var(--rgm-card, rgba(255,255,255,0.03));border:1rpx solid var(--rgm-line, rgba(255,255,255,0.1));">
+          <view
+            style="display:flex;align-items:center;justify-content:space-between;"
+            @click="showWeekSummaryForm = !showWeekSummaryForm"
+          >
+            <view style="display:flex;flex-direction:column;gap:4rpx;">
+              <text style="font-size:26rpx;font-weight:800;color:var(--rgm-text, #ffffff);">📝 第 {{ activeMiniWeek.week_index }} 周反馈</text>
+              <text v-if="weekInjuryNote || weekAthleteSummary || weekTravelNote" style="font-size:20rpx;color:var(--rgm-text-2, #a1a1aa);">
+                已填反馈
+              </text>
+            </view>
+            <text style="font-size:22rpx;font-weight:700;color:var(--rgm-brand-text, #f97316);background:var(--rgm-brand-tint, rgba(249,115,22,0.14));padding:8rpx 20rpx;border-radius:999rpx;white-space:nowrap;flex-shrink:0;">
+              {{ showWeekSummaryForm ? '收起 ▴' : '填写 ▾' }}
+            </text>
+          </view>
+
+          <view v-if="activeMiniWeek.coach_weekly_diagnosis" style="margin-top:16rpx;padding:16rpx;border-radius:16rpx;background:rgba(168,85,247,0.12);border:1rpx solid rgba(168,85,247,0.3);">
+            <text style="font-size:21rpx;font-weight:800;color:var(--rgm-purple, #d8b4fe);display:block;margin-bottom:4rpx;">🧢 教练复盘：</text>
+            <text style="font-size:21rpx;color:var(--rgm-text, #f3e8ff);line-height:1.4;">{{ activeMiniWeek.coach_weekly_diagnosis }}</text>
+          </view>
+
+          <view v-if="showWeekSummaryForm" style="margin-top:18rpx;padding-top:18rpx;border-top:1rpx solid var(--rgm-line, rgba(255,255,255,0.08));">
+            <view class="modal-input-group" style="margin-bottom:14rpx;">
+              <text class="modal-label" style="color:var(--rgm-red, #fda4af);">🚨 伤痛上报 (无则填无)</text>
+              <input v-model="weekInjuryNote" class="modal-input" placeholder="如：无，或右脚跟腱跑后轻微酸胀" />
+            </view>
+
+            <view class="modal-input-group" style="margin-bottom:14rpx;">
+              <text class="modal-label" style="color:var(--rgm-amber, #fcd34d);">💬 本周小结</text>
+              <input v-model="weekAthleteSummary" class="modal-input" placeholder="如：周二间歇完成顺利，周末长距离后程略掉速" />
+            </view>
+
+            <view class="modal-input-group" style="margin-bottom:16rpx;">
+              <text class="modal-label">✈️ 出差/请假/比赛报备</text>
+              <input v-model="weekTravelNote" class="modal-input" placeholder="如：下周三至周五出差，仅能安排晨跑" />
+            </view>
+
+            <button class="primary-btn" :loading="savingWeekSummary" @click="handleSaveRunnerWeekSummary">
+              <text class="btn-text">{{ savingWeekSummary ? '提交中...' : '💾 提交周反馈' }}</text>
+            </button>
           </view>
         </view>
       </view>
@@ -370,7 +560,7 @@
           <text class="tsb-val text-amber">{{ tsbMetrics.atl || 0 }}</text>
         </view>
         <view class="tsb-item">
-          <text class="tsb-label">状态 TSB</text>
+          <text class="tsb-label">状态 TSB <text class="term-info" @click.stop="explainTerm('tsb')">ⓘ</text></text>
           <text class="tsb-val" :class="tsbMetrics.tsb >= 0 ? 'text-green' : 'text-purple'">
             {{ tsbMetrics.tsb > 0 ? `+${tsbMetrics.tsb}` : (tsbMetrics.tsb || 0) }}
           </text>
@@ -381,86 +571,111 @@
         <text class="risk-icon">⚠️</text>
         <text class="risk-text">{{ tsbMetrics.risk_warning }}</text>
       </view>
+      <view
+        v-if="recoveryDataAvailability?.night_wear_missing || analysis?.recovery_data_availability?.night_wear_missing"
+        style="margin-top: 14rpx; padding: 12rpx 18rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
+        @click.stop="explainTerm('watch_wear')"
+      >
+        <text style="font-size: 22rpx; font-weight: 700; color: #b45309;">
+          ⚠️ 夜间未佩戴 · 恢复数据缺失
+        </text>
+        <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 12rpx;">ⓘ 详情</text>
+      </view>
     </view>
 
-    <!-- ── TARGET RACE CUSTOMIZATION CARD ── -->
+    <!-- ── TARGET RACE CUSTOMIZATION CARD (紧凑条 + 按需展开，消除与课表页重复表单) ── -->
     <view class="race-setup-card">
-      <view class="card-title-row">
-        <text class="section-icon">🎯</text>
-        <text class="card-title">目标赛事与专项设定</text>
+      <view
+        style="display:flex;align-items:center;justify-content:space-between;"
+        @click="showAnalysisRaceSetup = !showAnalysisRaceSetup"
+      >
+        <view style="display:flex;flex-direction:column;gap:4rpx;">
+          <view class="card-title-row" style="margin-bottom:0;">
+            <text class="section-icon">🎯</text>
+            <text class="card-title">备赛：{{ targetRace || '未设定' }}</text>
+          </view>
+          <text style="font-size:22rpx;color:#a1a1aa;">
+            目标 {{ targetTime || '—' }} · {{ raceType === 'half' ? '半马' : raceType === 'trail' ? '越野' : raceType === '10k' ? '10K' : '全马' }}
+          </text>
+        </view>
+        <text style="font-size:22rpx;font-weight:700;color:#f97316;background:rgba(249,115,22,0.14);padding:8rpx 20rpx;border-radius:999rpx;">
+          {{ showAnalysisRaceSetup ? '收起 ▴' : '切换 ▾' }}
+        </text>
       </view>
 
-      <!-- Registered User Races Quick Selector -->
-      <view v-if="userRaces.length" class="registered-races-row">
-        <text class="registered-label">🚩 您已登记的备赛日程 (点击直接切换为当前备赛)：</text>
-        <view class="registered-chips">
-          <view
-            v-for="r in userRaces"
-            :key="r.id || r.name"
-            class="reg-chip"
-            :class="{ active: targetRace === r.name || targetRace.includes(r.name) || r.name.includes(targetRace) }"
-            @click="handleSelectRegisteredRace(r)"
-          >
-            <text class="reg-chip-tier" :class="`tier-${r.priority == 1 || r.priority === 'A' ? 'a' : r.priority == 2 || r.priority === 'B' ? 'b' : 'c'}`">
-              {{ r.priority == 1 || r.priority === 'A' ? 'A标' : r.priority == 2 || r.priority === 'B' ? 'B标' : 'C标' }}
-            </text>
-            <text class="reg-chip-name">{{ r.name }}</text>
-            <text v-if="r.days_left !== undefined" class="reg-chip-days">{{ r.days_left }}天</text>
+      <view v-if="showAnalysisRaceSetup" style="margin-top:20rpx;padding-top:20rpx;border-top:1rpx solid rgba(255,255,255,0.08);">
+        <!-- Registered User Races Quick Selector -->
+        <view v-if="userRaces.length" class="registered-races-row">
+          <text class="registered-label">🚩 已登记赛事：</text>
+          <view class="registered-chips">
+            <view
+              v-for="r in userRaces"
+              :key="r.id || r.name"
+              class="reg-chip"
+              :class="{ active: targetRace === r.name || targetRace.includes(r.name) || r.name.includes(targetRace) }"
+              @click="handleSelectRegisteredRace(r)"
+            >
+              <text class="reg-chip-tier" :class="`tier-${r.priority == 1 || r.priority === 'A' ? 'a' : r.priority == 2 || r.priority === 'B' ? 'b' : 'c'}`">
+                {{ r.priority == 1 || r.priority === 'A' ? 'A标' : r.priority == 2 || r.priority === 'B' ? 'B标' : 'C标' }}
+              </text>
+              <text class="reg-chip-name">{{ r.name }}</text>
+              <text v-if="r.days_left !== undefined" class="reg-chip-days">{{ r.days_left }}天</text>
+            </view>
           </view>
         </view>
-      </view>
 
-      <view class="inputs-row">
-        <view class="input-col flex-2">
-          <text class="input-label">目标赛事</text>
-          <input
-            v-model="targetRace"
-            placeholder="如: 上海马拉松 / 武功山 50K"
-            class="setup-input"
-            @input="onRaceNameInput"
-          />
+        <view class="inputs-row">
+          <view class="input-col flex-2">
+            <text class="input-label">目标赛事</text>
+            <input
+              v-model="targetRace"
+              placeholder="如: 上海马拉松 / 武功山 50K"
+              class="setup-input"
+              @input="onRaceNameInput"
+            />
+          </view>
+          <view class="input-col flex-1">
+            <text class="input-label">目标时间</text>
+            <input
+              v-model="targetTime"
+              placeholder="3:15:00"
+              class="setup-input"
+            />
+          </view>
         </view>
-        <view class="input-col flex-1">
-          <text class="input-label">目标时间</text>
-          <input
-            v-model="targetTime"
-            placeholder="3:15:00"
-            class="setup-input"
-          />
-        </view>
-      </view>
 
-      <!-- Race Category Pills -->
-      <view class="race-type-pills-row">
-        <text class="input-label">专项分类：</text>
-        <view class="type-pills">
-          <view
-            class="type-pill"
-            :class="{ active: raceType === 'marathon' }"
-            @click="setCategory('marathon')"
-          >
-            <text class="pill-text">🏅 全马</text>
-          </view>
-          <view
-            class="type-pill"
-            :class="{ active: raceType === 'half' }"
-            @click="setCategory('half')"
-          >
-            <text class="pill-text">⚡ 半马</text>
-          </view>
-          <view
-            class="type-pill"
-            :class="{ active: raceType === 'trail' }"
-            @click="setCategory('trail')"
-          >
-            <text class="pill-text">🏔️ 越野</text>
-          </view>
-          <view
-            class="type-pill"
-            :class="{ active: raceType === '10k' || raceType === '5k' }"
-            @click="setCategory('10k')"
-          >
-            <text class="pill-text">🏃 10K</text>
+        <!-- Race Category Pills -->
+        <view class="race-type-pills-row">
+          <text class="input-label">专项分类：</text>
+          <view class="type-pills">
+            <view
+              class="type-pill"
+              :class="{ active: raceType === 'marathon' }"
+              @click="setCategory('marathon')"
+            >
+              <text class="pill-text">🏅 全马</text>
+            </view>
+            <view
+              class="type-pill"
+              :class="{ active: raceType === 'half' }"
+              @click="setCategory('half')"
+            >
+              <text class="pill-text">⚡ 半马</text>
+            </view>
+            <view
+              class="type-pill"
+              :class="{ active: raceType === 'trail' }"
+              @click="setCategory('trail')"
+            >
+              <text class="pill-text">🏔️ 越野</text>
+            </view>
+            <view
+              class="type-pill"
+              :class="{ active: raceType === '10k' || raceType === '5k' }"
+              @click="setCategory('10k')"
+            >
+              <text class="pill-text">🏃 10K</text>
+            </view>
           </view>
         </view>
       </view>
@@ -470,9 +685,9 @@
     <view v-if="analysis" class="content-box">
       <!-- ── CARD 1: 当前阶段与核心评价 ── -->
       <view class="hero-card">
-        <view class="phase-badge">
+        <view class="phase-badge" @click.stop="explainTerm('canova_model')">
           <text class="sparkle">✨</text>
-          <text class="phase-text">当前阶段：{{ analysis.periodization_phase || "专项准备期 (Special Period)" }}</text>
+          <text class="phase-text">阶段：{{ analysis.periodization_phase || "专项准备期" }} ⓘ</text>
         </view>
 
         <text class="summary-title">{{ analysis.summary }}</text>
@@ -485,15 +700,12 @@
           <view class="multi-race-header-titles">
             <view class="card-title-row">
               <text class="section-icon">📅</text>
-              <text class="card-title">Canova 多赛事宏观统筹与战术推演</text>
+              <text class="card-title">多赛事统筹</text>
             </view>
-            <text class="multi-race-subtitle">
-              A/B/C 梯队科学分级 · 规避过密疲劳冲突 · 黄金以赛代练配对 · 跨赛道专项切换
-            </text>
           </view>
           <view class="total-races-badge">
             <text class="sparkle-icon">✨</text>
-            <text class="total-races-text">共统筹 {{ (analysis.multi_race_strategy.race_timeline_advice || []).length }} 场目标赛事</text>
+            <text class="total-races-text">{{ (analysis.multi_race_strategy.race_timeline_advice || []).length }} 场赛事</text>
           </view>
         </view>
 
@@ -605,7 +817,7 @@
       <view v-if="analysis.race_zones" class="section-card">
         <view class="card-title-row">
           <text class="section-icon">⚡</text>
-          <text class="card-title">Canova 比赛专项刺激区间 ({{ targetRace }})</text>
+          <text class="card-title">专项配速区间 ({{ targetRace }})</text>
         </view>
 
         <view class="zones-list">
@@ -618,7 +830,6 @@
               <text class="zone-name">{{ z.name }}</text>
               <text class="zone-range">{{ z.range }}</text>
             </view>
-            <text class="zone-desc">{{ z.desc }}</text>
           </view>
         </view>
       </view>
@@ -627,31 +838,29 @@
       <view class="section-card workout-card">
         <view class="card-title-row">
           <text class="section-icon">🎯</text>
-          <text class="card-title">本周核心专项关键课</text>
+          <text class="card-title">本周关键课</text>
         </view>
         <view class="workout-box">
           <text class="workout-text">{{ formatWorkout(analysis.focus_workout_of_the_week) }}</text>
         </view>
-        <text class="tip-footnote">* 建议在充分热身与休息充沛状态下执行此课表。</text>
       </view>
 
       <!-- ── CARD 3: 生理恢复与超量恢复指导 ── -->
       <view class="section-card recovery-card">
         <view class="card-title-row">
           <text class="section-icon">🌿</text>
-          <text class="card-title">生理恢复与超量恢复指导</text>
+          <text class="card-title">恢复指导</text>
         </view>
         <view class="recovery-box">
           <text class="recovery-text">{{ formatAdvice(analysis.recovery_advice) }}</text>
         </view>
-        <text class="tip-footnote">* 密切关注晨起静息心率与睡眠质量得分。</text>
       </view>
 
       <!-- ── CARD 4: Canova 专项训练执行要点 ── -->
       <view class="section-card">
         <view class="card-title-row">
           <text class="section-icon">📋</text>
-          <text class="card-title">Canova 专项训练执行要点</text>
+          <text class="card-title">执行要点</text>
         </view>
 
         <view class="suggestions-list">
@@ -671,78 +880,421 @@
     <view v-else class="empty-card">
       <text class="empty-icon">⚡</text>
       <text class="empty-title">Canova教练就绪</text>
-      <text class="empty-desc">配置您的目标赛事，点击下方按钮，Canova教练将基于您的近期 Garmin / 高驰训练与生理负荷生成专属报告。</text>
-      <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成最新训练诊断</button>
+      <text class="empty-desc">配置目标赛事后即可生成训练诊断</text>
+      <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成训练诊断</button>
     </view>
     </view>
 
-    <!-- ── EDIT WORKOUT MODAL ── -->
+    <!-- ── EDIT WORKOUT & RUNNER DAILY SELF-REPORT MODAL ── -->
     <view v-if="editModalOpen" class="modal-mask">
       <view class="modal-card">
         <view class="modal-header">
-          <text class="modal-title">微调训练课目与教练指导</text>
+          <text class="modal-title">训练记录与调休</text>
           <text class="modal-close" @click="editModalOpen = false">✕</text>
         </view>
 
         <scroll-view scroll-y class="modal-scroll-body">
+          <!-- Feeling Tag Quick Selector -->
           <view class="modal-input-group">
-            <text class="modal-label">课目标题</text>
-            <input v-model="editTitle" class="modal-input" placeholder="输入课目标题" />
+            <text class="modal-label" style="color:var(--rgm-green, #10b981);font-weight:800;">😊 当日训练感受标签</text>
+            <view style="display:grid;grid-template-columns:repeat(3,1fr);gap:10rpx;margin-top:8rpx;">
+              <view
+                v-for="tag in COACH_FEELING_TAGS"
+                :key="tag"
+                @click="editFeelingTag = editFeelingTag === tag ? '' : tag"
+                style="padding:12rpx 8rpx;border-radius:14rpx;text-align:center;font-size:21rpx;font-weight:700;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.12));"
+                :style="editFeelingTag === tag ? 'background:rgba(16,185,129,0.16);border-color:var(--rgm-green, #10b981);color:var(--rgm-green, #10b981);' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text, #d4d4d8);'"
+              >
+                <text>{{ tag }}</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- RPE 1-10 Selector -->
+          <view class="modal-input-group">
+            <text class="modal-label" style="color:var(--rgm-brand-text, #fb923c);font-weight:800;">🔥 当日训练主观疲劳度 RPE (1=轻松 ~ 10=极限)</text>
+            <view style="display:flex;flex-wrap:wrap;gap:8rpx;margin-top:8rpx;">
+              <view
+                v-for="num in [1,2,3,4,5,6,7,8,9,10]"
+                :key="num"
+                @click="editRpe = editRpe === String(num) ? '' : String(num)"
+                style="width:52rpx;height:52rpx;border-radius:12rpx;display:flex;align-items:center;justify-content:center;font-size:22rpx;font-weight:800;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.12));"
+                :style="Number(editRpe) === num ? (num >= 8 ? 'background:#f43f5e;color:#fff;' : num >= 5 ? 'background:#f59e0b;color:#000;' : 'background:#10b981;color:#000;') : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);'"
+              >
+                <text>{{ num }}</text>
+              </view>
+            </view>
           </view>
 
           <view class="modal-row">
             <view class="modal-input-group flex-1">
-              <text class="modal-label">计划跑量 (km)</text>
-              <input v-model="editDistanceKm" type="digit" class="modal-input" />
+              <text class="modal-label">🏃 计划执行情况</text>
+              <input v-model="editExecutionText" class="modal-input" placeholder="如 15km*602, hr132" />
             </view>
             <view class="modal-input-group flex-1">
-              <text class="modal-label">目标配速</text>
-              <input v-model="editTargetPace" class="modal-input" placeholder="如 5:15 - 5:25 /km" />
+              <text class="modal-label">💬 训练感受与备注</text>
+              <input v-model="editAthleteNotes" class="modal-input" placeholder="如 体感轻快 / 小腿微酸" />
+            </view>
+          </view>
+
+          <!-- Workout Photos Uploader (Max 3) -->
+          <view class="modal-input-group">
+            <view style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8rpx;">
+              <text class="modal-label" style="margin-bottom:0;color:var(--rgm-brand-text, #38bdf8);font-weight:800;">📸 打卡照片（最多 3 张）</text>
+              <text style="font-size:20rpx;color:var(--rgm-text-2, #a1a1aa);">{{ editWorkoutPhotos.length + editNewPhotosPreview.length }}/3</text>
+            </view>
+            <view style="display:flex;flex-wrap:wrap;gap:14rpx;">
+              <view
+                v-for="(url, idx) in editWorkoutPhotos"
+                :key="'saved_' + idx"
+                style="width:140rpx;height:140rpx;border-radius:16rpx;position:relative;overflow:hidden;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.15));"
+              >
+                <image
+                  :src="url"
+                  mode="aspectFill"
+                  style="width:100%;height:100%;"
+                  @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], Number(idx))"
+                />
+                <view
+                  @click.stop="editWorkoutPhotos.splice(Number(idx), 1)"
+                  style="position:absolute;top:6rpx;right:6rpx;width:36rpx;height:36rpx;border-radius:50%;background:rgba(0,0,0,0.7);color:#fff;font-size:20rpx;display:flex;align-items:center;justify-content:center;"
+                >✕</view>
+              </view>
+
+              <view
+                v-for="(pUrl, nIdx) in editNewPhotosPreview"
+                :key="'new_' + nIdx"
+                style="width:140rpx;height:140rpx;border-radius:16rpx;position:relative;overflow:hidden;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.15));"
+              >
+                <image
+                  :src="pUrl"
+                  mode="aspectFill"
+                  style="width:100%;height:100%;"
+                  @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], editWorkoutPhotos.length + Number(nIdx))"
+                />
+                <view
+                  @click.stop="removeCoachNewPhoto(Number(nIdx))"
+                  style="position:absolute;top:6rpx;right:6rpx;width:36rpx;height:36rpx;border-radius:50%;background:rgba(0,0,0,0.7);color:#fff;font-size:20rpx;display:flex;align-items:center;justify-content:center;"
+                >✕</view>
+              </view>
+
+              <view
+                v-if="editWorkoutPhotos.length + editNewPhotosPreview.length < 3"
+                @click="handleChooseCoachWorkoutPhoto"
+                style="width:140rpx;height:140rpx;border-radius:16rpx;background:var(--rgm-card-2, rgba(255,255,255,0.04));border:2rpx dashed var(--rgm-line-solid, rgba(255,255,255,0.22));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6rpx;"
+              >
+                <text style="font-size:34rpx;">📷</text>
+                <text style="font-size:19rpx;color:var(--rgm-text-2, #a1a1aa);font-weight:600;">添加照片</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- Morning Biometrics -->
+          <view class="modal-input-group">
+            <text class="modal-label">💓 晨起身体指标 (HRV / 静息心率 / 恢复%)</text>
+            <view class="modal-row">
+              <view class="flex-1">
+                <input v-model="editHrv" type="number" class="modal-input" placeholder="HRV (如 39)" />
+              </view>
+              <view class="flex-1">
+                <input v-model="editRestingHr" type="number" class="modal-input" placeholder="静心 (如 50)" />
+              </view>
+              <view class="flex-1">
+                <input v-model="editRecoveryPct" type="number" class="modal-input" placeholder="恢复% (如 78)" />
+              </view>
+            </view>
+          </view>
+
+          <!-- Day Swap & Strength Toggle -->
+          <view class="modal-input-group">
+            <view style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8rpx;">
+              <text class="modal-label" style="color:var(--rgm-text, #93c5fd);">🔁 与本周其他天对换课表</text>
+              <view
+                v-if="editIsSwapped"
+                @click="handleUndoSwapWorkout"
+                style="padding:8rpx 18rpx;border-radius:12rpx;background:rgba(244,63,94,0.16);border:1rpx solid rgba(244,63,94,0.5);color:var(--rgm-red, #fda4af);font-size:21rpx;font-weight:800;"
+              >
+                <text>↩️ 取消对换 · 恢复原课表{{ editSwappedFrom ? `（原与${editSwappedFrom}对换）` : '' }}</text>
+              </view>
+            </view>
+            <view style="display:flex;flex-wrap:wrap;gap:8rpx;margin-top:8rpx;">
+              <view
+                @click="editSwapDayIdx = -1"
+                style="padding:8rpx 14rpx;border-radius:10rpx;font-size:20rpx;font-weight:700;"
+                :style="editSwapDayIdx === -1 ? 'background:#3b82f6;color:#fff;' : 'background:var(--rgm-card-2, rgba(255,255,255,0.06));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, transparent);'"
+              >
+                <text>不对换</text>
+              </view>
+              <view
+                v-for="(lbl, sIdx) in ['周一','周二','周三','周四','周五','周六','周日']"
+                :key="sIdx"
+                v-show="sIdx !== editDayIdx"
+                @click="editSwapDayIdx = sIdx"
+                style="padding:8rpx 14rpx;border-radius:10rpx;font-size:20rpx;font-weight:700;"
+                :style="editSwapDayIdx === sIdx ? 'background:#3b82f6;color:#fff;' : 'background:var(--rgm-card-2, rgba(255,255,255,0.06));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, transparent);'"
+              >
+                <text>换{{ lbl }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view style="display:flex;align-items:center;gap:16rpx;margin-bottom:16rpx;">
+            <view
+              @click="editCompleted = !editCompleted"
+              style="flex:1;padding:14rpx;border-radius:14rpx;text-align:center;font-size:22rpx;font-weight:800;"
+              :style="editCompleted ? 'background:rgba(16,185,129,0.16);color:var(--rgm-green, #6ee7b7);border:1rpx solid rgba(16,185,129,0.5);' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));'"
+            >
+              <text>{{ editCompleted ? '✅ 今日跑步课已完成' : '⬜ 标记跑步已完成' }}</text>
+            </view>
+            <view
+              @click="editStrengthDone = !editStrengthDone"
+              style="flex:1;padding:14rpx;border-radius:14rpx;text-align:center;font-size:22rpx;font-weight:800;"
+              :style="editStrengthDone ? 'background:var(--rgm-brand-tint, rgba(168,85,247,0.25));color:var(--rgm-brand-text, #d8b4fe);border:1rpx solid var(--rgm-brand-line, rgba(168,85,247,0.5));' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));'"
+            >
+              <text>{{ editStrengthDone ? '💪 今日力量已打卡' : '⬜ 标记力量已打卡' }}</text>
+            </view>
+          </view>
+
+          <view
+            v-if="isEditingStartedWeek"
+            style="margin-bottom:14rpx;padding:14rpx 18rpx;border-radius:14rpx;background:var(--rgm-brand-tint, rgba(245,158,11,0.12));border:1rpx solid var(--rgm-brand-line, rgba(245,158,11,0.35));"
+          >
+            <text style="font-size:21rpx;color:var(--rgm-brand-text, #fbbf24);font-weight:700;line-height:1.45;display:block;">
+              🔒 第 {{ editWeekIdx }} 周已开始，课表处方已锁定；仍可记录打卡、体感或调休对换。
+            </text>
+          </view>
+
+          <view class="modal-input-group">
+            <text class="modal-label">课目标题 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
+            <input v-model="editTitle" :disabled="isEditingStartedWeek" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" placeholder="输入课目标题" />
+          </view>
+
+          <view class="modal-row">
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">计划跑量 (km) {{ isEditingStartedWeek ? '🔒' : '' }}</text>
+              <input v-model="editDistanceKm" :disabled="isEditingStartedWeek" type="digit" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" />
+            </view>
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">目标配速 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
+              <input v-model="editTargetPace" :disabled="isEditingStartedWeek" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" placeholder="如 5:15 - 5:25 /km" />
             </view>
           </view>
 
           <view class="modal-input-group">
-            <text class="modal-label">目标心率区间</text>
-            <input v-model="editTargetHrZone" class="modal-input" placeholder="如 135-145 bpm" />
-          </view>
-
-          <view class="modal-input-group">
-            <text class="modal-label">课表安排与热身冷身说明</text>
-            <textarea v-model="editDescription" class="modal-textarea" maxlength="300" />
-          </view>
-
-          <view class="modal-input-group coach-notes-group">
-            <text class="modal-label text-amber">👨‍🏫 跑团教练寄语与指导批注 (Coach Notes)</text>
-            <textarea
-              v-model="editCoachNotes"
-              class="modal-textarea coach-textarea"
-              placeholder="在此输入教练微调说明或鼓励指导..."
-              maxlength="200"
-            />
+            <text class="modal-label">课表安排与热身冷身说明 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
+            <textarea v-model="editDescription" :disabled="isEditingStartedWeek" class="modal-textarea" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" maxlength="300" />
           </view>
         </scroll-view>
 
         <view class="modal-footer">
           <button class="modal-cancel-btn" @click="editModalOpen = false">取消</button>
-          <button class="modal-save-btn" :loading="savingWorkout" @click="handleSaveWorkout">保存修改</button>
+          <button class="modal-save-btn" :loading="savingWorkout" @click="handleSaveWorkout">保存打卡与体感</button>
         </view>
       </view>
     </view>
+
+    <!-- ── 底部运动生理算法免责声明 ── -->
+    <view class="ai-legal-disclaimer">
+      <text class="ai-legal-text">基于运动生理模型推算，仅供参考，不作医疗诊断依据。</text>
+    </view>
+
+    <!-- 个人打卡 & 已完赛赛事分享朋友圈卡片弹窗 -->
+    <PersonalShareCardModal
+      :visible="showCoachShareCard"
+      :race-id="activeCoachShareRaceId"
+      @close="showCoachShareCard = false"
+    />
+
+    <!-- 个人跑步周报与月报弹窗 -->
+    <PersonalReportModal
+      :visible="showCoachPersonalReport"
+      @close="showCoachPersonalReport = false"
+    />
+
+    <!-- 💬 AI 科学教练实时问答抽屉 -->
+    <view
+      v-if="showCoachChatModal"
+      class="modal-overlay"
+      @click="showCoachChatModal = false"
+      @touchmove.stop.prevent
+    >
+      <view
+        class="modal-card"
+        style="max-height: 82vh; display: flex; flex-direction: column;"
+        @click.stop
+      >
+        <view class="modal-header">
+          <text class="modal-title">💬 咨询 Canova 科学教练</text>
+          <text class="modal-close" @click="showCoachChatModal = false">✕</text>
+        </view>
+
+        <view style="padding: 12rpx 24rpx; display: flex; flex-wrap: wrap; gap: 10rpx; border-bottom: 1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.08));">
+          <view
+            v-for="qp in ['今天状态偏累怎么调课？', '如何提升马拉松有氧配速？', '本周长距离该怎么配速？']"
+            :key="qp"
+            style="padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-brand-tint, rgba(252,76,2,0.14)); border: 1rpx solid var(--rgm-brand-line, rgba(252,76,2,0.35));"
+            @click="sendCoachChatMessage(qp)"
+          >
+            <text style="font-size: 21rpx; color: var(--rgm-brand-text, #fb923c); font-weight: 700;">{{ qp }}</text>
+          </view>
+        </view>
+
+        <scroll-view scroll-y style="flex: 1; min-height: 360rpx; max-height: 52vh; padding: 20rpx 24rpx; box-sizing: border-box;">
+          <view
+            v-for="(msg, mIdx) in coachChatMessages"
+            :key="mIdx"
+            :style="msg.role === 'user' ? 'display:flex;justify-content:flex-end;margin-bottom:18rpx;' : 'display:flex;justify-content:flex-start;margin-bottom:18rpx;'"
+          >
+            <view
+              :style="msg.role === 'user'
+                ? 'max-width:84%;padding:16rpx 22rpx;border-radius:20rpx 20rpx 6rpx 20rpx;background:#fc4c02;color:#fff;'
+                : 'max-width:90%;padding:18rpx 22rpx;border-radius:20rpx 20rpx 20rpx 6rpx;background:var(--rgm-card-2, rgba(255,255,255,0.07));border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));color:var(--rgm-text, #f4f4f5);'"
+            >
+              <text style="font-size: 25rpx; line-height: 1.55; white-space: pre-wrap;">{{ msg.content }}</text>
+            </view>
+          </view>
+          <view v-if="sendingCoachChat" style="padding: 10rpx 4rpx;">
+            <text style="font-size: 22rpx; color: var(--rgm-text-2, #a1a1aa);">🎯 教练正在结合您的 CTL/ATL 负荷与课表推演建议...</text>
+          </view>
+        </scroll-view>
+
+        <view style="padding: 16rpx 24rpx; display: flex; align-items: center; gap: 12rpx; border-top: 1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.08));">
+          <input
+            v-model="coachChatInput"
+            class="modal-input"
+            style="flex: 1; margin: 0;"
+            placeholder="输入训练、配速、心率或伤痛恢复问题..."
+            confirm-type="send"
+            @confirm="sendCoachChatMessage()"
+          />
+          <button
+            class="modal-save-btn"
+            style="flex: 0 0 auto; width: auto; padding: 0 28rpx; height: 72rpx; line-height: 72rpx; margin: 0;"
+            :loading="sendingCoachChat"
+            :disabled="sendingCoachChat"
+            @click="sendCoachChatMessage()"
+          >
+            发送
+          </button>
+        </view>
+      </view>
+    </view>
+
+    <GoalSheetModal
+      :visible="showCoachGoalSheet"
+      :default-tab="coachGoalSheetTab"
+      :user-id="user?.id"
+      :initial-goal="userGoal"
+      @close="showCoachGoalSheet = false"
+      @saved="handleCoachGoalSaved"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
+import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import { explainTerm } from "../../utils/glossary";
+import { trackClick, trackSubView, trackFunnelStep } from "../../utils/telemetry";
 import { ref, computed, watch, onMounted, nextTick } from "vue";
-import { onShow, onPullDownRefresh } from "@dcloudio/uni-app";
+import { onShow, onPullDownRefresh, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
+import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
 import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex } from "../../utils/api";
+import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
+import PersonalReportModal from "../../components/PersonalReportModal.vue";
+import GoalSheetModal from "../../components/GoalSheetModal.vue";
+
+const showCoachGoalSheet = ref(false);
+const coachGoalSheetTab = ref<"week" | "month">("week");
+function openCoachGoalSheet(tab: "week" | "month" = "week") {
+  coachGoalSheetTab.value = tab;
+  showCoachGoalSheet.value = true;
+}
+function handleCoachGoalSaved(savedGoal: any) {
+  userGoal.value = { ...(userGoal.value || {}), ...(savedGoal || {}) };
+}
 
 const activeTab = ref<"plan" | "analysis">("plan");
+watch(activeTab, (tab) => {
+  trackSubView(`coach_${tab}`, `训练页切换：${tab === "analysis" ? "跑力与生理分析" : "周期训练课表"}`);
+});
+const showCoachShareCard = ref(false);
+const showCoachPersonalReport = ref(false);
+const activeCoachShareRaceId = ref("");
+
+function openCompletedTargetRaceShareCard() {
+  const targetName = plan.value?.target_race_name;
+  const matched = (userRaces.value || []).find(
+    (r: any) => r.name === targetName || (r.status === "completed" || r.is_completed)
+  );
+  activeCoachShareRaceId.value = matched ? String(matched.id || matched.name) : String(targetName || "");
+  showCoachShareCard.value = true;
+}
+
+// 原【深度分析】Tab 已并入【训练】，以二级页面打开
+function goToBodyData() {
+  uni.navigateTo({ url: "/pages/analysis/analysis" });
+}
 
 // Training Plan State
 const plan = ref<any>(null);
+const planBackups = ref<any[]>([]);
+const rollingBackPlan = ref(false);
+const savedPlanBackup = ref<any>(null);
+const isPreviewPlan = ref(false);
+const confirmingPlan = ref(false);
+
+// AI Coach Chat State
+const showCoachChatModal = ref(false);
+const coachChatInput = ref("");
+const sendingCoachChat = ref(false);
+const coachChatMessages = ref<Array<{ role: "user" | "assistant"; content: string }>>([
+  {
+    role: "assistant",
+    content: "您好！我是您的 Canova 科学耐力教练。我已同步您的近期跑量、负荷曲线（CTL/ATL/TSB）与当前周期课表，随时可向我咨询今日调课、目标配速或伤痛恢复方案。",
+  },
+]);
+
+function openCoachChatModal() {
+  trackClick("coach_open_ai_chat", "训练页打开AI科学教练咨询");
+  showCoachChatModal.value = true;
+}
+
+async function sendCoachChatMessage(presetQuestion?: string) {
+  const q = String(presetQuestion ?? coachChatInput.value ?? "").trim();
+  if (!q || sendingCoachChat.value) return;
+  if (!presetQuestion) coachChatInput.value = "";
+
+  user.value = getStoredUser();
+  if (!user.value) {
+    user.value = await checkAndAutoLogin();
+  }
+  if (!user.value?.id) return;
+
+  const historySnapshot = coachChatMessages.value.slice(-4);
+  coachChatMessages.value.push({ role: "user", content: q });
+  sendingCoachChat.value = true;
+  try {
+    const res = await request("/api/coach/chat", "POST", {
+      uid: user.value.id,
+      message: q,
+      history: historySnapshot,
+    });
+    const reply = String(res?.reply || "教练已收到问题，建议先保持有氧稳态跑并关注晨起静息心率与体感反馈。");
+    coachChatMessages.value.push({ role: "assistant", content: reply });
+  } catch (err: any) {
+    coachChatMessages.value.push({
+      role: "assistant",
+      content: err?.message || "网络连接稍有波动，请稍后再试。",
+    });
+  } finally {
+    sendingCoachChat.value = false;
+  }
+}
 const planLoading = ref(false);
 const generatingPlan = ref(false);
 const showPlanConfig = ref(false);
+const showWeekSummaryForm = ref(false);
+const showAnalysisRaceSetup = ref(false);
 const selectedWeekIdx = ref(1);
 const scrollIntoWeek = ref("");
 
@@ -828,8 +1380,37 @@ const planTargetTime = ref("3:09:30");
 const planMaintenanceFocus = ref("aerobic_base");
 const planWeeksCount = ref(8);
 const planDaysPerWeek = ref(4);
+const planWeekOptions = [4, 6, 8, 10, 12, 16];
+const planWeekOptionLabels = [
+  "4 周 · 冲刺微周期",
+  "6 周 · 标准进阶",
+  "8 周 · 经典备战",
+  "10 周 · 进阶周期",
+  "12 周 · 完整周期",
+  "16 周 · 长线备赛",
+];
+const planDayOptions = [3, 4, 5, 6];
+const planDayOptionLabels = [
+  "3 天/周 · 轻量均衡",
+  "4 天/周 · 经典推荐",
+  "5 天/周 · 进阶强化",
+  "6 天/周 · 严肃跑者",
+];
+function stepPlanWeeks(delta: number) {
+  const curIdx = planWeekOptions.indexOf(planWeeksCount.value);
+  const baseIdx = curIdx >= 0 ? curIdx : 2;
+  const nextIdx = Math.min(planWeekOptions.length - 1, Math.max(0, baseIdx + delta));
+  planWeeksCount.value = planWeekOptions[nextIdx];
+}
+function stepPlanDays(delta: number) {
+  const curIdx = planDayOptions.indexOf(planDaysPerWeek.value);
+  const baseIdx = curIdx >= 0 ? curIdx : 1;
+  const nextIdx = Math.min(planDayOptions.length - 1, Math.max(0, baseIdx + delta));
+  planDaysPerWeek.value = planDayOptions[nextIdx];
+}
 const userGoal = ref<any>(null);
 const syncingGoal = ref(false);
+const recoveryDataAvailability = ref<any>(null);
 
 const recommendedRace = computed(() => {
   if (!userRaces.value || userRaces.value.length === 0) return null;
@@ -929,7 +1510,16 @@ const activeMiniWeek = computed(() => {
   return weeks.find((w: any) => w.week_index === selectedWeekIdx.value) || weeks[0];
 });
 
-// Edit modal state
+const COACH_FEELING_TAGS = [
+  "🤩 状态极佳",
+  "😊 轻松舒适",
+  "💪 正常发挥",
+  "😮‍💨 略感吃力",
+  "🥵 疲惫掉速",
+  "🦵 肌肉酸紧",
+];
+
+// Edit modal & runner daily self-report state
 const editModalOpen = ref(false);
 const editWeekIdx = ref(1);
 const editDayIdx = ref(0);
@@ -941,7 +1531,101 @@ const editTargetHrZone = ref("");
 const editDescription = ref("");
 const editCompleted = ref(false);
 const editCoachNotes = ref("");
+const editFeelingTag = ref("");
+const editRpe = ref("");
+const editExecutionText = ref("");
+const editAthleteNotes = ref("");
+const editWorkoutPhotos = ref<string[]>([]);
+const editNewPhotosPreview = ref<string[]>([]);
+const editNewPhotosBase64 = ref<string[]>([]);
+const editHrv = ref("");
+const editRestingHr = ref("");
+const editRecoveryPct = ref("");
+const editStrengthDone = ref(false);
+const editSwapDayIdx = ref(-1);
+const editIsSwapped = ref(false);
+const editSwappedFrom = ref("");
 const savingWorkout = ref(false);
+
+function previewCoachWorkoutPhotos(urls: string[], currentIdx: number = 0) {
+  if (!urls || !urls.length) return;
+  uni.previewImage({
+    urls,
+    current: urls[currentIdx] || urls[0],
+  });
+}
+
+function removeCoachNewPhoto(idx: number) {
+  editNewPhotosPreview.value.splice(idx, 1);
+  editNewPhotosBase64.value.splice(idx, 1);
+}
+
+function handleChooseCoachWorkoutPhoto() {
+  const total = editWorkoutPhotos.value.length + editNewPhotosPreview.value.length;
+  const remain = Math.max(0, 3 - total);
+  if (remain <= 0) {
+    uni.showToast({ title: "最多上传 3 张照片", icon: "none" });
+    return;
+  }
+  uni.chooseImage({
+    count: remain,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: (res) => {
+      const paths = res.tempFilePaths || [];
+      const fs = uni.getFileSystemManager ? uni.getFileSystemManager() : null;
+      paths.forEach((p: string) => {
+        const readAsB64 = (filePath: string) => {
+          if (!fs) return;
+          fs.readFile({
+            filePath,
+            encoding: "base64",
+            success: (fRes) => {
+              const b64 = typeof fRes.data === "string" ? fRes.data : "";
+              if (b64) {
+                editNewPhotosPreview.value.push(filePath);
+                editNewPhotosBase64.value.push(`data:image/jpeg;base64,${b64}`);
+              }
+            },
+          });
+        };
+        if (uni.compressImage) {
+          uni.compressImage({
+            src: p,
+            quality: 78,
+            success: (cRes) => readAsB64(cRes.tempFilePath || p),
+            fail: () => readAsB64(p),
+          });
+        } else {
+          readAsB64(p);
+        }
+      });
+    },
+  });
+}
+
+const isEditingStartedWeek = computed(() => {
+  if (isPreviewPlan.value) return false;
+  return Number(editWeekIdx.value) <= Number(currentWeekIndex.value || 1);
+});
+
+// Weekly summary & injury report state
+const weekInjuryNote = ref("");
+const weekAthleteSummary = ref("");
+const weekTravelNote = ref("");
+const savingWeekSummary = ref(false);
+
+watch(
+  () => [activeMiniWeek.value?.week_index, plan.value?.updated_at],
+  () => {
+    if (activeMiniWeek.value) {
+      weekInjuryNote.value = activeMiniWeek.value.injury_note || "";
+      weekAthleteSummary.value = activeMiniWeek.value.athlete_weekly_summary || "";
+      weekTravelNote.value = activeMiniWeek.value.travel_or_leave_note || "";
+    }
+  },
+  { immediate: true }
+);
 
 function getWorkoutTypeLabel(type: string): string {
   const map: Record<string, string> = {
@@ -1004,6 +1688,7 @@ async function loadUserPlan() {
   planLoading.value = true;
   try {
     const res = await request(`/api/coach/plan/user/${user.value.id}`);
+    planBackups.value = Array.isArray(res?.backups) ? res.backups : [];
     if (res?.active_plan) {
       const curWk = Number(res.active_plan.current_week_index) || computeCurrentWeekIndex(res.active_plan);
       selectedWeekIdx.value = curWk;
@@ -1015,6 +1700,9 @@ async function loadUserPlan() {
     }
     if (res?.user_goal) {
       userGoal.value = res.user_goal;
+    }
+    if (res?.recovery_data_availability) {
+      recoveryDataAvailability.value = res.recovery_data_availability;
     }
   } catch (err) {
     console.warn("Load plan error:", err);
@@ -1068,6 +1756,10 @@ async function handleSyncToGoals() {
 }
 
 async function handleGeneratePlan() {
+  trackClick("coach_generate_plan", "点击「生成周期训练课表」", {
+    goal_type: planGoalType.value,
+    weeks: planWeeksCount.value,
+  });
   user.value = getStoredUser();
   if (!user.value) {
     user.value = await checkAndAutoLogin();
@@ -1075,6 +1767,9 @@ async function handleGeneratePlan() {
   if (!user.value || !user.value.id) return;
   generatingPlan.value = true;
   try {
+    if (!isPreviewPlan.value && plan.value) {
+      savedPlanBackup.value = JSON.parse(JSON.stringify(plan.value));
+    }
     const payload = {
       athlete_uid: user.value.id,
       goal_type: planGoalType.value,
@@ -1084,15 +1779,32 @@ async function handleGeneratePlan() {
       weeks_count: planWeeksCount.value,
       days_per_week: planDaysPerWeek.value,
       operator_uid: user.value.id,
-      user_weekly_target: userGoal.value?.weekly_target ? Number(userGoal.value.weekly_target) : undefined
+      user_weekly_target: userGoal.value?.weekly_target ? Number(userGoal.value.weekly_target) : undefined,
+      preview_only: true
     };
     const res = await request("/api/coach/plan/generate", "POST", payload);
     if (res?.success && res?.plan) {
+      trackFunnelStep("coach_generate_plan_preview", "生成新训练课表预览", {
+        weeks_count: planWeeksCount.value,
+        days_per_week: planDaysPerWeek.value,
+      });
       plan.value = res.plan;
+      isPreviewPlan.value = true;
       const curWk = res.plan.current_week_index || computeCurrentWeekIndex(res.plan);
       selectedWeekIdx.value = curWk;
       showPlanConfig.value = false;
-      uni.showToast({ title: "课表生成成功！", icon: "success" });
+      uni.showModal({
+        title: "已生成课表预览（尚未写入）",
+        content: "新训练课表已生成预览。您可以先审阅各周安排，或立即点击「确认更新并启用」正式写入生效；若不确认则不会覆盖原计划。",
+        confirmText: "立即确认启用",
+        cancelText: "先审阅预览",
+        confirmColor: "#10b981",
+        success: (mRes) => {
+          if (mRes.confirm) {
+            doConfirmGeneratedPlan();
+          }
+        }
+      });
     }
   } catch (err) {
     console.error("Generate plan error:", err);
@@ -1100,6 +1812,103 @@ async function handleGeneratePlan() {
   } finally {
     generatingPlan.value = false;
   }
+}
+
+async function doConfirmGeneratedPlan() {
+  if (!plan.value || !user.value?.id) return;
+  confirmingPlan.value = true;
+  try {
+    const res = await request("/api/coach/plan/confirm", "POST", {
+      plan_payload: plan.value,
+      operator_uid: user.value.id
+    });
+    if (res?.success && res?.plan) {
+      trackFunnelStep("coach_confirm_plan_success", "确认启用新周期训练课表");
+      plan.value = res.plan;
+      isPreviewPlan.value = false;
+      savedPlanBackup.value = null;
+      uni.showToast({ title: "已确认更新并启用计划！", icon: "success" });
+      await loadUserPlan();
+    }
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "确认更新失败", icon: "none" });
+  } finally {
+    confirmingPlan.value = false;
+  }
+}
+
+function handleRollbackUserPlan() {
+  if (!user.value?.id || !planBackups.value.length || rollingBackPlan.value) return;
+  const latestBackup = planBackups.value[0];
+  uni.showModal({
+    title: "恢复上一版课表",
+    content: "确定将当前周期课表回退至上一版备份快照吗？已记录的跑步活动不会被删除。",
+    confirmText: "确认回退",
+    cancelText: "取消",
+    confirmColor: "#f59e0b",
+    success: async (mRes) => {
+      if (!mRes.confirm || !user.value?.id) return;
+      rollingBackPlan.value = true;
+      try {
+        const res = await request(`/api/coach/plan/user/${user.value.id}/rollback`, "POST", {
+          operator_uid: user.value.id,
+          backup_id: latestBackup?.id,
+        });
+        if (res?.active_plan) {
+          plan.value = res.active_plan;
+          const curWk = Number(res.active_plan.current_week_index) || computeCurrentWeekIndex(res.active_plan);
+          selectedWeekIdx.value = curWk;
+          scrollToWeek(curWk);
+        }
+        if (Array.isArray(res?.backups)) {
+          planBackups.value = res.backups;
+        } else {
+          await loadUserPlan();
+        }
+        uni.showToast({ title: "已恢复上一版课表！", icon: "success" });
+      } catch (err: any) {
+        uni.showToast({ title: err?.message || "回退课表失败", icon: "none" });
+      } finally {
+        rollingBackPlan.value = false;
+      }
+    },
+  });
+}
+
+function handleConfirmGeneratedPlan() {
+  uni.showModal({
+    title: "确认更新训练计划",
+    content: "确定启用这套新生成的周期训练课表并正式写入更新现有计划吗？",
+    confirmText: "确认更新",
+    cancelText: "再看看",
+    confirmColor: "#10b981",
+    success: (mRes) => {
+      if (mRes.confirm) {
+        doConfirmGeneratedPlan();
+      }
+    }
+  });
+}
+
+function handleDiscardGeneratedPlan() {
+  uni.showModal({
+    title: "放弃此次排课预览",
+    content: "放弃后本次生成的预览课表将不会写入，保持原训练计划不变。确认放弃吗？",
+    confirmText: "确认放弃",
+    cancelText: "继续查看",
+    confirmColor: "#ef4444",
+    success: (mRes) => {
+      if (mRes.confirm) {
+        plan.value = savedPlanBackup.value;
+        isPreviewPlan.value = false;
+        savedPlanBackup.value = null;
+        if (!plan.value) {
+          showPlanConfig.value = true;
+        }
+        uni.showToast({ title: "已放弃预览，未写入更改", icon: "none" });
+      }
+    }
+  });
 }
 
 function openEditWorkoutModal(wIdx: number, dIdx: number, day: any) {
@@ -1113,14 +1922,64 @@ function openEditWorkoutModal(wIdx: number, dIdx: number, day: any) {
   editDescription.value = day.description || "";
   editCompleted.value = Boolean(day.completed);
   editCoachNotes.value = day.coach_notes || "";
+  editFeelingTag.value = day.feeling_tag || "";
+  editRpe.value = day.rpe != null ? String(day.rpe) : "";
+  editExecutionText.value = day.actual_execution_text || "";
+  editAthleteNotes.value = day.athlete_notes || "";
+  editWorkoutPhotos.value = Array.isArray(day.workout_photos) ? [...day.workout_photos] : (day.photo_url ? [day.photo_url] : []);
+  editNewPhotosPreview.value = [];
+  editNewPhotosBase64.value = [];
+  editHrv.value = day.hrv != null ? String(day.hrv) : "";
+  editRestingHr.value = day.resting_hr != null ? String(day.resting_hr) : "";
+  editRecoveryPct.value = day.recovery_pct != null ? String(day.recovery_pct) : "";
+  editStrengthDone.value = Boolean(day.strength_completed);
+  editSwapDayIdx.value = -1;
+  const noteStr = String(day.athlete_notes || "");
+  const execStr = String(day.actual_execution_text || "");
+  editIsSwapped.value = Boolean(
+    day.is_swapped ||
+      day.swapped_from ||
+      noteStr.includes("对换课表") ||
+      (execStr.startsWith("跑休") && execStr.includes("对换"))
+  );
+  editSwappedFrom.value = day.swapped_from || "";
   editModalOpen.value = true;
+}
+
+async function handleUndoSwapWorkout() {
+  if (!plan.value?.id || !user.value?.id) return;
+  savingWorkout.value = true;
+  try {
+    const payload: any = {
+      week_index: editWeekIdx.value,
+      day_index: editDayIdx.value,
+      undo_swap: true,
+      operator_uid: user.value.id
+    };
+    if (isPreviewPlan.value) {
+      payload.preview_only = true;
+      payload.plan_payload = plan.value;
+      payload.schedule_data = plan.value?.schedule_data;
+    }
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    if (res?.success && res?.plan) {
+      plan.value = res.plan;
+      editModalOpen.value = false;
+      uni.showToast({ title: "已取消对换并恢复原课表", icon: "success" });
+    }
+  } catch (err) {
+    console.error("Undo swap workout error:", err);
+    uni.showToast({ title: "取消对换失败", icon: "none" });
+  } finally {
+    savingWorkout.value = false;
+  }
 }
 
 async function handleSaveWorkout() {
   if (!plan.value?.id || !user.value?.id) return;
   savingWorkout.value = true;
   try {
-    const payload = {
+    const payload: any = {
       week_index: editWeekIdx.value,
       day_index: editDayIdx.value,
       workout_type: editWorkoutType.value,
@@ -1131,19 +1990,60 @@ async function handleSaveWorkout() {
       description: editDescription.value,
       completed: editCompleted.value,
       coach_notes: editCoachNotes.value,
+      feeling_tag: editFeelingTag.value,
+      athlete_notes: editAthleteNotes.value,
+      workout_photos: editWorkoutPhotos.value,
+      new_photos_base64: editNewPhotosBase64.value,
+      actual_execution_text: editExecutionText.value,
+      strength_completed: editStrengthDone.value,
       operator_uid: user.value.id
     };
+    if (String(editRpe.value).trim() !== "") payload.rpe = Number(editRpe.value);
+    if (String(editHrv.value).trim() !== "") payload.hrv = Number(editHrv.value);
+    if (String(editRestingHr.value).trim() !== "") payload.resting_hr = Number(editRestingHr.value);
+    if (String(editRecoveryPct.value).trim() !== "") payload.recovery_pct = Number(editRecoveryPct.value);
+    if (editSwapDayIdx.value >= 0 && editSwapDayIdx.value !== editDayIdx.value) {
+      payload.swap_with_day_index = editSwapDayIdx.value;
+    }
+    if (isPreviewPlan.value) {
+      payload.preview_only = true;
+      payload.plan_payload = plan.value;
+      payload.schedule_data = plan.value?.schedule_data;
+    }
     const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
     if (res?.success && res?.plan) {
+      trackFunnelStep("coach_save_workout_rpe", "保存课表打卡与体感反馈");
       plan.value = res.plan;
       editModalOpen.value = false;
-      uni.showToast({ title: "课表已保存", icon: "success" });
+      uni.showToast({ title: "打卡与体感已保存", icon: "success" });
     }
   } catch (err) {
     console.error("Save workout error:", err);
     uni.showToast({ title: "保存失败", icon: "none" });
   } finally {
     savingWorkout.value = false;
+  }
+}
+
+async function handleSaveRunnerWeekSummary() {
+  if (!plan.value?.id || !user.value?.id || !activeMiniWeek.value) return;
+  savingWeekSummary.value = true;
+  try {
+    const res = await request(`/api/coach/plan/${plan.value.id}/week-summary`, "POST", {
+      operator_uid: user.value.id,
+      week_index: activeMiniWeek.value.week_index || selectedWeekIdx.value,
+      injury_note: weekInjuryNote.value,
+      athlete_weekly_summary: weekAthleteSummary.value,
+      travel_or_leave_note: weekTravelNote.value,
+    });
+    if (res?.plan) {
+      plan.value = res.plan;
+      uni.showToast({ title: "周小结与伤痛已提交", icon: "success" });
+    }
+  } catch (err) {
+    uni.showToast({ title: "提交周小结失败", icon: "none" });
+  } finally {
+    savingWeekSummary.value = false;
   }
 }
 
@@ -1159,7 +2059,18 @@ async function handleToggleComplete(wIdx: number, dIdx: number, day: any) {
     };
     const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
     if (res?.success && res?.plan) {
+      if (newCompleted) {
+        trackFunnelStep("coach_workout_checkin", "完成单日训练课表打卡");
+      }
       plan.value = res.plan;
+      if (newCompleted) {
+        uni.showToast({ title: "已打卡！可补充训练感受与照片", icon: "success" });
+        const updatedWeek = (res.plan?.schedule_data?.weeks || []).find((w: any) => w.week_index === wIdx);
+        const updatedDay = updatedWeek?.days?.[dIdx] || { ...day, completed: true };
+        openEditWorkoutModal(wIdx, dIdx, updatedDay);
+      } else {
+        uni.showToast({ title: "已取消打卡", icon: "none" });
+      }
     }
   } catch (err) {
     console.error("Toggle complete error:", err);
@@ -1421,11 +2332,14 @@ async function handleReAnalyze() {
   if (!user.value) {
     user.value = await checkAndAutoLogin();
   }
-  if (!user.value || !user.value.id) return;
+  if (!user.value || !user.value.id) {
+    uni.showToast({ title: "请先在【我的】页面登录", icon: "none" });
+    return;
+  }
   const uid = user.value.id;
 
   loading.value = true;
-  uni.showLoading({ title: "AI 深度推理中..." });
+  uni.showLoading({ title: "生理模型测算中..." });
 
   try {
     const res = await request("/api/coach/analysis", "POST", {
@@ -1438,17 +2352,19 @@ async function handleReAnalyze() {
     if (res && res.summary) {
       analysis.value = res;
       uni.showToast({ title: "诊断报告已更新", icon: "success" });
+    } else {
+      uni.showToast({ title: "暂未生成诊断，请稍后重试", icon: "none" });
     }
-  } catch (e) {
+  } catch (e: any) {
     uni.hideLoading();
-    uni.showToast({ title: "已加载最新分析", icon: "success" });
+    uni.showToast({ title: e?.message || "诊断生成失败，请检查网络后重试", icon: "none" });
   } finally {
     loading.value = false;
   }
 }
 
 function formatWorkout(w: any): string {
-  if (!w) return "热身 3km + 3 × 4000m @ 专项配速 (间歇 1000m 漂浮跑) + 2km 冷身";
+  if (!w) return "暂无个性化关键课建议（同步更多跑步记录后可生成）";
   if (typeof w === "string") return w;
   if (typeof w === "object") {
     return Object.entries(w).map(([k, v]) => `【${k}】${v}`).join("\n");
@@ -1457,7 +2373,7 @@ function formatWorkout(w: any): string {
 }
 
 function formatAdvice(w: any): string {
-  if (!w) return "大课后 30 分钟内补充高碳水与适量蛋白质，夜间保证 8 小时深度睡眠，监控晨起 HRV 恢复基准。";
+  if (!w) return "暂无个性化恢复建议（同步更多跑步记录后可生成）";
   if (typeof w === "string") return w;
   if (typeof w === "object") {
     return Object.entries(w).map(([k, v]) => `【${k}】${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
@@ -1470,6 +2386,7 @@ onMounted(() => {
 });
 
 onShow(() => {
+  applySystemTheme(currentTheme.value);
   syncTabBarIndex(1);
   loadLatestReport();
   loadUserPlan();
@@ -1486,22 +2403,87 @@ onPullDownRefresh(async () => {
   }
 });
 
+onLoad(() => {
+  initShareMenu();
+});
+
+onShareAppMessage(() => {
+  return getUnifiedShareAppMessage();
+});
+
+onShareTimeline(() => {
+  return getUnifiedShareTimeline();
+});
 </script>
 
 <style scoped>
+/* ── 微信审核合规：显著标注 AI 生成内容（符合《人工智能生成合成内容标识办法》规范） ── */
+.ai-prominent-notice-banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  background: var(--rgm-tint, rgba(255, 255, 255, 0.05));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
+  border-radius: 9999rpx;
+  padding: 12rpx 28rpx;
+  margin: 0 auto 28rpx;
+  width: fit-content;
+}
+
+.ai-notice-robot {
+  font-size: 26rpx;
+}
+
+.ai-notice-txt {
+  font-size: 24rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+  font-weight: 500;
+  letter-spacing: 0.5rpx;
+}
+
+.ai-content-indicator {
+  display: inline-flex;
+  align-items: center;
+  background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.12));
+  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  border-radius: 9999rpx;
+  padding: 6rpx 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.ai-indicator-text {
+  font-size: 22rpx;
+  color: var(--rgm-brand-text, #fc4c02);
+  font-weight: 600;
+}
+
+.ai-legal-disclaimer {
+  padding: 32rpx 24rpx 60rpx;
+  text-align: center;
+}
+
+.ai-legal-text {
+  font-size: 22rpx;
+  color: var(--rgm-text-3, #71717a);
+  line-height: 1.6;
+}
+
 .coach-page {
   min-height: 100vh;
-  background-color: #0b0b0d;
-  padding: 30rpx 30rpx calc(180rpx + constant(safe-area-inset-bottom)) 30rpx;
-  padding: 30rpx 30rpx calc(180rpx + env(safe-area-inset-bottom)) 30rpx;
+  background-color: var(--rgm-bg, #0B0B0E);
+  padding: 24rpx 28rpx calc(130rpx + constant(safe-area-inset-bottom)) 28rpx;
+  padding: 24rpx 28rpx calc(130rpx + env(safe-area-inset-bottom)) 28rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .coach-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30rpx;
+  margin-bottom: 20rpx;
 }
 
 .header-left {
@@ -1517,25 +2499,19 @@ onPullDownRefresh(async () => {
 
 .title-icon {
   font-size: 36rpx;
-  color: #bf5af2;
+  color: var(--rgm-brand-text, #bf5af2);
 }
 
 .page-title {
   font-size: 34rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
-.page-subtitle {
-  font-size: 22rpx;
-  color: #8e8e93;
-  margin-top: 6rpx;
-  display: block;
-}
 
 .re-analyze-btn {
-  background: linear-gradient(135deg, #af52de 0%, #8e44ad 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(135deg, #af52de 0%, #8e44ad 100%));
+  color: var(--rgm-text, #ffffff);
   font-size: 24rpx;
   font-weight: bold;
   padding: 0 24rpx;
@@ -1543,7 +2519,8 @@ onPullDownRefresh(async () => {
   line-height: 64rpx;
   border-radius: 32rpx;
   border: none;
-  box-shadow: 0 6rpx 16rpx rgba(175, 82, 222, 0.3);
+  box-shadow: 0 6rpx 16rpx var(--rgm-brand-glow, rgba(175, 82, 222, 0.3));
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .btn-text {
@@ -1558,11 +2535,13 @@ onPullDownRefresh(async () => {
 
 /* ── PROFILE & TSB CARD ── */
 .profile-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  border-radius: 28rpx;
-  padding: 28rpx;
-  margin-bottom: 24rpx;
+  background-color: var(--rgm-card, #151518);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.25));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .profile-top {
@@ -1575,13 +2554,13 @@ onPullDownRefresh(async () => {
 .profile-name {
   font-size: 32rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .profile-meta {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 4rpx;
   display: block;
 }
@@ -1600,51 +2579,52 @@ onPullDownRefresh(async () => {
 .tsb-fresh {
   background-color: rgba(48, 209, 88, 0.15);
   border-color: rgba(48, 209, 88, 0.3);
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
 }
 
 .tsb-neutral {
   background-color: rgba(100, 210, 255, 0.15);
   border-color: rgba(100, 210, 255, 0.3);
-  color: #64d2ff;
+  color: var(--rgm-blue, #64d2ff);
 }
 
 .tsb-optimal {
-  background-color: rgba(175, 82, 222, 0.15);
-  border-color: rgba(175, 82, 222, 0.3);
-  color: #d084f7;
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.15));
+  border-color: var(--rgm-brand-line, rgba(175, 82, 222, 0.3));
+  color: var(--rgm-brand-text, #d084f7);
 }
 
 .tsb-fatigued {
   background-color: rgba(255, 159, 10, 0.15);
   border-color: rgba(255, 159, 10, 0.3);
-  color: #ff9f0a;
+  color: var(--rgm-amber, #ff9f0a);
 }
 
 .tsb-danger {
   background-color: rgba(255, 69, 58, 0.15);
   border-color: rgba(255, 69, 58, 0.3);
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
 }
 
 .tsb-grid {
   display: flex;
   gap: 16rpx;
   padding-top: 16rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.05);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
 }
 
 .tsb-item {
   flex: 1;
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 18rpx;
   padding: 16rpx 12rpx;
   text-align: center;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .tsb-label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   display: block;
   margin-bottom: 4rpx;
 }
@@ -1655,10 +2635,10 @@ onPullDownRefresh(async () => {
   display: block;
 }
 
-.text-cyan { color: #64d2ff; }
-.text-amber { color: #ff9f0a; }
-.text-green { color: #30d158; }
-.text-purple { color: #bf5af2; }
+.text-cyan { color: var(--rgm-blue, #64d2ff); }
+.text-amber { color: var(--rgm-amber, #ff9f0a); }
+.text-green { color: var(--rgm-green, #30d158); }
+.text-purple { color: var(--rgm-brand-text, #bf5af2); }
 
 .risk-box {
   margin-top: 18rpx;
@@ -1677,18 +2657,20 @@ onPullDownRefresh(async () => {
 
 .risk-text {
   font-size: 22rpx;
-  color: #ffb4ab;
+  color: var(--rgm-red, #ffb4ab);
   line-height: 1.4;
   flex: 1;
 }
 
 /* ── RACE SETUP CARD ── */
 .race-setup-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  border-radius: 28rpx;
-  padding: 28rpx;
-  margin-bottom: 24rpx;
+  background-color: var(--rgm-card, #151518);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.25));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .presets-row {
@@ -1699,30 +2681,31 @@ onPullDownRefresh(async () => {
 }
 
 .preset-chip {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   padding: 8rpx 20rpx;
   border-radius: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .preset-chip.active {
-  background-color: rgba(175, 82, 222, 0.25);
-  border-color: #af52de;
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.25));
+  border-color: var(--rgm-brand, #af52de);
 }
 
 .chip-text {
   font-size: 22rpx;
-  color: #c7c7cc;
+  color: var(--rgm-text-2, #c7c7cc);
 }
 
 .preset-chip.active .chip-text {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
 }
 
 /* 🏆 Target Race Completed Switch Banner */
 .plan-switch-banner {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(175, 82, 222, 0.12) 100%);
+  background: var(--rgm-brand-tint, linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(175, 82, 222, 0.12) 100%));
   border: 1rpx solid rgba(251, 191, 36, 0.35);
   border-radius: 20rpx;
   padding: 20rpx;
@@ -1741,7 +2724,7 @@ onPullDownRefresh(async () => {
 .banner-badge {
   font-size: 20rpx;
   font-weight: bold;
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
   background: rgba(251, 191, 36, 0.2);
   padding: 2rpx 12rpx;
   border-radius: 8rpx;
@@ -1749,19 +2732,19 @@ onPullDownRefresh(async () => {
 
 .banner-sub {
   font-size: 20rpx;
-  color: #c084fc;
+  color: var(--rgm-brand-text, #c084fc);
   font-weight: 600;
 }
 
 .banner-desc {
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   line-height: 1.5;
 }
 
 .banner-switch-btn {
-  background: #9333ea;
-  color: #ffffff;
+  background: var(--rgm-brand, #9333ea);
+  color: var(--rgm-text, #ffffff);
   font-size: 22rpx;
   font-weight: bold;
   height: 64rpx;
@@ -1769,10 +2752,12 @@ onPullDownRefresh(async () => {
   border-radius: 14rpx;
   border: none;
   margin-top: 6rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .banner-switch-btn:active {
-  background: #7e22ce;
+  background: var(--rgm-brand, #7e22ce);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* Registered User Races */
@@ -1780,12 +2765,12 @@ onPullDownRefresh(async () => {
   margin-top: 14rpx;
   margin-bottom: 18rpx;
   padding-top: 14rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
 }
 
 .registered-label {
   font-size: 20rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   display: block;
   margin-bottom: 10rpx;
 }
@@ -1800,10 +2785,11 @@ onPullDownRefresh(async () => {
   display: flex;
   align-items: center;
   gap: 8rpx;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   padding: 6rpx 16rpx;
   border-radius: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .reg-chip.is-done {
@@ -1817,8 +2803,8 @@ onPullDownRefresh(async () => {
 }
 
 .reg-chip.active {
-  background-color: rgba(175, 82, 222, 0.2);
-  border-color: #af52de;
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.2));
+  border-color: var(--rgm-brand, #af52de);
 }
 
 .reg-chip-tier {
@@ -1829,38 +2815,38 @@ onPullDownRefresh(async () => {
 }
 
 .reg-chip-tier.tier-done {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: #71717a;
+  background-color: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-text-3, #71717a);
 }
 
 .reg-chip-tier.tier-a {
   background-color: rgba(251, 191, 36, 0.25);
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
 }
 
 .reg-chip-tier.tier-b {
   background-color: rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
 }
 
 .reg-chip-tier.tier-c {
   background-color: rgba(161, 161, 170, 0.25);
-  color: #d4d4d8;
+  color: var(--rgm-text-2, #d4d4d8);
 }
 
 .reg-chip-name {
   font-size: 22rpx;
-  color: #f3f4f6;
+  color: var(--rgm-text, #f3f4f6);
 }
 
 .reg-chip.active .reg-chip-name {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
 }
 
 .reg-chip-days {
   font-size: 18rpx;
-  color: #c084fc;
+  color: var(--rgm-brand-text, #c084fc);
 }
 
 .inputs-row {
@@ -1879,17 +2865,18 @@ onPullDownRefresh(async () => {
 
 .input-label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .setup-input {
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 16rpx;
   height: 64rpx;
   padding: 0 16rpx;
   font-size: 24rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-type-pills-row {
@@ -1907,27 +2894,28 @@ onPullDownRefresh(async () => {
 
 .type-pill {
   flex: 1;
-  background-color: #1a1a1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1a1a1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 14rpx;
   padding: 10rpx 0;
   text-align: center;
   transition: all 0.2s ease;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .type-pill.active {
-  background-color: rgba(175, 82, 222, 0.25);
-  border-color: #af52de;
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.25));
+  border-color: var(--rgm-brand, #af52de);
 }
 
 .type-pill .pill-text {
   font-size: 20rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   font-weight: 500;
 }
 
 .type-pill.active .pill-text {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
 }
 
@@ -1939,9 +2927,10 @@ onPullDownRefresh(async () => {
 }
 
 .zone-item {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 18rpx;
   padding: 18rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .zone-header {
@@ -1954,35 +2943,31 @@ onPullDownRefresh(async () => {
 .zone-name {
   font-size: 24rpx;
   font-weight: bold;
-  color: #e5e5ea;
+  color: var(--rgm-text, #e5e5ea);
 }
 
 .zone-range {
   font-size: 24rpx;
   font-weight: 900;
-  color: #d084f7;
+  color: var(--rgm-brand-text, #d084f7);
 }
 
-.zone-desc {
-  font-size: 20rpx;
-  color: #8e8e93;
-  line-height: 1.4;
-}
 
 .hero-card {
-  background: linear-gradient(135deg, rgba(175, 82, 222, 0.2) 0%, #151518 100%);
-  border: 1rpx solid rgba(175, 82, 222, 0.3);
+  background: var(--rgm-card, linear-gradient(135deg, rgba(175, 82, 222, 0.2) 0%, #151518 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.3));
   border-radius: 28rpx;
   padding: 32rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10rpx 30rpx var(--rgm-shadow, rgba(0, 0, 0, 0.5));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .phase-badge {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  background-color: rgba(175, 82, 222, 0.2);
-  border: 1rpx solid rgba(175, 82, 222, 0.3);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.2));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.3));
   padding: 6rpx 18rpx;
   border-radius: 20rpx;
   margin-bottom: 20rpx;
@@ -1995,13 +2980,13 @@ onPullDownRefresh(async () => {
 .phase-text {
   font-size: 22rpx;
   font-weight: bold;
-  color: #d084f7;
+  color: var(--rgm-brand-text, #d084f7);
 }
 
 .summary-title {
   font-size: 32rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   line-height: 1.4;
   margin-bottom: 16rpx;
   display: block;
@@ -2009,16 +2994,17 @@ onPullDownRefresh(async () => {
 
 .fitness-detail {
   font-size: 24rpx;
-  color: #c7c7cc;
+  color: var(--rgm-text-2, #c7c7cc);
   line-height: 1.6;
   display: block;
 }
 
 .section-card {
-  background-color: #151518;
-  border: 1rpx solid rgba(255, 255, 255, 0.06);
+  background-color: var(--rgm-card, #151518);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   border-radius: 28rpx;
   padding: 28rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .card-title-row {
@@ -2035,19 +3021,19 @@ onPullDownRefresh(async () => {
 .card-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .workout-box {
-  background-color: rgba(175, 82, 222, 0.1);
-  border: 1rpx solid rgba(175, 82, 222, 0.2);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.1));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.2));
   border-radius: 20rpx;
   padding: 22rpx;
 }
 
 .workout-text {
   font-size: 26rpx;
-  color: #e5c9f9;
+  color: var(--rgm-text-2, #e5c9f9);
   line-height: 1.5;
 }
 
@@ -2060,13 +3046,13 @@ onPullDownRefresh(async () => {
 
 .recovery-text {
   font-size: 26rpx;
-  color: #bdf2cc;
+  color: var(--rgm-text, #bdf2cc);
   line-height: 1.5;
 }
 
 .tip-footnote {
   font-size: 20rpx;
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
   margin-top: 14rpx;
   display: block;
 }
@@ -2078,53 +3064,47 @@ onPullDownRefresh(async () => {
 }
 
 .sugg-item {
-  background-color: #1a1a1e;
+  background-color: var(--rgm-card-2, #1a1a1e);
   border-radius: 18rpx;
   padding: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .sugg-badge {
   font-size: 20rpx;
   font-weight: bold;
-  color: #bf5af2;
+  color: var(--rgm-brand-text, #bf5af2);
   margin-bottom: 8rpx;
   display: block;
 }
 
 .sugg-text {
   font-size: 24rpx;
-  color: #e5e5ea;
+  color: var(--rgm-text, #e5e5ea);
   line-height: 1.5;
 }
 
 .multi-race-card {
-  border-left: 6rpx solid #bf5af2;
-  border-color: rgba(255, 255, 255, 0.08);
+  border-left: 6rpx solid var(--rgm-brand, #bf5af2);
+  border-color: var(--rgm-line, rgba(255, 255, 255, 0.08));
 }
 
 .multi-race-header {
   display: flex;
   flex-direction: column;
   gap: 14rpx;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   padding-bottom: 20rpx;
   margin-bottom: 22rpx;
 }
 
-.multi-race-subtitle {
-  font-size: 20rpx;
-  color: #a1a1aa;
-  line-height: 1.4;
-  margin-top: 4rpx;
-  display: block;
-}
 
 .total-races-badge {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  background-color: rgba(175, 82, 222, 0.12);
-  border: 1rpx solid rgba(175, 82, 222, 0.25);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.12));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.25));
   padding: 6rpx 16rpx;
   border-radius: 16rpx;
   align-self: flex-start;
@@ -2136,16 +3116,17 @@ onPullDownRefresh(async () => {
 
 .total-races-text {
   font-size: 20rpx;
-  color: #d8b4fe;
+  color: var(--rgm-brand-text, #d8b4fe);
   font-weight: 600;
 }
 
 .macrocycle-box {
-  background: linear-gradient(135deg, rgba(88, 28, 135, 0.3) 0%, rgba(24, 24, 28, 0.95) 50%, rgba(49, 46, 129, 0.25) 100%);
-  border: 1rpx solid rgba(191, 90, 242, 0.25);
+  background: var(--rgm-card, linear-gradient(135deg, rgba(88, 28, 135, 0.3) 0%, rgba(24, 24, 28, 0.95) 50%, rgba(49, 46, 129, 0.25) 100%));
+  border: 1rpx solid var(--rgm-brand-line, rgba(191, 90, 242, 0.25));
   border-radius: 20rpx;
   padding: 22rpx;
   margin-bottom: 26rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .macrocycle-header {
@@ -2162,12 +3143,12 @@ onPullDownRefresh(async () => {
 .macrocycle-label {
   font-size: 22rpx;
   font-weight: bold;
-  color: #d8b4fe;
+  color: var(--rgm-brand-text, #d8b4fe);
 }
 
 .macrocycle-text {
   font-size: 24rpx;
-  color: #f3f4f6;
+  color: var(--rgm-text, #f3f4f6);
   line-height: 1.6;
   display: block;
 }
@@ -2179,7 +3160,7 @@ onPullDownRefresh(async () => {
 .timeline-section-title {
   font-size: 22rpx;
   font-weight: bold;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   letter-spacing: 1rpx;
   text-transform: uppercase;
   margin-bottom: 16rpx;
@@ -2193,31 +3174,35 @@ onPullDownRefresh(async () => {
 }
 
 .race-item {
-  background-color: #18181c;
+  background-color: var(--rgm-card, #18181c);
   border-radius: 24rpx;
   padding: 22rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   transition: all 0.3s ease;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-item.tier-a {
   border-color: rgba(244, 63, 94, 0.45);
-  background-color: rgba(32, 18, 24, 0.95);
+  background-color: var(--rgm-card, rgba(32, 18, 24, 0.95));
   box-shadow: 0 6rpx 24rpx rgba(244, 63, 94, 0.1);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-item.tier-b {
   border-color: rgba(56, 189, 248, 0.35);
-  background-color: rgba(18, 26, 32, 0.95);
+  background-color: var(--rgm-card, rgba(18, 26, 32, 0.95));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-item.tier-c {
-  border-color: rgba(255, 255, 255, 0.08);
-  background-color: #18181c;
+  border-color: var(--rgm-line, rgba(255, 255, 255, 0.08));
+  background-color: var(--rgm-card, #18181c);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .race-item-header {
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.06));
   padding-bottom: 16rpx;
   margin-bottom: 16rpx;
   display: flex;
@@ -2250,19 +3235,19 @@ onPullDownRefresh(async () => {
 
 .badge-a {
   background-color: rgba(244, 63, 94, 0.2);
-  color: #fda4af;
+  color: var(--rgm-red, #fda4af);
   border-color: rgba(244, 63, 94, 0.45);
 }
 
 .badge-b {
   background-color: rgba(56, 189, 248, 0.2);
-  color: #7dd3fc;
+  color: var(--rgm-blue, #7dd3fc);
   border-color: rgba(56, 189, 248, 0.4);
 }
 
 .badge-c {
   background-color: rgba(161, 161, 170, 0.2);
-  color: #d4d4d8;
+  color: var(--rgm-text-2, #d4d4d8);
   border-color: rgba(161, 161, 170, 0.4);
 }
 
@@ -2273,17 +3258,17 @@ onPullDownRefresh(async () => {
 .race-item-name {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .race-days-countdown {
   font-size: 22rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
   font-weight: 500;
 }
 
 .days-num {
-  color: #d8b4fe;
+  color: var(--rgm-brand-text, #d8b4fe);
   font-weight: 900;
 }
 
@@ -2293,10 +3278,11 @@ onPullDownRefresh(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  background-color: #121215;
+  background-color: var(--rgm-card, #121215);
   padding: 10rpx 14rpx;
   border-radius: 16rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .priority-left-group {
@@ -2308,7 +3294,7 @@ onPullDownRefresh(async () => {
 
 .switch-tip-lbl {
   font-size: 20rpx;
-  color: #71717a;
+  color: var(--rgm-text-3, #71717a);
   font-weight: bold;
 }
 
@@ -2324,9 +3310,9 @@ onPullDownRefresh(async () => {
   line-height: 44rpx;
   font-size: 20rpx;
   font-weight: bold;
-  color: #a1a1aa;
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  color: var(--rgm-text-2, #a1a1aa);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.05));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 10rpx;
 }
 
@@ -2336,21 +3322,23 @@ onPullDownRefresh(async () => {
 
 .p-btn-a.active {
   background-color: #f43f5e;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   border-color: #fb7185;
   box-shadow: 0 2rpx 10rpx rgba(244, 63, 94, 0.4);
+  --rgm-text: var(--rgm-on-bright); --rgm-text-2: var(--rgm-on-bright-2); --rgm-text-3: var(--rgm-on-bright-2);
 }
 
 .p-btn-b.active {
-  background-color: #0284c7;
-  color: #ffffff;
-  border-color: #38bdf8;
+  background-color: var(--rgm-brand, #0284c7);
+  color: var(--rgm-text, #ffffff);
+  border-color: var(--rgm-brand, #38bdf8);
   box-shadow: 0 2rpx 10rpx rgba(56, 189, 248, 0.4);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .p-btn-c.active {
   background-color: #52525b;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   border-color: #71717a;
   box-shadow: 0 2rpx 10rpx rgba(113, 113, 122, 0.4);
 }
@@ -2362,10 +3350,11 @@ onPullDownRefresh(async () => {
   line-height: 44rpx;
   font-size: 20rpx;
   font-weight: bold;
-  color: #a1a1aa;
-  background-color: #18181c;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  color: var(--rgm-text-2, #a1a1aa);
+  background-color: var(--rgm-card, #18181c);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 12rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .set-target-btn::after {
@@ -2373,9 +3362,9 @@ onPullDownRefresh(async () => {
 }
 
 .set-target-btn.is-active-target {
-  background-color: rgba(147, 51, 234, 0.25);
-  color: #e9d5ff;
-  border-color: #a855f7;
+  background-color: var(--rgm-brand-tint, rgba(147, 51, 234, 0.25));
+  color: var(--rgm-text, #e9d5ff);
+  border-color: var(--rgm-brand, #a855f7);
 }
 
 .race-execution-boxes {
@@ -2385,10 +3374,11 @@ onPullDownRefresh(async () => {
 }
 
 .exec-box {
-  background-color: #121215;
+  background-color: var(--rgm-card, #121215);
   padding: 16rpx 18rpx;
   border-radius: 16rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.05);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .exec-box-title {
@@ -2405,12 +3395,12 @@ onPullDownRefresh(async () => {
 .exec-label {
   font-size: 22rpx;
   font-weight: bold;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 
 .exec-desc {
   font-size: 22rpx;
-  color: #e4e4e7;
+  color: var(--rgm-text, #e4e4e7);
   line-height: 1.5;
   font-weight: 300;
   display: block;
@@ -2437,22 +3427,23 @@ onPullDownRefresh(async () => {
 .conflict-title {
   font-size: 22rpx;
   font-weight: bold;
-  color: #fbbf24;
+  color: var(--rgm-amber, #fbbf24);
 }
 
 .conflict-desc {
   font-size: 22rpx;
-  color: #fef3c7;
+  color: var(--rgm-text, #fef3c7);
   line-height: 1.5;
   font-weight: 300;
   display: block;
 }
 
 .empty-card {
-  background-color: #151518;
+  background-color: var(--rgm-card, #151518);
   border-radius: 28rpx;
   padding: 60rpx 40rpx;
   text-align: center;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .empty-icon {
@@ -2464,37 +3455,39 @@ onPullDownRefresh(async () => {
 .empty-title {
   font-size: 32rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   margin-bottom: 12rpx;
   display: block;
 }
 
 .empty-desc {
   font-size: 24rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   line-height: 1.5;
   margin-bottom: 30rpx;
   display: block;
 }
 
 .primary-btn {
-  background-color: #af52de;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #af52de);
+  color: var(--rgm-text, #ffffff);
   font-size: 28rpx;
   font-weight: bold;
   border-radius: 24rpx;
   height: 80rpx;
   line-height: 80rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* ── TAB BAR ── */
 .coach-tab-bar {
   display: flex;
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 8rpx;
   margin-bottom: 24rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .coach-tab-item {
@@ -2509,7 +3502,8 @@ onPullDownRefresh(async () => {
 }
 
 .coach-tab-item.active {
-  background-color: #af52de;
+  background-color: var(--rgm-brand, #af52de);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .coach-tab-item .tab-icon {
@@ -2519,11 +3513,11 @@ onPullDownRefresh(async () => {
 .coach-tab-item .tab-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .coach-tab-item.active .tab-title {
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 /* ── PLAN TOP BAR ── */
@@ -2542,45 +3536,101 @@ onPullDownRefresh(async () => {
 .plan-main-title {
   font-size: 30rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
+}
+
+.plan-status-pills-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 6rpx;
 }
 
 .plan-status-pill {
   font-size: 20rpx;
   font-weight: bold;
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
   background-color: rgba(48, 209, 88, 0.15);
   border: 1rpx solid rgba(48, 209, 88, 0.3);
   border-radius: 12rpx;
   padding: 2rpx 10rpx;
-  margin-top: 6rpx;
   display: inline-block;
 }
 
+.plan-coach-verified-pill {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: var(--rgm-amber, #fbbf24);
+  background-color: rgba(251, 191, 36, 0.15);
+  border: 1rpx solid rgba(251, 191, 36, 0.4);
+  border-radius: 12rpx;
+  padding: 2rpx 12rpx;
+  display: inline-block;
+}
+
+.coach-review-note-box {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(252, 76, 2, 0.08) 100%);
+  border: 1rpx solid rgba(251, 191, 36, 0.35);
+  border-radius: 20rpx;
+  padding: 18rpx 20rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+}
+
+.crn-icon {
+  font-size: 32rpx;
+  flex-shrink: 0;
+}
+
+.crn-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.crn-title {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: var(--rgm-amber, #fbbf24);
+}
+
+.crn-text {
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #e4e4e7);
+  line-height: 1.5;
+}
+
 .plan-config-toggle-btn {
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 18rpx;
   padding: 0 20rpx;
   height: 60rpx;
   line-height: 60rpx;
   font-size: 22rpx;
-  color: #d1d1d6;
+  color: var(--rgm-text-2, #d1d1d6);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 /* ── PLAN SETUP CARD ── */
 .plan-setup-card {
-  background-color: #121215;
-  border: 1rpx solid rgba(175, 82, 222, 0.3);
-  border-radius: 28rpx;
-  padding: 24rpx;
-  margin-bottom: 30rpx;
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.3));
+  border-radius: 24rpx;
+  padding: 28rpx 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 4rpx 16rpx var(--rgm-shadow, rgba(0, 0, 0, 0.25));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .setup-hint {
   font-size: 22rpx;
-  color: #af52de;
+  color: var(--rgm-brand-text, #af52de);
   margin-bottom: 20rpx;
   display: block;
 }
@@ -2593,31 +3643,26 @@ onPullDownRefresh(async () => {
 
 .goal-type-btn {
   flex: 1;
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   padding: 18rpx 14rpx;
   text-align: center;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .goal-type-btn.active {
-  border-color: #af52de;
-  background-color: rgba(175, 82, 222, 0.15);
+  border-color: var(--rgm-brand, #af52de);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.15));
 }
 
 .goal-btn-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
-.goal-btn-sub {
-  font-size: 20rpx;
-  color: #8e8e93;
-  margin-top: 4rpx;
-  display: block;
-}
 
 .maint-chips-grid {
   display: flex;
@@ -2628,10 +3673,11 @@ onPullDownRefresh(async () => {
 }
 
 .maint-chip {
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 16rpx;
   padding: 16rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .maint-chip.active {
@@ -2642,13 +3688,13 @@ onPullDownRefresh(async () => {
 .maint-name {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .maint-desc {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 4rpx;
   display: block;
 }
@@ -2661,41 +3707,73 @@ onPullDownRefresh(async () => {
 
 .picker-col {
   flex: 1;
+  min-width: 0;
 }
 
-.options-pills {
+.wheel-stepper-box {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.12));
+  border-radius: 16rpx;
+  height: 76rpx;
   margin-top: 8rpx;
+  overflow: hidden;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
-.opt-pill {
-  padding: 8rpx 18rpx;
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  border-radius: 14rpx;
+.ws-step-btn {
+  width: 68rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text, #af52de);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.04));
+  flex-shrink: 0;
 }
 
-.opt-pill.active {
-  background-color: #af52de;
-  border-color: #af52de;
+.ws-step-btn:active {
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.2));
 }
 
-.opt-pill .pill-text {
-  font-size: 22rpx;
-  color: #ffffff;
+.ws-picker-mid {
+  flex: 1;
+  height: 76rpx;
+}
+
+.ws-picker-val-wrap {
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+}
+
+.ws-picker-val {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: var(--rgm-text, #ffffff);
+  white-space: nowrap;
+}
+
+.ws-picker-caret {
+  font-size: 20rpx;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 /* ── SNAPSHOT CARD ── */
 .snapshot-card {
   display: flex;
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 24rpx;
   padding: 20rpx;
   margin-bottom: 20rpx;
   justify-content: space-between;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .snap-item {
@@ -2705,27 +3783,27 @@ onPullDownRefresh(async () => {
 
 .snap-label {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   display: block;
 }
 
 .snap-val {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   margin: 4rpx 0;
   display: block;
 }
 
 .snap-sub {
   font-size: 18rpx;
-  color: #636366;
+  color: var(--rgm-text-3, #636366);
   display: block;
 }
 
 .overview-box {
-  background-color: rgba(175, 82, 222, 0.08);
-  border: 1rpx solid rgba(175, 82, 222, 0.2);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.08));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.2));
   border-radius: 20rpx;
   padding: 16rpx 20rpx;
   margin-bottom: 20rpx;
@@ -2739,7 +3817,7 @@ onPullDownRefresh(async () => {
 
 .overview-text {
   font-size: 22rpx;
-  color: #d1d1d6;
+  color: var(--rgm-text-2, #d1d1d6);
   line-height: 1.5;
   flex: 1;
 }
@@ -2759,21 +3837,23 @@ onPullDownRefresh(async () => {
   display: inline-flex;
   flex-direction: column;
   padding: 16rpx 22rpx;
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 20rpx;
   min-width: 160rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .week-chip.active {
-  background-color: #af52de;
-  border-color: #af52de;
+  background-color: var(--rgm-brand, #af52de);
+  border-color: var(--rgm-brand, #af52de);
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .week-chip.is-current-week:not(.active) {
-  border-color: rgba(175, 82, 222, 0.5);
-  background-color: rgba(175, 82, 222, 0.08);
+  border-color: var(--rgm-brand-line, rgba(175, 82, 222, 0.5));
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.08));
 }
 
 .chip-title-row {
@@ -2784,9 +3864,9 @@ onPullDownRefresh(async () => {
 
 .current-week-tag {
   font-size: 18rpx;
-  color: #af52de;
-  background: rgba(175, 82, 222, 0.16);
-  border: 1rpx solid rgba(175, 82, 222, 0.35);
+  color: var(--rgm-brand-text, #af52de);
+  background: var(--rgm-brand-tint, rgba(175, 82, 222, 0.16));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.35));
   padding: 2rpx 8rpx;
   border-radius: 6rpx;
   font-weight: 700;
@@ -2794,25 +3874,25 @@ onPullDownRefresh(async () => {
 }
 
 .week-chip.active .current-week-tag {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.25);
+  color: var(--rgm-text, #ffffff);
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.25));
   border-color: rgba(255, 255, 255, 0.4);
 }
 
 .week-chip-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .week-chip-sub {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-top: 4rpx;
 }
 
 .week-chip.active .week-chip-sub {
-  color: #e5c5f8;
+  color: var(--rgm-text-2, #e5c5f8);
 }
 
 /* ── ACTIVE WEEK HEADER ── */
@@ -2820,11 +3900,12 @@ onPullDownRefresh(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 24rpx;
   padding: 20rpx;
   margin-bottom: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .active-week-left {
@@ -2840,24 +3921,32 @@ onPullDownRefresh(async () => {
 .active-week-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .phase-tag {
   font-size: 20rpx;
   font-weight: bold;
-  color: #af52de;
-  background-color: rgba(175, 82, 222, 0.15);
-  border: 1rpx solid rgba(175, 82, 222, 0.3);
+  color: var(--rgm-brand-text, #af52de);
+  background-color: var(--rgm-brand-tint, rgba(175, 82, 222, 0.15));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.3));
   border-radius: 10rpx;
   padding: 2rpx 8rpx;
 }
 
 .focus-text {
   font-size: 22rpx;
-  color: #aeaeb2;
+  color: var(--rgm-text-2, #aeaeb2);
   margin-top: 6rpx;
   display: block;
+}
+
+.week-summary-banner-line {
+  font-size: 21rpx;
+  color: var(--rgm-green, #34d399);
+  margin-top: 6rpx;
+  display: block;
+  font-weight: 700;
 }
 
 .active-week-right {
@@ -2867,13 +3956,13 @@ onPullDownRefresh(async () => {
 .mileage-val {
   font-size: 32rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .mileage-label {
   font-size: 18rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   display: block;
 }
 
@@ -2885,10 +3974,11 @@ onPullDownRefresh(async () => {
 }
 
 .daily-card {
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 24rpx;
   padding: 20rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .daily-card.is-completed {
@@ -2898,13 +3988,64 @@ onPullDownRefresh(async () => {
 
 .daily-card.is-missed {
   border-color: rgba(255, 69, 58, 0.45);
-  background: linear-gradient(180deg, rgba(255, 69, 58, 0.1) 0%, rgba(20, 16, 18, 0.95) 100%);
+  background: var(--rgm-card, linear-gradient(180deg, rgba(255, 69, 58, 0.1) 0%, rgba(20, 16, 18, 0.95) 100%));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .badge-group {
   display: flex;
   align-items: center;
   gap: 8rpx;
+  flex-wrap: wrap;
+}
+
+.swap-pill {
+  font-size: 18rpx;
+  padding: 2rpx 8rpx;
+  border-radius: 8rpx;
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--rgm-blue, #93c5fd);
+  border: 1rpx solid rgba(59, 130, 246, 0.32);
+  margin-left: 6rpx;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rpe-pill {
+  font-size: 19rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--rgm-amber, #fcd34d);
+  border: 1rpx solid rgba(245, 158, 11, 0.35);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.rec-pill {
+  font-size: 19rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.rec-pill.rec-good {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--rgm-green, #6ee7b7);
+  border: 1rpx solid rgba(16, 185, 129, 0.35);
+}
+
+.rec-pill.rec-mid {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--rgm-amber, #fcd34d);
+  border: 1rpx solid rgba(245, 158, 11, 0.38);
+}
+
+.rec-pill.rec-low {
+  background: rgba(244, 63, 94, 0.16);
+  color: var(--rgm-red, #fda4af);
+  border: 1rpx solid rgba(244, 63, 94, 0.35);
 }
 
 .missed-badge {
@@ -2913,7 +4054,7 @@ onPullDownRefresh(async () => {
   padding: 4rpx 10rpx;
   border-radius: 10rpx;
   background: rgba(255, 69, 58, 0.2);
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
   border: 1rpx solid rgba(255, 69, 58, 0.4);
 }
 
@@ -2923,7 +4064,7 @@ onPullDownRefresh(async () => {
   padding: 4rpx 10rpx;
   border-radius: 10rpx;
   background: rgba(48, 209, 88, 0.15);
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
   border: 1rpx solid rgba(48, 209, 88, 0.3);
 }
 
@@ -2943,12 +4084,12 @@ onPullDownRefresh(async () => {
 .day-name {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .day-date {
   font-size: 20rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .type-badge {
@@ -2958,21 +4099,22 @@ onPullDownRefresh(async () => {
   border-radius: 12rpx;
 }
 
-.badge-easy { background: rgba(48, 209, 88, 0.15); color: #30d158; }
-.badge-tempo { background: rgba(10, 132, 255, 0.15); color: #0a84ff; }
-.badge-interval { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
-.badge-long { background: rgba(175, 82, 222, 0.15); color: #af52de; }
-.badge-trail { background: rgba(94, 92, 230, 0.15); color: #5e5ce6; }
-.badge-cross { background: rgba(255, 55, 95, 0.15); color: #ff375f; }
-.badge-race { background: rgba(255, 45, 85, 0.25); color: #ff375f; border: 1rpx solid rgba(255, 45, 85, 0.4); font-weight: bold; }
-.badge-rest { background: rgba(142, 142, 147, 0.15); color: #8e8e93; }
+.badge-easy { background: rgba(48, 209, 88, 0.15); color: var(--rgm-green, #30d158); }
+.badge-tempo { background: rgba(10, 132, 255, 0.15); color: var(--rgm-blue, #0a84ff); }
+.badge-interval { background: rgba(255, 159, 10, 0.15); color: var(--rgm-amber, #ff9f0a); }
+.badge-long { background: var(--rgm-brand-tint, rgba(175, 82, 222, 0.15)); color: var(--rgm-brand-text, #af52de); }
+.badge-trail { background: rgba(94, 92, 230, 0.15); color: var(--rgm-blue, #5e5ce6); }
+.badge-cross { background: rgba(255, 55, 95, 0.15); color: var(--rgm-red, #ff375f); }
+.badge-race { background: rgba(255, 45, 85, 0.25); color: var(--rgm-red, #ff375f); border: 1rpx solid rgba(255, 45, 85, 0.4); font-weight: bold; }
+.badge-rest { background: rgba(142, 142, 147, 0.15); color: var(--rgm-text-3, #8e8e93); }
 
-.border-race { border-color: rgba(255, 45, 85, 0.45); background: linear-gradient(180deg, rgba(255, 45, 85, 0.12) 0%, rgba(26, 26, 30, 0.95) 100%); }
+.border-race { border-color: rgba(255, 45, 85, 0.45); background: var(--rgm-card, linear-gradient(180deg, rgba(255, 45, 85, 0.12) 0%, rgba(26, 26, 30, 0.95) 100%));
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3); }
 
 .workout-title {
   font-size: 26rpx;
   font-weight: bold;
-  color: #e5e5ea;
+  color: var(--rgm-text, #e5e5ea);
   margin-bottom: 8rpx;
   display: block;
 }
@@ -2987,12 +4129,12 @@ onPullDownRefresh(async () => {
 .dist-val {
   font-size: 36rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .dist-unit {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
 }
 
 .metrics-row {
@@ -3005,19 +4147,58 @@ onPullDownRefresh(async () => {
 .metric-pill {
   font-size: 20rpx;
   font-weight: 500;
-  color: #af52de;
-  background-color: #1c1c1e;
+  color: var(--rgm-brand-text, #af52de);
+  background-color: var(--rgm-card-2, #1c1c1e);
   padding: 4rpx 12rpx;
   border-radius: 10rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .metric-pill.hr-pill {
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
+}
+
+.metric-pill.bio-warn-pill {
+  background-color: rgba(244, 63, 94, 0.16);
+  color: var(--rgm-red, #fda4af);
+  border: 1rpx solid rgba(244, 63, 94, 0.35);
+  font-weight: 700;
+}
+
+.metric-pill.exec-pill {
+  background-color: rgba(16, 185, 129, 0.16);
+  color: var(--rgm-green, #6ee7b7);
+  border: 1rpx solid rgba(16, 185, 129, 0.38);
+  font-weight: 700;
+  max-width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.athlete-notes-box {
+  margin-top: 10rpx;
+  margin-bottom: 14rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 14rpx;
+  background-color: rgba(245, 158, 11, 0.12);
+  border: 1rpx solid rgba(245, 158, 11, 0.28);
+}
+
+.athlete-notes-title {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-amber, #fcd34d);
+}
+
+.athlete-notes-content {
+  font-size: 21rpx;
+  color: var(--rgm-text, #fef3c7);
 }
 
 .workout-desc {
   font-size: 22rpx;
-  color: #aeaeb2;
+  color: var(--rgm-text-2, #aeaeb2);
   line-height: 1.4;
   margin-bottom: 14rpx;
   display: block;
@@ -3034,14 +4215,14 @@ onPullDownRefresh(async () => {
 .coach-notes-title {
   font-size: 20rpx;
   font-weight: bold;
-  color: #ff9f0a;
+  color: var(--rgm-amber, #ff9f0a);
   display: block;
   margin-bottom: 4rpx;
 }
 
 .coach-notes-content {
   font-size: 20rpx;
-  color: #ffe0b2;
+  color: var(--rgm-amber, #ffe0b2);
   line-height: 1.3;
   display: block;
 }
@@ -3049,7 +4230,7 @@ onPullDownRefresh(async () => {
 .daily-card-actions {
   display: flex;
   gap: 12rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.05);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.05));
   padding-top: 14rpx;
 }
 
@@ -3058,23 +4239,24 @@ onPullDownRefresh(async () => {
   height: 56rpx;
   line-height: 56rpx;
   border-radius: 14rpx;
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .action-complete-btn.completed {
   background-color: rgba(48, 209, 88, 0.2);
   border-color: #30d158;
-  color: #30d158;
+  color: var(--rgm-green, #30d158);
   font-weight: bold;
 }
 
 .action-complete-btn.missed {
   background-color: rgba(255, 69, 58, 0.18);
   border-color: rgba(255, 69, 58, 0.5);
-  color: #ff453a;
+  color: var(--rgm-red, #ff453a);
   font-weight: bold;
 }
 
@@ -3083,10 +4265,11 @@ onPullDownRefresh(async () => {
   line-height: 56rpx;
   padding: 0 24rpx;
   border-radius: 14rpx;
-  background-color: #1c1c1e;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card-2, #1c1c1e);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   font-size: 22rpx;
-  color: #af52de;
+  color: var(--rgm-brand-text, #af52de);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 /* ── MODAL MASK & CARD ── */
@@ -3103,11 +4286,12 @@ onPullDownRefresh(async () => {
   z-index: 999;
   padding: 30rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-on-deep); --rgm-text-2: var(--rgm-on-deep-2); --rgm-text-3: var(--rgm-on-deep-2);
 }
 
 .modal-card {
-  background-color: #18181c;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card, #18181c);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 32rpx;
   width: 100%;
   max-height: 80vh;
@@ -3115,13 +4299,14 @@ onPullDownRefresh(async () => {
   flex-direction: column;
   padding: 30rpx;
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   padding-bottom: 16rpx;
   margin-bottom: 20rpx;
 }
@@ -3129,12 +4314,12 @@ onPullDownRefresh(async () => {
 .modal-title {
   font-size: 28rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .modal-close {
   font-size: 32rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   padding: 0 10rpx;
 }
 
@@ -3149,19 +4334,20 @@ onPullDownRefresh(async () => {
 
 .modal-label {
   font-size: 22rpx;
-  color: #8e8e93;
+  color: var(--rgm-text-3, #8e8e93);
   margin-bottom: 8rpx;
   display: block;
 }
 
 .modal-input {
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 16rpx;
   height: 64rpx;
   padding: 0 18rpx;
   font-size: 24rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .modal-row {
@@ -3170,15 +4356,16 @@ onPullDownRefresh(async () => {
 }
 
 .modal-textarea {
-  background-color: #121215;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: var(--rgm-card, #121215);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.1));
   border-radius: 16rpx;
   width: 100%;
   height: 120rpx;
   padding: 14rpx 18rpx;
   font-size: 22rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   box-sizing: border-box;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .coach-notes-group {
@@ -3189,41 +4376,43 @@ onPullDownRefresh(async () => {
 }
 
 .coach-textarea {
-  color: #ffe0b2;
+  color: var(--rgm-amber, #ffe0b2);
 }
 
 .modal-footer {
   display: flex;
   gap: 16rpx;
-  border-top: 1rpx solid rgba(255, 255, 255, 0.08);
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   padding-top: 20rpx;
 }
 
 .modal-cancel-btn {
   flex: 1;
-  background-color: #1c1c1e;
-  color: #8e8e93;
+  background-color: var(--rgm-card-2, #1c1c1e);
+  color: var(--rgm-text-3, #8e8e93);
   font-size: 26rpx;
   border-radius: 18rpx;
   height: 72rpx;
   line-height: 72rpx;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 
 .modal-save-btn {
   flex: 2;
-  background-color: #af52de;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #af52de);
+  color: var(--rgm-text, #ffffff);
   font-size: 26rpx;
   font-weight: bold;
   border-radius: 18rpx;
   height: 72rpx;
   line-height: 72rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 /* ── GOAL ALIGNMENT & SYNC STYLES ── */
 .goal-anchor-box {
-  background: rgba(175, 82, 222, 0.1);
-  border: 1rpx solid rgba(175, 82, 222, 0.25);
+  background: var(--rgm-brand-tint, rgba(175, 82, 222, 0.1));
+  border: 1rpx solid var(--rgm-brand-line, rgba(175, 82, 222, 0.25));
   border-radius: 20rpx;
   padding: 16rpx 20rpx;
   display: flex;
@@ -3236,7 +4425,7 @@ onPullDownRefresh(async () => {
 }
 .anchor-text {
   font-size: 22rpx;
-  color: #e9d5ff;
+  color: var(--rgm-text, #e9d5ff);
   line-height: 1.4;
 }
 
@@ -3264,25 +4453,25 @@ onPullDownRefresh(async () => {
 .align-good {
   background: rgba(16, 185, 129, 0.12);
   border-color: rgba(16, 185, 129, 0.3);
-  color: #6ee7b7;
+  color: var(--rgm-green, #6ee7b7);
 }
 
 .align-down {
   background: rgba(14, 165, 233, 0.12);
   border-color: rgba(14, 165, 233, 0.3);
-  color: #7dd3fc;
+  color: var(--rgm-blue, #7dd3fc);
 }
 
 .align-race {
   background: rgba(244, 63, 94, 0.12);
   border-color: rgba(244, 63, 94, 0.35);
-  color: #fda4af;
+  color: var(--rgm-red, #fda4af);
 }
 
 .align-climb {
   background: rgba(245, 158, 11, 0.12);
   border-color: rgba(245, 158, 11, 0.3);
-  color: #fcd34d;
+  color: var(--rgm-amber, #fcd34d);
 }
 
 .align-icon {
@@ -3299,8 +4488,8 @@ onPullDownRefresh(async () => {
 }
 
 .sync-goal-mini-btn {
-  background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(79, 70, 229, 0.3));
-  border: 1rpx solid rgba(168, 85, 247, 0.4);
+  background: var(--rgm-brand-tint, linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(79, 70, 229, 0.3)));
+  border: 1rpx solid var(--rgm-brand-line, rgba(168, 85, 247, 0.4));
   border-radius: 20rpx;
   height: 52rpx;
   line-height: 52rpx;
@@ -3314,6 +4503,7 @@ onPullDownRefresh(async () => {
 .sync-mini-btn-text {
   font-size: 20rpx;
   font-weight: bold;
-  color: #d8b4fe;
+  color: var(--rgm-brand-text, #d8b4fe);
 }
+
 </style>

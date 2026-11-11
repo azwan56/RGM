@@ -12,6 +12,7 @@ from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
 from utils.running_metrics import get_age_from_dob, estimate_vo2max
 from utils.encryption import decrypt_string, compute_age_group
+from utils.security import validate_uploaded_image_bytes
 
 logger = logging.getLogger("router_profile")
 router = APIRouter()
@@ -46,6 +47,10 @@ class ProfileUpdateRequest(BaseModel):
     clothing_size: Optional[str] = None
     shoe_size: Optional[str] = None
     health_declaration: Optional[Any] = None
+    hide_gps_route: Optional[bool] = None
+    hide_biometrics: Optional[bool] = None
+    first_aid_cert_type: Optional[str] = None
+    pacer_bio_tags: Optional[str] = None
 
 class EstimateVo2maxRequest(BaseModel):
     five_k_pb: Optional[Any] = None
@@ -58,10 +63,15 @@ class EstimateVo2maxRequest(BaseModel):
 
 class GoalUpdateRequest(BaseModel):
     target_distance: Optional[float] = None
-    monthly_targets: Optional[List[int]] = None
+    monthly_target: Optional[float] = None
+    monthly_targets: Optional[Any] = None
     weekly_target: Optional[float] = None
+    next_weekly_target: Optional[float] = None
     period_type: Optional[str] = "monthly"
     year: Optional[int] = None
+    target_period: Optional[str] = None
+    target_month: Optional[int] = None
+    enforce_started_lock: Optional[bool] = True
 
 class RacePlanRequest(BaseModel):
     id: Optional[str] = None
@@ -76,6 +86,8 @@ class RacePlanRequest(BaseModel):
     finish_notes: Optional[str] = None
     photo_url: Optional[str] = None
     photos: Optional[List[str]] = None
+    was_official_pacer: Optional[bool] = None
+    pacer_target_time: Optional[str] = None
 
 def parse_time_to_seconds(val: Any) -> Optional[int]:
     if val is None or val == "":
@@ -137,12 +149,30 @@ def get_user_profile(uid: str):
             "date_of_birth": None,
         }
 
+    has_saved_coros_pwd = bool(profile.get("coros_encrypted_password"))
     profile.pop("garmin_encrypted_password", None)
     profile.pop("coros_encrypted_password", None)
+    profile["coros_has_saved_password"] = has_saved_coros_pwd
+    if profile.get("coros_connected") and profile.get("coros_account"):
+        from utils.coros_adapter import CorosAdapter
+        c_state = CorosAdapter.get_cached_auth_state(
+            profile.get("coros_account") or "",
+            profile.get("coros_domain") or "teamcnapi.coros.com",
+        )
+        profile["coros_needs_reauth"] = bool(c_state.get("needs_reauth"))
+        profile["coros_auth_error"] = c_state.get("blocked_error") or ""
+    else:
+        profile["coros_needs_reauth"] = False
+        profile["coros_auth_error"] = ""
     profile["age"] = get_age_from_dob(profile.get("date_of_birth"))
     profile["age_group"] = compute_age_group(profile.get("date_of_birth"))
     dob_val = profile.get("date_of_birth") or ""
     profile["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
+    profile["is_coach_or_owner"] = LocalStore.is_user_coach_or_owner(uid)
+    profile["hide_gps_route"] = bool(profile.get("hide_gps_route"))
+    profile["hide_biometrics"] = bool(profile.get("hide_biometrics"))
+    profile["first_aid_cert_type"] = profile.get("first_aid_cert_type") or ""
+    profile["pacer_bio_tags"] = profile.get("pacer_bio_tags") or ""
     goal = LocalStore.get_goal(uid)
     races = LocalStore.get_race_plans(uid)
 
@@ -179,6 +209,20 @@ def purge_user_privacy_endpoint(uid: str):
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("message", "用户不存在"))
     return result
+
+
+@router.delete("/{uid}")
+@router.post("/{uid}/delete-account")
+def delete_user_account_endpoint(uid: str):
+    """
+    App Store Guideline 5.1.1(v) compliant account deletion.
+    Permanently wipes all user credentials, personal identity, and unbinds from clubs.
+    """
+    if not uid:
+        raise HTTPException(status_code=400, detail="缺少用户标识")
+    result = LocalStore.purge_user_privacy_data(uid)
+    return {"success": True, "message": "账号及全部个人数据已永久删除注销", "uid": uid}
+
 
 
 class AvatarBase64Request(BaseModel):
@@ -233,11 +277,9 @@ async def upload_user_avatar(uid: str, file: UploadFile = File(...)):
     Uploads a user avatar image, saves it to persistent static storage,
     updates the user profile in LocalStore, and returns the public URL.
     """
-    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     orig_name = file.filename or "avatar.jpg"
-    ext = os.path.splitext(orig_name)[1].lower()
-    if not ext or ext not in allowed_exts:
-        ext = ".jpg"
+    contents = await file.read()
+    ext = validate_uploaded_image_bytes(contents, orig_name)
 
     avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
     os.makedirs(avatars_dir, exist_ok=True)
@@ -247,7 +289,6 @@ async def upload_user_avatar(uid: str, file: UploadFile = File(...)):
     filepath = os.path.join(avatars_dir, filename)
 
     try:
-        contents = await file.read()
         with open(filepath, "wb") as f:
             f.write(contents)
     except Exception as e:
@@ -268,28 +309,50 @@ async def upload_user_avatar(uid: str, file: UploadFile = File(...)):
 @router.put("/{uid}/goals")
 @router.post("/{uid}/goals")
 def update_user_goal(uid: str, req: GoalUpdateRequest):
-    """Updates user monthly/yearly running distance target or weekly target independently."""
+    """Updates user monthly/yearly running distance target or weekly target independently.
+    Started weekly and monthly plans are locked and cannot be modified; only unstarted plans can be updated.
+    """
     import datetime
-    current_year = req.year or datetime.date.today().year
+    today = datetime.date.today()
+    current_year = req.year or today.year
+
+    if req.target_period == "current_week":
+        raise HTTPException(
+            status_code=400,
+            detail="本周计划已开始，不能更改！仅可申报或修改下周（未开始）的周计划。"
+        )
+    if req.target_month is not None:
+        if current_year < today.year or (current_year == today.year and int(req.target_month) <= today.month):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{req.target_month}月计划已开始，不能更改！仅可申报或修改未开始的月份计划。"
+            )
 
     existing_goal = LocalStore.get_goal(uid) or {}
 
-    if req.target_distance is not None:
-        target_dist = float(req.target_distance)
+    req_dist = req.target_distance if req.target_distance is not None else req.monthly_target
+    if req_dist is not None:
+        target_dist = float(req_dist)
     elif existing_goal.get("target_distance") is not None:
         target_dist = float(existing_goal.get("target_distance"))
     else:
         target_dist = 200.0
 
-    if req.weekly_target is not None:
-        weekly_tgt = float(req.weekly_target)
+    requested_weekly = req.next_weekly_target if req.next_weekly_target is not None else req.weekly_target
+    if requested_weekly is not None:
+        weekly_tgt = float(requested_weekly)
     elif existing_goal.get("weekly_target") is not None:
         weekly_tgt = float(existing_goal.get("weekly_target"))
     else:
         weekly_tgt = round(target_dist / 4.0, 1)
 
     if req.monthly_targets is not None:
-        monthly_arr = req.monthly_targets
+        if isinstance(req.monthly_targets, dict):
+            monthly_arr = [int(float(req.monthly_targets.get(str(m), req.monthly_targets.get(m, target_dist)))) for m in range(1, 13)]
+        elif isinstance(req.monthly_targets, list):
+            monthly_arr = [int(float(v)) for v in req.monthly_targets]
+        else:
+            monthly_arr = [int(target_dist)] * 12
     elif existing_goal.get("monthly_targets") is not None:
         monthly_arr = existing_goal.get("monthly_targets")
     else:
@@ -301,18 +364,32 @@ def update_user_goal(uid: str, req: GoalUpdateRequest):
         "period_type": req.period_type or existing_goal.get("period_type") or "monthly",
         "target_distance": target_dist,
         "weekly_target": weekly_tgt,
+        "next_weekly_target": weekly_tgt,
         "monthly_targets": monthly_arr,
     }
 
-    LocalStore.upsert_goal(uid, payload)
+    enforce_lock = True if req.enforce_started_lock is None else bool(req.enforce_started_lock)
+    LocalStore.upsert_goal(uid, payload, enforce_started_lock=enforce_lock)
+    saved_goal = LocalStore.get_goal(uid) or payload
 
     if supabase_admin:
         try:
-            supabase_admin.table("goals").upsert(payload).execute()
+            supabase_admin.table("goals").upsert({
+                "user_id": uid,
+                "year": current_year,
+                "period_type": saved_goal.get("period_type") or "monthly",
+                "target_distance": saved_goal.get("target_distance") or target_dist,
+                "weekly_target": saved_goal.get("weekly_target") or weekly_tgt,
+                "monthly_targets": saved_goal.get("monthly_targets") or monthly_arr,
+            }).execute()
         except Exception as e:
             logger.warning(f"[profile] Supabase update goal fallback: {e}")
 
-    return {"message": "跑量目标更新成功", "data": payload}
+    return {
+        "message": "未开始的周/月计划已更新（已开始的当前周及已开始月份已锁定保持不变）",
+        "data": saved_goal,
+        "goal": saved_goal,
+    }
 
 
 @router.post("/{uid}/import-garmin-pb")
@@ -333,15 +410,19 @@ def import_garmin_pb(uid: str):
         raise HTTPException(status_code=500, detail="解密 Garmin 密码失败")
 
     adapter = GarminAdapter(email=email, password=pwd, domain=domain)
-    prs = adapter.fetch_personal_records()
+    prs = adapter.fetch_personal_records() or {}
 
-    if not prs or not any(prs.values()):
-        # Fallback to realistic known records from synced Garmin data
-        prs = {
-            "marathon_pb": 11369, # 3:09:29
-            "half_pb": 5100,      # 1:25:00
-            "ten_k_pb": 2426,     # 40:26
-            "five_k_pb": 1140     # 19:00
+    if not any(prs.values()):
+        return {
+            "success": False,
+            "message": "未在您的 Garmin 账号中读取到官方最佳成绩纪录（PB），您可在下方手动填写或先同步历史跑步活动。",
+            "prs": {},
+            "formatted": {
+                "marathon_pb": secs_to_time_str(user.get("marathon_pb")),
+                "half_pb": secs_to_time_str(user.get("half_pb")),
+                "ten_k_pb": secs_to_time_str(user.get("ten_k_pb")),
+                "five_k_pb": secs_to_time_str(user.get("five_k_pb")),
+            },
         }
 
     # Filter non-null and upsert into profile
@@ -449,9 +530,30 @@ def estimate_user_vo2max(uid: str, req: Optional[EstimateVo2maxRequest] = None):
     """
     Estimates user VO2Max using Jack Daniels VDOT formula (from best race performances)
     and Heart Rate Ratio method (Uth-Sørensen formula).
-    Falls back to user stored profile if arguments not provided.
+    When the user already has watch-synced VO2Max data, returns the watch VO2Max directly without recalculating.
     """
     user = LocalStore.get_profile(uid) or {}
+    health = LocalStore.get_latest_health(uid) or {}
+    has_watch = bool(
+        user.get("garmin_connected")
+        or user.get("coros_connected")
+        or user.get("apple_health_connected")
+        or user.get("huawei_health_connected")
+        or health.get("vo2_max")
+    )
+    watch_vo2 = health.get("vo2_max") or user.get("vo2max")
+    if has_watch and watch_vo2 is not None and float(watch_vo2) > 0:
+        w_val = round(float(watch_vo2), 1)
+        if health.get("vo2_max") and user.get("vo2max") != w_val:
+            LocalStore.upsert_profile(uid, {"vo2max": w_val})
+        return {
+            "success": True,
+            "estimated_vo2max": w_val,
+            "primary_source": "运动手表同步数据",
+            "method": "手表实测 VO2Max 直读（不另作推算）",
+            "message": f"检测到已同步手表 VO2Max 数据 ({w_val})，直接使用手表数据，不另作推算。",
+            "candidates": [{"source": "运动手表实测", "method": "手表直读", "value": w_val}],
+        }
 
     pb_5k = parse_time_to_seconds(req.five_k_pb if req and req.five_k_pb is not None else user.get("five_k_pb"))
     pb_10k = parse_time_to_seconds(req.ten_k_pb if req and req.ten_k_pb is not None else user.get("ten_k_pb"))
@@ -541,25 +643,76 @@ def update_race_info(uid: str, race_id: str, req: RaceInfoUpdateRequest):
 class RaceLookupRequest(BaseModel):
     race_name: str
     race_type: Optional[str] = None
+    target_time: Optional[str] = None
+    race_date: Optional[str] = None
+    race_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 @router.post("/race-intel-lookup")
 def lookup_race_intelligence(req: RaceLookupRequest):
     """
-    Searches for race intelligence (elevation, difficulty, weather, race level, etc.)
-    using curated knowledge base and LLM AI inference.
+    Searches for official race intelligence (distance, elevation gain/loss, difficulty, weather, race level, etc.)
+    using the multi-group Official Race Catalog and live web search grounded LLM inference.
+    Also auto-persists to race_plans if a matching race record exists.
     """
     from utils.race_intel import fetch_race_intelligence
-    res = fetch_race_intelligence(req.race_name, req.race_type)
+    import sqlite3
+    from utils.local_store import DB_PATH
+
+    eff_uid = req.user_id
+    eff_target_time = req.target_time
+    eff_race_date = req.race_date
+    matched_rows = []
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            if req.user_id and req.race_id:
+                c.execute(
+                    "SELECT id, user_id, name, race_type, race_date, target_time FROM race_plans WHERE (user_id = ? AND id = ?) OR id = ?",
+                    (req.user_id, req.race_id, req.race_id),
+                )
+                matched_rows = [dict(r) for r in c.fetchall()]
+            if not matched_rows and req.race_name:
+                c.execute(
+                    "SELECT id, user_id, name, race_type, race_date, target_time FROM race_plans WHERE name = ? AND user_id NOT LIKE 'u_test_%' ORDER BY created_at DESC LIMIT 5",
+                    (req.race_name.strip(),),
+                )
+                matched_rows = [dict(r) for r in c.fetchall()]
+            if matched_rows:
+                first = matched_rows[0]
+                eff_uid = eff_uid or first.get("user_id")
+                eff_target_time = eff_target_time or first.get("target_time")
+                eff_race_date = eff_race_date or first.get("race_date")
+    except Exception as e:
+        logger.warning(f"[race-intel-lookup] Pre-query race_plans failed: {e}")
+
+    res = fetch_race_intelligence(
+        race_name=req.race_name,
+        race_type=req.race_type,
+        target_time=eff_target_time,
+        race_date=eff_race_date,
+        uid=eff_uid,
+    )
+
+    # Auto-persist to matched race_plans rows so the user doesn't even have to click Save separately
+    if res.get("success") and res.get("race_info") and matched_rows:
+        try:
+            for r in matched_rows:
+                LocalStore.update_race_info(r["user_id"], r["id"], res["race_info"])
+        except Exception as e:
+            logger.warning(f"[race-intel-lookup] Auto-save race_info failed: {e}")
+
     return res
 
 
 @router.post("/{uid}/races/lookup-info")
 def lookup_user_race_intelligence(uid: str, req: RaceLookupRequest):
     """User-scoped alias for race intelligence auto-search."""
-    from utils.race_intel import fetch_race_intelligence
-    res = fetch_race_intelligence(req.race_name, req.race_type)
-    return res
+    req.user_id = uid
+    return lookup_race_intelligence(req)
 
 
 # ── Race Completion & Photo Endpoints ──
@@ -569,6 +722,8 @@ class RaceCompleteRequest(BaseModel):
     finish_time: Optional[str] = None
     finish_notes: Optional[str] = None
     photo_url: Optional[str] = None
+    was_official_pacer: Optional[bool] = None
+    pacer_target_time: Optional[str] = None
 
 
 @router.post("/{uid}/races/{race_id}/complete")
@@ -576,7 +731,7 @@ class RaceCompleteRequest(BaseModel):
 def complete_user_race(uid: str, race_id: str, req: RaceCompleteRequest):
     """
     Marks a race as completed (or reverts to upcoming), recording actual finish time,
-    personal notes/reflection, and optional finisher photo URL.
+    personal notes/reflection, official pacer badge, and optional finisher photo URL.
     """
     success = LocalStore.update_race_completion(
         uid=uid,
@@ -585,6 +740,8 @@ def complete_user_race(uid: str, race_id: str, req: RaceCompleteRequest):
         finish_time=req.finish_time,
         finish_notes=req.finish_notes,
         photo_url=req.photo_url,
+        was_official_pacer=req.was_official_pacer,
+        pacer_target_time=req.pacer_target_time,
     )
     if not success:
         raise HTTPException(status_code=404, detail="未找到对应的比赛记录")
@@ -633,11 +790,20 @@ async def upload_race_photo_base64(uid: str, race_id: str, req: RacePhotoBase64R
     Works seamlessly with WeChat request合法域名 without needing uploadFile domain.
     """
     import base64
-    ext = (req.ext or ".jpg").lower()
-    if not ext.startswith("."):
-        ext = f".{ext}"
-    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-        ext = ".jpg"
+    raw_ext = (req.ext or ".jpg").lower()
+    if not raw_ext.startswith("."):
+        raw_ext = f".{raw_ext}"
+
+    try:
+        raw_b64 = req.image_base64
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+        img_bytes = base64.b64decode(raw_b64)
+    except Exception as e:
+        logger.error(f"[profile] Failed to decode base64 race photo for {uid}/{race_id}: {e}")
+        raise HTTPException(status_code=400, detail="照片 Base64 编码格式无效")
+
+    ext = validate_uploaded_image_bytes(img_bytes, f"race{raw_ext}")
 
     photos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "race_photos")
     os.makedirs(photos_dir, exist_ok=True)
@@ -648,14 +814,10 @@ async def upload_race_photo_base64(uid: str, race_id: str, req: RacePhotoBase64R
     filepath = os.path.join(photos_dir, filename)
 
     try:
-        raw_b64 = req.image_base64
-        if "," in raw_b64:
-            raw_b64 = raw_b64.split(",", 1)[1]
-        img_bytes = base64.b64decode(raw_b64)
         with open(filepath, "wb") as f:
             f.write(img_bytes)
     except Exception as e:
-        logger.error(f"[profile] Failed to decode and save base64 race photo for {uid}/{race_id}: {e}")
+        logger.error(f"[profile] Failed to save base64 race photo for {uid}/{race_id}: {e}")
         raise HTTPException(status_code=500, detail="保存赛事照片失败")
 
     photo_url = f"https://rgm.vanpower.net/api/race-photos/{filename}"
@@ -674,11 +836,9 @@ async def upload_race_photo(uid: str, race_id: str, file: UploadFile = File(...)
     """
     Uploads a finisher photo or race certificate file via multipart/form-data.
     """
-    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     orig_name = file.filename or "race.jpg"
-    ext = os.path.splitext(orig_name)[1].lower()
-    if not ext or ext not in allowed_exts:
-        ext = ".jpg"
+    contents = await file.read()
+    ext = validate_uploaded_image_bytes(contents, orig_name)
 
     photos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "race_photos")
     os.makedirs(photos_dir, exist_ok=True)
@@ -689,7 +849,6 @@ async def upload_race_photo(uid: str, race_id: str, file: UploadFile = File(...)
     filepath = os.path.join(photos_dir, filename)
 
     try:
-        contents = await file.read()
         with open(filepath, "wb") as f:
             f.write(contents)
     except Exception as e:
@@ -720,4 +879,22 @@ def delete_race_photo(uid: str, race_id: str, req: RacePhotoDeleteRequest):
         "photos": photos,
         "races": LocalStore.get_race_plans(uid)
     }
+
+
+class OnboardingActionRequest(BaseModel):
+    action: str # "skip_club_solo", "skip_device", "skip_history", "complete_onboarding"
+    payload: Optional[Dict[str, Any]] = None
+
+
+@router.get("/{uid}/onboarding-status")
+def get_onboarding_status_endpoint(uid: str):
+    """Returns user step-by-step setup and onboarding completion status."""
+    return LocalStore.get_user_onboarding_status(uid)
+
+
+@router.post("/{uid}/onboarding-action")
+def update_onboarding_action_endpoint(uid: str, req: OnboardingActionRequest):
+    """Updates user onboarding state or marks steps skipped / completed."""
+    return LocalStore.update_onboarding_action(uid, req.action, req.payload)
+
 

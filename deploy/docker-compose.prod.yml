@@ -24,6 +24,8 @@ services:
       - WECHAT_APP_ID=${WECHAT_APP_ID}
       - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
       - SECRET_KEY=${SECRET_KEY}
+      - RGM_ADMIN_EMAIL=${RGM_ADMIN_EMAIL}
+      - RGM_ADMIN_PASSWORD=${RGM_ADMIN_PASSWORD}
     volumes:
       - ../backend/data:/app/data
       - /etc/localtime:/etc/localtime:ro

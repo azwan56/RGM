@@ -55,7 +55,7 @@ export default function ManualPage() {
             <div className="space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-[#FC4C02]/15 text-[#FC4C02] border border-[#FC4C02]/30">
                 <BookOpen className="w-3.5 h-3.5" />
-                <span>RGM 万跑跑团助手 · 官方新用户手册</span>
+                <span>万跑跑团助手 · 官方新用户手册</span>
               </div>
               <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white">
                 跑者快速上手与配置指南

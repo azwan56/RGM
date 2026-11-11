@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import axios from "axios";
+import { formatBeijingTime } from "@/lib/apiClient";
 import {
   Shield,
   Crown,
@@ -34,15 +35,37 @@ import {
   Pause,
   Play,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Activity,
+  BarChart2,
+  Eye,
+  ArrowRight,
+  Smartphone,
+  TrendingUp
 } from "lucide-react";
 
 export default function AdminPage() {
   const [adminToken, setAdminToken] = useState<string | null>(null);
   const [adminInfo, setAdminInfo] = useState<any>(null);
 
-  // Tab state: 'orgs' (大群体架构) | 'clubs' (分跑团)
-  const [activeTab, setActiveTab] = useState<"orgs" | "clubs">("orgs");
+  // Tab state: 'orgs' (大群体架构) | 'clubs' (分跑团) | 'unaffiliated' (未入团自由跑友) | 'support' (用户问题反馈工单) | 'analytics' (用户体验与行为分析)
+  const [activeTab, setActiveTab] = useState<"orgs" | "clubs" | "unaffiliated" | "support" | "analytics">("orgs");
+
+  // Unaffiliated users roster state
+  const [unaffiliatedData, setUnaffiliatedData] = useState<any>(null);
+  const [unaffiliatedFilter, setUnaffiliatedFilter] = useState<"all" | "recent" | "pending" | "ready">("all");
+  const [unaffiliatedSearch, setUnaffiliatedSearch] = useState<string>("");
+  const [remindingUnaffiliatedUid, setRemindingUnaffiliatedUid] = useState<string>("");
+
+  // UX & Behavior Analytics states
+  const [analyticsDays, setAnalyticsDays] = useState<number>(14);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionDetail, setSessionDetail] = useState<any>(null);
+  const [sessionDetailLoading, setSessionDetailLoading] = useState<boolean>(false);
+  const [userJourneyData, setUserJourneyData] = useState<any>(null);
+  const [userJourneyLoading, setUserJourneyLoading] = useState<boolean>(false);
 
   // Login form state
   const [email, setEmail] = useState("admin@rgm.com");
@@ -54,6 +77,9 @@ export default function AdminPage() {
   const [orgs, setOrgs] = useState<any[]>([]);
   const [clubs, setClubs] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [supportTickets, setSupportTickets] = useState<any[]>([]);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [replyingTicketId, setReplyingTicketId] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
 
   // Club Modal states
@@ -223,21 +249,34 @@ export default function AdminPage() {
     setClubs([]);
     setUsers([]);
     setOrgs([]);
+    setSupportTickets([]);
   }
 
   async function loadAdminData(token: string) {
     setLoadingData(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const [clubsRes, usersRes, orgsRes] = await Promise.all([
+      const [clubsRes, usersRes, orgsRes, ticketsRes, unaffRes] = await Promise.all([
         axios.get("/api/admin/clubs", { headers }),
         axios.get("/api/admin/users", { headers }),
-        axios.get("/api/org/admin/all-list", { headers }).catch(() => ({ data: { organizations: [] } }))
+        axios.get("/api/org/admin/all-list", { headers }).catch(() => ({ data: { organizations: [] } })),
+        axios.get("/api/admin/support-tickets", { headers }).catch(() => ({ data: { tickets: [] } })),
+        axios.get("/api/admin/unaffiliated-users", { headers }).catch(() => ({ data: null }))
       ]);
       setClubs(clubsRes.data?.clubs || []);
       const userList = usersRes.data?.users || [];
       setUsers(userList);
       setOrgs(orgsRes.data?.organizations || []);
+      if (unaffRes?.data) {
+        setUnaffiliatedData(unaffRes.data);
+      }
+      const tList = ticketsRes.data?.tickets || [];
+      setSupportTickets(tList);
+      const drafts: Record<string, string> = {};
+      tList.forEach((t: any) => {
+        if (t.admin_reply) drafts[t.id] = t.admin_reply;
+      });
+      setReplyDrafts(drafts);
       if (userList.length > 0 && !newClubOwnerId) {
         setNewClubOwnerId(userList[0].id);
       }
@@ -253,6 +292,113 @@ export default function AdminPage() {
       setLoadingData(false);
     }
   }
+
+  async function handleRemindUnaffiliatedUser(targetUid: string, displayName: string) {
+    if (!adminToken || !targetUid) return;
+    setRemindingUnaffiliatedUid(targetUid);
+    try {
+      const res = await axios.post(
+        `/api/admin/unaffiliated-users/${encodeURIComponent(targetUid)}/remind`,
+        {},
+        { headers: { Authorization: `Bearer ${adminToken}` } }
+      );
+      setActionSuccessMsg(res.data?.message || `已向【${displayName || targetUid}】发送完善绑表与目标设定提醒！`);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "发送提醒失败");
+    } finally {
+      setRemindingUnaffiliatedUid("");
+    }
+  }
+
+  async function handleReplySupportTicket(ticketId: string, status: string = "resolved") {
+    if (!adminToken) return;
+    const replyText = (replyDrafts[ticketId] || "").trim();
+    if (!replyText) {
+      alert("请输入回复内容");
+      return;
+    }
+    setReplyingTicketId(ticketId);
+    try {
+      await axios.post(
+        `/api/admin/support-tickets/${ticketId}/reply`,
+        { admin_reply: replyText, status },
+        { headers: { Authorization: `Bearer ${adminToken}` } }
+      );
+      setActionSuccessMsg("已保存技术支持回复，用户端「我的 -> 帮助与技术支持」将实时可见！");
+      loadAdminData(adminToken);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "回复失败");
+    } finally {
+      setReplyingTicketId(null);
+    }
+  }
+
+  async function loadSessionTimeline(sessionId: string, tokenOverride?: string) {
+    const tk = tokenOverride || adminToken;
+    if (!tk || !sessionId) return;
+    setSelectedSessionId(sessionId);
+    setSessionDetailLoading(true);
+    try {
+      const res = await axios.get(`/api/admin/analytics/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: { Authorization: `Bearer ${tk}` }
+      });
+      setSessionDetail(res.data || null);
+    } catch (err: any) {
+      console.error("Load session timeline error:", err);
+      setSessionDetail(null);
+    } finally {
+      setSessionDetailLoading(false);
+    }
+  }
+
+  async function loadAnalyticsOverview(daysOverride?: number, tokenOverride?: string) {
+    const tk = tokenOverride || adminToken;
+    if (!tk) return;
+    const d = daysOverride ?? analyticsDays;
+    setAnalyticsLoading(true);
+    try {
+      const res = await axios.get(`/api/admin/analytics/overview?days=${d}&include_wechat=true`, {
+        headers: { Authorization: `Bearer ${tk}` }
+      });
+      const data = res.data || null;
+      setAnalyticsData(data);
+      const recent = data?.behavior?.recent_sessions || [];
+      if (recent.length > 0) {
+        const currentStillExists = selectedSessionId && recent.some((s: any) => s.session_id === selectedSessionId);
+        const targetSid = currentStillExists ? selectedSessionId! : recent[0].session_id;
+        loadSessionTimeline(targetSid, tk);
+      } else {
+        setSelectedSessionId(null);
+        setSessionDetail(null);
+      }
+    } catch (err: any) {
+      console.error("Load analytics overview error:", err);
+      setActionErrorMsg(err.response?.data?.detail || "加载行为统计数据失败");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }
+
+  async function loadUserJourney(userId: string) {
+    if (!adminToken || !userId) return;
+    setUserJourneyLoading(true);
+    try {
+      const res = await axios.get(`/api/admin/analytics/users/${encodeURIComponent(userId)}/journey?limit=15`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      setUserJourneyData(res.data || null);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "加载该跑者历史访问记录失败");
+    } finally {
+      setUserJourneyLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "analytics" && adminToken && !analyticsData && !analyticsLoading) {
+      loadAnalyticsOverview(analyticsDays, adminToken);
+    }
+  }, [activeTab, adminToken]);
 
   // Club Modals Opener
   function openCreateModal() {
@@ -574,6 +720,22 @@ export default function AdminPage() {
     }
   }
 
+  async function handleGrantGracePeriod(targetUid: string) {
+    if (!adminToken || !activeOrg) return;
+    setConfirmingUid(targetUid);
+    try {
+      await axios.post(`/api/org/${activeOrg.id}/members/${targetUid}/grace-period`);
+      setOrgMembers((prev) =>
+        prev.map((m) => (m.user_id === targetUid ? { ...m, status: "temporary", days_remaining: 14 } : m))
+      );
+      setActionSuccessMsg("已成功为该队员重置 14 天临时宽限期！");
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "重置宽限期失败");
+    } finally {
+      setConfirmingUid(null);
+    }
+  }
+
   async function handleConfirmMember(targetUid: string) {
     if (!adminToken || !activeOrg) return;
     setConfirmingUid(targetUid);
@@ -587,7 +749,17 @@ export default function AdminPage() {
       );
       setActionSuccessMsg("戈友实名认证已核对通过！");
     } catch (err: any) {
-      alert(err.response?.data?.detail || "确认成员失败");
+      const errorMsg = err.response?.data?.detail || "确认成员失败";
+      const targetMember = orgMembers.find((m) => m.user_id === targetUid);
+      if (targetMember?.status === 'expired' && errorMsg.includes("必填资料尚未补齐")) {
+        const grant = window.confirm(`${errorMsg}\n\n是否为该队员重置 14 天临时访问宽限期，给予其充足时间在小程序补齐资料？`);
+        if (grant) {
+          await handleGrantGracePeriod(targetUid);
+          return;
+        }
+      } else {
+        alert(errorMsg);
+      }
     } finally {
       setConfirmingUid(null);
     }
@@ -807,7 +979,7 @@ export default function AdminPage() {
           /* Logged In -> Admin Dashboard */
           <div className="space-y-6">
             {/* Top Navigation Tabs */}
-            <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+            <div className="flex flex-wrap items-center gap-3 border-b border-white/10 pb-4">
               <button
                 onClick={() => setActiveTab("orgs")}
                 className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-bold text-sm transition-all ${
@@ -835,6 +1007,53 @@ export default function AdminPage() {
                 <span>🏃 分跑团与俱乐部 ({clubs.length})</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-zinc-300 font-normal">
                   下属与独立分队
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("unaffiliated")}
+                className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-bold text-sm transition-all ${
+                  activeTab === "unaffiliated"
+                    ? "bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-lg shadow-orange-600/25 border border-orange-400/30"
+                    : "bg-[#141416] text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5"
+                }`}
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>🌍 未入团自由跑友 ({unaffiliatedData?.summary?.total_members ?? 0})</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-cyan-300 font-normal">
+                  ⌚已绑表 {unaffiliatedData?.summary?.watch_bound_count ?? 0} · 🎯已设目标 {unaffiliatedData?.summary?.goal_set_count ?? 0}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("support")}
+                className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-bold text-sm transition-all ${
+                  activeTab === "support"
+                    ? "bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-lg shadow-orange-600/25 border border-orange-400/30"
+                    : "bg-[#141416] text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5"
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>💬 用户技术支持工单 ({supportTickets.length})</span>
+                {supportTickets.filter((t) => t.status !== "resolved" && !t.admin_reply).length > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500 text-white font-bold">
+                    {supportTickets.filter((t) => t.status !== "resolved" && !t.admin_reply).length} 待处理
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab("analytics")}
+                className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-bold text-sm transition-all ${
+                  activeTab === "analytics"
+                    ? "bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-lg shadow-orange-600/25 border border-orange-400/30"
+                    : "bg-[#141416] text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5"
+                }`}
+              >
+                <BarChart2 className="w-4 h-4" />
+                <span>📊 用户体验与行为分析</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-emerald-300 font-normal">
+                  单人轨迹回放 · We分析
                 </span>
               </button>
             </div>
@@ -875,7 +1094,7 @@ export default function AdminPage() {
                         {/* Top Info */}
                         <div className="flex items-start gap-3.5 mb-4">
                           <img
-                            src={org.logo_url || "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=300&auto=format&fit=crop&q=80"}
+                            src={org.logo_url || "/logo.png"}
                             alt={org.name}
                             className="w-14 h-14 rounded-2xl object-cover border border-white/10 shrink-0 bg-white/5"
                           />
@@ -1072,7 +1291,7 @@ export default function AdminPage() {
                         {/* Top Info */}
                         <div className="flex items-start gap-3.5 mb-3">
                           <img
-                            src={club.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                            src={club.logo_url || "/logo.png"}
                             alt={club.name}
                             className="w-14 h-14 rounded-2xl object-cover border border-white/10 shrink-0"
                           />
@@ -1252,6 +1471,1181 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+
+            {/* TAB 2.5: Unaffiliated Users View */}
+            {activeTab === "unaffiliated" && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#141416] p-5 rounded-2xl border border-white/10">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-5 h-5 text-orange-400" />
+                      <h2 className="text-base font-bold text-white">
+                        🌍 未入团自由跑友全局名册 ({unaffiliatedData?.summary?.total_members ?? 0} 人)
+                      </h2>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      展示尚未加入任何跑团的注册跑友及其注册时间、运动手表绑定状态、周/月目标设定状态与月跑量进度。支持一键发送系统提醒或查看个人档案。
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => adminToken && loadAdminData(adminToken)}
+                    className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-zinc-200 flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingData ? "animate-spin text-orange-400" : ""}`} />
+                    刷新名册
+                  </button>
+                </div>
+
+                {/* 4 KPI Summary Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div
+                    onClick={() => setUnaffiliatedFilter("recent")}
+                    className="bg-[#141416] border border-white/10 rounded-2xl p-4 cursor-pointer hover:border-orange-500/40 transition"
+                  >
+                    <div className="text-2xl font-black text-orange-400">
+                      {unaffiliatedData?.summary?.new_7d_count ?? 0} <span className="text-xs font-bold">人</span>
+                    </div>
+                    <div className="text-xs font-bold text-white mt-1">🌱 近7天新注册</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      近30天新注册 {unaffiliatedData?.summary?.new_30d_count ?? 0} 人
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setUnaffiliatedFilter("pending")}
+                    className="bg-[#141416] border border-white/10 rounded-2xl p-4 cursor-pointer hover:border-emerald-500/40 transition"
+                  >
+                    <div className="text-2xl font-black text-emerald-400">
+                      {unaffiliatedData?.summary?.watch_bound_count ?? 0} / {unaffiliatedData?.summary?.total_members ?? 0}
+                    </div>
+                    <div className="text-xs font-bold text-white mt-1">⌚ 手表已绑定</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      未绑表 {unaffiliatedData?.summary?.watch_unbound_count ?? 0} 人
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setUnaffiliatedFilter("pending")}
+                    className="bg-[#141416] border border-white/10 rounded-2xl p-4 cursor-pointer hover:border-cyan-500/40 transition"
+                  >
+                    <div className="text-2xl font-black text-cyan-400">
+                      {unaffiliatedData?.summary?.goal_set_count ?? 0} / {unaffiliatedData?.summary?.total_members ?? 0}
+                    </div>
+                    <div className="text-xs font-bold text-white mt-1">🎯 目标已设定</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      未设目标 {unaffiliatedData?.summary?.goal_unset_count ?? 0} 人
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setUnaffiliatedFilter("pending")}
+                    className="bg-[#141416] border border-white/10 rounded-2xl p-4 cursor-pointer hover:border-amber-500/40 transition"
+                  >
+                    <div className="text-2xl font-black text-amber-400">
+                      {unaffiliatedData?.summary?.pending_setup_count ?? 0} <span className="text-xs font-bold">人</span>
+                    </div>
+                    <div className="text-xs font-bold text-white mt-1">⚠️ 待完善设置</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">支持一键发送提醒通知</div>
+                  </div>
+                </div>
+
+                {/* Filter Pills & Search */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#141416] p-4 rounded-2xl border border-white/5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[
+                      { key: "all", label: `全部 (${unaffiliatedData?.summary?.total_members ?? 0})` },
+                      { key: "recent", label: `🌱 近30天 (${unaffiliatedData?.summary?.new_30d_count ?? 0})` },
+                      { key: "pending", label: `⚠️ 待完善 (${unaffiliatedData?.summary?.pending_setup_count ?? 0})` },
+                      {
+                        key: "ready",
+                        label: `✅ 已配齐 (${Math.max(
+                          0,
+                          (unaffiliatedData?.summary?.total_members ?? 0) -
+                            (unaffiliatedData?.summary?.pending_setup_count ?? 0)
+                        )})`
+                      }
+                    ].map((pill) => (
+                      <button
+                        key={pill.key}
+                        onClick={() => setUnaffiliatedFilter(pill.key as any)}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition ${
+                          unaffiliatedFilter === pill.key
+                            ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-white/10"
+                        }`}
+                      >
+                        {pill.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative w-full sm:w-72">
+                    <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={unaffiliatedSearch}
+                      onChange={(e) => setUnaffiliatedSearch(e.target.value)}
+                      placeholder="搜索未入团跑友昵称或 UID..."
+                      className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Unaffiliated Members Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(unaffiliatedData?.members || [])
+                    .filter((m: any) => {
+                      if (unaffiliatedFilter === "recent" && !m.is_new_30d) return false;
+                      if (unaffiliatedFilter === "pending" && m.watch_bound && m.goal_set) return false;
+                      if (unaffiliatedFilter === "ready" && (!m.watch_bound || !m.goal_set)) return false;
+                      if (unaffiliatedSearch.trim()) {
+                        const q = unaffiliatedSearch.trim().toLowerCase();
+                        return (
+                          (m.display_name || "").toLowerCase().includes(q) ||
+                          (m.user_id || "").toLowerCase().includes(q)
+                        );
+                      }
+                      return true;
+                    })
+                    .map((m: any) => (
+                      <div
+                        key={m.user_id}
+                        className={`bg-[#141416] border rounded-2xl p-4 flex flex-col justify-between gap-3 ${
+                          !m.watch_bound || !m.goal_set ? "border-amber-500/30" : "border-white/10"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={
+                                m.avatar_url ||
+                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                              }
+                              alt={m.display_name || "跑友"}
+                              className="w-11 h-11 rounded-full object-cover border border-white/20 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-bold text-white truncate">
+                                  {m.display_name || "新跑友"}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-semibold">
+                                  🌍 未入团
+                                </span>
+                                {m.is_new_7d && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                                    🌱 新注册
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-zinc-400 mt-0.5">
+                                ⏰ 注册时间：{m.joined_at_display || "早期注册"}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 shrink-0">
+                            {m.joined_relative_label || "未入团"}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2.5 text-xs">
+                          <div
+                            className={`p-2.5 rounded-xl border ${
+                              m.watch_bound
+                                ? "bg-emerald-500/5 border-emerald-500/25"
+                                : "bg-amber-500/5 border-amber-500/25"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-zinc-200">⌚ 手表绑定</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                  m.watch_bound
+                                    ? "bg-emerald-500/20 text-emerald-300"
+                                    : "bg-amber-500/20 text-amber-300"
+                                }`}
+                              >
+                                {m.watch_bound ? m.watch_status_label || "已绑表" : "未绑定"}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-zinc-400">
+                              {m.total_runs_count > 0
+                                ? `累计 ${m.total_runs_count} 次 · 本月 ${m.month_km || 0}km`
+                                : m.watch_bound
+                                  ? `本月跑量 ${m.month_km || 0}km`
+                                  : "尚未绑定佳明/高驰/苹果/华为"}
+                            </div>
+                          </div>
+
+                          <div
+                            className={`p-2.5 rounded-xl border ${
+                              m.goal_set
+                                ? "bg-emerald-500/5 border-emerald-500/25"
+                                : "bg-amber-500/5 border-amber-500/25"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-zinc-200">🎯 目标设定</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                  m.goal_set
+                                    ? "bg-emerald-500/20 text-emerald-300"
+                                    : "bg-amber-500/20 text-amber-300"
+                                }`}
+                              >
+                                {m.goal_set ? "已设定" : "未设目标"}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-zinc-400">
+                              周 {m.weekly_target_km || 50}km · 月 {m.monthly_target_km || 200}km
+                              {m.has_training_plan ? " · 📋已排课" : ""}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          {(!m.watch_bound || !m.goal_set) && (
+                            <button
+                              onClick={() => handleRemindUnaffiliatedUser(m.user_id, m.display_name)}
+                              disabled={remindingUnaffiliatedUid === m.user_id}
+                              className="flex-1 py-2 px-3 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/35 text-orange-300 text-xs font-bold transition disabled:opacity-50"
+                            >
+                              {remindingUnaffiliatedUid === m.user_id
+                                ? "发送中..."
+                                : "🔔 提醒完善绑表/目标"}
+                            </button>
+                          )}
+                          <a
+                            href={`/dashboard/analysis?target_uid=${encodeURIComponent(
+                              m.user_id
+                            )}&target_name=${encodeURIComponent(m.display_name || "跑友")}`}
+                            className="flex-1 py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 text-xs font-bold text-center transition"
+                          >
+                            📊 查看跑力档案
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: Support Tickets View */}
+            {activeTab === "support" && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#141416] p-4 rounded-2xl border border-white/5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-orange-400" />
+                      <h2 className="text-base font-bold text-white">
+                        用户技术支持与问题反馈工单 ({supportTickets.length})
+                      </h2>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      自动附带跑者 UID、当前手表绑定状态、所属跑团与手机系统诊断信息。您在此回复后，跑者在小程序「我的 → 帮助与技术支持」中可实时查看。
+                    </p>
+                  </div>
+                </div>
+
+                {supportTickets.length === 0 ? (
+                  <div className="bg-[#141416] border border-white/10 rounded-3xl p-12 text-center">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3 opacity-80" />
+                    <p className="text-sm font-bold text-white">当前暂无待处理的用户问题反馈工单</p>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      当跑者在小程序提交问题留言时，将自动连同设备与跑团诊断信息汇总于此
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {supportTickets.map((tkt) => {
+                      const catMap: Record<string, string> = {
+                        device_sync: "⌚ 手表绑定/同步",
+                        club_org: "🏕️ 跑团/大群认证",
+                        training_data: "📊 训练数据/配速",
+                        other: "💡 其他问题建议",
+                      };
+                      const isResolved = tkt.status === "resolved" || !!tkt.admin_reply;
+                      const dev = tkt.device_info || {};
+                      return (
+                        <div
+                          key={tkt.id}
+                          className="bg-[#141416] border border-white/10 rounded-3xl p-6 space-y-4 shadow-xl"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                                {catMap[tkt.category] || "💬 问题反馈"}
+                              </span>
+                              <span className="text-sm font-bold text-white">
+                                {tkt.display_name || "微信跑者"}
+                              </span>
+                              <span className="text-xs font-mono text-zinc-400 bg-white/5 px-2 py-0.5 rounded">
+                                {tkt.user_id}
+                              </span>
+                              {tkt.clubs && tkt.clubs.length > 0 && (
+                                <span className="text-xs px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                                  🏃 跑团: {tkt.clubs.join("、")}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-zinc-500">
+                                {formatBeijingTime(tkt.created_at, true)}
+                              </span>
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                  isResolved
+                                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                    : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                                }`}
+                              >
+                                {isResolved ? "✓ 已回复/已解决" : "⏳ 待处理"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Diagnostic Bar */}
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 bg-white/[0.02] p-3 rounded-xl border border-white/5">
+                            <span>
+                              ⌚ 手表状态:{" "}
+                              <strong className="text-zinc-200">
+                                {dev.watch_status ||
+                                  [
+                                    tkt.garmin_connected ? `佳明(${tkt.garmin_email || "已绑"})` : "",
+                                    tkt.coros_connected ? `高驰(${tkt.coros_account || "已绑"})` : "",
+                                    tkt.apple_watch_connected ? "Apple Watch" : "",
+                                    tkt.huawei_connected ? "华为手表" : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join("、") ||
+                                  "未连接"}
+                              </strong>
+                            </span>
+                            {(dev.brand || dev.model || dev.system) && (
+                              <span>
+                                📱 终端:{" "}
+                                <strong className="text-zinc-200">
+                                  {[dev.brand, dev.model, dev.system].filter(Boolean).join(" ")}
+                                </strong>
+                              </span>
+                            )}
+                            {tkt.contact_info && (
+                              <span>
+                                📞 预留联系方式:{" "}
+                                <strong className="text-amber-300">{tkt.contact_info}</strong>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* User Content */}
+                          <div className="text-sm text-zinc-100 whitespace-pre-wrap leading-relaxed bg-black/30 p-4 rounded-2xl border border-white/5">
+                            {tkt.content}
+                          </div>
+
+                          {/* Admin Reply Input */}
+                          <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                            <input
+                              type="text"
+                              value={replyDrafts[tkt.id] ?? ""}
+                              onChange={(e) =>
+                                setReplyDrafts((prev) => ({ ...prev, [tkt.id]: e.target.value }))
+                              }
+                              placeholder="输入给该跑者的技术支持回复（保存后跑者可在小程序端内直接查看）..."
+                              className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-orange-500"
+                            />
+                            <button
+                              disabled={replyingTicketId === tkt.id}
+                              onClick={() => handleReplySupportTicket(tkt.id, "resolved")}
+                              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold hover:opacity-90 transition-all shrink-0 disabled:opacity-50"
+                            >
+                              {replyingTicketId === tkt.id
+                                ? "保存中..."
+                                : tkt.admin_reply
+                                ? "更新回复"
+                                : "发送回复并标为已解决"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: UX & Behavior Analytics View */}
+            {activeTab === "analytics" && (
+              <div className="space-y-6">
+                {/* Action Bar & Period Selector */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#141416] p-4 rounded-2xl border border-white/5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <BarChart2 className="w-5 h-5 text-orange-400" />
+                      <h2 className="text-base font-bold text-white">
+                        小程序用户体验与全链路行为分析
+                      </h2>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      单用户「打开小程序 → 页面停留与滚动浏览深度 → 按钮/弹窗点击 → 退出」全链路回放 · 存量转化漏斗 · 微信官方 We分析
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {[7, 14, 30].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => {
+                          setAnalyticsDays(d);
+                          loadAnalyticsOverview(d);
+                        }}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                          analyticsDays === d
+                            ? "bg-orange-600 text-white shadow shadow-orange-600/30"
+                            : "bg-white/5 text-zinc-400 hover:text-white border border-white/10"
+                        }`}
+                      >
+                        近 {d} 天
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => loadAnalyticsOverview(analyticsDays)}
+                      disabled={analyticsLoading}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-200 text-xs font-medium border border-white/10 transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${analyticsLoading ? "animate-spin" : ""}`} />
+                      {analyticsLoading ? "统计中..." : "刷新"}
+                    </button>
+                  </div>
+                </div>
+
+                {analyticsLoading && !analyticsData ? (
+                  <div className="bg-[#141416] p-12 rounded-2xl border border-white/5 text-center text-zinc-400 text-sm">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-3 text-orange-400" />
+                    正在拉取单用户行为埋点、业务转化漏斗与微信官方 We分析 数据...
+                  </div>
+                ) : (
+                  <>
+                    {/* ── SECTION 1: Per-User Session Trajectory Replay & Real-Time Telemetry ── */}
+                    <div className="bg-[#141416] p-5 rounded-3xl border border-white/5 space-y-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <Activity className="w-5 h-5 text-emerald-400" />
+                          <h3 className="text-sm font-bold text-white">
+                            一、单用户真实访问轨迹回放 & 细粒度交互埋点（近 {analyticsData?.days || analyticsDays} 天）
+                          </h3>
+                        </div>
+                        <span className="text-[11px] text-zinc-400">
+                          累计采集埋点事件 <strong className="text-white">{analyticsData?.behavior?.summary?.total_events ?? 0}</strong> 条
+                        </span>
+                      </div>
+
+                      {/* 6 KPI Summary Cards */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">总打开会话</div>
+                          <div className="text-xl font-black text-white mt-1">
+                            {analyticsData?.behavior?.summary?.total_sessions ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">次</span>
+                          </div>
+                        </div>
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">独立访问跑者</div>
+                          <div className="text-xl font-black text-emerald-400 mt-1">
+                            {analyticsData?.behavior?.summary?.unique_visitors ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">人</span>
+                          </div>
+                        </div>
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">平均单次停留</div>
+                          <div className="text-xl font-black text-amber-300 mt-1">
+                            {analyticsData?.behavior?.summary?.avg_session_duration_sec ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">秒</span>
+                          </div>
+                        </div>
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">平均访问页数</div>
+                          <div className="text-xl font-black text-sky-300 mt-1">
+                            {analyticsData?.behavior?.summary?.avg_pages_per_session ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">页/次</span>
+                          </div>
+                        </div>
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">平均下滑浏览深度</div>
+                          <div className="text-xl font-black text-purple-300 mt-1">
+                            {analyticsData?.behavior?.summary?.avg_scroll_pct ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">%</span>
+                          </div>
+                        </div>
+                        <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                          <div className="text-[11px] text-zinc-400">秒退跳出率 (10s内无点击)</div>
+                          <div className="text-xl font-black text-rose-400 mt-1">
+                            {analyticsData?.behavior?.summary?.bounce_sessions_pct ?? 0}
+                            <span className="text-xs font-normal text-zinc-500 ml-1">%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Split View: Recent Sessions List (Left) + Chronological Timeline Replay (Right) */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                        {/* Left: Recent Sessions */}
+                        <div className="lg:col-span-5 bg-black/30 rounded-2xl border border-white/5 p-4 flex flex-col max-h-[560px]">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-zinc-200">
+                              最近访问会话列表（点击右侧逐秒回放）
+                            </span>
+                            <span className="text-[11px] text-zinc-500">
+                              显示最新 {(analyticsData?.behavior?.recent_sessions || []).length} 次
+                            </span>
+                          </div>
+
+                          {(analyticsData?.behavior?.recent_sessions || []).length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center py-12 px-4 text-zinc-500 text-xs leading-relaxed">
+                              <Smartphone className="w-8 h-8 text-zinc-600 mb-2" />
+                              <p className="text-zinc-300 font-semibold mb-1">暂无新采集的单人访问轨迹</p>
+                              <p>
+                                全链路静默埋点已就绪。新版小程序发布后，每位跑者打开小程序、浏览滚动、点击按钮到退出的完整时间轴将实时呈现在此处。
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 overflow-y-auto pr-1">
+                              {(analyticsData?.behavior?.recent_sessions || []).map((sess: any) => {
+                                const isSelected = selectedSessionId === sess.session_id;
+                                return (
+                                  <button
+                                    key={sess.session_id}
+                                    onClick={() => loadSessionTimeline(sess.session_id)}
+                                    className={`w-full text-left p-3 rounded-xl border transition-all ${
+                                      isSelected
+                                        ? "bg-orange-600/15 border-orange-500/50 shadow"
+                                        : "bg-white/[0.02] hover:bg-white/[0.05] border-white/5"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-xs font-bold text-white truncate">
+                                          {sess.display_name}
+                                        </span>
+                                        {sess.watch_brand && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 shrink-0">
+                                            ⌚ {sess.watch_brand}
+                                          </span>
+                                        )}
+                                        {sess.had_error && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 shrink-0">
+                                            异常
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[10px] text-zinc-500 shrink-0">
+                                        {formatBeijingTime(sess.started_at)}
+                                      </span>
+                                    </div>
+
+                                    <div className="text-[11px] text-zinc-400 mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="text-amber-300/90">{sess.scene_label}</span>
+                                      <span>·</span>
+                                      <span className="truncate max-w-[200px]">
+                                        {sess.entry_title} → {sess.exit_title}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 mt-2 text-[11px] text-zinc-300">
+                                      <span>⏱️ {sess.duration_sec}s</span>
+                                      <span>📄 {sess.page_count} 页</span>
+                                      <span>👆 {sess.click_count} 次交互</span>
+                                      <span>📜 深度 {sess.max_scroll_pct}%</span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right: Chronological Session Timeline Replay */}
+                        <div className="lg:col-span-7 bg-black/30 rounded-2xl border border-white/5 p-4 flex flex-col max-h-[560px]">
+                          {sessionDetailLoading ? (
+                            <div className="flex-1 flex items-center justify-center text-zinc-400 text-xs py-16">
+                              <RefreshCw className="w-4 h-4 animate-spin mr-2 text-orange-400" />
+                              正在加载单次会话逐秒轨迹...
+                            </div>
+                          ) : !sessionDetail?.session ? (
+                            <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs py-16 text-center px-6">
+                              在左侧选择任意一次用户会话，即可在此查看从打开小程序、每个页面停留时长与下滑百分比、点击哪个按钮/弹窗，一直到退出的完整轨迹回放。
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-white/10">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Eye className="w-4 h-4 text-orange-400" />
+                                    <span className="text-sm font-bold text-white">
+                                      {sessionDetail.session.display_name} 的单次访问回放
+                                    </span>
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-zinc-300">
+                                      {sessionDetail.session.scene_label}
+                                    </span>
+                                    {sessionDetail.session.device_model && (
+                                      <span className="text-[11px] text-zinc-400">
+                                        📱 {sessionDetail.session.device_model}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-zinc-400 mt-1">
+                                    打开时间：{formatBeijingTime(sessionDetail.session.started_at)} · 总停留{" "}
+                                    <strong className="text-amber-300">{sessionDetail.session.duration_sec} 秒</strong> · 浏览{" "}
+                                    <strong className="text-sky-300">{sessionDetail.session.page_count} 页</strong> · 最大滚动深度{" "}
+                                    <strong className="text-purple-300">{sessionDetail.session.max_scroll_pct}%</strong>
+                                  </div>
+                                </div>
+
+                                {sessionDetail.session.user_id && (
+                                  <button
+                                    onClick={() => loadUserJourney(sessionDetail.session.user_id)}
+                                    disabled={userJourneyLoading}
+                                    className="px-3 py-1.5 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 border border-orange-500/30 text-xs font-bold shrink-0 transition-all"
+                                  >
+                                    {userJourneyLoading ? "加载中..." : "查看该跑者历次访问"}
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="space-y-2.5 overflow-y-auto pr-1">
+                                {(sessionDetail.events || []).map((ev: any, idx: number) => {
+                                  const typeMeta: Record<string, { badge: string; cls: string }> = {
+                                    session_start: {
+                                      badge: "🚀 打开小程序",
+                                      cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                                    },
+                                    page_enter: {
+                                      badge: "📄 进入页面",
+                                      cls: "bg-sky-500/15 text-sky-300 border-sky-500/30"
+                                    },
+                                    subview_enter: {
+                                      badge: "🔀 切换子视图",
+                                      cls: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
+                                    },
+                                    button_click: {
+                                      badge: "👆 点击按钮",
+                                      cls: "bg-orange-500/15 text-orange-300 border-orange-500/30"
+                                    },
+                                    modal_open: {
+                                      badge: "🪟 打开弹窗",
+                                      cls: "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                                    },
+                                    modal_close: {
+                                      badge: "✖️ 关闭弹窗",
+                                      cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"
+                                    },
+                                    funnel_step: {
+                                      badge: "🎯 转化动作",
+                                      cls: "bg-amber-500/20 text-amber-200 border-amber-400/40"
+                                    },
+                                    module_view: {
+                                      badge: "👁️ 模块曝光",
+                                      cls: "bg-teal-500/15 text-teal-300 border-teal-500/30"
+                                    },
+                                    page_leave: {
+                                      badge: "⏱️ 离开页面",
+                                      cls: "bg-zinc-700/30 text-zinc-300 border-zinc-600/40"
+                                    },
+                                    app_background: {
+                                      badge: "⏸️ 切后台/选图",
+                                      cls: "bg-slate-500/20 text-slate-300 border-slate-500/30"
+                                    },
+                                    api_issue: {
+                                      badge: "⚠️ 接口慢/异常",
+                                      cls: "bg-red-500/20 text-red-300 border-red-500/40"
+                                    },
+                                    session_end: {
+                                      badge: "👋 结束访问",
+                                      cls: "bg-slate-600/25 text-slate-200 border-slate-500/30"
+                                    }
+                                  };
+                                  const meta = typeMeta[ev.event_type] || {
+                                    badge: ev.event_type,
+                                    cls: "bg-white/10 text-zinc-300 border-white/10"
+                                  };
+
+                                  return (
+                                    <div
+                                      key={ev.id || idx}
+                                      className="flex items-start gap-3 p-2.5 rounded-xl bg-white/[0.02] border border-white/5"
+                                    >
+                                      <div className="w-14 shrink-0 text-right font-mono text-[11px] text-zinc-400 pt-0.5">
+                                        +{ev.offset_sec}s
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span
+                                            className={`text-[10px] px-2 py-0.5 rounded-md border font-bold ${meta.cls}`}
+                                          >
+                                            {meta.badge}
+                                          </span>
+                                          <span className="text-xs font-semibold text-white">
+                                            {ev.event_label}
+                                          </span>
+                                          {ev.page_title && (
+                                            <span className="text-[11px] text-zinc-400">
+                                              @{ev.page_title}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {(ev.stay_sec > 0 || ev.scroll_pct > 0) && (
+                                          <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] text-zinc-300">
+                                            {ev.stay_sec > 0 && (
+                                              <span>
+                                                页面停留 <strong className="text-amber-300">{ev.stay_sec}s</strong>
+                                              </span>
+                                            )}
+                                            {ev.scroll_pct > 0 && (
+                                              <span className="flex items-center gap-1.5">
+                                                <span>滚动浏览深度</span>
+                                                <span className="inline-block w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                                  <span
+                                                    className="block h-full bg-purple-400 rounded-full"
+                                                    style={{ width: `${Math.min(100, ev.scroll_pct)}%` }}
+                                                  />
+                                                </span>
+                                                <strong className="text-purple-300">{ev.scroll_pct}%</strong>
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {ev.props && Object.keys(ev.props).length > 0 && (
+                                          <div className="text-[10px] text-zinc-500 mt-1 truncate">
+                                            {Object.entries(ev.props)
+                                              .slice(0, 5)
+                                              .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+                                              .join(" · ")}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 3-Column Aggregate Breakdown: Pages Stay/Scroll + Top Buttons + Page Transitions */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-1">
+                        {/* Col 1: Per-Page Stay & Scroll Depth */}
+                        <div className="bg-black/30 rounded-2xl border border-white/5 p-4">
+                          <h4 className="text-xs font-bold text-white mb-3">
+                            📄 各页面停留时长与下滑浏览深度
+                          </h4>
+                          {(analyticsData?.behavior?.pages || []).length === 0 ? (
+                            <p className="text-xs text-zinc-500 py-6 text-center">等待新埋点数据上报</p>
+                          ) : (
+                            <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                              {(analyticsData?.behavior?.pages || []).map((pg: any) => (
+                                <div
+                                  key={pg.page_path}
+                                  className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5 space-y-1"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-semibold text-white truncate">
+                                      {pg.page_title}
+                                    </span>
+                                    <span className="text-[11px] text-zinc-400 shrink-0">
+                                      {pg.pv} PV / {pg.uv} UV
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[11px] text-zinc-300">
+                                    <span>平均停留 {pg.avg_stay_sec}s</span>
+                                    <span>平均滚动 {pg.avg_scroll_pct}%</span>
+                                    <span
+                                      className={
+                                        pg.exit_rate_pct >= 30 ? "text-rose-400 font-bold" : "text-zinc-400"
+                                      }
+                                    >
+                                      退出率 {pg.exit_rate_pct}%
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Col 2: Top Clicked Buttons & Modals */}
+                        <div className="bg-black/30 rounded-2xl border border-white/5 p-4">
+                          <h4 className="text-xs font-bold text-white mb-3">
+                            👆 高频按钮与弹窗点击排行
+                          </h4>
+                          {(analyticsData?.behavior?.top_buttons || []).length === 0 ? (
+                            <p className="text-xs text-zinc-500 py-6 text-center">等待新埋点数据上报</p>
+                          ) : (
+                            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                              {(analyticsData?.behavior?.top_buttons || []).map((btn: any, idx: number) => (
+                                <div
+                                  key={`${btn.event_name}-${idx}`}
+                                  className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white/[0.02] border border-white/5"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-white truncate">
+                                      {btn.event_label}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 truncate">
+                                      {btn.page_title} · {btn.event_name}
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className="text-xs font-bold text-orange-400">{btn.clicks} 次</div>
+                                    <div className="text-[10px] text-zinc-500">{btn.unique_users} 人</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Col 3: Page-to-Page Transitions & Client API Issues */}
+                        <div className="bg-black/30 rounded-2xl border border-white/5 p-4 space-y-4">
+                          <div>
+                            <h4 className="text-xs font-bold text-white mb-3">
+                              🔀 页面跳转流向（从哪页去哪页）
+                            </h4>
+                            {(analyticsData?.behavior?.page_transitions || []).length === 0 ? (
+                              <p className="text-xs text-zinc-500 py-4 text-center">等待新埋点数据上报</p>
+                            ) : (
+                              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                                {(analyticsData?.behavior?.page_transitions || []).map((tr: any, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-white/[0.02] border border-white/5 text-xs"
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0 text-zinc-200 truncate">
+                                      <span className="truncate">{tr.from_title}</span>
+                                      <ArrowRight className="w-3 h-3 text-orange-400 shrink-0" />
+                                      <span className="truncate">{tr.to_title}</span>
+                                    </div>
+                                    <span className="text-xs font-bold text-sky-300 shrink-0">{tr.count} 次</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {(analyticsData?.behavior?.module_exposures || []).length > 0 && (
+                              <div className="border-t border-white/10 mt-4 pt-3">
+                                <h4 className="text-xs font-bold text-teal-300 mb-2">
+                                  👁️ 首页与核心卡片模块曝光率
+                                </h4>
+                                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                                  {(analyticsData?.behavior?.module_exposures || []).map((mod: any) => (
+                                    <div
+                                      key={mod.event_name}
+                                      className="flex items-center justify-between text-[11px] bg-white/[0.02] border border-white/5 px-2.5 py-1.5 rounded-lg"
+                                    >
+                                      <span className="text-zinc-200 truncate">{mod.event_label}</span>
+                                      <span className="text-teal-300 font-bold shrink-0 ml-2">
+                                        {mod.exposure_pct}% 同页曝光 ({mod.unique_users}人)
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {(analyticsData?.behavior?.api_issues || []).length > 0 && (
+                            <div className="border-t border-white/10 pt-3">
+                              <h4 className="text-xs font-bold text-rose-300 mb-2">
+                                ⚠️ 客户端感知慢接口 / 报错
+                              </h4>
+                              <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+                                {(analyticsData?.behavior?.api_issues || []).map((iss: any, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between text-[11px] bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded-lg"
+                                  >
+                                    <span className="text-red-200 truncate">{iss.event_label}</span>
+                                    <span className="text-red-300 font-bold shrink-0 ml-2">{iss.count} 次</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── SECTION 2: Real-User Product Conversion Funnel ── */}
+                    <div className="bg-[#141416] p-5 rounded-3xl border border-white/5 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5 text-orange-400" />
+                          <h3 className="text-sm font-bold text-white">
+                            二、存量真实用户全生命周期转化漏斗（已自动过滤测试夹具账号）
+                          </h3>
+                        </div>
+                        {analyticsData?.conversion_funnel?.watch_breakdown && (
+                          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                              ⌚ 已绑表合计 {analyticsData.conversion_funnel.watch_breakdown.any} 人
+                            </span>
+                            <span className="text-zinc-400">
+                              高驰 {analyticsData.conversion_funnel.watch_breakdown.coros} · 佳明{" "}
+                              {analyticsData.conversion_funnel.watch_breakdown.garmin} · Apple{" "}
+                              {analyticsData.conversion_funnel.watch_breakdown.apple_watch} · 华为{" "}
+                              {analyticsData.conversion_funnel.watch_breakdown.huawei} · 颂拓{" "}
+                              {analyticsData.conversion_funnel.watch_breakdown.suunto}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {(analyticsData?.conversion_funnel?.steps || []).map((step: any) => (
+                          <div
+                            key={step.key}
+                            className="p-3.5 rounded-2xl bg-black/30 border border-white/5 space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-white">{step.label}</span>
+                              <span className="text-xs font-black text-orange-300 shrink-0">
+                                {step.count} 人 ({step.pct_of_total}%)
+                              </span>
+                            </div>
+                            <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
+                                style={{ width: `${Math.min(100, Math.max(2, step.pct_of_total || 0))}%` }}
+                              />
+                            </div>
+                            <div className="text-[11px] text-zinc-400">{step.hint}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ── SECTION 3: Official WeChat Mini Program We分析 Historical Stats ── */}
+                    <div className="bg-[#141416] p-5 rounded-3xl border border-white/5 space-y-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-5 h-5 text-sky-400" />
+                          <h3 className="text-sm font-bold text-white">
+                            三、微信官方「We分析」历史真实访问统计（近 {analyticsData?.wechat_datacube?.days || analyticsDays} 天 T-1 官方聚合）
+                          </h3>
+                        </div>
+                        {analyticsData?.wechat_datacube?.available && (
+                          <span className="text-xs text-sky-300 font-semibold">
+                            历史累计访问总人数：{analyticsData.wechat_datacube.cumulative_visitors} 人
+                          </span>
+                        )}
+                      </div>
+
+                      {!analyticsData?.wechat_datacube?.available ? (
+                        <div className="text-xs text-zinc-400 bg-black/30 p-6 rounded-2xl border border-white/5 text-center">
+                          暂未获取到微信官方 We分析 数据：{analyticsData?.wechat_datacube?.reason || "未配置小程序密钥或网络受限"}
+                        </div>
+                      ) : (
+                        <>
+                          {/* WeChat Official Summary Cards */}
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                            <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                              <div className="text-[11px] text-zinc-400">累计独立访客</div>
+                              <div className="text-xl font-black text-white mt-1">
+                                {analyticsData.wechat_datacube.cumulative_visitors}
+                                <span className="text-xs font-normal text-zinc-500 ml-1">人</span>
+                              </div>
+                            </div>
+                            <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                              <div className="text-[11px] text-zinc-400">周期打开次数</div>
+                              <div className="text-xl font-black text-sky-300 mt-1">
+                                {analyticsData.wechat_datacube.total_sessions}
+                                <span className="text-xs font-normal text-zinc-500 ml-1">次</span>
+                              </div>
+                            </div>
+                            <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                              <div className="text-[11px] text-zinc-400">总浏览量 (PV)</div>
+                              <div className="text-xl font-black text-emerald-300 mt-1">
+                                {analyticsData.wechat_datacube.total_pv}
+                                <span className="text-xs font-normal text-zinc-500 ml-1">次</span>
+                              </div>
+                            </div>
+                            <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
+                              <div className="text-[11px] text-zinc-400">新增访问人数</div>
+                              <div className="text-xl font-black text-amber-300 mt-1">
+                                {analyticsData.wechat_datacube.total_new_uv}
+                                <span className="text-xs font-normal text-zinc-500 ml-1">人</span>
+                              </div>
+                            </div>
+                            <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5 col-span-2 sm:col-span-1">
+                              <div className="text-[11px] text-zinc-400">单次停留 / 深度</div>
+                              <div className="text-base font-black text-purple-300 mt-1.5">
+                                {analyticsData.wechat_datacube.avg_session_stay_sec}s ·{" "}
+                                {analyticsData.wechat_datacube.avg_visit_depth}页
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                            {/* Official Per-Page Stay & Exit Rate Table */}
+                            <div className="lg:col-span-7 bg-black/30 rounded-2xl border border-white/5 p-4 overflow-x-auto">
+                              <h4 className="text-xs font-bold text-white mb-3">
+                                微信官方各页面访问量、停留时长与退出率
+                              </h4>
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="text-zinc-400 border-b border-white/10">
+                                    <th className="pb-2 font-medium">页面</th>
+                                    <th className="pb-2 font-medium text-right">PV (占比)</th>
+                                    <th className="pb-2 font-medium text-right">平均停留</th>
+                                    <th className="pb-2 font-medium text-right">入口页</th>
+                                    <th className="pb-2 font-medium text-right">退出率</th>
+                                    <th className="pb-2 font-medium text-right">转发</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                  {(analyticsData.wechat_datacube.pages || []).map((pg: any) => (
+                                    <tr key={pg.page_path} className="hover:bg-white/[0.02]">
+                                      <td className="py-2 pr-2">
+                                        <div className="font-semibold text-white">{pg.page_title}</div>
+                                        <div className="text-[10px] text-zinc-500 font-mono">{pg.page_path}</div>
+                                      </td>
+                                      <td className="py-2 text-right text-zinc-200 whitespace-nowrap">
+                                        {pg.pv}{" "}
+                                        <span className="text-[10px] text-zinc-500">({pg.pv_share_pct}%)</span>
+                                      </td>
+                                      <td className="py-2 text-right text-amber-300 whitespace-nowrap">
+                                        {pg.avg_stay_sec}s
+                                      </td>
+                                      <td className="py-2 text-right text-zinc-300 whitespace-nowrap">
+                                        {pg.entry_pv}
+                                      </td>
+                                      <td
+                                        className={`py-2 text-right whitespace-nowrap font-semibold ${
+                                          pg.exit_rate_pct >= 28
+                                            ? "text-rose-400"
+                                            : pg.exit_rate_pct <= 14
+                                            ? "text-emerald-400"
+                                            : "text-zinc-300"
+                                        }`}
+                                      >
+                                        {pg.exit_rate_pct}% ({pg.exit_pv})
+                                      </td>
+                                      <td className="py-2 text-right text-zinc-400 whitespace-nowrap">
+                                        {pg.share_pv}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Official Access Source Scenes & Daily Trend */}
+                            <div className="lg:col-span-5 space-y-4">
+                              <div className="bg-black/30 rounded-2xl border border-white/5 p-4">
+                                <h4 className="text-xs font-bold text-white mb-3">
+                                  用户从哪里打开小程序（微信入口场景分布）
+                                </h4>
+                                <div className="space-y-2.5">
+                                  {(analyticsData.wechat_datacube.scenes || []).map((sc: any) => (
+                                    <div key={sc.scene_key} className="space-y-1">
+                                      <div className="flex items-center justify-between text-xs">
+                                        <span className="text-zinc-200">{sc.scene_label}</span>
+                                        <span className="text-sky-300 font-bold">
+                                          {sc.count} 次 ({sc.pct}%)
+                                        </span>
+                                      </div>
+                                      <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full bg-sky-400 rounded-full"
+                                          style={{ width: `${Math.min(100, Math.max(2, sc.pct || 0))}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="bg-black/30 rounded-2xl border border-white/5 p-4 max-h-56 overflow-y-auto">
+                                <h4 className="text-xs font-bold text-white mb-2.5">
+                                  逐日访问趋势
+                                </h4>
+                                <div className="space-y-1.5 text-[11px]">
+                                  {[...(analyticsData.wechat_datacube.daily_trend || [])]
+                                    .reverse()
+                                    .map((dy: any) => (
+                                      <div
+                                        key={dy.date}
+                                        className="flex items-center justify-between py-1 border-b border-white/5 text-zinc-300"
+                                      >
+                                        <span className="font-mono text-zinc-400">{dy.date}</span>
+                                        <span>
+                                          打开 <strong className="text-white">{dy.session_cnt}</strong> · UV{" "}
+                                          <strong className="text-emerald-300">{dy.visit_uv}</strong> (+{dy.visit_uv_new}) ·{" "}
+                                          {dy.visit_pv} PV · 均留 {dy.stay_time_session_sec}s
+                                        </span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Modal: Single Runner Historical Journey ── */}
+        {userJourneyData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="relative w-full max-w-2xl bg-[#141416] border border-white/10 rounded-3xl p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
+              <button
+                onClick={() => setUserJourneyData(null)}
+                className="absolute top-5 right-5 p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <h3 className="text-base font-bold text-white">
+                🏃 {userJourneyData.user?.display_name} 的历史访问轨迹（最近 {userJourneyData.total_sessions} 次打开）
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1 mb-4">
+                点击任一历史会话即可切换到该次访问的逐秒详细回放
+              </p>
+              <div className="space-y-2.5">
+                {(userJourneyData.sessions || []).map((item: any) => {
+                  const s = item.session;
+                  if (!s) return null;
+                  return (
+                    <div
+                      key={s.session_id}
+                      className="p-3.5 rounded-2xl bg-black/40 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="text-xs font-bold text-white">
+                          {formatBeijingTime(s.started_at)} · {s.scene_label}
+                        </div>
+                        <div className="text-[11px] text-zinc-400">
+                          路径：{s.entry_title} → {s.exit_title} · 停留 {s.duration_sec}s · {s.page_count} 页 ·{" "}
+                          {s.click_count} 次点击 · 最大滚动 {s.max_scroll_pct}%
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSessionDetail(item);
+                          setSelectedSessionId(s.session_id);
+                          setUserJourneyData(null);
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shrink-0"
+                      >
+                        回放此次会话
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
 
@@ -2191,13 +3585,32 @@ export default function AdminPage() {
                                 >
                                   必填项未齐
                                 </button>
+                              ) : m.status === 'expired' ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleConfirmMember(m.user_id)}
+                                    disabled={confirmingUid === m.user_id}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition disabled:opacity-50"
+                                    title="核验并通过实名资料转为正式成员"
+                                  >
+                                    {confirmingUid === m.user_id ? "核验中..." : "恢复并批准"}
+                                  </button>
+                                  <button
+                                    onClick={() => handleGrantGracePeriod(m.user_id)}
+                                    disabled={confirmingUid === m.user_id}
+                                    className="px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[11px] font-medium transition disabled:opacity-50"
+                                    title="重置14天临时宽限期，给予队员时间在小程序补齐资料"
+                                  >
+                                    宽限14天
+                                  </button>
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => handleConfirmMember(m.user_id)}
                                   disabled={confirmingUid === m.user_id}
                                   className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition disabled:opacity-50"
                                 >
-                                  {confirmingUid === m.user_id ? "核验中..." : (m.status === 'expired' ? "恢复并批准" : "核验并批准")}
+                                  {confirmingUid === m.user_id ? "核验中..." : "核验并批准"}
                                 </button>
                               )
                             ) : (
@@ -2284,7 +3697,7 @@ export default function AdminPage() {
                         >
                           <div className="flex items-center gap-3">
                             <img
-                              src={sc.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                              src={sc.logo_url || "/logo.png"}
                               alt={sc.name}
                               className="w-10 h-10 rounded-xl object-cover border border-white/10 shrink-0"
                             />
@@ -2333,7 +3746,7 @@ export default function AdminPage() {
                         >
                           <div className="flex items-center gap-3">
                             <img
-                              src={c.logo_url || "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300&auto=format&fit=crop&q=80"}
+                              src={c.logo_url || "/logo.png"}
                               alt={c.name}
                               className="w-10 h-10 rounded-xl object-cover border border-white/10 shrink-0"
                             />
@@ -2402,11 +3815,11 @@ export default function AdminPage() {
               <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/20 mb-4 space-y-1 text-xs">
                 <div className="flex items-center gap-1.5 font-bold text-purple-300">
                   <Clock className="w-4 h-4 text-purple-400" />
-                  <span>复旦戈准入规则与 14 天临时状态说明：</span>
+                  <span>大群准入字段三态规则（必填 / 选填 / 不显示）与 14 天临时状态说明：</span>
                 </div>
                 <p className="text-zinc-300 text-[11px] leading-relaxed">
-                  管理员可逐个字段开启为<span className="text-purple-300 font-bold">【必须】</span>或<span className="text-zinc-400 font-bold">【非必须】</span>。
-                  成员必须完成全部必须字段且获得管理员审核批准后，方可加入下属跑团；否则仅为临时人员（有效期 2 周/14天），到期该用户将被禁止进入大群。
+                  主理人或管理员可逐个字段设为<span className="text-purple-300 font-bold">【必填】</span>、<span className="text-emerald-300 font-bold">【选填】</span>或<span className="text-zinc-500 font-bold">【不显示】</span>。
+                  设为【不显示】的字段将在入群及修改资料表单中彻底隐藏且不纳入考核；成员需在 14 天内完成全部【必填】字段并获审核通过。
                 </p>
               </div>
 
@@ -2418,79 +3831,141 @@ export default function AdminPage() {
                     <span>正在加载准入规则...</span>
                   </div>
                 ) : (
-                  orgFieldRules.map((rule, idx) => (
-                    <div
-                      key={rule.field_key || idx}
-                      className={`flex items-center justify-between p-3.5 rounded-2xl border transition ${
-                        rule.required
-                          ? "bg-purple-500/[0.04] border-purple-500/30"
-                          : "bg-white/[0.02] border-white/5"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
-                            rule.required
-                              ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
-                              : "bg-white/5 text-zinc-500"
-                          }`}
-                        >
-                          {idx + 1}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-sm">{rule.label}</span>
-                            <span className="font-mono text-[10px] text-zinc-500">
-                              {rule.field_key}
-                            </span>
-                            {rule.required ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                                必须完成
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-500">
-                                选填项
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-zinc-400 mt-0.5">
-                            {rule.description || "成员加入及资料登记字段"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Toggle Button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = orgFieldRules.map((r, i) =>
-                            i === idx ? { ...r, required: !r.required } : r
-                          );
-                          setOrgFieldRules(updated);
-                        }}
-                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-                          rule.required
-                            ? "bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20"
-                            : "bg-white/10 hover:bg-white/15 text-zinc-400 hover:text-white"
+                  orgFieldRules.map((rule, idx) => {
+                    const ruleMode: "required" | "optional" | "hidden" =
+                      rule.mode === "hidden" || rule.hidden
+                        ? "hidden"
+                        : rule.mode === "required" || rule.required
+                        ? "required"
+                        : "optional";
+                    const setRuleMode = (nextMode: "required" | "optional" | "hidden") => {
+                      const updated = orgFieldRules.map((r, i) =>
+                        i === idx
+                          ? {
+                              ...r,
+                              mode: nextMode,
+                              required: nextMode === "required",
+                              hidden: nextMode === "hidden",
+                            }
+                          : r
+                      );
+                      setOrgFieldRules(updated);
+                    };
+                    return (
+                      <div
+                        key={rule.field || rule.field_key || idx}
+                        className={`flex items-center justify-between gap-3 p-3.5 rounded-2xl border transition ${
+                          ruleMode === "required"
+                            ? "bg-purple-500/[0.05] border-purple-500/30"
+                            : ruleMode === "hidden"
+                            ? "bg-black/40 border-white/5 opacity-60"
+                            : "bg-white/[0.02] border-white/10"
                         }`}
                       >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>{rule.required ? "设为必须 (必填)" : "设为非必须 (选填)"}</span>
-                      </button>
-                    </div>
-                  ))
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                              ruleMode === "required"
+                                ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                                : ruleMode === "hidden"
+                                ? "bg-zinc-900 text-zinc-600 border border-white/5"
+                                : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                            }`}
+                          >
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`font-bold text-sm ${ruleMode === "hidden" ? "text-zinc-500 line-through" : "text-white"}`}>
+                                {rule.label}
+                              </span>
+                              <span className="font-mono text-[10px] text-zinc-500">
+                                {rule.field || rule.field_key}
+                              </span>
+                              {ruleMode === "required" ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                  必填项
+                                </span>
+                              ) : ruleMode === "hidden" ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-500 border border-white/5">
+                                  不显示 (隐藏)
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                  选填项
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                              {rule.description || "成员加入及资料登记字段"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* 3-State Segmented Selector: 必填 / 选填 / 不显示 */}
+                        <div className="flex items-center bg-black/50 border border-white/10 rounded-xl p-1 shrink-0 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setRuleMode("required")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              ruleMode === "required"
+                                ? "bg-purple-600 text-white shadow"
+                                : "text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            必填
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRuleMode("optional")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              ruleMode === "optional"
+                                ? "bg-emerald-600 text-white shadow"
+                                : "text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            选填
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRuleMode("hidden")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              ruleMode === "hidden"
+                                ? "bg-zinc-700 text-zinc-200 shadow"
+                                : "text-zinc-500 hover:text-zinc-300"
+                            }`}
+                          >
+                            不显示
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
               {/* Bottom Actions */}
-              <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between">
-                <span className="text-xs text-zinc-500">
-                  当前必须字段数:{" "}
-                  <span className="text-purple-400 font-bold">
-                    {orgFieldRules.filter((r) => r.required).length}
-                  </span>{" "}
-                  / {orgFieldRules.length} 项
-                </span>
+              <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-3 text-xs text-zinc-400">
+                  <span>
+                    必填:{" "}
+                    <strong className="text-purple-400">
+                      {orgFieldRules.filter((r) => !(r.mode === "hidden" || r.hidden) && (r.mode === "required" || r.required)).length}
+                    </strong>
+                  </span>
+                  <span>
+                    选填:{" "}
+                    <strong className="text-emerald-400">
+                      {orgFieldRules.filter((r) => !(r.mode === "hidden" || r.hidden) && !(r.mode === "required" || r.required)).length}
+                    </strong>
+                  </span>
+                  <span>
+                    不显示:{" "}
+                    <strong className="text-zinc-500">
+                      {orgFieldRules.filter((r) => r.mode === "hidden" || r.hidden).length}
+                    </strong>
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

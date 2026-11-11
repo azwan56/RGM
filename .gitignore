@@ -89,3 +89,10 @@ venv.bak/
 # Uni-app / HBuilderX
 unpackage/
 .hbuilderx/
+
+# Xcode / iOS build artifacts
+build/
+*.xcarchive/
+xcuserdata/
+*.xcuserstate
+DerivedData/

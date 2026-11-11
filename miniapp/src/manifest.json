@@ -1,23 +1,108 @@
 {
-  "name": "珍珍跑团助手",
+  "name": "万跑跑团助手",
   "appid": "__UNI__RGM_CN",
-  "description": "RGM跑团管理与Canova教练小程序",
+  "description": "万跑跑团助手：跑团管理与 Canova 科学耐力训练系统",
   "versionName": "2.0.0",
   "versionCode": "200",
   "transformPx": false,
+  "uniStatistics": {
+    "enable": false
+  },
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "splashscreen": {
+      "alwaysShowBeforeRender": true,
+      "waiting": true,
+      "autoclose": true,
+      "delay": 0
+    },
+    "safearea": {
+      "background": "#121214",
+      "bottom": {
+        "offset": "auto"
+      },
+      "left": {
+        "offset": "none"
+      },
+      "right": {
+        "offset": "none"
+      }
+    },
+    "statusbar": {
+      "immersed": "supported",
+      "style": "light"
+    },
+    "modules": {
+      "OAuth": {}
+    },
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
+        ]
+      },
+      "ios": {
+        "id": "com.vanpower.rgm",
+        "privacyDescription": {
+          "NSLocationWhenInUseUsageDescription": "用于记录跑步轨迹、运动配速与距离",
+          "NSLocationAlwaysAndWhenInUseUsageDescription": "用于在后台持续记录跑步轨迹与配速",
+          "NSPhotoLibraryUsageDescription": "用于选择跑者头像和上传比赛成绩证书",
+          "NSCameraUsageDescription": "用于拍摄跑者头像和跑步打卡照片"
+        },
+        "capabilities": {
+          "entitlements": {
+            "com.apple.developer.applesignin": [
+              "Default"
+            ]
+          }
+        },
+        "dSYMs": false
+      },
+      "sdkConfigs": {
+        "oauth": {
+          "weixin": {
+            "appid": "wxdfff48d6d0506130",
+            "UniversalLinks": "https://rgm.vanpower.net/ulink/"
+          },
+          "apple": {}
+        }
+      }
+    }
+  },
+  "quickapp": {},
   "mp-weixin": {
     "appid": "wxdfff48d6d0506130",
     "setting": {
       "urlCheck": false,
       "es6": true,
       "postcss": true,
-      "minified": true
+      "minified": true,
+      "minifyWXSS": true,
+      "minifyWXML": true,
+      "uglifyFileName": true,
+      "bigPackageSizeSupport": true
+    },
+    "optimization": {
+      "subPackages": true
     },
     "usingComponents": true,
+    "lazyCodeLoading": "requiredComponents",
+    "__usePrivacyCheck__": true,
+    "uniStatistics": {
+      "enable": false
+    },
     "permission": {
       "scope.userLocation": {
-        "desc": "用于跑步轨迹记录"
+        "desc": "用于跑步轨迹记录与约跑集合地点地图选点"
       }
-    }
+    },
+    "requiredPrivateInfos": [
+      "chooseLocation",
+      "getLocation"
+    ]
   }
 }

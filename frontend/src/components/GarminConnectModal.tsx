@@ -35,6 +35,8 @@ export default function GarminConnectModal({
   const [corosDomain, setCorosDomain] = useState<"teamcnapi.coros.com" | "teamapi.coros.com">("teamcnapi.coros.com");
   const [corosAccount, setCorosAccount] = useState("");
   const [corosPassword, setCorosPassword] = useState("");
+  const [needsCoros2fa, setNeedsCoros2fa] = useState(false);
+  const [coros2faCode, setCoros2faCode] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -70,15 +72,27 @@ export default function GarminConnectModal({
         setNeedsMfa(false);
         setMfaCode("");
       } else {
-        const payload = {
+        const payload: any = {
           uid,
           account: corosAccount.trim(),
           password: corosPassword.trim(),
           domain: corosDomain,
         };
+        if (needsCoros2fa && coros2faCode.trim()) {
+          payload.code = coros2faCode.trim();
+        }
 
-        await apiClient.post("/api/auth/coros/bind", payload);
+        const res = await apiClient.post("/api/auth/coros/bind", payload);
+
+        if (res.data?.needs_2fa) {
+          setNeedsCoros2fa(true);
+          setLoading(false);
+          return;
+        }
+
         alert(`高驰账号 (${corosDomain.includes("cn") ? "中国区" : "国际区"}) 绑定成功！已开始自动同步最近运动数据。`);
+        setNeedsCoros2fa(false);
+        setCoros2faCode("");
       }
 
       onSuccess();
@@ -247,71 +261,111 @@ export default function GarminConnectModal({
             )
           ) : (
             /* COROS TAB */
-            <>
-              {/* COROS Domain Picker */}
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5 flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5" /> 高驰账号所属区域
-                </label>
-                <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-xl border border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => setCorosDomain("teamcnapi.coros.com")}
-                    className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                      corosDomain === "teamcnapi.coros.com" ? "bg-[#FC4C02] text-white shadow" : "text-zinc-400 hover:text-white"
-                    }`}
-                  >
-                    中国区 (teamcnapi)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCorosDomain("teamapi.coros.com")}
-                    className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                      corosDomain === "teamapi.coros.com" ? "bg-[#FC4C02] text-white shadow" : "text-zinc-400 hover:text-white"
-                    }`}
-                  >
-                    国际区 (teamapi)
-                  </button>
+            needsCoros2fa ? (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-[#FC4C02]/10 border border-[#FC4C02]/30 rounded-2xl">
+                  <span className="text-[#FC4C02] font-bold text-xs block mb-1">🔒 高驰官方二次安全验证</span>
+                  <span className="text-xs text-zinc-300 block leading-relaxed">
+                    高驰官方已向您的注册手机发送了 6 位安全验证码，请输入以完成账号绑定：
+                  </span>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">高驰注册账号（手机号或邮箱）</label>
-                <input
-                  type="text"
-                  required
-                  value={corosAccount}
-                  onChange={(e) => setCorosAccount(e.target.value)}
-                  placeholder="例如: 13800000000 或 runner@example.com"
-                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FC4C02] transition-all"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">6 位手机短信验证码</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    value={coros2faCode}
+                    onChange={(e) => setCoros2faCode(e.target.value)}
+                    placeholder="例如: 123456"
+                    className="w-full px-4 py-2.5 bg-white/5 border border-[#FC4C02]/50 rounded-xl text-center text-lg tracking-widest font-mono text-white focus:outline-none focus:border-[#FC4C02] transition-all"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">高驰登录密码</label>
-                <input
-                  type="password"
-                  required
-                  value={corosPassword}
-                  onChange={(e) => setCorosPassword(e.target.value)}
-                  placeholder="输入高驰登录密码"
-                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FC4C02] transition-all"
-                />
-              </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-[#FC4C02]/20 hover:opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? "正在验证..." : "确认验证码并完成绑定"}
+                </button>
 
-              <div className="flex items-start gap-2 p-3 bg-white/5 rounded-xl border border-white/5 text-[11px] text-zinc-400">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>您的凭据经过 AES-256-GCM 安全加密，仅在后端用于从 COROS Training Hub 获取运动记录，绝不泄露给任何第三方。</span>
+                <button
+                  type="button"
+                  onClick={() => setNeedsCoros2fa(false)}
+                  className="w-full py-2 text-xs text-zinc-400 hover:text-white transition-all text-center"
+                >
+                  返回修改高驰账号与密码
+                </button>
               </div>
+            ) : (
+              <>
+                {/* COROS Domain Picker */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 flex items-center gap-1">
+                    <Globe className="w-3.5 h-3.5" /> 高驰账号所属区域
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-xl border border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setCorosDomain("teamcnapi.coros.com")}
+                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                        corosDomain === "teamcnapi.coros.com" ? "bg-[#FC4C02] text-white shadow" : "text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      中国区 (teamcnapi)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCorosDomain("teamapi.coros.com")}
+                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                        corosDomain === "teamapi.coros.com" ? "bg-[#FC4C02] text-white shadow" : "text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      国际区 (teamapi)
+                    </button>
+                  </div>
+                </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-[#FC4C02]/20 hover:opacity-90 transition-all disabled:opacity-50"
-              >
-                {loading ? "正在验证并连接..." : "确认绑定高驰并即时同步"}
-              </button>
-            </>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">高驰注册账号（手机号或邮箱）</label>
+                  <input
+                    type="text"
+                    required
+                    value={corosAccount}
+                    onChange={(e) => setCorosAccount(e.target.value)}
+                    placeholder="例如: 13800000000 或 runner@example.com"
+                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FC4C02] transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">高驰登录密码</label>
+                  <input
+                    type="password"
+                    required
+                    value={corosPassword}
+                    onChange={(e) => setCorosPassword(e.target.value)}
+                    placeholder="输入高驰登录密码"
+                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-[#FC4C02] transition-all"
+                  />
+                </div>
+
+                <div className="flex items-start gap-2 p-3 bg-white/5 rounded-xl border border-white/5 text-[11px] text-zinc-400">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>您的凭据经过 AES-256-GCM 安全加密，仅在后端用于从 COROS Training Hub 获取运动记录，绝不泄露给任何第三方。</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-[#FC4C02] to-orange-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-[#FC4C02]/20 hover:opacity-90 transition-all disabled:opacity-50"
+                >
+                  {loading ? "正在验证并连接..." : "确认绑定高驰并即时同步"}
+                </button>
+              </>
+            )
           )}
         </form>
       </div>

@@ -143,14 +143,19 @@ def test_generate_canova_critique_individualized():
     assert "72 小时" in master_critique or "大师组" in master_critique or "超量恢复" in master_critique
 
 def test_analyze_multi_race_calendar_and_strategy():
+    from datetime import date, timedelta
     from utils.running_metrics import analyze_multi_race_calendar
     from routers.coach import generate_fallback_multi_race_strategy
 
+    d1 = (date.today() + timedelta(days=14)).isoformat()
+    d2 = (date.today() + timedelta(days=42)).isoformat()
+    d3 = (date.today() + timedelta(days=56)).isoformat()
+
     # 1. Test multi-race calendar with conflicts, pairings, and trail cross-discipline
     races = [
-        {"name": "上海半马", "race_type": "half", "race_date": "2026-10-18", "target_time": "1:32:00", "priority": "B"},
-        {"name": "无锡马拉松", "race_type": "marathon", "race_date": "2026-11-15", "target_time": "3:15:00", "priority": "A"},
-        {"name": "武功山 50K", "race_type": "trail", "race_date": "2026-11-29", "target_time": "8:00:00", "priority": "A"}
+        {"name": "上海半马", "race_type": "half", "race_date": d1, "target_time": "1:32:00", "priority": "B"},
+        {"name": "无锡马拉松", "race_type": "marathon", "race_date": d2, "target_time": "3:15:00", "priority": "A"},
+        {"name": "武功山 50K", "race_type": "trail", "race_date": d3, "target_time": "8:00:00", "priority": "A"}
     ]
     res = analyze_multi_race_calendar(races)
     assert res["total_upcoming"] == 3
@@ -178,23 +183,26 @@ def test_analyze_multi_race_calendar_and_strategy():
     assert "赛程冲突警报" in strat["conflict_resolution"]
 
 def test_update_race_priority_and_deduplication():
+    from datetime import date, timedelta
     from routers.coach import update_coach_race_priority, CoachRacePriorityRequest, CoachAnalysisRequest, generate_coach_analysis
     import uuid
     test_uid = f"u_test_pri_{uuid.uuid4().hex[:8]}"
+    r_d1 = (date.today() + timedelta(days=30)).isoformat()
+    r_d2 = (date.today() + timedelta(days=14)).isoformat()
     
     # 1. Setup profile and 2 races
     LocalStore.upsert_profile(test_uid, {"display_name": "多赛测试跑者"})
     r1_id = LocalStore.upsert_race_plan(test_uid, {
         "name": "武功山",
         "race_type": "trail",
-        "race_date": "2026-11-01",
+        "race_date": r_d1,
         "target_time": "8:00:00",
         "priority": "A"
     })
     r2_id = LocalStore.upsert_race_plan(test_uid, {
         "name": "灵鹫山",
         "race_type": "trail",
-        "race_date": "2026-10-15",
+        "race_date": r_d2,
         "target_time": "7:30:00",
         "priority": "A"
     })

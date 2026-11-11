@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import apiClient from "@/lib/apiClient";
+import apiClient, { formatBeijingTime } from "@/lib/apiClient";
 import {
   Calendar,
   CheckCircle2,
@@ -42,6 +42,12 @@ export default function TrainingPlanView({
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<any>(null);
+  const [savedPlanBeforePreview, setSavedPlanBeforePreview] = useState<any>(null);
+  const [confirmingPreview, setConfirmingPreview] = useState(false);
+  const [allPlans, setAllPlans] = useState<any[]>([]);
+  const [planBackups, setPlanBackups] = useState<any[]>([]);
+  const [showVersionSwitcher, setShowVersionSwitcher] = useState(false);
+  const [rollingBackPlan, setRollingBackPlan] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [selectedWeekIdx, setSelectedWeekIdx] = useState(1);
   const [userGoal, setUserGoal] = useState<any>(null);
@@ -59,7 +65,8 @@ export default function TrainingPlanView({
   const [preferredLongRunDay, setPreferredLongRunDay] = useState("Sunday");
   const [targetDate, setTargetDate] = useState("");
 
-  // Edit workout modal state
+  // Edit workout & runner daily self-report modal state
+  const [weekViewMode, setWeekViewMode] = useState<"w19_table" | "cards">("w19_table");
   const [editingModalOpen, setEditingModalOpen] = useState(false);
   const [editWeekIdx, setEditWeekIdx] = useState(1);
   const [editDayIdx, setEditDayIdx] = useState(0);
@@ -71,7 +78,78 @@ export default function TrainingPlanView({
   const [editDescription, setEditDescription] = useState("");
   const [editCompleted, setEditCompleted] = useState(false);
   const [editCoachNotes, setEditCoachNotes] = useState("");
+  const [editFeelingTag, setEditFeelingTag] = useState("");
+  const [editRpe, setEditRpe] = useState<string>("");
+  const [editAthleteNotes, setEditAthleteNotes] = useState("");
+  const [editWorkoutPhotos, setEditWorkoutPhotos] = useState<string[]>([]);
+  const [editNewPhotosBase64, setEditNewPhotosBase64] = useState<string[]>([]);
+  const [editExecutionText, setEditExecutionText] = useState("");
+
+  const PLAN_FEELING_TAGS = [
+    "🤩 状态极佳",
+    "😊 轻松舒适",
+    "💪 正常发挥",
+    "😮‍💨 略感吃力",
+    "🥵 疲惫掉速",
+    "🦵 肌肉酸紧",
+  ];
+
+  function handlePlanPhotoUploadChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const currentTotal = editWorkoutPhotos.length + editNewPhotosBase64.length;
+    const remain = Math.max(0, 3 - currentTotal);
+    files.slice(0, remain).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1280;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+            setEditNewPhotosBase64((prev) => [...prev, dataUrl]);
+          }
+        };
+        if (typeof reader.result === "string") {
+          img.src = reader.result;
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  }
+  const [editHrv, setEditHrv] = useState<string>("");
+  const [editRestingHr, setEditRestingHr] = useState<string>("");
+  const [editRespRate, setEditRespRate] = useState<string>("");
+  const [editStrainScore, setEditStrainScore] = useState<string>("");
+  const [editRecoveryPct, setEditRecoveryPct] = useState<string>("");
+  const [editStrengthDone, setEditStrengthDone] = useState(false);
+  const [editSwapDayIdx, setEditSwapDayIdx] = useState<number>(-1);
+  const [editIsSwapped, setEditIsSwapped] = useState(false);
   const [savingWorkout, setSavingWorkout] = useState(false);
+
+  // Weekly summary & injury report state
+  const [weekInjuryNote, setWeekInjuryNote] = useState("");
+  const [weekAthleteSummary, setWeekAthleteSummary] = useState("");
+  const [weekTravelNote, setWeekTravelNote] = useState("");
+  const [weekStrengthCount, setWeekStrengthCount] = useState<number>(0);
+  const [savingWeekSummary, setSavingWeekSummary] = useState(false);
 
   useEffect(() => {
     if (user?.id) {
@@ -174,6 +252,8 @@ function computeCurrentWeekIndex(planData: any): number {
     setLoading(true);
     try {
       const res = await apiClient.get(`/api/coach/plan/user/${uid}`);
+      setAllPlans(res.data?.all_plans || []);
+      setPlanBackups(res.data?.backups || []);
       if (res.data?.active_plan) {
         setPlan(res.data.active_plan);
         const curWk = res.data.active_plan.current_week_index || computeCurrentWeekIndex(res.data.active_plan);
@@ -190,6 +270,33 @@ function computeCurrentWeekIndex(planData: any): number {
       setShowConfig(true);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRunnerSwitchOrRollbackPlan(opts: { backupId?: string; targetPlanId?: string; label?: string }) {
+    if (!user?.id || rollingBackPlan) return;
+    if (
+      !window.confirm(
+        `确认将当前训练计划切换/回退至「${opts.label || "历史方案"}」吗？\n（您已完成的每日跑步打卡数据将 100% 合并保留）`
+      )
+    ) {
+      return;
+    }
+    setRollingBackPlan(true);
+    try {
+      const res = await apiClient.post(`/api/coach/plan/user/${user.id}/rollback`, {
+        operator_uid: user.id,
+        backup_id: opts.backupId,
+        target_plan_id: opts.targetPlanId,
+      });
+      setSyncSuccessMsg(res.data?.message || "✅ 已成功切换训练方案！");
+      setShowVersionSwitcher(false);
+      await loadUserPlan(user.id);
+      setTimeout(() => setSyncSuccessMsg(""), 5000);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "切换方案失败，请稍后重试");
+    } finally {
+      setRollingBackPlan(false);
     }
   }
 
@@ -240,11 +347,19 @@ function computeCurrentWeekIndex(planData: any): number {
       if (userGoal?.weekly_target) {
         payload.user_weekly_target = Number(userGoal.weekly_target);
       }
+      const hadActivePlan = Boolean(plan && !(plan as any)?.is_preview);
+      if (hadActivePlan || Boolean((plan as any)?.is_preview)) {
+        payload.preview_only = true;
+        if (hadActivePlan) {
+          setSavedPlanBeforePreview(plan);
+        }
+      }
 
       const res = await apiClient.post("/api/coach/plan/generate", payload);
       if (res.data?.success && res.data?.plan) {
-        setPlan(res.data.plan);
-        const curWk = res.data.plan.current_week_index || computeCurrentWeekIndex(res.data.plan);
+        const nextPlan = payload.preview_only ? { ...res.data.plan, is_preview: true } : res.data.plan;
+        setPlan(nextPlan);
+        const curWk = nextPlan.current_week_index || computeCurrentWeekIndex(nextPlan);
         setSelectedWeekIdx(curWk);
         setShowConfig(false);
       }
@@ -254,6 +369,31 @@ function computeCurrentWeekIndex(planData: any): number {
     } finally {
       setGenerating(false);
     }
+  }
+
+  async function handleConfirmPreviewPlan() {
+    if (!plan || !user?.id || confirmingPreview) return;
+    setConfirmingPreview(true);
+    try {
+      const res = await apiClient.post("/api/coach/plan/confirm", {
+        plan_payload: plan,
+        operator_uid: user.id,
+      });
+      if (res.data?.success && res.data?.plan) {
+        setPlan(res.data.plan);
+        setSavedPlanBeforePreview(null);
+        await loadUserPlan(user.id);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "确认启用新课表失败，请稍后重试");
+    } finally {
+      setConfirmingPreview(false);
+    }
+  }
+
+  function handleDiscardPreviewPlan() {
+    setPlan(savedPlanBeforePreview);
+    setSavedPlanBeforePreview(null);
   }
 
   function handleOpenEditModal(wIdx: number, dIdx: number, day: any) {
@@ -267,14 +407,72 @@ function computeCurrentWeekIndex(planData: any): number {
     setEditDescription(day.description || "");
     setEditCompleted(Boolean(day.completed));
     setEditCoachNotes(day.coach_notes || "");
+    setEditFeelingTag(day.feeling_tag || "");
+    setEditRpe(day.rpe != null ? String(day.rpe) : "");
+    setEditAthleteNotes(day.athlete_notes || "");
+    setEditWorkoutPhotos(
+      Array.isArray(day.workout_photos)
+        ? [...day.workout_photos]
+        : day.photo_url
+        ? [day.photo_url]
+        : []
+    );
+    setEditNewPhotosBase64([]);
+    setEditExecutionText(day.actual_execution_text || "");
+    setEditHrv(day.hrv != null ? String(day.hrv) : "");
+    setEditRestingHr(day.resting_hr != null ? String(day.resting_hr) : "");
+    setEditRespRate(day.respiratory_rate != null ? String(day.respiratory_rate) : "");
+    setEditStrainScore(day.strain_score != null ? String(day.strain_score) : "");
+    setEditRecoveryPct(day.recovery_pct != null ? String(day.recovery_pct) : "");
+    setEditStrengthDone(Boolean(day.strength_completed));
+    setEditSwapDayIdx(-1);
+    const noteStr = String(day.athlete_notes || "");
+    const execStr = String(day.actual_execution_text || "");
+    setEditIsSwapped(
+      Boolean(
+        day.is_swapped ||
+          day.swapped_from ||
+          noteStr.includes("对换课表") ||
+          (execStr.startsWith("跑休") && execStr.includes("对换"))
+      )
+    );
     setEditingModalOpen(true);
+  }
+
+  async function handleUndoSwapWorkout() {
+    if (!plan?.id || !user?.id) return;
+    const isPreviewPlan = Boolean((plan as any)?.is_preview);
+    setSavingWorkout(true);
+    try {
+      const payload: any = {
+        week_index: editWeekIdx,
+        day_index: editDayIdx,
+        undo_swap: true,
+        operator_uid: user.id
+      };
+      if (isPreviewPlan) {
+        payload.preview_only = true;
+        payload.plan_payload = plan;
+        payload.schedule_data = plan?.schedule_data;
+      }
+      const res = await apiClient.patch(`/api/coach/plan/${plan.id}/workout`, payload);
+      if (res.data?.success && res.data?.plan) {
+        setPlan(res.data.plan);
+        setEditingModalOpen(false);
+      }
+    } catch (err) {
+      console.error("Failed to undo swap:", err);
+      alert("取消对换失败，请重试！");
+    } finally {
+      setSavingWorkout(false);
+    }
   }
 
   async function handleSaveWorkout() {
     if (!plan?.id || !user?.id) return;
     setSavingWorkout(true);
     try {
-      const payload = {
+      const payload: any = {
         week_index: editWeekIdx,
         day_index: editDayIdx,
         workout_type: editWorkoutType,
@@ -285,8 +483,25 @@ function computeCurrentWeekIndex(planData: any): number {
         description: editDescription,
         completed: editCompleted,
         coach_notes: editCoachNotes,
+        feeling_tag: editFeelingTag,
+        athlete_notes: editAthleteNotes,
+        workout_photos: editWorkoutPhotos,
+        new_photos_base64: editNewPhotosBase64,
+        actual_execution_text: editExecutionText,
+        strength_completed: editStrengthDone,
         operator_uid: user.id
       };
+      if (editRpe.trim() !== "") payload.rpe = Number(editRpe);
+      if (editHrv.trim() !== "") payload.hrv = Number(editHrv);
+      if (editRestingHr.trim() !== "") payload.resting_hr = Number(editRestingHr);
+      if (editRespRate.trim() !== "") payload.respiratory_rate = Number(editRespRate);
+      if (editStrainScore.trim() !== "") payload.strain_score = Number(editStrainScore);
+      if (editRecoveryPct.trim() !== "") payload.recovery_pct = Number(editRecoveryPct);
+      if (editSwapDayIdx === -2) {
+        payload.undo_swap = true;
+      } else if (editSwapDayIdx >= 0 && editSwapDayIdx !== editDayIdx) {
+        payload.swap_with_day_index = editSwapDayIdx;
+      }
       const res = await apiClient.patch(`/api/coach/plan/${plan.id}/workout`, payload);
       if (res.data?.success && res.data?.plan) {
         setPlan(res.data.plan);
@@ -297,6 +512,30 @@ function computeCurrentWeekIndex(planData: any): number {
       alert("保存课表更新失败，请重试！");
     } finally {
       setSavingWorkout(false);
+    }
+  }
+
+  async function handleSaveRunnerWeekSummary() {
+    if (!plan?.id || !user?.id || !activeWeek) return;
+    setSavingWeekSummary(true);
+    try {
+      const res = await apiClient.post(`/api/coach/plan/${plan.id}/week-summary`, {
+        operator_uid: user.id,
+        week_index: activeWeek.week_index || selectedWeekIdx,
+        injury_note: weekInjuryNote,
+        athlete_weekly_summary: weekAthleteSummary,
+        travel_or_leave_note: weekTravelNote,
+        strength_sessions_done: Number(weekStrengthCount) || 0,
+      });
+      if (res.data?.plan) {
+        setPlan(res.data.plan);
+        setSyncSuccessMsg("✅ 本周小结与伤痛报备已同步提交给教练！");
+        setTimeout(() => setSyncSuccessMsg(""), 4000);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "保存周小结失败");
+    } finally {
+      setSavingWeekSummary(false);
     }
   }
 
@@ -313,6 +552,11 @@ function computeCurrentWeekIndex(planData: any): number {
       const res = await apiClient.patch(`/api/coach/plan/${plan.id}/workout`, payload);
       if (res.data?.success && res.data?.plan) {
         setPlan(res.data.plan);
+        if (newStatus) {
+          const updatedWeek = (res.data.plan?.schedule_data?.weeks || []).find((w: any) => w.week_index === wIdx);
+          const updatedDay = updatedWeek?.days?.[dIdx] || { ...day, completed: true };
+          handleOpenEditModal(wIdx, dIdx, updatedDay);
+        }
       }
     } catch (err) {
       console.error("Failed to toggle completion:", err);
@@ -321,6 +565,15 @@ function computeCurrentWeekIndex(planData: any): number {
 
   const currentWeeks = plan?.schedule_data?.weeks || [];
   const activeWeek = currentWeeks.find((w: any) => w.week_index === selectedWeekIdx) || currentWeeks[0];
+
+  useEffect(() => {
+    if (activeWeek) {
+      setWeekInjuryNote(activeWeek.injury_note || "");
+      setWeekAthleteSummary(activeWeek.athlete_weekly_summary || "");
+      setWeekTravelNote(activeWeek.travel_or_leave_note || "");
+      setWeekStrengthCount(activeWeek.strength_sessions_done || 0);
+    }
+  }, [activeWeek?.week_index, plan?.updated_at]);
 
   const maintenanceOptions = [
     {
@@ -375,13 +628,18 @@ function computeCurrentWeekIndex(planData: any): number {
             <Calendar className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base font-black text-white">
                 {plan ? plan.title : "个人科学周期训练计划"}
               </h2>
               {plan && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
                   执行中 · {plan.weeks_count}周周期
+                </span>
+              )}
+              {plan?.source_label && (
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                  {plan.source_label}
                 </span>
               )}
             </div>
@@ -391,13 +649,26 @@ function computeCurrentWeekIndex(planData: any): number {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          {(planBackups.length > 0 || allPlans.filter((p) => p.status === "archived").length > 0) && (
+            <button
+              onClick={() => setShowVersionSwitcher((prev) => !prev)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                showVersionSwitcher
+                  ? "bg-[#FC4C02] text-white border-[#FC4C02] font-bold"
+                  : "bg-[#18181c] hover:bg-white/10 text-zinc-300 border-white/10"
+              }`}
+              title="在 AI 科学周期计划与教练派发课表之间自由切换或回退上一版"
+            >
+              历史方案切换 ({planBackups.length + allPlans.filter((p) => p.status === "archived").length})
+            </button>
+          )}
           {plan && (
             <button
               onClick={() => setShowConfig(!showConfig)}
-              className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold border border-white/10 text-zinc-300 bg-[#18181c] hover:border-purple-500/50 hover:text-white transition flex items-center justify-center gap-1.5"
+              className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-medium border border-white/10 text-zinc-300 bg-[#18181c] hover:border-white/25 hover:text-white transition flex items-center justify-center gap-1.5"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
               {showConfig ? "收起定制面板" : "重新制定训练计划"}
             </button>
           )}
@@ -413,6 +684,126 @@ function computeCurrentWeekIndex(planData: any): number {
           )}
         </div>
       </div>
+
+      {/* ── Preview Confirmation Bar (prevents overwriting active plan without explicit confirmation) ── */}
+      {Boolean((plan as any)?.is_preview) && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+          <div className="space-y-0.5">
+            <div className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4" />
+              新课表预览模式（尚未覆盖您正在执行的训练计划）
+            </div>
+            <p className="text-[11px] text-zinc-300">
+              您可以先逐周查看配速与跑量安排；确认无误后点击右侧「确认启用新课表」正式生效，原课表将自动存入历史快照。
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleDiscardPreviewPlan}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 transition cursor-pointer"
+            >
+              放弃预览
+            </button>
+            <button
+              type="button"
+              disabled={confirmingPreview}
+              onClick={handleConfirmPreviewPlan}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              {confirmingPreview ? "正在写入..." : "确认启用新课表"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Collapsible Multi-Plan Switcher & Version Rollback Panel ── */}
+      {showVersionSwitcher && (
+        <div className="bg-[#18181c] border border-white/10 rounded-2xl p-5 space-y-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                多套训练方案切换与历史版本回退
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                每次重新生成或由教练派发课表时，系统都会自动保留历史方案。您可以随时切回任意方案，所有已完成的打卡数据自动合并保留。
+              </p>
+            </div>
+            <button
+              onClick={() => setShowVersionSwitcher(false)}
+              className="text-xs text-zinc-400 hover:text-white cursor-pointer"
+            >
+              收起 ✕
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto pr-1">
+            {planBackups.map((bk: any) => (
+              <div
+                key={bk.id}
+                className="p-3 rounded-xl bg-[#121215] border border-white/10 flex items-center justify-between gap-2 text-xs"
+              >
+                <div className="min-w-0">
+                  <div className="font-bold text-white truncate">
+                    历史快照：{bk.previous_plan_title || "原训练课表"}
+                  </div>
+                  <div className="text-[10px] text-zinc-400 truncate mt-0.5">
+                    备份原因：{bk.action_label || "课表变更"} · {formatBeijingTime(bk.created_at, true)}
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    handleRunnerSwitchOrRollbackPlan({
+                      backupId: bk.id,
+                      label: bk.previous_plan_title || "原训练课表",
+                    })
+                  }
+                  disabled={rollingBackPlan}
+                  className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium shrink-0 cursor-pointer"
+                >
+                  恢复此版本
+                </button>
+              </div>
+            ))}
+
+            {allPlans
+              .filter((p: any) => p.status === "archived")
+              .map((arc: any) => (
+                <div
+                  key={arc.id}
+                  className="p-3 rounded-xl bg-[#121215] border border-white/10 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-white truncate">{arc.title}</span>
+                      {arc.source_label && (
+                        <span className="px-1.5 py-0.2 rounded bg-white/5 border border-white/10 text-zinc-300 text-[9px] font-medium shrink-0">
+                          {arc.source_label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 truncate mt-0.5">
+                      历史归档方案 · {arc.weeks_count || 4}周周期 · 更新于 {String(arc.updated_at || "").slice(0, 10)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() =>
+                      handleRunnerSwitchOrRollbackPlan({
+                        targetPlanId: arc.id,
+                        label: arc.title,
+                      })
+                    }
+                    disabled={rollingBackPlan}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium shrink-0 cursor-pointer"
+                  >
+                    切回此方案
+                  </button>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* ── 🏆 Target Race Completed / A-Race Switch Recommendation Banner ── */}
       {plan && isTargetRaceCompleted && recommendedRace && (
@@ -764,7 +1155,11 @@ function computeCurrentWeekIndex(planData: any): number {
                 <span className="text-sm font-black text-purple-400">
                   {plan.schedule_data.current_fitness_snapshot.vo2max || "—"}
                 </span>
-                <span className="text-[9px] text-zinc-500 block mt-0.5">Daniels VDOT 模型基准</span>
+                <span className="text-[9px] text-zinc-500 block mt-0.5">
+                  {plan.schedule_data.current_fitness_snapshot.vo2max_source === "watch"
+                    ? "手表生理实测数据"
+                    : "手表实测 / 生理基准"}
+                </span>
               </div>
 
               <div className="bg-[#18181c] p-3 rounded-2xl border border-white/5">
@@ -801,21 +1196,60 @@ function computeCurrentWeekIndex(planData: any): number {
             </div>
           )}
 
-          {/* Goal Summary Quote */}
-          {plan.overview_summary && (
-            <div className="p-5 rounded-3xl bg-purple-950/20 border border-purple-500/20 text-xs space-y-1.5">
-              <div className="font-bold text-purple-300 flex items-center gap-2">
-                <Target className="w-4 h-4 text-purple-400" />
-                Canova 周期战术设计综述：
+          {/* Coach Verified & Published Banner */}
+          {(plan.review_status === "published" || plan.coach_review_note || plan.schedule_data?.coach_review) && (
+            <div className="p-5 rounded-3xl bg-emerald-950/25 border border-emerald-500/30 text-xs space-y-2 shadow-lg shadow-emerald-950/10">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="font-bold text-emerald-300 flex items-center gap-2 text-sm">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>
+                    🧢 跑团教练【{plan.reviewed_by_name || plan.schedule_data?.coach_review?.reviewed_by_name || "认证教练"}】已审核并发布本计划
+                  </span>
+                </div>
+                {(plan.reviewed_at || plan.schedule_data?.coach_review?.reviewed_at) && (
+                  <span className="text-[11px] text-emerald-400/70 font-mono">
+                    发布于 {formatBeijingTime(plan.reviewed_at || plan.schedule_data?.coach_review?.reviewed_at, true)}
+                  </span>
+                )}
               </div>
-              <p className="text-zinc-300 leading-relaxed font-light">
-                {plan.overview_summary}
-              </p>
+              {(plan.coach_review_note || plan.schedule_data?.coach_review?.coach_review_note) && (
+                <p className="text-zinc-200 leading-relaxed bg-black/30 rounded-2xl p-3.5 border border-emerald-500/20">
+                  <strong className="text-emerald-400">👨‍🏫 教练执行叮嘱：</strong>
+                  {plan.coach_review_note || plan.schedule_data?.coach_review?.coach_review_note}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Goal Summary Quote & Macro Roadmap */}
+          {(plan.overview_summary || plan.schedule_data?.macro_roadmap) && (
+            <div className="p-5 rounded-3xl bg-purple-950/20 border border-purple-500/20 text-xs space-y-2.5">
+              {plan.overview_summary && (
+                <div>
+                  <div className="font-bold text-purple-300 flex items-center gap-2 mb-1">
+                    <Target className="w-4 h-4 text-purple-400" />
+                    Canova 周期战术设计综述：
+                  </div>
+                  <p className="text-zinc-300 leading-relaxed font-light">
+                    {plan.overview_summary}
+                  </p>
+                </div>
+              )}
+              {plan.schedule_data?.macro_roadmap && (
+                <div className="bg-black/30 border border-purple-500/20 rounded-2xl p-3.5">
+                  <div className="font-bold text-purple-300 mb-1">🗺️ 阶段宏观周期大纲 (教练规划)：</div>
+                  <p className="text-zinc-200 whitespace-pre-wrap leading-relaxed">
+                    {String(plan.schedule_data.macro_roadmap)
+                      .replace(/\bW(\d+)-W(\d+)\b/g, "第$1-$2周")
+                      .replace(/\bW(\d+)\b/g, "第$1周")}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
           {/* ── Week Tabs Bar ── */}
-          <div className="bg-[#121215] border border-white/[0.08] p-3 sm:p-4 rounded-3xl">
+          <div className="bg-[#121215] border border-white/[0.08] p-3 sm:p-4 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
               {currentWeeks.map((w: any) => {
                 const isActive = w.week_index === selectedWeekIdx;
@@ -824,7 +1258,7 @@ function computeCurrentWeekIndex(planData: any): number {
                   <button
                     key={w.week_index}
                     onClick={() => setSelectedWeekIdx(w.week_index)}
-                    className={`shrink-0 px-4 py-2.5 rounded-2xl border text-xs font-bold transition flex flex-col items-start min-w-[110px] relative ${
+                    className={`shrink-0 px-4 py-2.5 rounded-2xl border text-xs font-bold transition flex flex-col items-start min-w-[110px] relative cursor-pointer ${
                       isActive
                         ? "bg-purple-600 text-white border-purple-500 shadow-lg shadow-purple-600/30"
                         : hasRace
@@ -855,6 +1289,29 @@ function computeCurrentWeekIndex(planData: any): number {
                   </button>
                 );
               })}
+            </div>
+
+            <div className="flex items-center gap-1 bg-[#18181c] p-1 rounded-xl border border-white/10 shrink-0 self-start sm:self-auto">
+              <button
+                onClick={() => setWeekViewMode("w19_table")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  weekViewMode === "w19_table"
+                    ? "bg-[#FC4C02] text-white shadow"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                📊 周训练与体感表
+              </button>
+              <button
+                onClick={() => setWeekViewMode("cards")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  weekViewMode === "cards"
+                    ? "bg-purple-600 text-white shadow"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                🗓️ 7日卡片视图
+              </button>
             </div>
           </div>
 
@@ -927,16 +1384,16 @@ function computeCurrentWeekIndex(planData: any): number {
                       </div>
                       <div className="w-px h-6 bg-white/10" />
                       <div className="text-right">
-                        <span className="text-[10px] text-zinc-500 block font-bold">自定周目标</span>
+                        <span className="text-[10px] text-zinc-500 block font-bold">本周已执行</span>
                         <span className="text-sm font-black text-emerald-400">
-                          {userGoal?.weekly_target || 50} km
+                          {activeWeek.actual_mileage_km || 0} km ({activeWeek.compliance_rate || 0}%)
                         </span>
                       </div>
                       <div className="w-px h-6 bg-white/10" />
                       <div className="text-right">
-                        <span className="text-[10px] text-zinc-500 block font-bold">训练天数</span>
+                        <span className="text-[10px] text-zinc-500 block font-bold">力量训练</span>
                         <span className="text-sm font-black text-purple-400">
-                          {(activeWeek.days || []).filter((d: any) => d.workout_type !== "rest").length} 天
+                          {activeWeek.strength_sessions_done || 0} 次
                         </span>
                       </div>
                     </div>
@@ -946,7 +1403,7 @@ function computeCurrentWeekIndex(planData: any): number {
                       onClick={handleSyncToGoals}
                       disabled={syncingGoal}
                       title="将当前训练计划的平均跑量与各月跑量同步为我的个人周/月目标"
-                      className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 border border-purple-500/30 text-purple-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50"
+                      className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 border border-purple-500/30 text-purple-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${syncingGoal ? "animate-spin" : ""}`} />
                       <span>{syncingGoal ? "同步中..." : "同步至我的目标"}</span>
@@ -968,177 +1425,661 @@ function computeCurrentWeekIndex(planData: any): number {
                 )}
               </div>
 
-              {/* Daily 7-day Workout Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3">
-                {(activeWeek.days || []).map((day: any, dIdx: number) => {
-                  const typeMeta = workoutTypeStyles[day.workout_type] || workoutTypeStyles.easy_run;
-                  const isRest = day.workout_type === "rest";
-                  const todayStr = new Date().toLocaleDateString("en-CA");
-                  const isPast = Boolean(day.date && day.date < todayStr);
-                  const isMissed = Boolean(day.is_missed ?? (isPast && !day.completed && !isRest && (day.distance_km || 0) > 0));
-
-                  return (
-                    <div
-                      key={dIdx}
-                      className={`bg-[#121215] border rounded-3xl p-4 flex flex-col justify-between transition-all hover:border-purple-500/40 ${
-                        day.completed
-                          ? "border-emerald-500/30 bg-emerald-950/5"
-                          : isMissed
-                          ? "border-rose-500/40 bg-rose-950/15 shadow-[0_0_15px_rgba(244,63,94,0.08)]"
-                          : typeMeta.border
-                      }`}
-                    >
-                      <div className="space-y-3">
-                        {/* Day & Date Header */}
-                        <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                          <div>
-                            <span className="text-xs font-black text-white block">
-                              {day.day_of_week}
-                            </span>
-                            <span className="text-[10px] text-zinc-500 block">
-                              {day.date ? day.date.substring(5) : ""}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {isMissed && (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black border border-rose-500/40 bg-rose-500/20 text-rose-300 animate-pulse">
-                                ✗ 缺跑
-                              </span>
-                            )}
-                            {day.completed && day.actual_distance_km && (
-                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-                                实跑 {day.actual_distance_km}k
-                              </span>
-                            )}
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${typeMeta.badge}`}>
-                              {typeMeta.label}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Title & Distance */}
-                        <div>
-                          <div className="text-xs font-bold text-zinc-200 line-clamp-2 leading-snug">
-                            {day.title}
-                          </div>
-                          {!isRest && (
-                            <div className="mt-1.5 flex items-baseline gap-1">
-                              <span className="text-base font-black text-white tracking-tight">
-                                {day.distance_km || 0}
-                              </span>
-                              <span className="text-[10px] text-zinc-400">km</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Pace & Heart Rate Pills */}
-                        {!isRest && (day.target_pace || day.target_hr_zone) && (
-                          <div className="space-y-1 text-[10px]">
-                            {day.target_pace && day.target_pace !== "—" && (
-                              <div className="bg-[#18181c] px-2 py-1 rounded-lg border border-white/5 text-purple-300 font-medium">
-                                ⏱️ {day.target_pace}
-                              </div>
-                            )}
-                            {day.target_hr_zone && day.target_hr_zone !== "—" && (
-                              <div className="bg-[#18181c] px-2 py-1 rounded-lg border border-white/5 text-emerald-300 font-medium truncate">
-                                ❤️ {day.target_hr_zone}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Description */}
-                        <p className="text-[11px] text-zinc-400 leading-relaxed font-light line-clamp-4">
-                          {day.description}
-                        </p>
-
-                        {/* Coach Notes Bubble (if any) */}
-                        {day.coach_notes && (
-                          <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-[10px] text-amber-200 space-y-1">
-                            <div className="font-bold flex items-center gap-1 text-amber-300">
-                              <span>👨‍🏫 教练批注：</span>
-                            </div>
-                            <p className="leading-snug">{day.coach_notes}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Card Footer Actions */}
-                      <div className="pt-3 border-t border-white/5 mt-3 flex items-center justify-between gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleQuickComplete(activeWeek.week_index, dIdx, day)}
-                          className={`flex-1 py-1 px-2 rounded-xl text-[10px] font-bold border transition flex items-center justify-center gap-1 ${
-                            day.completed
-                              ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 hover:bg-emerald-500/30"
-                              : isMissed
-                              ? "bg-rose-500/15 border-rose-500/40 text-rose-400 hover:bg-rose-500/25 hover:border-rose-500"
-                              : "bg-[#18181c] border-white/10 text-zinc-400 hover:text-white"
-                          }`}
-                          title={
-                            day.completed
-                              ? (day.actual_pace ? `已打卡：实跑 ${day.actual_distance_km || 0}km，配速 ${day.actual_pace}` : "点击取消完成状态")
-                              : isMissed
-                              ? "该课表已过且未检测到打卡，点击补卡"
-                              : "点击打卡完成"
-                          }
-                        >
-                          {day.completed ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span>{day.actual_distance_km ? `已打卡 ${day.actual_distance_km}km` : "已完成"}</span>
-                            </>
-                          ) : isMissed ? (
-                            <>
-                              <X className="w-3.5 h-3.5 text-rose-400" />
-                              <span>缺跑 · 点击补卡</span>
-                            </>
-                          ) : (
-                            <>
-                              <Check className="w-3 h-3 text-zinc-500" />
-                              <span>打卡</span>
-                            </>
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(activeWeek.week_index, dIdx, day)}
-                          className="p-1.5 rounded-xl text-[10px] border border-white/10 text-zinc-400 hover:text-white hover:border-purple-500 bg-[#18181c] transition"
-                          title="微调课表 / 添加教练批注"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+              {/* ── VIEW 1: W19 Standard Weekly Plan & Self-Report Table ── */}
+              {weekViewMode === "w19_table" ? (
+                <div className="bg-[#121215] border border-white/10 rounded-3xl overflow-hidden shadow-xl">
+                  <div className="bg-[#191922] px-5 py-3 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2 py-0.5 rounded bg-[#FC4C02]/20 text-[#FC4C02] font-black">
+                        第 {activeWeek.week_index} 周 · 训练记录与体感反馈表
+                      </span>
+                      <span className="text-zinc-300 font-semibold">
+                        {activeWeek.summary_banner_text || `周跑量：${activeWeek.weekly_mileage_km || 0}公里。执行：${activeWeek.actual_mileage_km || 0}公里，完成度${activeWeek.compliance_rate || 0}%；力量：${activeWeek.strength_sessions_done || 0}次。`}
+                      </span>
                     </div>
-                  );
-                })}
+                    <span className="text-[11px] text-zinc-400">
+                      💡 点击任意一行可填报当日 RPE (1-10)、训练自我感受、晨起身体指标或调休对换课表
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[#16161d] text-zinc-400 border-b border-white/10 text-[11px]">
+                          <th className="py-2.5 px-3 font-bold w-24">星期 / 日期</th>
+                          <th className="py-2.5 px-3 font-bold min-w-[210px]">训练计划 (教练处方)</th>
+                          <th className="py-2.5 px-3 font-bold w-44">
+                            身体指标
+                            <span className="block text-[9px] text-zinc-500 font-normal">HRV / 静心 / 呼吸 / 压力(0-21)</span>
+                          </th>
+                          <th className="py-2.5 px-2.5 font-bold w-20 text-center">恢复%</th>
+                          <th className="py-2.5 px-3 font-bold min-w-[170px]">计划执行情况</th>
+                          <th className="py-2.5 px-2 font-bold w-16 text-center">RPE 10</th>
+                          <th className="py-2.5 px-3 font-bold min-w-[180px]">备注 (自我感受 / 教练批注)</th>
+                          <th className="py-2.5 px-3 font-bold w-28 text-right">打卡 / 填报</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {(activeWeek.days || []).map((day: any, dIdx: number) => {
+                          const isRest = day.workout_type === "rest" || Number(day.distance_km || 0) <= 0;
+                          const recPct = day.recovery_pct != null ? Number(day.recovery_pct) : null;
+                          const recColor =
+                            recPct == null
+                              ? "bg-white/5 text-zinc-500"
+                              : recPct >= 67
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                              : recPct >= 34
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                              : "bg-rose-500/25 text-rose-300 border border-rose-500/40";
+                          const lowHrv = Boolean(day.low_hrv_alert) || (day.hrv != null && Number(day.hrv) <= 32);
+
+                          return (
+                            <tr
+                              key={dIdx}
+                              onClick={() => handleOpenEditModal(activeWeek.week_index, dIdx, day)}
+                              className="hover:bg-white/[0.03] transition cursor-pointer"
+                            >
+                              <td className="py-3 px-3 align-top">
+                                <div className="font-bold text-white">{day.day_of_week}</div>
+                                <div className="text-[10px] text-zinc-500 font-mono">{day.date ? day.date.slice(5) : ""}</div>
+                                {day.swapped_from && (
+                                  <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] bg-blue-500/20 text-blue-300">
+                                    🔁 与{day.swapped_from}对换
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-3 align-top">
+                                <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                                  <span>{day.title}</span>
+                                  {!isRest && (
+                                    <span className="text-[#FC4C02] font-mono text-xs">{day.distance_km}km</span>
+                                  )}
+                                </div>
+                                {day.description && (
+                                  <div className="text-[11px] text-zinc-400 mt-0.5 leading-snug">{day.description}</div>
+                                )}
+                              </td>
+
+                              <td className={`py-3 px-3 align-top font-mono text-[11px] ${lowHrv ? "bg-rose-500/10" : ""}`}>
+                                {day.biometrics_text ? (
+                                  <span className={lowHrv ? "text-rose-300 font-bold" : "text-zinc-200"}>
+                                    {day.biometrics_text}
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-600">点击填报晨起指标</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-2.5 align-top text-center">
+                                {recPct != null ? (
+                                  <span className={`inline-block px-2 py-0.5 rounded-lg text-[11px] font-black font-mono ${recColor}`}>
+                                    {recPct}%
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-600">—</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-3 align-top">
+                                {day.actual_execution_text ? (
+                                  <div className="font-mono text-emerald-300 font-semibold">{day.actual_execution_text}</div>
+                                ) : day.completed ? (
+                                  <div className="font-mono text-emerald-400">
+                                    ✅ 已完成 {day.actual_distance_km || day.distance_km}km
+                                  </div>
+                                ) : isRest ? (
+                                  <span className="text-zinc-500">跑休</span>
+                                ) : (
+                                  <span className="text-zinc-500">待执行 / 点击录入</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-2 align-top text-center">
+                                {day.rpe != null ? (
+                                  <span
+                                    className={`inline-block px-2 py-0.5 rounded-lg font-mono font-black text-xs ${
+                                      Number(day.rpe) >= 8
+                                        ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                        : Number(day.rpe) >= 6
+                                        ? "bg-amber-500/20 text-amber-300"
+                                        : "bg-emerald-500/15 text-emerald-300"
+                                    }`}
+                                  >
+                                    {day.rpe}
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-600">—</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-3 align-top space-y-1">
+                                {day.feeling_tag && (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 mr-1">
+                                    {day.feeling_tag}
+                                  </span>
+                                )}
+                                {day.athlete_notes ? (
+                                  <div className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
+                                    💬 感受: {day.athlete_notes}
+                                  </div>
+                                ) : !day.feeling_tag && !(day.workout_photos && day.workout_photos.length > 0) ? (
+                                  <span className="text-zinc-600 text-[11px]">点击填写感受/备注/照片...</span>
+                                ) : null}
+                                {day.workout_photos && day.workout_photos.length > 0 && (
+                                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5" onClick={(e) => e.stopPropagation()}>
+                                    {day.workout_photos.map((pUrl: string, pIdx: number) => (
+                                      <a
+                                        key={pIdx}
+                                        href={pUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block w-10 h-10 rounded-lg overflow-hidden border border-white/15 hover:border-emerald-400"
+                                      >
+                                        <img src={pUrl} alt="打卡照片" className="w-full h-full object-cover" />
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                                {day.coach_notes && (
+                                  <div className="text-[11px] text-purple-200 bg-purple-500/10 border border-purple-500/20 rounded px-2 py-1">
+                                    🧢 教练: {day.coach_notes}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleQuickComplete(activeWeek.week_index, dIdx, day)}
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                                      day.completed
+                                        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                                        : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                                    }`}
+                                  >
+                                    {day.completed ? "✓已卡" : "打卡"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(activeWeek.week_index, dIdx, day)}
+                                    className="px-2 py-1 rounded-lg bg-[#FC4C02]/20 hover:bg-[#FC4C02]/35 text-[#FC4C02] border border-[#FC4C02]/30 text-[10px] font-bold cursor-pointer"
+                                  >
+                                    {day.completed ? "感受/照片" : "体感/调休"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                /* ── VIEW 2: Daily 7-day Workout Cards Grid ── */
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3">
+                  {(activeWeek.days || []).map((day: any, dIdx: number) => {
+                    const typeMeta = workoutTypeStyles[day.workout_type] || workoutTypeStyles.easy_run;
+                    const isRest = day.workout_type === "rest";
+                    const todayStr = new Date().toLocaleDateString("en-CA");
+                    const isPast = Boolean(day.date && day.date < todayStr);
+                    const isMissed = Boolean(day.is_missed ?? (isPast && !day.completed && !isRest && (day.distance_km || 0) > 0));
+
+                    return (
+                      <div
+                        key={dIdx}
+                        className={`bg-[#121215] border rounded-3xl p-4 flex flex-col justify-between transition-all hover:border-purple-500/40 ${
+                          day.completed
+                            ? "border-emerald-500/30 bg-emerald-950/5"
+                            : isMissed
+                            ? "border-rose-500/40 bg-rose-950/15 shadow-[0_0_15px_rgba(244,63,94,0.08)]"
+                            : typeMeta.border
+                        }`}
+                      >
+                        <div className="space-y-3">
+                          {/* Day & Date Header */}
+                          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                            <div>
+                              <span className="text-xs font-black text-white block">
+                                {day.day_of_week}
+                              </span>
+                              <span className="text-[10px] text-zinc-500 block">
+                                {day.date ? day.date.substring(5) : ""}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {day.rpe != null && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300">
+                                  RPE {day.rpe}
+                                </span>
+                              )}
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${typeMeta.badge}`}>
+                                {typeMeta.label}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Title & Distance */}
+                          <div>
+                            <div className="text-xs font-bold text-zinc-200 line-clamp-2 leading-snug">
+                              {day.title}
+                            </div>
+                            {!isRest && (
+                              <div className="mt-1.5 flex items-baseline gap-1">
+                                <span className="text-base font-black text-white tracking-tight">
+                                  {day.distance_km || 0}
+                                </span>
+                                <span className="text-[10px] text-zinc-400">km</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Description */}
+                          <p className="text-[11px] text-zinc-400 leading-relaxed font-light line-clamp-3">
+                            {day.description}
+                          </p>
+
+                          {/* Athlete Self-Feel, Photos & Coach Notes */}
+                          {day.feeling_tag && (
+                            <div className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              {day.feeling_tag}
+                            </div>
+                          )}
+                          {day.athlete_notes && (
+                            <div className="bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl text-[10px] text-amber-200">
+                              💬 自我感受: {day.athlete_notes}
+                            </div>
+                          )}
+                          {day.workout_photos && day.workout_photos.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {day.workout_photos.map((pUrl: string, pIdx: number) => (
+                                <a
+                                  key={pIdx}
+                                  href={pUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block w-11 h-11 rounded-lg overflow-hidden border border-white/15 hover:border-emerald-400"
+                                >
+                                  <img src={pUrl} alt="打卡照片" className="w-full h-full object-cover" />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {day.coach_notes && (
+                            <div className="bg-purple-500/10 border border-purple-500/20 p-2 rounded-xl text-[10px] text-purple-200">
+                              👨‍🏫 教练批注: {day.coach_notes}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Card Footer Actions */}
+                        <div className="pt-3 border-t border-white/5 mt-3 flex items-center justify-between gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleQuickComplete(activeWeek.week_index, dIdx, day)}
+                            className={`flex-1 py-1 px-2 rounded-xl text-[10px] font-bold border transition flex items-center justify-center gap-1 cursor-pointer ${
+                              day.completed
+                                ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                                : "bg-[#18181c] border-white/10 text-zinc-400 hover:text-white"
+                            }`}
+                          >
+                            {day.completed ? "✓ 已打卡" : "打卡"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(activeWeek.week_index, dIdx, day)}
+                            className="px-2 py-1 rounded-xl text-[10px] border border-white/10 text-zinc-300 hover:text-white hover:border-purple-500 bg-[#18181c] transition cursor-pointer"
+                          >
+                            {day.completed ? "📝 感受/照片" : "📝 体感/调休"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* ── W19 Weekly Summary & Injury Self-Report Box (周小结 & 伤痛报备) ── */}
+              <div className="bg-[#121215] border border-white/10 rounded-3xl p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+                  <div>
+                    <h4 className="text-sm font-black text-white flex items-center gap-2">
+                      📝 第 {activeWeek.week_index} 周 · 周小结、伤痛上报与出行请假报备
+                    </h4>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      填写后跑团教练将在后台实时收到提醒，并结合您的周体感与伤痛为您滚动制定下一周课表
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveRunnerWeekSummary}
+                    disabled={savingWeekSummary}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#FC4C02] to-orange-600 hover:from-[#ff5c16] hover:to-orange-500 text-white text-xs font-black shadow-md transition cursor-pointer disabled:opacity-50"
+                  >
+                    {savingWeekSummary ? "保存提交中..." : "💾 提交本周小结与伤痛给教练"}
+                  </button>
+                </div>
+
+                {activeWeek.coach_weekly_diagnosis && (
+                  <div className="p-3.5 rounded-2xl bg-purple-950/25 border border-purple-500/30 text-xs text-purple-200">
+                    <strong className="text-purple-300">🧢 教练本周复盘与下周导向：</strong>
+                    {activeWeek.coach_weekly_diagnosis}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <label className="text-zinc-400 block mb-1">🚨 伤痛部位与疼痛感上报</label>
+                    <input
+                      type="text"
+                      value={weekInjuryNote}
+                      onChange={(e) => setWeekInjuryNote(e.target.value)}
+                      placeholder="无伤痛填“无”，如有如：右脚跟腱轻微酸胀"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white outline-none focus:border-rose-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-zinc-400 block mb-1">💬 队员本周训练自我小结</label>
+                    <input
+                      type="text"
+                      value={weekAthleteSummary}
+                      onChange={(e) => setWeekAthleteSummary(e.target.value)}
+                      placeholder="如：本周间歇课完成顺利，周末长距离后半程稍微掉速"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-zinc-400 block mb-1">✈️ 下周出差/请假/比赛报备</label>
+                    <input
+                      type="text"
+                      value={weekTravelNote}
+                      onChange={(e) => setWeekTravelNote(e.target.value)}
+                      placeholder="如：下周三至周五出差，仅能晨跑"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ── Collaborative Edit Modal ── */}
+      {/* ── Runner Daily RPE, Biometrics, Day-Swap & Workout Edit Modal ── */}
       {editingModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#18181c] border border-white/10 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative">
+          <div className="bg-[#18181c] border border-white/10 rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <div className="flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-purple-400" />
-                <h4 className="text-sm font-bold text-white">
-                  微调训练课目与教练指导 (第 {editWeekIdx} 周)
+                <Edit3 className="w-4 h-4 text-[#FC4C02]" />
+                <h4 className="text-sm font-black text-white">
+                  训练执行打卡 · 主观疲劳度 (RPE) · 调休对换 (第 {editWeekIdx} 周)
                 </h4>
               </div>
               <button
                 onClick={() => setEditingModalOpen(false)}
-                className="p-1.5 rounded-xl text-zinc-400 hover:text-white bg-[#121215]"
+                className="p-1.5 rounded-xl text-zinc-400 hover:text-white bg-[#121215] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-3.5 text-xs">
+              {/* Section 1: Feeling Tag, RPE 1-10, Notes & Workout Photos */}
+              <div className="bg-[#121215] border border-[#FC4C02]/30 rounded-2xl p-3.5 space-y-3">
+                <div>
+                  <label className="text-emerald-300 font-bold block mb-1.5">
+                    😊 当日训练感受标签
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {PLAN_FEELING_TAGS.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setEditFeelingTag(editFeelingTag === tag ? "" : tag)}
+                        className={`py-1.5 px-2 rounded-xl font-bold text-xs border transition cursor-pointer ${
+                          editFeelingTag === tag
+                            ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
+                            : "bg-white/5 text-zinc-300 border-white/10 hover:text-white"
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-zinc-200 font-bold block mb-1.5">
+                    🔥 当日训练主观疲劳度 RPE (1=极轻松 ~ 10=极限力竭)
+                  </label>
+                  <div className="grid grid-cols-10 gap-1">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setEditRpe(editRpe === String(num) ? "" : String(num))}
+                        className={`py-1.5 rounded-lg font-mono font-black text-xs border transition cursor-pointer ${
+                          Number(editRpe) === num
+                            ? num >= 8
+                              ? "bg-rose-500 text-white border-rose-400"
+                              : num >= 5
+                              ? "bg-amber-500 text-black border-amber-400"
+                              : "bg-emerald-500 text-black border-emerald-400"
+                            : "bg-white/5 text-zinc-400 border-white/10 hover:text-white"
+                        }`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-zinc-400 block mb-1">🏃 计划执行情况 (实跑/力量记录)</label>
+                    <input
+                      type="text"
+                      value={editExecutionText}
+                      onChange={(e) => setEditExecutionText(e.target.value)}
+                      placeholder="如: 15km*602, hr132 或 慢跑4.3km+身训2组"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-zinc-400 block mb-1">💬 备注 (训练自我感受)</label>
+                    <input
+                      type="text"
+                      value={editAthleteNotes}
+                      onChange={(e) => setEditAthleteNotes(e.target.value)}
+                      placeholder="如: 体感轻快 / 小腿微酸 / 天气闷热掉速"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
+                </div>
+
+                {/* Workout Photos Uploader */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sky-300 font-bold">
+                      📸 训练打卡照片（最多 3 张，小程序与网页同步）
+                    </label>
+                    <span className="text-zinc-400">
+                      {editWorkoutPhotos.length + editNewPhotosBase64.length}/3
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {editWorkoutPhotos.map((url, idx) => (
+                      <div
+                        key={`saved-${idx}`}
+                        className="relative w-16 h-16 rounded-xl overflow-hidden border border-white/15"
+                      >
+                        <img src={url} alt="已上传" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditWorkoutPhotos((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-black/75 text-white text-[9px] flex items-center justify-center cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {editNewPhotosBase64.map((b64, nIdx) => (
+                      <div
+                        key={`new-${nIdx}`}
+                        className="relative w-16 h-16 rounded-xl overflow-hidden border border-emerald-500/40"
+                      >
+                        <img src={b64} alt="待上传" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditNewPhotosBase64((prev) => prev.filter((_, i) => i !== nIdx))
+                          }
+                          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-black/75 text-white text-[9px] flex items-center justify-center cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {editWorkoutPhotos.length + editNewPhotosBase64.length < 3 && (
+                      <label className="w-16 h-16 rounded-xl bg-[#18181c] border border-dashed border-white/25 hover:border-emerald-400 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition">
+                        <span className="text-base">📷</span>
+                        <span className="text-[9px] text-zinc-400 font-bold">添加照片</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={handlePlanPhotoUploadChange}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                  <label className="flex items-center gap-2 text-zinc-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editCompleted}
+                      onChange={(e) => setEditCompleted(e.target.checked)}
+                      className="rounded bg-[#18181c] border-white/10 text-emerald-500"
+                    />
+                    <span className="font-bold">✅ 标记今日跑步课表已完成</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-purple-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editStrengthDone}
+                      onChange={(e) => setEditStrengthDone(e.target.checked)}
+                      className="rounded bg-[#18181c] border-white/10 text-purple-500"
+                    />
+                    <span className="font-bold">💪 今日已完成力量/核心训练</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Section 2: Morning Biometrics & Day Swap */}
+              <div className="bg-[#121215] border border-white/10 rounded-2xl p-3.5 space-y-2.5">
+                <div className="font-bold text-zinc-300">💓 晨起身体指标 (HRV / 静息心率 / 呼吸 / 压力 / 恢复%) & 调休对换</div>
+                <div className="grid grid-cols-5 gap-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">HRV (ms)</label>
+                    <input
+                      type="number"
+                      value={editHrv}
+                      onChange={(e) => setEditHrv(e.target.value)}
+                      placeholder="39"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-lg px-2 py-1.5 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">静心 (bpm)</label>
+                    <input
+                      type="number"
+                      value={editRestingHr}
+                      onChange={(e) => setEditRestingHr(e.target.value)}
+                      placeholder="50"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-lg px-2 py-1.5 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">呼吸率</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={editRespRate}
+                      onChange={(e) => setEditRespRate(e.target.value)}
+                      placeholder="14.2"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-lg px-2 py-1.5 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">压力(0-21)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={editStrainScore}
+                      onChange={(e) => setEditStrainScore(e.target.value)}
+                      placeholder="10.2"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-lg px-2 py-1.5 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">恢复%</label>
+                    <input
+                      type="number"
+                      value={editRecoveryPct}
+                      onChange={(e) => setEditRecoveryPct(e.target.value)}
+                      placeholder="78"
+                      className="w-full bg-[#18181c] border border-white/10 rounded-lg px-2 py-1.5 text-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="text-[11px] text-blue-300">
+                      🔁 临时有事调休？与本周其他天对换课表:
+                    </label>
+                    {editIsSwapped && (
+                      <button
+                        type="button"
+                        onClick={handleUndoSwapWorkout}
+                        disabled={savingWorkout}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 text-[11px] font-bold transition cursor-pointer"
+                      >
+                        ↩️ 取消对换 · 恢复原课表
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={editSwapDayIdx}
+                    onChange={(e) => setEditSwapDayIdx(Number(e.target.value))}
+                    className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3 py-1.5 text-white"
+                  >
+                    <option value={-1}>不对换课表</option>
+                    {editIsSwapped && (
+                      <option value={-2}>↩️ 取消对换 · 恢复原本课表</option>
+                    )}
+                    {["周一", "周二", "周三", "周四", "周五", "周六", "周日"].map((lbl, idx) =>
+                      idx !== editDayIdx ? (
+                        <option key={idx} value={idx}>
+                          与 {lbl} 对换课表
+                        </option>
+                      ) : null
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* Section 3: Workout Prescription Details */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-zinc-400 block mb-1">课目类型</label>
@@ -1170,17 +2111,16 @@ function computeCurrentWeekIndex(planData: any): number {
                 </div>
               </div>
 
-              <div>
-                <label className="text-zinc-400 block mb-1">训练课标题</label>
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full bg-[#121215] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-zinc-400 block mb-1">训练课标题</label>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full bg-[#121215] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
                 <div>
                   <label className="text-zinc-400 block mb-1">目标配速区间</label>
                   <input
@@ -1191,52 +2131,6 @@ function computeCurrentWeekIndex(planData: any): number {
                     className="w-full bg-[#121215] border border-white/10 rounded-xl px-3 py-2 text-white placeholder-zinc-600 focus:outline-none focus:border-purple-500"
                   />
                 </div>
-                <div>
-                  <label className="text-zinc-400 block mb-1">目标心率区间</label>
-                  <input
-                    type="text"
-                    value={editTargetHrZone}
-                    onChange={(e) => setEditTargetHrZone(e.target.value)}
-                    placeholder="如: 135-145 bpm"
-                    className="w-full bg-[#121215] border border-white/10 rounded-xl px-3 py-2 text-white placeholder-zinc-600 focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-zinc-400 block mb-1">课目详情与热身冷身说明</label>
-                <textarea
-                  rows={3}
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full bg-[#121215] border border-white/10 rounded-xl p-3 text-white placeholder-zinc-600 focus:outline-none focus:border-purple-500 resize-none"
-                />
-              </div>
-
-              {/* Coach Notes */}
-              <div className="bg-amber-500/5 border border-amber-500/20 p-3 rounded-2xl space-y-1.5">
-                <label className="text-amber-300 font-bold block flex items-center gap-1.5">
-                  <span>👨‍🏫 跑团教练寄语与战术微调批注 (Coach Notes)</span>
-                </label>
-                <textarea
-                  rows={2}
-                  value={editCoachNotes}
-                  onChange={(e) => setEditCoachNotes(e.target.value)}
-                  placeholder="在此输入教练指导建议，例如：针对大师组心率反应，今天前5km务必压住速度..."
-                  className="w-full bg-[#121215] border border-white/10 rounded-xl p-2.5 text-xs text-amber-100 placeholder-zinc-600 focus:outline-none focus:border-amber-500 resize-none"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <label className="flex items-center gap-2 text-zinc-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editCompleted}
-                    onChange={(e) => setEditCompleted(e.target.checked)}
-                    className="rounded bg-[#121215] border-white/10 text-purple-600 focus:ring-0"
-                  />
-                  <span>标记该项训练为已完成打卡</span>
-                </label>
               </div>
             </div>
 
@@ -1244,7 +2138,7 @@ function computeCurrentWeekIndex(planData: any): number {
               <button
                 type="button"
                 onClick={() => setEditingModalOpen(false)}
-                className="px-4 py-2 rounded-xl border border-white/10 text-xs text-zinc-400 hover:text-white"
+                className="px-4 py-2 rounded-xl border border-white/10 text-xs text-zinc-400 hover:text-white cursor-pointer"
               >
                 取消
               </button>
@@ -1252,7 +2146,7 @@ function computeCurrentWeekIndex(planData: any): number {
                 type="button"
                 onClick={handleSaveWorkout}
                 disabled={savingWorkout}
-                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition shadow-lg shadow-purple-600/30 flex items-center gap-1.5"
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#FC4C02] to-orange-600 hover:from-[#ff5c16] hover:to-orange-500 text-white font-black text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
               >
                 {savingWorkout ? (
                   <>
@@ -1262,7 +2156,7 @@ function computeCurrentWeekIndex(planData: any): number {
                 ) : (
                   <>
                     <Check className="w-3.5 h-3.5" />
-                    保存课表修改
+                    保存打卡与体感记录
                   </>
                 )}
               </button>

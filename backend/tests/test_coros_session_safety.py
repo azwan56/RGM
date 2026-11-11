@@ -252,3 +252,60 @@ def test_coros_repeated_sync_scheduler_simulation(monkeypatch):
     res3 = sync_single_user(test_uid)
     assert res3["success"] is True
     assert login_count == 1  # Still 1, perfectly stable!
+
+
+def test_coros_2fa_user_silent_token_refresh_prevents_disconnection(monkeypatch):
+    """
+    Simulates a 2FA-enabled COROS user (like 王鹏飞 18912367150) whose initial accessToken
+    reaches the 30-day expiry window (result='1019'), and verifies that CorosAdapter
+    uses the saved 'acct_ext_2' Remember-Me cookie to silently rotate the token via
+    /account/refresh WITHOUT calling /account/login or blocking on 2FA SMS.
+    """
+    adapter = CorosAdapter("18912367150", "SecretPass", "teamcnapi.coros.com")
+    adapter.access_token = "expired_token_from_30_days_ago"
+    adapter.user_id = "438274210932998144"
+    adapter.cookies = {
+        "acct_ext_2": "encrypted_remember_me_cookie_v1",
+        "acct_uid_2": "438274210932998144"
+    }
+    adapter._save_cached_token()
+
+    refresh_called = False
+    login_called = False
+
+    def mock_get(url, *args, **kwargs):
+        headers = kwargs.get("headers", {})
+        if headers.get("accesstoken") == "expired_token_from_30_days_ago":
+            return MagicMock(status_code=200, json=lambda: {"result": "1019", "message": "Access token is invalid"})
+        return MagicMock(status_code=200, json=lambda: {"result": "0000", "data": {"dataList": []}})
+
+    def mock_post(url, *args, **kwargs):
+        nonlocal refresh_called, login_called
+        if "/account/refresh" in url:
+            refresh_called = True
+            cookie_hdr = kwargs.get("headers", {}).get("cookie", "")
+            assert "acct_ext_2=encrypted_remember_me_cookie_v1" in cookie_hdr
+            resp = MagicMock(
+                status_code=200,
+                json=lambda: {
+                    "result": "0000",
+                    "data": {"accessToken": "fresh_rotated_token_v2"}
+                }
+            )
+            resp.cookies = {"acct_ext_2": "encrypted_remember_me_cookie_v2", "acct_uid_2": "438274210932998144"}
+            return resp
+        if "/account/login" in url:
+            login_called = True
+        return MagicMock(status_code=200, json=lambda: {"result": "0000"})
+
+    monkeypatch.setattr("requests.get", mock_get)
+    monkeypatch.setattr("requests.post", mock_post)
+
+    ok = adapter.login(force=False, trigger_2fa_sms=False)
+    assert ok is True
+    assert refresh_called is True
+    assert login_called is False
+    assert adapter.access_token == "fresh_rotated_token_v2"
+    assert adapter.cookies.get("acct_ext_2") == "encrypted_remember_me_cookie_v2"
+    assert adapter.needs_2fa is False
+

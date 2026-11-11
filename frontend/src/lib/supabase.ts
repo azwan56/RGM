@@ -71,6 +71,79 @@ const customAuth = {
     }
   },
 
+  async signInWithWatch({
+    brand,
+    account,
+    password,
+    domain,
+    mfaCode,
+  }: {
+    brand: "coros" | "garmin";
+    account: string;
+    password: string;
+    domain?: string;
+    mfaCode?: string;
+  }) {
+    try {
+      const payload: Record<string, any> = {
+        brand,
+        account: account.trim(),
+        password: password.trim(),
+        domain: domain || (brand === "coros" ? "teamcnapi.coros.com" : "garmin.cn"),
+      };
+      if (mfaCode && mfaCode.trim()) {
+        payload.mfa_code = mfaCode.trim();
+      }
+      const res = await axios.post("/api/auth/device-login", payload);
+      if (res.data?.needs_2fa || res.data?.needs_mfa) {
+        return {
+          data: {
+            user: null,
+            session: null,
+            needsMfa: true,
+            message: res.data.message || "已向您的手机或邮箱发送 6 位安全验证码，请输入验证码完成登录",
+          },
+          error: null,
+        };
+      }
+      const userObj = res.data.user || {
+        id: res.data.uid,
+        email: res.data.garmin_email || res.data.coros_account || account.trim(),
+        display_name: res.data.display_name || account.trim(),
+        avatar_url: res.data.avatar_url || "",
+        garmin_connected: Boolean(res.data.garmin_connected || res.data.coros_connected),
+        coros_connected: Boolean(res.data.coros_connected),
+        is_coach_or_owner: Boolean(res.data.is_coach_or_owner),
+      };
+      const session = {
+        access_token: res.data.token,
+        token_type: "bearer",
+        user: userObj,
+      };
+      if (isBrowser) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+      }
+      notifyListeners("SIGNED_IN", session);
+      return { data: { user: userObj, session, needsMfa: false }, error: null };
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || err.message || "手表账号验证失败，请核对账号密码与所属区域";
+      return { data: { user: null, session: null, needsMfa: false }, error: new Error(msg) };
+    }
+  },
+
+  async completeTokenSession(token: string, user: any) {
+    const session = {
+      access_token: token,
+      token_type: "bearer",
+      user,
+    };
+    if (isBrowser) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    }
+    notifyListeners("SIGNED_IN", session);
+    return { data: { user, session }, error: null };
+  },
+
   async getSession() {
     if (isBrowser) {
       const raw = localStorage.getItem(AUTH_KEY);

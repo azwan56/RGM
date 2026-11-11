@@ -2,16 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #0a0a0a;
+:root,
+html {
+  color-scheme: dark;
+  --background: #070708;
   --foreground: #ededed;
+  background-color: #070708;
+}
+
+html.theme-light {
+  color-scheme: light;
+  --background: #f6f8fa;
+  --foreground: #0f172a;
+  background-color: #f6f8fa;
 }
 
 body {
   color: var(--foreground);
-  background: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Hero Prescription & Capsule Custom Classes */
+.rgm-hero-prescription {
+  background: linear-gradient(135deg, #161822 0%, #1e1722 60%, #19162b 100%);
+  border-color: rgba(252, 76, 2, 0.32);
+  box-shadow: 0 14px 36px -10px rgba(0, 0, 0, 0.55);
+}
+
+/* v3.0 统一色彩模版：一级卡片 100% 纯白底板，顶部 3px 万跑橙主锚点，取消花哨粉紫渐变 */
+html.theme-light .rgm-hero-prescription {
+  background-image: none !important;
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  border-top: 3px solid #fc4c02 !important;
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.045), 0 2px 6px -1px rgba(15, 23, 42, 0.025) !important;
+}
+
+html.theme-light .rgm-day-capsule.is-today {
+  background-color: #fffbf7 !important;
+  border-color: #fc4c02 !important;
+  box-shadow: 0 6px 18px -4px rgba(252, 76, 2, 0.15) !important;
+}
+
+html.theme-light .rgm-day-capsule.is-done {
+  background-image: none !important;
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom scrollbars */
@@ -28,4 +76,460 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
+}
+
+html.theme-light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+html.theme-light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+html.theme-light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ============================================================================
+   ☀️ 明亮模式 v3.0 统一色彩模版系统 (60-30-10 专业运动视觉规范)
+   - 60% 基础中性背景与纯白/浅冷灰卡片 (#F6F8FA / #FFFFFF / #F8FAFC)
+   - 30% 深墨黑与石板灰文字数字层级 (#0F172A / #475569 / #94A3B8)
+   - 10% 唯一主品牌色 (#FC4C02) + 达标状态绿 (#059669)
+   ============================================================================ */
+
+/* 1. 页面级背景画布 (60% 纯净冷灰白画布，去除杂乱多色光晕) */
+html.theme-light [class*="bg-[#070708]"],
+html.theme-light [class*="bg-[#0a0a0a]"],
+html.theme-light [class*="bg-[#0a0a0c]"],
+html.theme-light [class*="bg-[#0b0d13]"],
+html.theme-light [class*="bg-[#0d0d10]"],
+html.theme-light [class*="bg-[#0e0e11]"],
+html.theme-light [class*="bg-[#0e1118]"],
+html.theme-light [class*="bg-[#0f0f14]"],
+html.theme-light [class*="bg-[#101013]"] {
+  background-color: #f6f8fa !important;
+  background-image: none !important;
+  color: #0f172a;
+}
+
+/* 2. 一级卡片容器与深色横幅 -> 100% 统一纯白底板 (#FFFFFF) + 柔和阴影 */
+html.theme-light [class*="bg-[#121214]"],
+html.theme-light [class*="bg-[#121215]"],
+html.theme-light [class*="bg-[#121216]"],
+html.theme-light [class*="bg-[#121217]"],
+html.theme-light [class*="bg-[#121218]"],
+html.theme-light [class*="bg-[#12151e]"],
+html.theme-light [class*="bg-[#131318]"],
+html.theme-light [class*="bg-[#131419]"],
+html.theme-light [class*="bg-[#141416]"],
+html.theme-light [class*="bg-[#141418]"],
+html.theme-light [class*="bg-[#14141a]"],
+html.theme-light [class*="bg-[#15141c]"],
+html.theme-light [class*="bg-[#151518]"],
+html.theme-light [class*="bg-[#15151b]"],
+html.theme-light [class*="bg-[#16161a]"],
+html.theme-light [class*="bg-[#161822]"],
+html.theme-light [class*="bg-[#181519]"],
+html.theme-light [class*="bg-[#1b1a24]"],
+html.theme-light [class*="bg-[#09090c]"],
+html.theme-light [class*="bg-[#101014]"],
+html.theme-light [class*="bg-[#111216]"],
+html.theme-light [class*="bg-[#11131c]"],
+html.theme-light [class*="bg-[#121520]"],
+html.theme-light [class*="bg-[#141419]"],
+html.theme-light [class*="bg-[#151519]"],
+html.theme-light [class*="from-[#1b1518]"],
+html.theme-light [class*="from-[#16141a]"],
+html.theme-light [class*="from-[#17141f]"],
+html.theme-light [class*="from-[#1c1610]"],
+html.theme-light [class*="to-[#14151c]"],
+html.theme-light [class*="to-[#111216]"],
+html.theme-light [class*="to-[#121926]"],
+html.theme-light [class*="to-[#14181e]"],
+html.theme-light [class*="to-[#1a1524]"],
+html.theme-light [class*="to-zinc-900"],
+html.theme-light [class*="from-[#1a1816]"],
+html.theme-light [class*="from-[#18181c]"],
+html.theme-light [class*="from-[#11141d]"],
+html.theme-light [class*="from-[#131622]"],
+html.theme-light [class*="via-[#10131c]"],
+html.theme-light [class*="via-[#121215]"],
+html.theme-light [class*="via-[#151418]"],
+html.theme-light [class*="via-[#15151b]"],
+html.theme-light [class*="via-[#151824]"],
+html.theme-light [class*="via-[#181624]"],
+html.theme-light [class*="via-[#18181c]"],
+html.theme-light [class*="via-zinc-900"],
+html.theme-light [class*="to-[#0c0d14]"],
+html.theme-light [class*="to-[#0d0d10]"],
+html.theme-light [class*="to-[#121215]"],
+html.theme-light [class*="to-[#15151b]"],
+html.theme-light [class*="to-[#16161a]"],
+html.theme-light [class*="to-[#181624]"],
+html.theme-light [class*="to-[#18181c]"] {
+  background-image: none !important;
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.045), 0 2px 6px -1px rgba(15, 23, 42, 0.025) !important;
+}
+
+/* GPS 轨迹矢量画布转浅色底图 */
+html.theme-light [class*="from-[#16161b]"] {
+  background-image: linear-gradient(180deg, #f8fafc 0%, #eef2f6 100%) !important;
+  background-color: #f8fafc !important;
+}
+
+/* 3. 二级内嵌卡片、输入框、选择器与原彩色块 -> 统一收拢为浅冷灰微表面 (#F8FAFC) */
+html.theme-light [class*="bg-[#16161b]"],
+html.theme-light [class*="bg-[#16161d]"],
+html.theme-light [class*="bg-[#16181d]"],
+html.theme-light [class*="bg-[#17171f]"],
+html.theme-light [class*="bg-[#171923]"],
+html.theme-light [class*="bg-[#18181c]"],
+html.theme-light [class*="bg-[#18181d]"],
+html.theme-light [class*="bg-[#18181e]"],
+html.theme-light [class*="bg-[#18181f]"],
+html.theme-light [class*="bg-[#181a20]"],
+html.theme-light [class*="bg-[#181c28]"],
+html.theme-light [class*="bg-[#191922]"],
+html.theme-light [class*="bg-[#1a1a1e]"],
+html.theme-light [class*="bg-[#1a1a20]"],
+html.theme-light [class*="bg-[#1a1a21]"],
+html.theme-light [class*="bg-[#1b1b22]"],
+html.theme-light [class*="bg-[#1b1e24]"],
+html.theme-light [class*="bg-[#1c1c20]"],
+html.theme-light [class*="bg-[#1c1c22]"],
+html.theme-light [class*="bg-[#1c2026]"],
+html.theme-light [class*="bg-[#1e1e24]"],
+html.theme-light [class*="bg-[#1f1d22]"],
+html.theme-light [class*="bg-[#1f1f23]"],
+html.theme-light [class*="bg-[#202026]"],
+html.theme-light [class*="bg-[#24242c]"],
+html.theme-light [class*="bg-[#25252c]"],
+html.theme-light [class*="bg-[#282830]"],
+html.theme-light .bg-zinc-900,
+html.theme-light [class*="bg-zinc-900/"],
+html.theme-light [class*="bg-black/10"],
+html.theme-light [class*="bg-black/20"],
+html.theme-light [class*="bg-black/25"],
+html.theme-light [class*="bg-black/30"],
+html.theme-light [class*="bg-black/35"],
+html.theme-light [class*="bg-black/40"],
+html.theme-light [class*="bg-black/50"],
+html.theme-light :not(.fixed)[class*="bg-black/60"],
+html.theme-light :not(.fixed)[class*="bg-black/70"],
+html.theme-light :not(.fixed)[class*="bg-black/75"],
+html.theme-light :not(.fixed)[class*="bg-black/80"],
+html.theme-light :not(.fixed)[class*="bg-black/85"],
+html.theme-light :not(.fixed)[class*="bg-black/90"],
+html.theme-light [class*="from-purple-900/"],
+html.theme-light [class*="from-purple-950/"],
+html.theme-light [class*="from-purple-500/"],
+html.theme-light [class*="via-[#1e1b2e]"],
+html.theme-light [class*="bg-purple-950/"],
+html.theme-light [class*="from-emerald-950/"],
+html.theme-light [class*="bg-emerald-950/"],
+html.theme-light [class*="bg-emerald-500/5"],
+html.theme-light [class*="bg-emerald-500/10"],
+html.theme-light [class*="bg-sky-500/[0.06]"],
+html.theme-light [class*="bg-amber-500/[0.06]"],
+html.theme-light [class*="bg-amber-500/10"] {
+  background-image: none !important;
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 引述栏左侧竖线统一为万跑橙 (#FC4C02) */
+html.theme-light [class*="border-l-purple-500"],
+html.theme-light [class*="border-l-purple-400"],
+html.theme-light [class*="border-l-sky-500"],
+html.theme-light [class*="border-l-emerald-500"] {
+  border-left-color: #fc4c02 !important;
+}
+
+/* 风险/告警块保留淡红提示底 */
+html.theme-light [class*="from-red-950/"],
+html.theme-light [class*="bg-rose-950/"],
+html.theme-light [class*="bg-red-950/"],
+html.theme-light [class*="bg-rose-500/10"] {
+  background-image: none !important;
+  background-color: #fff1f2 !important;
+  border-color: rgba(244, 63, 94, 0.28) !important;
+}
+
+/* 进度条底槽与分段控制器外槽 */
+html.theme-light .bg-zinc-800,
+html.theme-light [class*="bg-zinc-800/"],
+html.theme-light .bg-zinc-700,
+html.theme-light [class*="bg-zinc-700/"] {
+  background-color: #e2e8f0 !important;
+}
+
+/* 半透明白色微表面转为浅冷灰胶囊底 (#F1F5F9) */
+html.theme-light [class*="bg-white/5"],
+html.theme-light [class*="bg-white/10"],
+html.theme-light [class*="bg-white/15"],
+html.theme-light [class*="bg-white/20"],
+html.theme-light [class*="bg-white/[0.02]"],
+html.theme-light [class*="bg-white/[0.03]"],
+html.theme-light [class*="bg-white/[0.04]"],
+html.theme-light [class*="bg-white/[0.06]"] {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 4. 胶囊徽章与激活按钮统一规范 (10% 唯一品牌橙 + 中性石板灰胶囊 + 达标绿) */
+/* 4A. 非按钮类的紫/黄/蓝/靛青信息徽章 -> 统一收拢为高级中性石板灰胶囊 (#F1F5F9 + #334155) */
+html.theme-light span[class*="bg-purple-500/"],
+html.theme-light a[class*="bg-purple-500/"],
+html.theme-light div[class*="bg-purple-500/15"],
+html.theme-light span[class*="bg-amber-500/"],
+html.theme-light a[class*="bg-amber-500/"],
+html.theme-light span[class*="bg-sky-500/"],
+html.theme-light a[class*="bg-sky-500/"],
+html.theme-light span[class*="bg-indigo-500/"],
+html.theme-light a[class*="bg-indigo-500/"],
+html.theme-light span[class*="bg-cyan-500/"],
+html.theme-light span[class*="bg-pink-500/"] {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+/* 4B. 按钮类的紫/蓝/黄/绿选中态 -> 统一收拢为万跑橙激活态 (#FFF5EE 底 + #FC4C02 边 + #C23800 字) */
+html.theme-light button[class*="bg-purple-500/"],
+html.theme-light button[class*="bg-purple-600"],
+html.theme-light button[class*="bg-sky-500/"],
+html.theme-light button[class*="bg-amber-500/"],
+html.theme-light button[class*="bg-indigo-500/"],
+html.theme-light button[class*="bg-[#d0fd3e]/"] {
+  background-image: none !important;
+  background-color: #fff5ee !important;
+  border-color: #fc4c02 !important;
+  color: #c23800 !important;
+}
+
+/* 实心琥珀黄/翠绿主操作按钮在明亮模式下统一收拢为万跑橙主按钮 */
+html.theme-light button[class*="bg-amber-500 "],
+html.theme-light button[class*="from-amber-500"] {
+  background-image: none !important;
+  background-color: #fc4c02 !important;
+  border-color: #fc4c02 !important;
+  color: #ffffff !important;
+}
+
+/* 品牌浅橙胶囊 (#FC4C02/10 ~ /20) 在白底上保持清晰暖橙底与深橙字 */
+html.theme-light [class*="bg-[#FC4C02]/10"],
+html.theme-light [class*="bg-[#FC4C02]/15"],
+html.theme-light [class*="bg-[#FC4C02]/20"],
+html.theme-light [class*="bg-[#fc4c02]/10"],
+html.theme-light [class*="bg-[#fc4c02]/15"],
+html.theme-light [class*="bg-[#fc4c02]/20"] {
+  background-color: #fff5ee !important;
+  border-color: rgba(252, 76, 2, 0.3) !important;
+  color: #c23800 !important;
+}
+
+/* 正向完成/达标徽章保持清爽森林绿 (#ECFDF5 + #059669) */
+html.theme-light span[class*="bg-emerald-500/"],
+html.theme-light button[class*="bg-emerald-500/"],
+html.theme-light button[class*="bg-emerald-600/"] {
+  background-color: #ecfdf5 !important;
+  border-color: rgba(5, 150, 105, 0.28) !important;
+  color: #059669 !important;
+}
+
+/* 5. 边框与分割线 (Borders & Dividers) */
+html.theme-light [class*="border-white/5"],
+html.theme-light [class*="border-white/10"],
+html.theme-light [class*="border-white/15"],
+html.theme-light [class*="border-white/20"],
+html.theme-light [class*="border-white/[0.06]"],
+html.theme-light [class*="border-white/[0.07]"],
+html.theme-light [class*="border-white/[0.08]"],
+html.theme-light [class*="border-amber-500/"],
+html.theme-light [class*="border-purple-500/"],
+html.theme-light [class*="border-sky-500/"],
+html.theme-light [class*="border-emerald-500/25"],
+html.theme-light [class*="border-emerald-500/30"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* 装饰性半透明品牌橙边框（非选中态）统一为中性浅灰，选中态实心 border-[#FC4C02] 保留 */
+html.theme-light :not([class*="bg-[#FC4C02]/"]):not([class*="bg-[#fc4c02]/"])[class*="border-[#FC4C02]/"],
+html.theme-light :not([class*="bg-[#FC4C02]/"]):not([class*="bg-[#fc4c02]/"])[class*="border-[#fc4c02]/"] {
+  border-color: #e2e8f0 !important;
+}
+
+html.theme-light [class*="divide-white/5"] > :not([hidden]) ~ :not([hidden]),
+html.theme-light [class*="divide-white/10"] > :not([hidden]) ~ :not([hidden]),
+html.theme-light [class*="divide-white/[0.06]"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}
+
+/* 6. 文字与数据颜色收拢 (30% 深墨黑主轴 #0F172A：终结“彩虹数字”) */
+html.theme-light .text-white {
+  color: #0f172a !important;
+}
+
+/* 保持实心主按钮及封面照片遮罩内的文字为纯白
+   注意：使用 ~= 精确匹配整个 class token，避免 bg-[#FC4C02]/15 这类半透明浅橙底
+   被误判为实心橙底而残留白字（白底白字不可读） */
+html.theme-light .rgm-photo-overlay .text-white,
+html.theme-light [class~="bg-[#FC4C02]"].text-white,
+html.theme-light [class~="bg-[#FC4C02]"] .text-white,
+html.theme-light [class~="bg-[#fc4c02]"].text-white,
+html.theme-light [class~="bg-[#fc4c02]"] .text-white,
+html.theme-light [class~="from-[#FC4C02]"].text-white,
+html.theme-light [class~="from-[#FC4C02]"] .text-white,
+html.theme-light [class~="from-[#fc4c02]"].text-white,
+html.theme-light [class~="from-[#fc4c02]"] .text-white,
+html.theme-light [class~="from-orange-500"].text-white,
+html.theme-light [class~="from-orange-600"].text-white,
+html.theme-light [class~="from-amber-500"].text-white,
+html.theme-light [class~="from-red-600"].text-white,
+html.theme-light [class~="from-rose-600"].text-white,
+html.theme-light [class~="from-emerald-500"].text-white,
+html.theme-light [class~="from-emerald-600"].text-white,
+html.theme-light [class~="from-purple-500"].text-white,
+html.theme-light [class~="from-purple-500"] .text-white,
+html.theme-light [class~="from-purple-600"].text-white,
+html.theme-light [class~="from-purple-600"] .text-white,
+html.theme-light div[class~="bg-purple-600"].text-white,
+html.theme-light span[class~="bg-purple-600"].text-white,
+html.theme-light [class~="bg-[#0A84FF]"].text-white,
+html.theme-light [class~="bg-[#0A84FF]"] .text-white,
+html.theme-light [class~="from-[#0A84FF]"].text-white,
+html.theme-light [class~="from-[#0A84FF]"] .text-white,
+html.theme-light .bg-orange-500.text-white,
+html.theme-light .bg-orange-600.text-white,
+html.theme-light .bg-amber-600.text-white,
+html.theme-light .bg-amber-700.text-white,
+html.theme-light .bg-emerald-600.text-white,
+html.theme-light .bg-emerald-600 .text-white,
+html.theme-light .bg-rose-500.text-white,
+html.theme-light .bg-rose-600.text-white,
+html.theme-light .bg-rose-600 .text-white,
+html.theme-light .bg-red-500.text-white,
+html.theme-light .bg-blue-600.text-white,
+html.theme-light .bg-blue-600 .text-white,
+html.theme-light .bg-indigo-600.text-white,
+html.theme-light .bg-indigo-600 .text-white,
+html.theme-light .bg-zinc-600.text-white,
+html.theme-light .bg-red-600.text-white,
+html.theme-light .bg-red-600 .text-white {
+  color: #ffffff !important;
+}
+
+/* 悬停变为实心品牌橙的按钮，悬停时文字切回纯白 */
+html.theme-light [class*="hover:bg-[#FC4C02]"]:hover,
+html.theme-light [class*="hover:bg-[#fc4c02]"]:hover {
+  color: #ffffff !important;
+}
+
+/* 紫色实心渐变/徽章在明亮模式下统一收拢为品牌橙，避免多色混杂 */
+html.theme-light [class~="from-purple-600"],
+html.theme-light div[class~="bg-purple-600"],
+html.theme-light span[class~="bg-purple-600"] {
+  background-image: none !important;
+  background-color: #fc4c02 !important;
+  border-color: #fc4c02 !important;
+  box-shadow: none !important;
+}
+
+html.theme-light [class*="text-zinc-100"],
+html.theme-light [class*="text-zinc-200"] {
+  color: #1e293b !important;
+}
+html.theme-light [class*="text-zinc-300"],
+html.theme-light [class*="text-zinc-400"] {
+  color: #475569 !important;
+}
+html.theme-light [class*="text-zinc-500"],
+html.theme-light [class*="text-zinc-600"] {
+  color: #94a3b8 !important;
+}
+
+/* 原本五颜六色的指标/标签文字（紫/蓝/天蓝/青/粉/黄/浅红）统一归位深墨黑 (#0F172A)，让版面干净克制 */
+html.theme-light [class*="text-purple-"],
+html.theme-light [class*="text-violet-"],
+html.theme-light [class*="text-indigo-"],
+html.theme-light [class*="text-sky-"],
+html.theme-light [class*="text-cyan-"],
+html.theme-light [class*="text-blue-"],
+html.theme-light [class*="text-pink-"],
+html.theme-light [class*="text-fuchsia-"],
+html.theme-light [class*="text-amber-"],
+html.theme-light [class*="text-yellow-"],
+html.theme-light [class*="text-[#ffd700]"],
+html.theme-light [class*="text-[#fbbf24]"],
+html.theme-light [class*="text-[#fcd34d]"],
+html.theme-light [class*="text-rose-200"],
+html.theme-light [class*="text-rose-300"],
+html.theme-light [class*="text-rose-400"] {
+  color: #0f172a !important;
+}
+
+/* 链接与可点击文字若原本为紫/蓝/黄，在明亮模式下统一用品牌深橙 (#C23800) */
+html.theme-light a[class*="text-purple-"],
+html.theme-light a[class*="text-sky-"],
+html.theme-light a[class*="text-amber-"],
+html.theme-light a[class*="text-indigo-"] {
+  color: #c23800 !important;
+}
+
+/* 封面深色照片遮罩内保留亮色文字 */
+html.theme-light .rgm-photo-overlay [class*="text-amber-200"],
+html.theme-light .rgm-photo-overlay [class*="text-amber-300"] {
+  color: #fcd34d !important;
+}
+
+/* 品牌橙色系文字 */
+html.theme-light [class*="text-orange-100"],
+html.theme-light [class*="text-orange-200"],
+html.theme-light [class*="text-orange-300"],
+html.theme-light [class*="text-orange-400"],
+html.theme-light [class*="text-[#fb923c]"],
+html.theme-light [class*="text-[#FB923C]"] {
+  color: #c23800 !important;
+}
+
+/* 浅玫红文字 -> 深墨黑 */
+html.theme-light [class*="text-rose-100"] {
+  color: #0f172a !important;
+}
+
+/* 后端下发的动态评级色（琥珀/亮绿/天蓝等亮色）在白底上统一压暗 35%，保证可读 */
+html.theme-light .rgm-tone-text {
+  color: color-mix(in srgb, var(--rgm-tone) 65%, #000000) !important;
+}
+
+/* 正向完成/状态达标文字 -> 统一森林绿 (#059669) */
+html.theme-light [class*="text-[#d0fd3e]"],
+html.theme-light [class*="text-[#ccff00]"],
+html.theme-light [class*="text-lime-"],
+html.theme-light [class*="text-green-"],
+html.theme-light [class*="text-teal-"],
+html.theme-light [class*="text-emerald-"] {
+  color: #059669 !important;
+}
+
+/* 真实告警/错误文字 -> 深红 (#DC2626) */
+html.theme-light [class*="text-red-"],
+html.theme-light [class*="text-rose-500"],
+html.theme-light [class*="text-rose-600"] {
+  color: #dc2626 !important;
+}
+
+/* 7. Recharts 图表网格与悬浮框适配 */
+html.theme-light .recharts-cartesian-grid line {
+  stroke: #e2e8f0 !important;
+}
+html.theme-light .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
+}
+html.theme-light .recharts-tooltip-item {
+  color: #0f172a !important;
 }

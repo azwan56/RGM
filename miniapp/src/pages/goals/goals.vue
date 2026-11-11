@@ -1,8 +1,7 @@
 <template>
-  <view class="goals-page">
+  <view class="goals-page" :class="themeClass">
     <view class="page-title-box">
       <text class="title">目标设定与生理参数</text>
-      <text class="subtitle">科学量化训练负荷，为 Canova教练提供精准分析基准</text>
     </view>
 
     <!-- Monthly Target Card -->
@@ -40,15 +39,22 @@
 
       <!-- Monthly breakdown toggle -->
       <view class="breakdown-toggle" @click="showMonthly = !showMonthly">
-        <text class="toggle-text">{{ showMonthly ? "收起 12 个月独立设定 ▲" : "展开 12 个月独立设定 (夏训/冬训调整) ▼" }}</text>
+        <text class="toggle-text">{{ showMonthly ? "收起 12 个月设定 ▲" : `展开 12 个月设定 (🔒1~${currentCalendarMonth}月已锁定) ▼` }}</text>
       </view>
 
       <view v-if="showMonthly" class="months-grid">
-        <view v-for="(val, idx) in monthlyTargets" :key="idx" class="month-cell">
-          <text class="month-label">{{ idx + 1 }}月</text>
+        <view
+          v-for="(val, idx) in monthlyTargets"
+          :key="idx"
+          class="month-cell"
+          :class="{ 'month-locked': idx + 1 <= currentCalendarMonth }"
+          @click="idx + 1 <= currentCalendarMonth ? onLockedMonthClick(idx + 1) : undefined"
+        >
+          <text class="month-label">{{ idx + 1 }}月 {{ idx + 1 <= currentCalendarMonth ? '🔒' : '✏️' }}</text>
           <input
             class="month-input"
             type="number"
+            :disabled="idx + 1 <= currentCalendarMonth"
             :value="val"
             @input="(e) => updateMonthTarget(idx, e.detail.value)"
           />
@@ -101,9 +107,13 @@
 </template>
 
 <script setup lang="ts">
+import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
 import { ref, onMounted } from "vue";
+import { onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
+import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
 import { request, getStoredUser } from "../../utils/api";
 
+const currentCalendarMonth = new Date().getMonth() + 1;
 const overallTarget = ref(200);
 const monthlyTargets = ref<number[]>(Array(12).fill(200));
 const showMonthly = ref(false);
@@ -111,12 +121,26 @@ const maxHr = ref(190);
 const restHr = ref(60);
 const saving = ref(false);
 
+function onLockedMonthClick(m: number) {
+  uni.showToast({
+    title: `${m}月计划已开始，锁定不可更改（仅可修改未开始的月份）`,
+    icon: "none",
+  });
+}
+
 function onSliderChange(e: any) {
-  overallTarget.value = e.detail.value;
-  monthlyTargets.value = Array(12).fill(e.detail.value);
+  const val = Number(e.detail.value) || 200;
+  overallTarget.value = val;
+  monthlyTargets.value = monthlyTargets.value.map((oldVal, idx) =>
+    idx + 1 <= currentCalendarMonth ? oldVal : val
+  );
 }
 
 function updateMonthTarget(idx: number, valStr: string) {
+  if (idx + 1 <= currentCalendarMonth) {
+    onLockedMonthClick(idx + 1);
+    return;
+  }
   const n = parseInt(valStr, 10) || 0;
   monthlyTargets.value[idx] = n;
 }
@@ -150,11 +174,15 @@ async function handleSave() {
 
   saving.value = true;
   try {
-    // 1. Save goal
-    await request(`/api/profile/${user.id}/goal`, "PUT", {
+    // 1. Save goal (started months remain locked)
+    const goalRes: any = await request(`/api/profile/${user.id}/goal`, "PUT", {
       target_distance: overallTarget.value,
       monthly_targets: monthlyTargets.value,
+      enforce_started_lock: true,
     });
+    if (goalRes?.data?.monthly_targets) {
+      monthlyTargets.value = goalRes.data.monthly_targets;
+    }
 
     // 2. Save physiological metrics
     await request(`/api/profile/${user.id}`, "PUT", {
@@ -170,16 +198,33 @@ async function handleSave() {
   }
 }
 
+onShow(() => {
+  applySystemTheme(currentTheme.value);
+});
+
 onMounted(() => {
   loadData();
+});
+
+onLoad(() => {
+  initShareMenu();
+});
+
+onShareAppMessage(() => {
+  return getUnifiedShareAppMessage();
+});
+
+onShareTimeline(() => {
+  return getUnifiedShareTimeline();
 });
 </script>
 
 <style scoped>
 .goals-page {
   padding: 32rpx;
-  background-color: #0a0a0a;
+  background-color: var(--rgm-bg, #0a0a0a);
   min-height: 100vh;
+  --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3);
 }
 .page-title-box {
   margin-bottom: 32rpx;
@@ -187,19 +232,13 @@ onMounted(() => {
 .title {
   font-size: 36rpx;
   font-weight: 800;
-  color: #ffffff;
-  display: block;
-}
-.subtitle {
-  font-size: 22rpx;
-  color: #71717a;
-  margin-top: 6rpx;
+  color: var(--rgm-text, #ffffff);
   display: block;
 }
 
 .setting-card {
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.03));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
   border-radius: 28rpx;
   padding: 32rpx;
   margin-bottom: 32rpx;
@@ -213,16 +252,16 @@ onMounted(() => {
 .card-title {
   font-size: 30rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 .target-display {
   font-size: 40rpx;
   font-weight: 800;
-  color: #FC4C02;
+  color: var(--rgm-brand-text, #FC4C02);
 }
 .unit {
   font-size: 22rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 
 .chips-row {
@@ -234,15 +273,16 @@ onMounted(() => {
 }
 .chip {
   padding: 10rpx 24rpx;
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.05));
   border-radius: 16rpx;
   font-size: 24rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 .chip.active {
-  background-color: #FC4C02;
-  color: #ffffff;
+  background-color: var(--rgm-brand, #FC4C02);
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 
 .breakdown-toggle {
@@ -251,7 +291,7 @@ onMounted(() => {
 }
 .toggle-text {
   font-size: 22rpx;
-  color: #38bdf8;
+  color: var(--rgm-blue, #38bdf8);
 }
 
 .months-grid {
@@ -261,19 +301,19 @@ onMounted(() => {
   margin-top: 20rpx;
 }
 .month-cell {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--rgm-tint, rgba(255, 255, 255, 0.05));
   border-radius: 16rpx;
   padding: 12rpx;
   text-align: center;
 }
 .month-label {
   font-size: 20rpx;
-  color: #71717a;
+  color: var(--rgm-text-3, #71717a);
   display: block;
 }
 .month-input {
   font-size: 28rpx;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
   font-weight: bold;
   margin-top: 4rpx;
 }
@@ -288,24 +328,25 @@ onMounted(() => {
 }
 .form-label {
   font-size: 24rpx;
-  color: #a1a1aa;
+  color: var(--rgm-text-2, #a1a1aa);
 }
 .form-val {
   font-size: 26rpx;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--rgm-text, #ffffff);
 }
 
 .action-box {
   margin-top: 48rpx;
 }
 .save-btn {
-  background: linear-gradient(90deg, #FC4C02 0%, #ea580c 100%);
-  color: #ffffff;
+  background: var(--rgm-brand-grad, linear-gradient(90deg, #FC4C02 0%, #ea580c 100%));
+  color: var(--rgm-text, #ffffff);
   font-size: 30rpx;
   font-weight: bold;
   height: 90rpx;
   line-height: 90rpx;
   border-radius: 24rpx;
+  --rgm-text: var(--rgm-on-brand); --rgm-text-2: var(--rgm-on-brand-2); --rgm-text-3: var(--rgm-on-brand-2);
 }
 </style>

@@ -1,4 +1,5 @@
 import os
+import hmac
 import time
 import jwt
 import logging
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from config import settings
 from utils.local_store import LocalStore
+from utils.security import validate_uploaded_image_bytes
 
 logger = logging.getLogger("router_admin")
 router = APIRouter()
@@ -68,10 +70,15 @@ def admin_login(req: AdminLoginRequest):
     Super Admin login endpoint.
     Strictly for platform super administrators to manage clubs and designate owners.
     """
+    if settings.ENVIRONMENT.lower() == "production" and ADMIN_PASSWORD in ("", "rgm_admin_2026"):
+        raise HTTPException(status_code=503, detail="生产环境尚未配置安全的 RGM_ADMIN_PASSWORD，已拒绝默认密码登录")
+
     clean_email = req.email.strip().lower()
     clean_pw = req.password.strip()
 
-    if clean_email != ADMIN_EMAIL or clean_pw != ADMIN_PASSWORD:
+    email_ok = hmac.compare_digest(clean_email.encode("utf-8"), ADMIN_EMAIL.encode("utf-8"))
+    pw_ok = hmac.compare_digest(clean_pw.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8"))
+    if not (email_ok and pw_ok):
         raise HTTPException(status_code=401, detail="超级管理员账号或密码错误")
 
     payload = {
@@ -216,17 +223,33 @@ def get_users_for_admin(admin_info: Dict[str, Any] = Depends(verify_super_admin)
     return {"users": users}
 
 
+@router.get("/unaffiliated-users")
+def get_unaffiliated_users_for_admin(admin_info: Dict[str, Any] = Depends(verify_super_admin)):
+    """Returns all users who have not joined any running club, with their watch binding and goal setting status."""
+    return LocalStore.get_unaffiliated_users_status(viewer_uid="super_admin")
+
+
+@router.post("/unaffiliated-users/{target_uid}/remind")
+def remind_unaffiliated_user_as_admin(target_uid: str, admin_info: Dict[str, Any] = Depends(verify_super_admin)):
+    """Super Admin sends a 1-tap setup reminder notification to an unaffiliated user."""
+    try:
+        return LocalStore.remind_unaffiliated_user_setup("super_admin", target_uid)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/upload-club-logo")
-async def upload_club_logo(file: UploadFile = File(...)):
+async def upload_club_logo(
+    file: UploadFile = File(...),
+    admin_info: Dict[str, Any] = Depends(verify_super_admin),
+):
     """
     Uploads a club logo image from local disk, saves it to persistent static storage,
-    and returns the public URL.
+    and returns the public URL. Requires Super Admin authentication.
     """
-    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
     orig_name = file.filename or "club_logo.jpg"
-    ext = os.path.splitext(orig_name)[1].lower()
-    if not ext or ext not in allowed_exts:
-        ext = ".jpg"
+    contents = await file.read()
+    ext = validate_uploaded_image_bytes(contents, orig_name)
 
     avatars_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "avatars")
     os.makedirs(avatars_dir, exist_ok=True)
@@ -236,7 +259,6 @@ async def upload_club_logo(file: UploadFile = File(...)):
     filepath = os.path.join(avatars_dir, filename)
 
     try:
-        contents = await file.read()
         with open(filepath, "wb") as f:
             f.write(contents)
     except Exception as e:
@@ -250,4 +272,106 @@ async def upload_club_logo(file: UploadFile = File(...)):
         "url": logo_url,
         "message": "跑团 Logo 上传成功！"
     }
+
+
+class AdminReplyTicketRequest(BaseModel):
+    admin_reply: str
+    status: Optional[str] = "resolved"
+
+
+@router.get("/support-tickets")
+def get_support_tickets_for_admin(
+    status: Optional[str] = None,
+    admin_info: Dict[str, Any] = Depends(verify_super_admin)
+):
+    """Returns user technical support tickets with diagnostic context for Super Admin."""
+    tickets = LocalStore.list_all_support_tickets(status_filter=status)
+    open_count = sum(1 for t in tickets if t.get("status") == "open")
+    return {
+        "tickets": tickets,
+        "open_count": open_count,
+        "total": len(tickets),
+    }
+
+
+@router.post("/support-tickets/{ticket_id}/reply")
+def reply_support_ticket_as_admin(
+    ticket_id: str,
+    req: AdminReplyTicketRequest,
+    admin_info: Dict[str, Any] = Depends(verify_super_admin)
+):
+    """Super Admin replies to a user support ticket and updates its status."""
+    updated = LocalStore.reply_support_ticket(
+        ticket_id=ticket_id,
+        admin_reply=req.admin_reply or "",
+        status=req.status or "resolved",
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    return {
+        "success": True,
+        "ticket": updated,
+        "message": "工单回复及状态已保存！用户可在小程序【我的 → 帮助与技术支持】中查看。",
+    }
+
+
+@router.get("/analytics/overview")
+def get_admin_analytics_overview(
+    days: int = 14,
+    include_wechat: bool = True,
+    admin_info: Dict[str, Any] = Depends(verify_super_admin),
+) -> Dict[str, Any]:
+    """
+    Returns unified UX & product analytics for Super Admin:
+    1. Per-user real-time session, page stay, scroll depth, button click & navigation flow stats
+    2. Real-user conversion funnel across business tables (excluding synthetic test profiles)
+    3. Official WeChat Mini Program historical analytics (We分析 DataCube API)
+    """
+    from utils.wechat import wechat_client
+
+    eff_days = max(1, min(30, int(days or 14)))
+    behavior = LocalStore.get_behavior_analytics_overview(days=eff_days)
+    conversion_funnel = LocalStore.get_conversion_funnel_analytics()
+    wechat_datacube = None
+    if include_wechat:
+        try:
+            wechat_datacube = wechat_client.get_datacube_overview(days=eff_days)
+        except Exception as e:
+            logger.warning(f"[admin] WeChat datacube fetch warning: {e}")
+            wechat_datacube = {"available": False, "reason": str(e)}
+
+    return {
+        "success": True,
+        "days": eff_days,
+        "behavior": behavior,
+        "conversion_funnel": conversion_funnel,
+        "wechat_datacube": wechat_datacube,
+    }
+
+
+@router.get("/analytics/sessions/{session_id}")
+def get_admin_session_timeline(
+    session_id: str,
+    admin_info: Dict[str, Any] = Depends(verify_super_admin),
+) -> Dict[str, Any]:
+    """
+    Returns step-by-step chronological replay timeline for a single user session.
+    """
+    timeline = LocalStore.get_session_timeline(session_id)
+    if not timeline:
+        raise HTTPException(status_code=404, detail="未找到该访问会话记录")
+    return {"success": True, **timeline}
+
+
+@router.get("/analytics/users/{user_id}/journey")
+def get_admin_user_journey(
+    user_id: str,
+    limit: int = 20,
+    admin_info: Dict[str, Any] = Depends(verify_super_admin),
+) -> Dict[str, Any]:
+    """
+    Returns all recent MiniApp sessions and timelines for a specific runner.
+    """
+    journey = LocalStore.get_user_journey(user_id=user_id, limit_sessions=limit)
+    return {"success": True, **journey}
 

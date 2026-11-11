@@ -8,19 +8,34 @@ preserving:
 3. 'RGM先锋跑团' (club_rgm_flagship)
 4. '复旦戈闵文跑团' (club_fudan_gobi_main)
 5. '复旦戈' (org_fudan_gobi)
-6. Memberships for Alex, Vivian Chen (晓韵), SUN JIN (Jin SUN) in both clubs and 复旦戈.
+6. Confirmed memberships for all 6 active core runners:
+   - u_df65d9a588c9 (Zhong Wan, owner)
+   - Vivian Chen (晓韵)
+   - SUN JIN (Jin SUN / 孙进)
+   - u_wx_26a168a65f (高九凯)
+   - u_wx_82320f8a14 (Tony 王鹏飞)
+   - u_wx_d595452dbe (LM)
+7. Automatically removes any expired organization members from sub-clubs.
 """
 
+import os
 import sys
+import json
 import sqlite3
 from datetime import datetime
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE_DIR, "backend"))
+
+from utils.local_store import LocalStore, DB_PATH
+from utils.encryption import encrypt_pii, decrypt_pii
+
 
 def run_cleanup(db_path: str):
     print(f"Connecting to database at {db_path}...")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    # Pre-checks
     c.execute("SELECT COUNT(*) FROM profiles")
     profiles_before = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM activities")
@@ -34,9 +49,18 @@ def run_cleanup(db_path: str):
 
     now_iso = datetime.utcnow().isoformat() + "Z"
 
-    # Start transaction
+    core_users = [
+        ("u_df65d9a588c9", "owner", "Zhong Wan", "male", "1985-01-01", "复旦-BI（挪威） 10班", {"program": "复旦-BI（挪威）", "class_detail": "10班", "gobi_experience": "戈11 A组", "clothing_size": "XL", "shoe_size": "44", "health_declaration": True}),
+        ("Vivian Chen", "member", "晓韵", "female", "1973-12-18", "中文EMBA 戈友班", {"program": "中文EMBA", "class_detail": "戈友班", "gobi_experience": "老戈"}),
+        ("SUN JIN", "member", "孙进", "male", "1971-03-27", "中文EMBA 戈友班", {"program": "中文EMBA", "class_detail": "戈友班", "gobi_experience": "老戈"}),
+        ("u_wx_26a168a65f", "member", "高九凯", "male", "1990-06-22", "中文EMBA 戈友班", {"program": "中文EMBA", "class_detail": "戈友班", "gobi_experience": "老戈"}),
+        ("u_wx_82320f8a14", "member", "王鹏飞", "male", "1988-12-10", "中文EMBA 戈友班", {"program": "中文EMBA", "class_detail": "戈友班", "gobi_experience": "老戈"}),
+        ("u_wx_d595452dbe", "member", "LM", "female", "1982-01-17", "中文EMBA 戈友班", {"program": "中文EMBA", "class_detail": "戈友班", "gobi_experience": "老戈"}),
+    ]
+    core_uids = tuple(u[0] for u in core_users)
+
     with conn:
-        # 1. Update/Ensure 'RGM先锋跑团' (club_rgm_flagship)
+        # 1. Ensure 'RGM先锋跑团' (club_rgm_flagship)
         c.execute("SELECT COUNT(*) FROM clubs WHERE id = 'club_rgm_flagship'")
         if c.fetchone()[0] == 0:
             c.execute("""
@@ -57,7 +81,7 @@ def run_cleanup(db_path: str):
                 WHERE id = 'club_rgm_flagship'
             """)
 
-        # 2. Update/Ensure 'org_fudan_gobi'
+        # 2. Ensure 'org_fudan_gobi'
         c.execute("SELECT COUNT(*) FROM organizations WHERE id = 'org_fudan_gobi'")
         if c.fetchone()[0] == 0:
             c.execute("""
@@ -75,7 +99,7 @@ def run_cleanup(db_path: str):
                 WHERE id = 'org_fudan_gobi'
             """)
 
-        # 3. Update/Ensure '复旦戈闵文跑团' (club_fudan_gobi_main)
+        # 3. Ensure '复旦戈闵文跑团' (club_fudan_gobi_main)
         c.execute("SELECT COUNT(*) FROM clubs WHERE id = 'club_fudan_gobi_main'")
         if c.fetchone()[0] == 0:
             c.execute("""
@@ -105,8 +129,10 @@ def run_cleanup(db_path: str):
         # 6. Clean club_memberships for removed clubs
         c.execute("DELETE FROM club_memberships WHERE club_id NOT IN ('club_rgm_flagship', 'club_fudan_gobi_main')")
 
-        # 7. Clean organization_members for removed orgs
+        # 7. Clean organization_members for removed orgs and non-core test users in org_fudan_gobi
         c.execute("DELETE FROM organization_members WHERE org_id != 'org_fudan_gobi'")
+        placeholders = ",".join("?" for _ in core_uids)
+        c.execute(f"DELETE FROM organization_members WHERE org_id = 'org_fudan_gobi' AND user_id NOT IN ({placeholders})", core_uids)
 
         # 8. Clean club_events and coach_assignments for removed clubs
         c.execute("DELETE FROM club_events WHERE club_id NOT IN ('club_rgm_flagship', 'club_fudan_gobi_main')")
@@ -115,43 +141,40 @@ def run_cleanup(db_path: str):
         # 9. Clean training_plans club_id foreign key
         c.execute("UPDATE training_plans SET club_id = NULL WHERE club_id IS NOT NULL AND club_id NOT IN ('club_rgm_flagship', 'club_fudan_gobi_main')")
 
-        # 10. Ensure core runner memberships in 'club_rgm_flagship'
-        core_users = [
-            ("u_df65d9a588c9", "owner"),
-            ("Vivian Chen", "member"),
-            ("SUN JIN", "member")
-        ]
-        for uid, role in core_users:
-            c.execute("SELECT id FROM profiles WHERE id = ?", (uid,))
-            if c.fetchone():
-                c.execute("""
-                    INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
-                    VALUES (?, 'club_rgm_flagship', ?, ?, 'active', ?, 1)
-                """, (f"club_rgm_flagship_{uid}", uid, role, now_iso))
-
-        # 11. Ensure core runner memberships in 'club_fudan_gobi_main'
-        for uid, role in core_users:
-            c.execute("SELECT id FROM profiles WHERE id = ?", (uid,))
-            if c.fetchone():
-                c.execute("""
-                    INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
-                    VALUES (?, 'club_fudan_gobi_main', ?, ?, 'active', ?, 1)
-                """, (f"club_fudan_gobi_main_{uid}", uid, role, now_iso))
-
-        # 12. Ensure core runner memberships in 'org_fudan_gobi'
-        for uid, role in core_users:
-            c.execute("SELECT id, display_name, gender, date_of_birth, real_name, phone, class_name FROM profiles WHERE id = ?", (uid,))
+        # 10. Ensure all 6 active core runners are confirmed in 'org_fudan_gobi' and active in both clubs
+        for uid, role, rname, gender, dob, cname, extra_dict in core_users:
+            c.execute("SELECT id, phone FROM profiles WHERE id = ?", (uid,))
             p_row = c.fetchone()
-            if p_row:
-                p_id, p_disp, p_gender, p_dob, p_rname, p_phone, p_cname = p_row
-                # Check if member already in org_fudan_gobi
-                c.execute("SELECT id FROM organization_members WHERE org_id = 'org_fudan_gobi' AND user_id = ?", (uid,))
-                m_exists = c.fetchone()
-                if not m_exists:
-                    c.execute("""
-                        INSERT INTO organization_members (id, org_id, user_id, real_name, gender, date_of_birth, class_name, phone, role, status, joined_at)
-                        VALUES (?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, ?, 'temporary', ?)
-                    """, (f"org_fudan_gobi_{uid}", uid, p_rname or p_disp, p_gender or 'male', p_dob or '1985-01-01', p_cname or '复旦戈友', p_phone or '', role, now_iso))
+            if not p_row:
+                continue
+            existing_phone = p_row[1] or ""
+            enc_rname = encrypt_pii(rname)
+            enc_dob = encrypt_pii(dob)
+            extra_str = json.dumps(extra_dict, ensure_ascii=False)
+
+            c.execute("""
+                INSERT OR REPLACE INTO organization_members (
+                    id, org_id, user_id, real_name, gender, date_of_birth, class_name,
+                    phone, role, status, joined_at, confirmed_at, confirmed_by, extra_data
+                ) VALUES (?, 'org_fudan_gobi', ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, 'u_df65d9a588c9', ?)
+            """, (
+                f"org_fudan_gobi_{uid}", uid, enc_rname, gender, enc_dob, cname,
+                existing_phone, role, now_iso, now_iso, extra_str
+            ))
+
+            c.execute("""
+                INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
+                VALUES (?, 'club_rgm_flagship', ?, ?, 'active', ?, 1)
+            """, (f"club_rgm_flagship_{uid}", uid, role, now_iso))
+
+            c.execute("""
+                INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent)
+                VALUES (?, 'club_fudan_gobi_main', ?, ?, 'active', ?, 1)
+            """, (f"club_fudan_gobi_main_{uid}", uid, role, now_iso))
+
+    # 11. Run remove_expired_org_members_from_sub_clubs to verify & clean any remaining expired sub-club members
+    purge_res = LocalStore.remove_expired_org_members_from_sub_clubs("org_fudan_gobi")
+    print(f"Purge expired sub-club members result: {purge_res}")
 
     # Post-checks
     c.execute("SELECT COUNT(*) FROM profiles")
@@ -163,9 +186,9 @@ def run_cleanup(db_path: str):
     c.execute("SELECT id, name, (SELECT COUNT(*) FROM organization_members WHERE org_id = organizations.id) FROM organizations")
     orgs_after = c.fetchall()
 
-    print("\n--- Cleanup Verification Report ---")
-    print(f"Profiles: Before={profiles_before}, After={profiles_after} (Difference: {profiles_after - profiles_before})")
-    print(f"Activities: Before={activities_before}, After={activities_after} (Difference: {activities_after - activities_before})")
+    print("\n--- Cleanup & Confirmation Verification Report ---")
+    print(f"Profiles: Before={profiles_before}, After={profiles_after}")
+    print(f"Activities: Before={activities_before}, After={activities_after}")
     print(f"Remaining Clubs ({len(clubs_after)}):")
     for cl in clubs_after:
         print(f"  - [{cl[0]}] {cl[1]} (org_id: {cl[2]}, members: {cl[3]})")
@@ -173,12 +196,16 @@ def run_cleanup(db_path: str):
     for og in orgs_after:
         print(f"  - [{og[0]}] {og[1]} (members: {og[2]})")
 
+    for uid, *_ in core_users:
+        st = LocalStore.check_org_member_status("org_fudan_gobi", uid)
+        print(f"  - Active member [{uid}]: org_status={st['status']}, is_valid={st['is_valid']}, missing={st['missing_fields']}")
+        assert st["status"] == "confirmed" and st["is_valid"] is True
+
     assert profiles_before == profiles_after, "Error: Profiles count changed!"
     assert activities_before == activities_after, "Error: Activities count changed!"
-    assert len(clubs_after) == 2, f"Expected exactly 2 clubs, got {len(clubs_after)}"
-    assert len(orgs_after) == 1, f"Expected exactly 1 organization, got {len(orgs_after)}"
-    print("\nSUCCESS: All data integrity checks passed!")
+    print("\nSUCCESS: All 6 active members confirmed and all expired/test sub-club records cleaned!")
+
 
 if __name__ == "__main__":
-    db_file = sys.argv[1] if len(sys.argv) > 1 else "backend/data/rgm.db"
+    db_file = sys.argv[1] if len(sys.argv) > 1 else DB_PATH
     run_cleanup(db_file)

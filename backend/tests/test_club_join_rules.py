@@ -162,3 +162,86 @@ def test_club_feed_pagination():
     data3 = res3.json()
     assert len(data3["feed"]) >= 1
     assert data3["offset"] == 4
+
+
+def test_club_invite_code_coach_and_owner_permissions():
+    import time
+    ts = int(time.time() * 1000)
+    owner_uid = f"u_owner_code_{ts}"
+    coach_uid = f"u_coach_code_{ts}"
+    member_uid = f"u_member_code_{ts}"
+    stranger_uid = f"u_stranger_code_{ts}"
+
+    LocalStore.upsert_profile(owner_uid, {"display_name": "码测试团长", "email": "code_owner@test.com"})
+    LocalStore.upsert_profile(coach_uid, {"display_name": "码测试教练", "email": "code_coach@test.com"})
+    LocalStore.upsert_profile(member_uid, {"display_name": "码测试团员", "email": "code_member@test.com"})
+    LocalStore.upsert_profile(stranger_uid, {"display_name": "路人跑友", "email": "code_stranger@test.com"})
+
+    # 1. Create club
+    club = LocalStore.create_club(
+        owner_id=owner_uid,
+        name=f"邀请码权限跑团_{ts}",
+        description="测试团长与教练对邀请码的查看与修改权限",
+        city="上海",
+        join_mode="free"
+    )
+    club_id = club["id"]
+    init_code = club["invite_code"]
+
+    # 2. Add coach and member
+    LocalStore.join_club_by_id(coach_uid, club_id)
+    LocalStore.update_member_role(club_id, coach_uid, "coach")
+
+    LocalStore.join_club_by_id(member_uid, club_id)
+
+    # 3. Check my-clubs endpoint
+    # Owner sees invite_code
+    owner_clubs = client.get(f"/api/team/my-clubs/{owner_uid}").json()["clubs"]
+    target_c = next(c for c in owner_clubs if c["id"] == club_id)
+    assert target_c.get("invite_code") == init_code
+
+    # Coach sees invite_code
+    coach_clubs = client.get(f"/api/team/my-clubs/{coach_uid}").json()["clubs"]
+    target_c_coach = next(c for c in coach_clubs if c["id"] == club_id)
+    assert target_c_coach.get("invite_code") == init_code
+
+    # Regular member CANNOT see invite_code
+    member_clubs = client.get(f"/api/team/my-clubs/{member_uid}").json()["clubs"]
+    target_c_member = next(c for c in member_clubs if c["id"] == club_id)
+    assert "invite_code" not in target_c_member
+
+    # 4. Check dashboard endpoint
+    # Coach sees invite_code
+    coach_dash = client.get(f"/api/team/{club_id}/dashboard?operator_uid={coach_uid}").json()
+    assert coach_dash["club"].get("invite_code") == init_code
+
+    # Regular member CANNOT see invite_code on dashboard
+    member_dash = client.get(f"/api/team/{club_id}/dashboard?operator_uid={member_uid}").json()
+    assert "invite_code" not in member_dash["club"]
+
+    # 5. Member tries to update invite_code -> 403 Forbidden
+    member_update = client.post(f"/api/team/{club_id}/join-mode", json={
+        "operator_uid": member_uid,
+        "invite_code": "HACK99"
+    })
+    assert member_update.status_code == 403
+    assert "团长和教练" in member_update.json()["detail"]
+
+    # 6. Coach updates invite_code to a custom code -> 200 OK
+    new_custom_code = f"CD{ts % 10000}"
+    coach_update = client.post(f"/api/team/{club_id}/join-mode", json={
+        "operator_uid": coach_uid,
+        "join_mode": "invite",
+        "invite_code": new_custom_code
+    })
+    assert coach_update.status_code == 200
+    assert coach_update.json()["club"]["invite_code"] == new_custom_code
+    assert coach_update.json()["club"]["join_mode"] == "invite"
+
+    # 7. Stranger uses new_custom_code to join -> 200 OK
+    join_with_new_code = client.post("/api/team/join-club", json={
+        "user_id": stranger_uid,
+        "club_id": club_id,
+        "invite_code": new_custom_code
+    })
+    assert join_with_new_code.status_code == 200

@@ -3,125 +3,254 @@
     {
       "path": "pages/index/index",
       "style": {
-        "navigationBarTitleText": "RGM 跑团",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "万跑跑团助手",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
+        "backgroundColor": "#0b0b0e",
         "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/coach/coach",
       "style": {
-        "navigationBarTitleText": "Canova教练",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "训练",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
-        "enablePullDownRefresh": true
-      }
-    },
-    {
-      "path": "pages/analysis/analysis",
-      "style": {
-        "navigationBarTitleText": "深度分析",
-        "navigationBarBackgroundColor": "#0b0b0d",
-        "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
+        "backgroundColor": "#0b0b0e",
         "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/team/team",
       "style": {
-        "navigationBarTitleText": "跑团大本营",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "跑团",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
+        "backgroundColor": "#0b0b0e",
         "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/team/rank",
       "style": {
-        "navigationBarTitleText": "跑团英雄榜与动态",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "英雄榜与打卡动态",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
+        "backgroundColor": "#0b0b0e",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/team/group-run",
+      "style": {
+        "navigationBarTitleText": "约跑集结与完赛战报",
+        "navigationBarBackgroundColor": "#0b0b0e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0b0b0e",
         "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/profile/profile",
       "style": {
-        "navigationBarTitleText": "个人中心",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "我的",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d"
-      }
-    },
-    {
-      "path": "pages/goals/goals",
-      "style": {
-        "navigationBarTitleText": "目标与体能",
-        "navigationBarBackgroundColor": "#0b0b0d",
-        "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d"
+        "backgroundColor": "#0b0b0e"
       }
     },
     {
       "path": "pages/team/cockpit",
       "style": {
-        "navigationBarTitleText": "教练学员体能罗盘",
-        "navigationBarBackgroundColor": "#0b0b0d",
+        "navigationBarTitleText": "教练工作台",
+        "navigationBarBackgroundColor": "#0b0b0e",
         "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
+        "backgroundColor": "#0b0b0e",
         "enablePullDownRefresh": true
       }
+    }
+  ],
+  "subPackages": [
+    {
+      "root": "pages/rank",
+      "pages": [
+        {
+          "path": "rank",
+          "style": {
+            "navigationBarTitleText": "英雄榜与打卡动态",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": true
+          }
+        }
+      ]
     },
     {
-      "path": "pages/manual/manual",
-      "style": {
-        "navigationBarTitleText": "新用户操作手册",
-        "navigationBarBackgroundColor": "#0b0b0d",
-        "navigationBarTextStyle": "white",
-        "backgroundColor": "#0b0b0d",
-        "enablePullDownRefresh": false
-      }
+      "root": "pages/group-run",
+      "pages": [
+        {
+          "path": "group-run",
+          "style": {
+            "navigationBarTitleText": "约跑集结与完赛战报",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": true
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/modals",
+      "pages": [
+        {
+          "path": "placeholder",
+          "style": {
+            "navigationBarTitleText": "万跑跑团助手",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/analysis",
+      "pages": [
+        {
+          "path": "analysis",
+          "style": {
+            "navigationBarTitleText": "身体数据与跑力分析",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": true
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/activities",
+      "pages": [
+        {
+          "path": "activities",
+          "style": {
+            "navigationBarTitleText": "全部跑步记录",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": true
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/manual",
+      "pages": [
+        {
+          "path": "manual",
+          "style": {
+            "navigationBarTitleText": "帮助与常见问题",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": false
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/share",
+      "pages": [
+        {
+          "path": "share",
+          "style": {
+            "navigationBarTitleText": "万跑跑团助手",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": false
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/onboarding",
+      "pages": [
+        {
+          "path": "onboarding",
+          "style": {
+            "navigationBarTitleText": "新手跑者设定引导",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e",
+            "enablePullDownRefresh": false
+          }
+        }
+      ]
     }
   ],
   "globalStyle": {
     "navigationBarTextStyle": "white",
-    "navigationBarTitleText": "RGM",
-    "navigationBarBackgroundColor": "#0b0b0d",
-    "backgroundColor": "#0b0b0d"
+    "navigationBarTitleText": "万跑跑团助手",
+    "navigationBarBackgroundColor": "#0b0b0e",
+    "backgroundColor": "#0b0b0e"
+  },
+  "lazyCodeLoading": "requiredComponents",
+  "preloadRule": {
+    "pages/index/index": {
+      "network": "all",
+      "packages": ["pages/rank", "pages/modals", "pages/activities"]
+    },
+    "pages/team/team": {
+      "network": "all",
+      "packages": ["pages/rank", "pages/group-run", "pages/modals"]
+    },
+    "pages/coach/coach": {
+      "network": "all",
+      "packages": ["pages/modals", "pages/analysis"]
+    }
   },
   "tabBar": {
-    "color": "#d4d4d8",
+    "color": "#888888",
     "selectedColor": "#fc4c02",
     "backgroundColor": "#121214",
     "borderStyle": "black",
+    // #ifdef MP-WEIXIN
+    "custom": true,
+    // #endif
     "list": [
       {
         "pagePath": "pages/index/index",
-        "text": "看板"
+        "text": "首页",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home-active.png"
       },
       {
         "pagePath": "pages/coach/coach",
-        "text": "Canova教练"
+        "text": "训练",
+        "iconPath": "static/tabbar/train.png",
+        "selectedIconPath": "static/tabbar/train-active.png"
       },
       {
-        "pagePath": "pages/analysis/analysis",
-        "text": "深度分析"
+        "pagePath": "pages/team/team",
+        "text": "跑团",
+        "iconPath": "static/tabbar/team.png",
+        "selectedIconPath": "static/tabbar/team-active.png"
       },
       {
-        "pagePath": "pages/team/rank",
-        "text": "跑团"
+        "pagePath": "pages/team/cockpit",
+        "text": "教练",
+        "iconPath": "static/tabbar/coach.png",
+        "selectedIconPath": "static/tabbar/coach-active.png"
       },
       {
         "pagePath": "pages/profile/profile",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "static/tabbar/profile.png",
+        "selectedIconPath": "static/tabbar/profile-active.png"
       }
-    ],
-    "custom": true
+    ]
   }
 }
