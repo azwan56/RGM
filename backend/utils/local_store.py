@@ -18058,6 +18058,7 @@ class LocalStore:
         now_iso = get_beijing_iso()
         inserted_count = 0
         primary_sess_uid = eff_uid
+        newly_bound_primary_uid = False
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -18093,6 +18094,8 @@ class LocalStore:
                 sess_uid = eff_uid if can_bind_uid else existing_uid
                 if is_primary_sid:
                     primary_sess_uid = sess_uid
+                    if can_bind_uid and existing_sess and not existing_sess["user_id"]:
+                        newly_bound_primary_uid = True
 
                 sess_client = client_uuid or existing_client
                 sess_scene = (
@@ -18297,11 +18300,133 @@ class LocalStore:
                 )
             conn.commit()
 
+        if primary_sess_uid and eff_uid and primary_sess_uid == eff_uid and not eff_uid.startswith("u_wx_c_"):
+            try:
+                LocalStore._bridge_web_qr_from_telemetry(
+                    raw_sid,
+                    events,
+                    eff_uid,
+                    inspect_history=newly_bound_primary_uid,
+                )
+            except Exception as bridge_err:
+                logging.getLogger("local_store").warning(f"[web_qr_bridge] non-fatal error: {bridge_err}")
+
         return {
             "accepted": inserted_count,
             "session_id": raw_sid,
             "user_id": primary_sess_uid,
         }
+
+    @staticmethod
+    def _bridge_web_qr_from_telemetry(
+        session_id: str,
+        events: List[Dict[str, Any]],
+        eff_uid: str,
+        inspect_history: bool = False,
+    ) -> None:
+        """
+        Cryptographically verified Web QR login bridge for live Mini-Program builds (including 3.9.2):
+        When a signed-JWT authenticated user scans a dynamic `wxacode` (`scene=wlogin_<16hex>`)
+        and taps to enter the Mini-Program from `pages/share/share`, marks/confirms the one-time Web QR session.
+        """
+        if not eff_uid or eff_uid.startswith("u_wx_c_"):
+            return
+
+        from urllib.parse import unquote
+
+        share_entry_clicks = {
+            "share_cta_home",
+            "share_nav_coach",
+            "share_nav_team",
+            "share_nav_analysis",
+            "share_nav_profile",
+            "share_nav_manual",
+            "web_qr_login_confirm",
+        }
+        wlogin_scene = ""
+        has_entry_action = False
+        has_dismiss = False
+
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            ev_type = str(ev.get("event_type") or "").strip()
+            ev_name = str(ev.get("event_name") or "").strip()
+            if ev_name == "web_qr_login_dismiss":
+                has_dismiss = True
+            props = ev.get("props") if isinstance(ev.get("props"), dict) else {}
+            q = props.get("query") if isinstance(props.get("query"), dict) else {}
+            raw_q_scene = unquote(str(q.get("scene") or "").strip())
+            if re.fullmatch(r"wlogin_[0-9a-f]{16}", raw_q_scene):
+                wlogin_scene = raw_q_scene
+            if ev_type == "button_click" and ev_name in share_entry_clicks:
+                has_entry_action = True
+            elif ev_type == "page_enter":
+                from_page = str(props.get("from_page") or "").strip().lstrip("/")
+                if from_page == "pages/share/share":
+                    has_entry_action = True
+
+        if (not wlogin_scene and has_entry_action and session_id) or (inspect_history and session_id):
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                prior_rows = conn.execute(
+                    """
+                    SELECT event_type, event_name, props_json
+                    FROM miniapp_events
+                    WHERE session_id = ? AND user_id = ?
+                    ORDER BY id DESC
+                    LIMIT 20
+                    """,
+                    (session_id, eff_uid),
+                ).fetchall()
+            for prow in prior_rows:
+                p_type = str(prow["event_type"] or "")
+                p_name = str(prow["event_name"] or "")
+                if p_name == "web_qr_login_dismiss":
+                    has_dismiss = True
+                if p_type == "button_click" and p_name in share_entry_clicks:
+                    has_entry_action = True
+                raw_pj = prow["props_json"]
+                if not raw_pj:
+                    continue
+                try:
+                    pj = json.loads(raw_pj)
+                    if not isinstance(pj, dict):
+                        continue
+                    if p_type == "page_enter" and str(pj.get("from_page") or "").strip().lstrip("/") == "pages/share/share":
+                        has_entry_action = True
+                    if not wlogin_scene:
+                        pq = pj.get("query") if isinstance(pj.get("query"), dict) else {}
+                        cand = unquote(str(pq.get("scene") or "").strip())
+                        if re.fullmatch(r"wlogin_[0-9a-f]{16}", cand):
+                            wlogin_scene = cand
+                except Exception:
+                    pass
+
+        if not wlogin_scene:
+            return
+
+        qr_sess = LocalStore.get_web_qr_session(wlogin_scene)
+        if not qr_sess or qr_sess.get("status") not in ("pending", "scanned"):
+            return
+
+        prof = LocalStore.get_profile(eff_uid) or {}
+        d_name = str(prof.get("display_name") or "").strip()
+        avatar = str(prof.get("avatar_url") or "").strip()
+
+        if has_entry_action and not has_dismiss:
+            LocalStore.confirm_web_qr_session(
+                wlogin_scene,
+                user_id=eff_uid,
+                display_name=d_name,
+                avatar_url=avatar,
+            )
+        else:
+            LocalStore.mark_web_qr_scanned(
+                wlogin_scene,
+                display_name=d_name,
+                avatar_url=avatar,
+            )
 
     @staticmethod
     def get_behavior_analytics_overview(days: int = 14) -> Dict[str, Any]:

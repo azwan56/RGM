@@ -377,3 +377,104 @@ def test_club_7d_leaderboard_weekly_target_and_broadcast_day_index_base():
     day_obj = wk_upd.json()["plan"]["schedule_data"]["weeks"][0]["days"][1]
     assert day_obj["athlete_notes"] == "体感轻盈，心率稳定"
     assert day_obj["feeling_tag"] == "😊 轻松舒适"
+
+
+def test_web_qr_telemetry_bridge_for_legacy_miniapp_and_security():
+    uid = f"u_wx_bridge_{int(time.time() * 1000)}"
+    LocalStore.upsert_profile(
+        uid,
+        {
+            "id": uid,
+            "display_name": "正式版扫码跑者",
+            "avatar_url": "https://rgm.vanpower.net/api/avatars/rgm-logo.png",
+        },
+    )
+    fake_png = b"\x89PNG\r\n\x1a\n" + (b"\x00" * 400)
+    with patch("routers.auth.wechat_client.get_wxacode_unlimit", return_value=fake_png):
+        res_create = client.post("/api/auth/wechat/web-qr/create")
+    assert res_create.status_code == 200
+    scene_id = res_create.json()["scene_id"]
+
+    # 1. Unauthenticated telemetry batch MUST NOT mark scanned or confirm
+    unauth_batch = {
+        "session_id": f"s_unauth_{int(time.time() * 1000)}",
+        "client_uuid": "c_attacker",
+        "scene": 1047,
+        "entry_page": "pages/share/share",
+        "events": [
+            {
+                "event_id": "e_unauth_1",
+                "event_type": "session_start",
+                "event_name": "app_open",
+                "page_path": "pages/share/share",
+                "client_ts": int(time.time() * 1000),
+                "props": {"scene": 1047, "query": {"scene": scene_id}},
+            },
+            {
+                "event_id": "e_unauth_2",
+                "event_type": "button_click",
+                "event_name": "share_cta_home",
+                "page_path": "pages/share/share",
+                "client_ts": int(time.time() * 1000) + 500,
+            },
+        ],
+    }
+    r_b0 = client.post("/api/miniapp/telemetry/batch", json=unauth_batch)
+    assert r_b0.status_code == 200
+    r_st0 = client.get(f"/api/auth/wechat/web-qr/status/{scene_id}")
+    assert r_st0.json()["status"] == "pending"
+
+    # 2. Signed-JWT telemetry batch on scan arrival -> marks `scanned`
+    token = _make_jwt(uid)
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    sid = f"s_legit_{int(time.time() * 1000)}"
+    scan_batch = {
+        "session_id": sid,
+        "client_uuid": "c_iphone14",
+        "scene": 1047,
+        "entry_page": "pages/share/share",
+        "events": [
+            {
+                "event_id": "e_legit_1",
+                "event_type": "session_start",
+                "event_name": "app_open",
+                "page_path": "pages/share/share",
+                "client_ts": int(time.time() * 1000),
+                "props": {"scene": 1047, "query": {"scene": scene_id}},
+            }
+        ],
+    }
+    r_b1 = client.post("/api/miniapp/telemetry/batch", json=scan_batch, headers=auth_headers)
+    assert r_b1.status_code == 200
+    r_st1 = client.get(f"/api/auth/wechat/web-qr/status/{scene_id}")
+    assert r_st1.json()["status"] == "scanned"
+    assert r_st1.json()["display_name"] == "正式版扫码跑者"
+
+    # 3. Follow-up batch with `share_cta_home` ("立即进入小程序") -> confirms & issues one-time Web JWT
+    cta_batch = {
+        "session_id": sid,
+        "client_uuid": "c_iphone14",
+        "scene": 1047,
+        "entry_page": "pages/share/share",
+        "events": [
+            {
+                "event_id": "e_legit_2",
+                "event_type": "button_click",
+                "event_name": "share_cta_home",
+                "page_path": "pages/share/share",
+                "client_ts": int(time.time() * 1000) + 1200,
+            }
+        ],
+    }
+    r_b2 = client.post("/api/miniapp/telemetry/batch", json=cta_batch, headers=auth_headers)
+    assert r_b2.status_code == 200
+    r_st2 = client.get(f"/api/auth/wechat/web-qr/status/{scene_id}")
+    st2_data = r_st2.json()
+    assert st2_data["status"] == "confirmed"
+    assert st2_data["user"]["id"] == uid
+    assert st2_data["token"]
+
+    # 4. Subsequent poll sees `consumed` (atomically consumed)
+    r_st3 = client.get(f"/api/auth/wechat/web-qr/status/{scene_id}")
+    assert r_st3.json()["status"] == "consumed"
+

@@ -114,7 +114,7 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
               <span className="text-[11px] text-emerald-300 mt-1 leading-relaxed">
                 请在手机微信点击
                 <br />
-                「确认授权登录网页版」
+                「确认授权登录网页版」或「立即进入小程序」
               </span>
               {scannedUser.name && (
                 <span className="mt-2 px-2.5 py-0.5 rounded-full bg-white/10 text-[11px] text-zinc-200">
@@ -191,7 +191,7 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
       <div className="flex items-start gap-2 p-2.5 bg-white/[0.03] rounded-xl border border-white/5 text-[11px] text-zinc-400 leading-relaxed">
         <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
         <span>
-          扫码后将在「万跑跑团助手」小程序内确认身份，直接同步您的跑团关系、周期训练课表与历史跑步记录。
+          扫码后在「万跑跑团助手」小程序内点击「确认授权」或「立即进入小程序」，即可自动登录网页端并同步跑团、课表与跑步记录。
         </span>
       </div>
     </div>

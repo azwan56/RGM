@@ -416,6 +416,19 @@ function ensureSession(options?: any) {
         query: sanitizeLaunchQuery(options?.query),
       },
     });
+  } else if (options?.query?.scene && String(options.query.scene).includes("wlogin_")) {
+    pushEvent({
+      session_id: sessionId,
+      event_type: "funnel_step",
+      event_name: "app_reopen_scan",
+      event_label: "热启动扫码登录",
+      page_path: options?.path ? String(options.path).replace(/^\/+/, "") : getCurrentPageRoute() || "pages/share/share",
+      client_ts: now,
+      props: {
+        scene: options?.scene !== undefined ? Number(options.scene) : launchScene,
+        query: sanitizeLaunchQuery(options?.query),
+      },
+    });
   }
 
   foregroundEnteredAt = now;

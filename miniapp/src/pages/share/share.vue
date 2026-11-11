@@ -72,7 +72,7 @@
       <view
         v-if="!webLoginConfirmed"
         style="margin-top: 20rpx; padding: 10rpx 24rpx;"
-        @click="webLoginScene = ''"
+        @click="handleDismissWebQrLogin"
       >
         <text style="font-size: 24rpx; color: var(--rgm-text-2, #a1a1aa);">暂不登录网页版，浏览小程序 ›</text>
       </view>
@@ -325,6 +325,11 @@ async function handleConfirmWebQrLogin() {
   } finally {
     confirmingWebLogin.value = false;
   }
+}
+
+function handleDismissWebQrLogin() {
+  trackClick("web_qr_login_dismiss", "暂不登录网页版浏览小程序");
+  webLoginScene.value = "";
 }
 
 onShareAppMessage(() => {
