@@ -3,11 +3,10 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
 import json
-import sqlite3
 from datetime import datetime, date, timedelta
 from db import supabase_admin
 from utils.llm import llm_client
-from utils.local_store import LocalStore, DB_PATH
+from utils.local_store import LocalStore, DB_PATH, sqlite3
 from utils.running_metrics import (
     get_race_specific_zones,
     get_age_from_dob,

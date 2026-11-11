@@ -724,9 +724,8 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
     import time
     import jwt
     from datetime import datetime
-    from utils.local_store import LocalStore, DB_PATH
+    from utils.local_store import LocalStore, DB_PATH, sqlite3
     from utils.encryption import encrypt_string, decrypt_string
-    import sqlite3
 
     brand = (request.brand or "garmin").lower().strip()
     account = (request.account or "").strip()
@@ -1059,8 +1058,7 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
     if domain not in ["garmin.cn", "garmin.com"]:
         raise HTTPException(status_code=400, detail="无效的佳明区域。请选择 garmin.cn (中国版) 或 garmin.com (国际版)")
 
-    from utils.local_store import LocalStore, DB_PATH
-    import sqlite3
+    from utils.local_store import LocalStore, DB_PATH, sqlite3
 
     email_key = request.email.strip().lower()
     existing_p = LocalStore.get_profile_by_garmin_email(request.email)
@@ -1278,8 +1276,7 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
     encrypts password, and initiates an initial sync.
     Supports 2FA (手机二次安全验证) and passwordless 1-click SMS re-authorization for already-bound owners.
     """
-    from utils.local_store import LocalStore, DB_PATH
-    import sqlite3
+    from utils.local_store import LocalStore, DB_PATH, sqlite3
 
     domain = (request.domain or "teamcnapi.coros.com").lower().strip()
     if "teamapi" not in domain and "teamcnapi" not in domain and domain not in ["cn", "global"]:

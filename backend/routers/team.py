@@ -2197,8 +2197,7 @@ def get_club_pacer_radar_endpoint(
     op_canon = LocalStore.resolve_user_id(eff_uid)
     is_auth = op_canon in LocalStore.SUPER_ADMIN_UIDS or eff_uid in LocalStore.SUPER_ADMIN_UIDS
     if not is_auth:
-        import sqlite3
-        from utils.local_store import DB_PATH
+        from utils.local_store import DB_PATH, sqlite3
         with sqlite3.connect(DB_PATH) as conn:
             c = conn.cursor()
             c.execute("SELECT owner_id FROM clubs WHERE id = ?", (club_id,))

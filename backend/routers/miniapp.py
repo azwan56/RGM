@@ -4,7 +4,6 @@ Reduces network roundtrips by bundling essential dashboard data into single fast
 Includes smart user mapping so newly opened Mini Programs automatically resolve to the active runner profile.
 """
 
-import sqlite3
 import json
 import hashlib
 import calendar
@@ -19,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from db import supabase_admin
-from utils.local_store import LocalStore, DB_PATH
+from utils.local_store import LocalStore, DB_PATH, sqlite3
 from utils.running_metrics import compute_ctl_atl_tsb, compute_canova_athlete_matrix
 from utils.encryption import decrypt_string
 from utils.garmin_adapter import GarminAdapter
@@ -44,14 +43,11 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     """
     try:
         eff_uid = LocalStore.resolve_user_id(uid)
-        profile = LocalStore.get_profile(eff_uid) or {}
-        if not profile:
-            profile = {
-                "id": eff_uid,
-                "display_name": "微信跑者",
-                "garmin_connected": False
-            }
-            LocalStore.upsert_profile(eff_uid, profile)
+        profile = LocalStore.get_profile(eff_uid) or {
+            "id": eff_uid,
+            "display_name": "微信跑者",
+            "garmin_connected": False,
+        }
 
         # 2. Compute Monthly Goal Progress
         today = LocalStore.get_beijing_today()
@@ -713,20 +709,14 @@ def get_activity_track(
                     fetched_track = adapter.fetch_activity_gps_track(act_id_str)
                     if fetched_track:
                         track_data = fetched_track
-                        laps_json = json.dumps(fetched_track["laps"], ensure_ascii=False) if fetched_track.get("laps") else None
-                        with sqlite3.connect(DB_PATH) as conn:
-                            c = conn.cursor()
-                            c.execute(
-                                """
-                                UPDATE activities
-                                SET gps_track_data = ?,
-                                    laps_data = COALESCE(?, laps_data),
-                                    splits_data = COALESCE(?, splits_data)
-                                WHERE id = ?
-                                """,
-                                (json.dumps(fetched_track, ensure_ascii=False), laps_json, laps_json, act_id_str),
-                            )
-                            conn.commit()
+                        laps_list = fetched_track.get("laps")
+                        LocalStore.save_activity_streams(
+                            act_id_str,
+                            user_id=owner_uid,
+                            gps_track_data=fetched_track,
+                            laps_data=laps_list if laps_list else None,
+                            splits_data=laps_list if laps_list else None,
+                        )
                         logger.info(f"[miniapp] Cached fetched Garmin detail+track for {act_id_str}")
                 except Exception as fe:
                     logger.warning(f"[miniapp] On-demand Garmin detail fetch failed for {act_id_str}: {fe}")
@@ -740,21 +730,15 @@ def get_activity_track(
                         fetched_track = c_adapter.fetch_activity_gps_track(act_id_str)
                         if fetched_track:
                             track_data = fetched_track
-                            laps_json = json.dumps(fetched_track["laps"], ensure_ascii=False) if fetched_track.get("laps") else None
-                            splits_json = json.dumps(fetched_track["km_splits"], ensure_ascii=False) if fetched_track.get("km_splits") else None
-                            with sqlite3.connect(DB_PATH) as conn:
-                                c = conn.cursor()
-                                c.execute(
-                                    """
-                                    UPDATE activities
-                                    SET gps_track_data = ?,
-                                        laps_data = COALESCE(?, laps_data),
-                                        splits_data = COALESCE(?, splits_data)
-                                    WHERE id = ?
-                                    """,
-                                    (json.dumps(fetched_track, ensure_ascii=False), laps_json, splits_json, act_id_str),
-                                )
-                                conn.commit()
+                            laps_list = fetched_track.get("laps")
+                            splits_list = fetched_track.get("km_splits")
+                            LocalStore.save_activity_streams(
+                                act_id_str,
+                                user_id=owner_uid,
+                                gps_track_data=fetched_track,
+                                laps_data=laps_list if laps_list else None,
+                                splits_data=splits_list if splits_list else None,
+                            )
                             logger.info(f"[miniapp] Cached fetched COROS Web detail+track for {act_id_str}")
                 except Exception as cfe:
                     logger.warning(f"[miniapp] On-demand COROS detail fetch failed for {act_id_str}: {cfe}")

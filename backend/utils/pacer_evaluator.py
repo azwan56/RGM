@@ -27,12 +27,11 @@ import json
 import logging
 import math
 import re
-import sqlite3
 import statistics
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils.local_store import DB_PATH, LocalStore
+from utils.local_store import DB_PATH, LocalStore, sqlite3
 from utils.race_intel import OFFICIAL_ROAD_CATALOG, fetch_race_intelligence
 from utils.running_metrics import (
     _assess_long_run_anti_fade,

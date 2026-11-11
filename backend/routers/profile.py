@@ -657,8 +657,7 @@ def lookup_race_intelligence(req: RaceLookupRequest):
     Also auto-persists to race_plans if a matching race record exists.
     """
     from utils.race_intel import fetch_race_intelligence
-    import sqlite3
-    from utils.local_store import DB_PATH
+    from utils.local_store import DB_PATH, sqlite3
 
     eff_uid = req.user_id
     eff_target_time = req.target_time

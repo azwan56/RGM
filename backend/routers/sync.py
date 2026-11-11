@@ -1,8 +1,9 @@
 import json
 import hashlib
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
 from datetime import datetime, date, timedelta
 from db import supabase_admin
@@ -10,7 +11,7 @@ from utils.encryption import decrypt_string
 from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
 from utils.running_metrics import calculate_trimp
-from utils.local_store import LocalStore
+from utils.local_store import LocalStore, DB_PATH, sqlite3, parse_iso_datetime
 
 logger = logging.getLogger("router_sync")
 router = APIRouter()
@@ -18,6 +19,150 @@ router = APIRouter()
 class SyncTriggerRequest(BaseModel):
     uid: str
     start_date: Optional[str] = None
+
+
+def _activity_source_prefix(act_id: str) -> str:
+    s = str(act_id or "").strip().lower()
+    for p in ("garmin_", "coros_", "hk_", "aw_", "hw_", "st_", "strava_"):
+        if s.startswith(p):
+            return p.rstrip("_")
+    return "other"
+
+
+def _resolve_incremental_sync_window(
+    uid: str,
+    brand_prefix: str,
+    explicit_start_date: Optional[str],
+    last_sync_iso: Optional[str],
+    default_health_days: int,
+) -> Tuple[str, int]:
+    """
+    Computes an incremental sync window (`last_sync_date - 3 days` + dynamic health days)
+    when `explicit_start_date` is omitted and the user already has synced activities for `brand_prefix`.
+    Falls back to full YTD (`YYYY-01-01`) + `default_health_days` on first sync or manual backfill.
+    """
+    today = LocalStore.get_beijing_today()
+    year_floor = f"{today.year}-01-01"
+    if explicit_start_date:
+        return explicit_start_date, default_health_days
+    if not last_sync_iso:
+        return year_floor, default_health_days
+    last_dt = parse_iso_datetime(str(last_sync_iso))
+    if last_dt is None:
+        return year_floor, default_health_days
+
+    has_prior_brand_act = False
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM activities WHERE user_id = ? AND id LIKE ? LIMIT 1",
+                (uid, f"{brand_prefix}_%"),
+            ).fetchone()
+            has_prior_brand_act = row is not None
+    except Exception:
+        has_prior_brand_act = False
+
+    if not has_prior_brand_act:
+        return year_floor, default_health_days
+
+    last_date = last_dt.date()
+    inc_start = max(date.fromisoformat(year_floor), last_date - timedelta(days=3)).isoformat()
+    gap_days = max(0, (today - last_date).days)
+    health_days = max(3, min(default_health_days, gap_days + 2))
+    return inc_start, health_days
+
+
+def _filter_cross_brand_duplicates(uid: str, activities: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Prevents double-counting mileage/TRIMP/leaderboards when a runner records the same workout
+    on two watch ecosystems (e.g., Garmin + COROS simultaneously, ±15 min start_time & ±12% distance).
+    Same-brand activities with distinct IDs (e.g., warmup + intervals) or updates to an existing ID are preserved.
+    """
+    if not activities:
+        return activities, 0
+
+    parsed_dates: List[date] = []
+    for a in activities:
+        dt = parse_iso_datetime(str(a.get("start_time") or ""))
+        if dt is not None:
+            parsed_dates.append(dt.date())
+
+    existing_records: List[Tuple[str, str, datetime, float]] = []
+    existing_ids: set = set()
+    if parsed_dates:
+        min_iso = (min(parsed_dates) - timedelta(days=1)).isoformat()
+        max_iso = (max(parsed_dates) + timedelta(days=2)).isoformat()
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    """
+                    SELECT id, start_time, distance_meters
+                    FROM activities
+                    WHERE user_id = ? AND start_time >= ? AND start_time <= ?
+                      AND (exclude_mode IS NULL OR exclude_mode != 'excluded')
+                    """,
+                    (uid, min_iso, max_iso),
+                )
+                for r_id, r_st, r_dist in cur.fetchall():
+                    rid = str(r_id or "")
+                    existing_ids.add(rid)
+                    dt_ex = parse_iso_datetime(str(r_st or ""))
+                    if dt_ex is not None:
+                        existing_records.append((rid, _activity_source_prefix(rid), dt_ex, float(r_dist or 0.0)))
+        except Exception as e:
+            logger.debug(f"[sync] Cross-brand dedup preload skipped: {e}")
+
+    # Prefer Garmin over COROS when both arrive fresh in the same sync batch
+    brand_priority = {"garmin": 0, "coros": 1, "hk": 2, "aw": 3, "hw": 4, "st": 5, "other": 9}
+    ordered = sorted(
+        activities,
+        key=lambda a: (
+            0 if str(a.get("id") or "") in existing_ids else 1,
+            brand_priority.get(_activity_source_prefix(str(a.get("id") or "")), 9),
+            str(a.get("start_time") or ""),
+        ),
+    )
+
+    accepted: List[Dict[str, Any]] = []
+    skipped = 0
+    for act in ordered:
+        act_id = str(act.get("id") or "")
+        if not act_id:
+            continue
+        if act_id in existing_ids:
+            accepted.append(act)
+            continue
+
+        cur_prefix = _activity_source_prefix(act_id)
+        cur_dt = parse_iso_datetime(str(act.get("start_time") or ""))
+        cur_dist = float(act.get("distance_meters") or 0.0)
+
+        is_dup = False
+        if cur_dt is not None and cur_dist > 0:
+            for ex_id, ex_prefix, ex_dt, ex_dist in existing_records:
+                if ex_prefix == cur_prefix or ex_dist <= 0:
+                    continue
+                time_diff = abs((cur_dt - ex_dt).total_seconds())
+                max_d = max(cur_dist, ex_dist)
+                dist_tol = max(250.0, max_d * 0.12)
+                if time_diff <= 900 and abs(cur_dist - ex_dist) <= dist_tol:
+                    logger.info(
+                        f"[sync] Skipped cross-brand duplicate {act_id} ({cur_dist:.0f}m) matched {ex_id} ({ex_dist:.0f}m, Δt={time_diff:.0f}s)"
+                    )
+                    is_dup = True
+                    break
+
+        if is_dup:
+            skipped += 1
+            continue
+
+        accepted.append(act)
+        if cur_dt is not None:
+            existing_records.append((act_id, cur_prefix, cur_dt, cur_dist))
+            existing_ids.add(act_id)
+
+    accepted.sort(key=lambda x: str(x.get("start_time") or ""), reverse=True)
+    return accepted, skipped
 
 def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, Any]:
     """Core synchronization task for a single user supporting both Garmin and COROS."""
@@ -122,16 +267,23 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     except Exception as pe:
                         logger.warning(f"[sync] Garmin profile fetch error: {pe}")
 
-                    year_start = start_date or f"{date.today().year}-01-01"
-                    g_acts = garmin_adapter.fetch_activities_by_date(start_date=year_start)
-                    if not g_acts:
+                    garmin_start, garmin_health_days = _resolve_incremental_sync_window(
+                        uid=uid,
+                        brand_prefix="garmin",
+                        explicit_start_date=start_date,
+                        last_sync_iso=user.get("garmin_last_sync_at"),
+                        default_health_days=7,
+                    )
+                    g_acts = garmin_adapter.fetch_activities_by_date(start_date=garmin_start)
+                    if not g_acts and garmin_start == f"{LocalStore.get_beijing_today().year}-01-01":
                         g_acts = garmin_adapter.fetch_recent_activities(limit=100)
                     all_activities.extend(g_acts)
                     if garmin_adapter.last_error:
                         sync_errors.append(garmin_adapter.last_error)
 
-                    for i in range(7):
-                        d = (date.today() - timedelta(days=i)).isoformat()
+                    today_bj = LocalStore.get_beijing_today()
+                    for i in range(garmin_health_days):
+                        d = (today_bj - timedelta(days=i)).isoformat()
                         try:
                             h_metrics = garmin_adapter.fetch_daily_health_metrics(d)
                             if h_metrics:
@@ -174,35 +326,42 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     else:
                         try:
                             c_info = coros_adapter.fetch_user_profile_info()
-                            if c_info.get("avatar_url") and not profile_updates.get("avatar_url"):
+                            if c_info.get("avatar_url") and not profile_updates.get("avatar_url") and not user.get("avatar_url"):
                                 profile_updates["avatar_url"] = c_info["avatar_url"]
                             if c_info.get("display_name") and not user.get("display_name"):
                                 profile_updates["display_name"] = c_info["display_name"]
-                            if c_info.get("weight_kg"):
+                            if c_info.get("weight_kg") and not user.get("weight_kg") and not user.get("weight"):
                                 profile_updates["weight_kg"] = c_info["weight_kg"]
-                            if c_info.get("height_cm"):
+                            if c_info.get("height_cm") and not user.get("height_cm") and not user.get("height"):
                                 profile_updates["height_cm"] = c_info["height_cm"]
-                            if c_info.get("date_of_birth"):
+                            if c_info.get("date_of_birth") and not user.get("date_of_birth"):
                                 profile_updates["date_of_birth"] = c_info["date_of_birth"]
-                            if c_info.get("gender"):
+                            if c_info.get("gender") and not user.get("gender"):
                                 profile_updates["gender"] = c_info["gender"]
                             if c_info.get("vo2max"):
                                 profile_updates["vo2max"] = c_info["vo2max"]
-                            if c_info.get("max_heart_rate"):
+                            if c_info.get("max_heart_rate") and (not user.get("max_heart_rate") or user.get("max_heart_rate") == 190):
                                 profile_updates["max_heart_rate"] = c_info["max_heart_rate"]
-                            if c_info.get("resting_heart_rate"):
+                            if c_info.get("resting_heart_rate") and (not user.get("resting_heart_rate") or user.get("resting_heart_rate") in (56, 60)):
                                 profile_updates["resting_heart_rate"] = c_info["resting_heart_rate"]
                         except Exception as pe:
                             logger.warning(f"[sync] COROS profile fetch error: {pe}")
 
-                        year_start = start_date or f"{date.today().year}-01-01"
-                        c_acts = coros_adapter.fetch_activities_by_date(start_date=year_start)
-                        if not c_acts:
+                        coros_start, coros_health_days = _resolve_incremental_sync_window(
+                            uid=uid,
+                            brand_prefix="coros",
+                            explicit_start_date=start_date,
+                            last_sync_iso=user.get("coros_last_sync_at"),
+                            default_health_days=30,
+                        )
+                        c_acts = coros_adapter.fetch_activities_by_date(start_date=coros_start)
+                        if not c_acts and coros_start == f"{LocalStore.get_beijing_today().year}-01-01":
                             c_acts = coros_adapter.fetch_recent_activities(limit=100)
                         all_activities.extend(c_acts)
 
-                        for i in range(30):
-                            d = (date.today() - timedelta(days=i)).isoformat()
+                        today_bj = LocalStore.get_beijing_today()
+                        for i in range(coros_health_days):
+                            d = (today_bj - timedelta(days=i)).isoformat()
                             try:
                                 h_metrics = coros_adapter.fetch_daily_health_metrics(d)
                                 if h_metrics and any(h_metrics.get(k) is not None for k in [
@@ -233,29 +392,32 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                 except Exception as se:
                     logger.warning(f"[sync] Supabase profile update error: {se}")
 
-        # 4. Process and upsert activities
+        # 4. Process and upsert activities (deduplicating cross-brand double-watch recordings first)
         saved_count = 0
-        rest_hr = user.get("resting_heart_rate") or 60
-        max_hr = user.get("max_heart_rate") or 190
-        gender = user.get("gender") or "male"
+        rest_hr = profile_updates.get("resting_heart_rate") or user.get("resting_heart_rate") or 60
+        max_hr = profile_updates.get("max_heart_rate") or user.get("max_heart_rate") or 190
+        gender = profile_updates.get("gender") or user.get("gender") or "male"
 
-        # Sort activities newest first so prefetch targets the true latest runs
-        all_activities.sort(key=lambda x: str(x.get("start_time") or ""), reverse=True)
+        all_activities, skipped_cross_brand = _filter_cross_brand_duplicates(uid, all_activities)
 
-        # Check existing DB cache to avoid redundant detail API calls on already-cached activities
+        # Check existing DB cache (lightweight scalar flags only, zero GPS blobs read)
         existing_cache: Dict[str, Tuple[bool, bool]] = {}
         act_ids_all = [str(a.get("id") or "") for a in all_activities if a.get("id")]
         if act_ids_all:
             try:
-                import sqlite3
-                from utils.local_store import DB_PATH
                 with sqlite3.connect(DB_PATH) as conn:
                     cur = conn.cursor()
                     for chunk_start in range(0, len(act_ids_all), 200):
                         chunk = act_ids_all[chunk_start:chunk_start + 200]
                         ph = ",".join(["?"] * len(chunk))
                         cur.execute(
-                            f"SELECT id, gps_track_data, segment_analysis_json FROM activities WHERE id IN ({ph})",
+                            f"""
+                            SELECT id,
+                                   COALESCE(has_gps_track, CASE WHEN route_preview_json IS NOT NULL OR gps_track_data IS NOT NULL THEN 1 ELSE 0 END) AS has_gps,
+                                   CASE WHEN segment_analysis_json IS NOT NULL AND segment_analysis_json != '' THEN 1 ELSE 0 END AS has_seg
+                            FROM activities
+                            WHERE id IN ({ph})
+                            """,
                             chunk,
                         )
                         for r_id, r_gps, r_seg in cur.fetchall():
@@ -372,6 +534,7 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
         return {
             "success": True,
             "synced_activities": saved_count,
+            "skipped_cross_brand_duplicates": skipped_cross_brand,
             "synced_health": synced_health,
             "last_sync_at": sync_time_iso,
         }
@@ -542,9 +705,6 @@ def import_healthkit(req: HealthKitImportRequest, request: Request):
     Huawei Watch workouts bridged via iOS HealthKit.
     Enforces single-watch exclusivity and skips any workout already present from Garmin/COROS.
     """
-    import sqlite3
-    from utils.local_store import DB_PATH
-
     token_uid = getattr(request.state, "user_id", None)
     if not token_uid:
         raise HTTPException(status_code=401, detail="请先登录")
@@ -587,8 +747,13 @@ def import_healthkit(req: HealthKitImportRequest, request: Request):
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(
-                "SELECT id, start_time, distance_meters, average_heartrate, avg_pace_str, gps_track_data FROM activities WHERE user_id = ?",
-                (uid,)
+                """
+                SELECT id, start_time, distance_meters, average_heartrate, avg_pace_str,
+                       COALESCE(has_gps_track, CASE WHEN route_preview_json IS NOT NULL OR gps_track_data IS NOT NULL THEN 1 ELSE 0 END) AS gps_track_data
+                FROM activities
+                WHERE user_id = ?
+                """,
+                (uid,),
             )
             for row in cur.fetchall():
                 r_dict = dict(row)
@@ -1190,9 +1355,6 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
     extracting the full GPS route, elevation profile, heart rate, and cadence.
     """
     import base64
-    import hashlib
-    import sqlite3
-    from utils.local_store import DB_PATH
 
     token_uid = getattr(request.state, "user_id", None)
     if not req.uid or not req.uid.strip():
@@ -1258,7 +1420,12 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, start_time, distance_meters, average_heartrate, avg_pace_str, gps_track_data FROM activities WHERE user_id = ? AND substr(start_time, 1, 10) = ?",
+                """
+                SELECT id, start_time, distance_meters, average_heartrate, avg_pace_str,
+                       COALESCE(has_gps_track, CASE WHEN route_preview_json IS NOT NULL OR gps_track_data IS NOT NULL THEN 1 ELSE 0 END) AS gps_track_data
+                FROM activities
+                WHERE user_id = ? AND substr(start_time, 1, 10) = ?
+                """,
                 (uid, bj_date),
             )
             for row in cur.fetchall():
@@ -1331,6 +1498,7 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
                 for old_id in stale_screenshot_ids_to_delete:
                     if old_id != act_id:
                         cur.execute("DELETE FROM activities WHERE id = ? AND user_id = ?", (old_id, uid))
+                        cur.execute("DELETE FROM activity_streams WHERE activity_id = ? AND user_id = ?", (old_id, uid))
                 conn.commit()
         except Exception:
             pass
@@ -1779,10 +1947,6 @@ def _is_daily_summary_activity(ex: Dict[str, Any]) -> bool:
 
 
 def _process_screenshot_import(uid: str, raw_bytes: bytes, filename: str, source_brand: str) -> Dict[str, Any]:
-    import hashlib
-    import sqlite3
-    from utils.local_store import DB_PATH
-
     profile = LocalStore.get_profile(uid) or {}
     raw_brand = (source_brand or "huawei").strip().lower()
     if raw_brand == "apple_watch":
@@ -1824,7 +1988,12 @@ def _process_screenshot_import(uid: str, raw_bytes: bytes, filename: str, source
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, start_time, distance_meters, moving_time_seconds, average_heartrate, avg_pace_str, gps_track_data FROM activities WHERE user_id = ?",
+                """
+                SELECT id, start_time, distance_meters, moving_time_seconds, average_heartrate, avg_pace_str,
+                       COALESCE(has_gps_track, CASE WHEN route_preview_json IS NOT NULL OR gps_track_data IS NOT NULL THEN 1 ELSE 0 END) AS gps_track_data
+                FROM activities
+                WHERE user_id = ?
+                """,
                 (uid,),
             )
             for row in cur.fetchall():
@@ -1936,6 +2105,7 @@ def _process_screenshot_import(uid: str, raw_bytes: bytes, filename: str, source
                     for old_id in ids_to_delete_on_day:
                         if old_id != act_id:
                             cur.execute("DELETE FROM activities WHERE id = ? AND user_id = ?", (old_id, uid))
+                            cur.execute("DELETE FROM activity_streams WHERE activity_id = ? AND user_id = ?", (old_id, uid))
                     conn.commit()
                 existing_by_date[rec_date] = [ex for ex in same_day_list if str(ex.get("id")) not in ids_to_delete_on_day]
                 updated_count += 1
@@ -2064,7 +2234,8 @@ async def import_screenshot_upload(
         raise HTTPException(status_code=403, detail="无权为其他账号导入数据")
 
     raw_bytes = await file.read()
-    return _process_screenshot_import(
+    return await run_in_threadpool(
+        _process_screenshot_import,
         uid=uid.strip(),
         raw_bytes=raw_bytes,
         filename=file.filename or "screenshot.jpg",

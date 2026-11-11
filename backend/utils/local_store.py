@@ -58,6 +58,11 @@ logger = logging.getLogger("local_store")
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 DB_PATH = os.environ.get("RGM_DB_PATH") or os.path.join(DB_DIR, "rgm.db")
 
+
+def db_connect(database: Optional[str] = None, *args, **kwargs):
+    """Unified auto-closing SQLite connection helper with WAL/busy_timeout pragmas."""
+    return sqlite3.connect(database or DB_PATH, *args, **kwargs)
+
 DEFAULT_ORG_PROGRAMS = [
     "中文EMBA",
     "台大班",
@@ -134,6 +139,85 @@ def to_beijing_iso(dt_str: Optional[str]) -> Optional[str]:
     if dt is not None and dt.tzinfo is not None:
         return dt.astimezone(_CN_TZ).isoformat(timespec="seconds")
     return s
+
+def _build_slim_route_preview(raw_track: Any) -> Optional[Dict[str, Any]]:
+    """Extracts a compact <=250-point polyline thumbnail (normalized to latitude/longitude + bounds) from full gps_track_data."""
+    if not raw_track:
+        return None
+    parsed = raw_track
+    if isinstance(raw_track, str):
+        try:
+            parsed = json.loads(raw_track)
+        except Exception:
+            return None
+    if isinstance(parsed, list):
+        pts = parsed
+    elif isinstance(parsed, dict):
+        pts = parsed.get("points") if parsed.get("points") is not None else parsed.get("route")
+    else:
+        return None
+    if not isinstance(pts, list) or len(pts) < 2:
+        return None
+
+    valid_pts: List[Dict[str, float]] = []
+    for p in pts:
+        lat_v = None
+        lng_v = None
+        if isinstance(p, dict):
+            lat_v = p.get("latitude") if p.get("latitude") is not None else p.get("lat")
+            lng_v = (
+                p.get("longitude")
+                if p.get("longitude") is not None
+                else (p.get("lng") if p.get("lng") is not None else p.get("lon"))
+            )
+        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+            lat_v, lng_v = p[0], p[1]
+        if lat_v is not None and lng_v is not None:
+            try:
+                valid_pts.append({"latitude": float(lat_v), "longitude": float(lng_v)})
+            except (TypeError, ValueError):
+                continue
+
+    if len(valid_pts) < 2:
+        return None
+    try:
+        from utils.geo_utils import smooth_sparse_stadium_track
+        smoothed = smooth_sparse_stadium_track(valid_pts, max_output_points=250)
+        if smoothed is not valid_pts and len(smoothed) >= 2:
+            valid_pts = smoothed
+    except Exception:
+        pass
+    max_pts = 250
+    if len(valid_pts) <= max_pts:
+        sampled = valid_pts
+    else:
+        step = (len(valid_pts) - 1) / float(max_pts - 1)
+        sampled = [valid_pts[int(round(i * step))] for i in range(max_pts - 1)] + [valid_pts[-1]]
+    slim_pts = [
+        {
+            "latitude": round(float(p["latitude"]), 6),
+            "longitude": round(float(p["longitude"]), 6),
+        }
+        for p in sampled
+    ]
+    if len(slim_pts) < 2:
+        return None
+    min_lat = min(p["latitude"] for p in slim_pts)
+    max_lat = max(p["latitude"] for p in slim_pts)
+    min_lng = min(p["longitude"] for p in slim_pts)
+    max_lng = max(p["longitude"] for p in slim_pts)
+    return {
+        "points": slim_pts,
+        "center": {
+            "latitude": round((min_lat + max_lat) / 2.0, 6),
+            "longitude": round((min_lng + max_lng) / 2.0, 6),
+        },
+        "bounds": {
+            "southwest": {"latitude": min_lat, "longitude": min_lng},
+            "northeast": {"latitude": max_lat, "longitude": max_lng},
+        },
+    }
+
 
 def init_db():
     os.makedirs(DB_DIR, exist_ok=True)
@@ -231,6 +315,24 @@ def init_db():
             cursor.execute("ALTER TABLE activities ADD COLUMN segment_analysis_json TEXT")
         except Exception:
             pass
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN route_preview_json TEXT")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN has_gps_track INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS activity_streams (
+                activity_id TEXT PRIMARY KEY,
+                user_id TEXT,
+                gps_track_data TEXT,
+                updated_at TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_streams_user ON activity_streams(user_id)")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS daily_health (
@@ -930,12 +1032,44 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_club_memberships_club ON club_memberships(club_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_training_plans_user ON training_plans(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_training_plan_backups_user ON training_plan_backups(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_race_plans_user ON race_plans(user_id, race_date)",
         ]:
             try:
                 cursor.execute(idx_sql)
             except Exception:
                 pass
+
+        # Phase 2: Cold/hot separation — migrate inline heavy gps_track_data blobs to activity_streams
+        try:
+            cursor.execute(
+                "SELECT id, user_id, gps_track_data FROM activities WHERE gps_track_data IS NOT NULL AND gps_track_data != ''"
+            )
+            inline_stream_rows = cursor.fetchall()
+            if inline_stream_rows:
+                now_mig_iso = datetime.utcnow().isoformat() + "Z"
+                for s_row in inline_stream_rows:
+                    a_id, a_uid, raw_gps = s_row[0], s_row[1], s_row[2]
+                    slim_preview = _build_slim_route_preview(raw_gps)
+                    preview_str = json.dumps(slim_preview, ensure_ascii=False) if slim_preview else None
+                    has_pts = 1 if (slim_preview and slim_preview.get("points")) else 0
+                    cursor.execute(
+                        """
+                        INSERT INTO activity_streams (activity_id, user_id, gps_track_data, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(activity_id) DO UPDATE SET
+                            gps_track_data = COALESCE(activity_streams.gps_track_data, excluded.gps_track_data),
+                            user_id = COALESCE(excluded.user_id, activity_streams.user_id),
+                            updated_at = excluded.updated_at
+                        """,
+                        (a_id, a_uid, raw_gps, now_mig_iso),
+                    )
+                    cursor.execute(
+                        "UPDATE activities SET route_preview_json = COALESCE(?, route_preview_json), has_gps_track = ?, gps_track_data = NULL WHERE id = ?",
+                        (preview_str, has_pts, a_id),
+                    )
+        except Exception as mig_err:
+            logger.warning(f"[init_db] activity_streams migration warning: {mig_err}")
 
         # Seed default Fudan Gobi Organization if none exists
         cursor.execute("SELECT COUNT(*) FROM organizations WHERE id = 'org_fudan_gobi'")
@@ -1215,11 +1349,17 @@ class LocalStore:
 
             if drop_transient_watch_activities:
                 cursor.execute(
+                    "DELETE FROM activity_streams WHERE user_id = ? AND (activity_id LIKE 'hk_%' OR activity_id LIKE 'aw_%' OR activity_id LIKE 'hw_%')",
+                    (source_uid,),
+                )
+                cursor.execute(
                     "DELETE FROM activities WHERE user_id = ? AND (id LIKE 'hk_%' OR id LIKE 'aw_%' OR id LIKE 'hw_%')",
                     (source_uid,),
                 )
             cursor.execute("UPDATE OR IGNORE activities SET user_id = ? WHERE user_id = ?", (target_uid, source_uid))
             cursor.execute("DELETE FROM activities WHERE user_id = ?", (source_uid,))
+            cursor.execute("UPDATE OR IGNORE activity_streams SET user_id = ? WHERE user_id = ?", (target_uid, source_uid))
+            cursor.execute("DELETE FROM activity_streams WHERE user_id = ?", (source_uid,))
 
             # Migrate daily_health rows whose composite id is '{uid}_{date}'
             cursor.execute("SELECT * FROM daily_health WHERE user_id = ?", (source_uid,))
@@ -1624,6 +1764,7 @@ class LocalStore:
             cursor.execute("DELETE FROM profiles WHERE id = ?", (uid,))
             cursor.execute("DELETE FROM club_memberships WHERE user_id = ?", (uid,))
             cursor.execute("DELETE FROM organization_members WHERE user_id = ?", (uid,))
+            cursor.execute("DELETE FROM activity_streams WHERE user_id = ?", (uid,))
             conn.commit()
 
     @staticmethod
@@ -1700,6 +1841,62 @@ class LocalStore:
                     logger.warning(f"Failed to sync profile update to org {oid} for user {eff_uid}: {e}")
 
     @staticmethod
+    def save_activity_streams(
+        activity_id: str,
+        user_id: Optional[str] = None,
+        gps_track_data: Any = None,
+        laps_data: Any = None,
+        splits_data: Any = None,
+    ) -> None:
+        """Persists full-resolution GPS stream in `activity_streams` and updates slim preview on `activities`."""
+        if not activity_id:
+            return
+        gps_str: Optional[str] = None
+        preview_str: Optional[str] = None
+        has_pts: Optional[int] = None
+        if gps_track_data is not None:
+            gps_str = json.dumps(gps_track_data, ensure_ascii=False) if isinstance(gps_track_data, (dict, list)) else str(gps_track_data)
+            slim_prev = _build_slim_route_preview(gps_track_data)
+            preview_str = json.dumps(slim_prev, ensure_ascii=False) if slim_prev else None
+            has_pts = 1 if (slim_prev and slim_prev.get("points")) else 0
+
+        laps_str = json.dumps(laps_data, ensure_ascii=False) if isinstance(laps_data, (dict, list)) else laps_data
+        splits_str = json.dumps(splits_data, ensure_ascii=False) if isinstance(splits_data, (dict, list)) else splits_data
+        now_iso = datetime.utcnow().isoformat() + "Z"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if not user_id:
+                u_row = cursor.execute("SELECT user_id FROM activities WHERE id = ?", (activity_id,)).fetchone()
+                if u_row:
+                    user_id = u_row[0]
+            if gps_str is not None:
+                cursor.execute(
+                    """
+                    INSERT INTO activity_streams (activity_id, user_id, gps_track_data, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(activity_id) DO UPDATE SET
+                        user_id = COALESCE(excluded.user_id, activity_streams.user_id),
+                        gps_track_data = excluded.gps_track_data,
+                        updated_at = excluded.updated_at
+                    """,
+                    (activity_id, user_id, gps_str, now_iso),
+                )
+            cursor.execute(
+                """
+                UPDATE activities
+                SET gps_track_data = NULL,
+                    route_preview_json = COALESCE(?, route_preview_json),
+                    has_gps_track = COALESCE(?, has_gps_track),
+                    laps_data = COALESCE(?, laps_data),
+                    splits_data = COALESCE(?, splits_data)
+                WHERE id = ?
+                """,
+                (preview_str, has_pts, laps_str, splits_str, activity_id),
+            )
+            conn.commit()
+
+    @staticmethod
     def upsert_activity(act: Dict[str, Any], notify: bool = True, reconcile_plan: bool = True):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
@@ -1709,23 +1906,26 @@ class LocalStore:
                 "average_heartrate", "max_heartrate", "average_cadence", "avg_pace_str",
                 "calories", "aerobic_training_effect", "anaerobic_training_effect", "trimp",
                 "ai_journal", "laps_data", "splits_data", "gps_track_data", "map_image_url",
-                "exclude_mode", "segment_analysis_json"
+                "exclude_mode", "segment_analysis_json", "route_preview_json", "has_gps_track"
             ]
             act_id = act.get("id")
             cursor.execute(
                 """
-                SELECT id, gps_track_data, map_image_url, laps_data, splits_data,
-                       exclude_mode, segment_analysis_json, ai_journal
-                FROM activities WHERE id = ?
+                SELECT a.id, COALESCE(s.gps_track_data, a.gps_track_data), a.map_image_url, a.laps_data, a.splits_data,
+                       a.exclude_mode, a.segment_analysis_json, a.ai_journal, a.route_preview_json, a.has_gps_track
+                FROM activities a
+                LEFT JOIN activity_streams s ON s.activity_id = a.id
+                WHERE a.id = ?
                 """,
                 (act_id,),
             )
             existing_row = cursor.fetchone()
             is_new = existing_row is None
 
+            incoming_gps = act.get("gps_track_data")
+            preserved_gps = existing_row[1] if (not is_new and existing_row) else None
+
             if not is_new and existing_row:
-                if not act.get("gps_track_data") and existing_row[1]:
-                    act["gps_track_data"] = existing_row[1]
                 if not act.get("map_image_url") and existing_row[2]:
                     act["map_image_url"] = existing_row[2]
                 if not act.get("laps_data") and existing_row[3]:
@@ -1758,15 +1958,51 @@ class LocalStore:
             if not act.get("ai_journal") or not str(act.get("ai_journal")).strip():
                 act["ai_journal"] = LocalStore.generate_canova_critique(act)
 
+            # Cold/hot stream separation: store full GPS stream in `activity_streams`, slim preview in `activities`
+            eff_gps = incoming_gps if incoming_gps else preserved_gps
+            if incoming_gps:
+                slim_prev = _build_slim_route_preview(incoming_gps)
+                route_preview_str = json.dumps(slim_prev, ensure_ascii=False) if slim_prev else None
+                has_gps_flag = 1 if (slim_prev and slim_prev.get("points")) else 0
+                gps_stream_str = json.dumps(incoming_gps, ensure_ascii=False) if isinstance(incoming_gps, (dict, list)) else str(incoming_gps)
+                cursor.execute(
+                    """
+                    INSERT INTO activity_streams (activity_id, user_id, gps_track_data, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(activity_id) DO UPDATE SET
+                        user_id = COALESCE(excluded.user_id, activity_streams.user_id),
+                        gps_track_data = excluded.gps_track_data,
+                        updated_at = excluded.updated_at
+                    """,
+                    (act_id, act.get("user_id"), gps_stream_str, datetime.utcnow().isoformat() + "Z"),
+                )
+            elif not is_new and existing_row:
+                route_preview_str = existing_row[8]
+                has_gps_flag = int(existing_row[9] or 0)
+                if not route_preview_str and preserved_gps:
+                    slim_prev = _build_slim_route_preview(preserved_gps)
+                    route_preview_str = json.dumps(slim_prev, ensure_ascii=False) if slim_prev else None
+                    has_gps_flag = 1 if (slim_prev and slim_prev.get("points")) else 0
+            else:
+                route_preview_str = None
+                has_gps_flag = 0
+
+            row_map = dict(act)
+            row_map["gps_track_data"] = None
+            row_map["route_preview_json"] = route_preview_str
+            row_map["has_gps_track"] = has_gps_flag
+
             row_data = []
             for col in cols:
-                val = act.get(col)
+                val = row_map.get(col)
                 if isinstance(val, (dict, list)):
                     val = json.dumps(val, ensure_ascii=False)
                 row_data.append(val)
             placeholders = ["?"] * len(cols)
             cursor.execute(f"INSERT OR REPLACE INTO activities ({', '.join(cols)}) VALUES ({', '.join(placeholders)})", row_data)
             conn.commit()
+            if eff_gps and not act.get("gps_track_data"):
+                act["gps_track_data"] = route_preview_str or eff_gps
 
         # Trigger training plan auto-reconciliation if active plan exists
         if reconcile_plan:
@@ -1792,14 +2028,26 @@ class LocalStore:
                 logger.warning(f"Canova critique push notification failed: {pe}")
 
     @staticmethod
-    def get_recent_activities(uid: str, limit: int = 15) -> List[Dict[str, Any]]:
+    def get_recent_activities(uid: str, limit: int = 15, include_splits: bool = True) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        split_cols = ", laps_data, splits_data, segment_analysis_json" if include_splits else ""
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM activities WHERE user_id = ? OR user_id = ? ORDER BY start_time DESC LIMIT ?",
-                (canonical_uid, uid, limit)
+                f"""
+                SELECT id, user_id, name, sport_type, start_time, distance_meters,
+                       moving_time_seconds, elapsed_time_seconds, elevation_gain_meters,
+                       average_heartrate, max_heartrate, average_cadence, avg_pace_str,
+                       calories, aerobic_training_effect, anaerobic_training_effect, trimp,
+                       ai_journal, map_image_url, exclude_mode, has_gps_track,
+                       COALESCE(route_preview_json, gps_track_data) AS gps_track_data{split_cols}
+                FROM activities
+                WHERE user_id = ? OR user_id = ?
+                ORDER BY start_time DESC
+                LIMIT ?
+                """,
+                (canonical_uid, uid, limit),
             )
             rows = [dict(r) for r in cursor.fetchall()]
 
@@ -1823,11 +2071,7 @@ class LocalStore:
                 r["workout_effective_vdot"] = None
 
             if not r.get("ai_journal") or not str(r["ai_journal"]).strip():
-                critique = LocalStore.generate_canova_critique(r)
-                r["ai_journal"] = critique
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.cursor().execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (critique, r["id"]))
-                    conn.commit()
+                r["ai_journal"] = LocalStore.generate_canova_critique(r)
 
         return rows
 
@@ -1877,13 +2121,16 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, user_id, name, sport_type, start_time, distance_meters,
-                       moving_time_seconds, elapsed_time_seconds, elevation_gain_meters,
-                       avg_pace_str, average_heartrate, max_heartrate, average_cadence,
-                       map_image_url, gps_track_data, laps_data, splits_data,
-                       segment_analysis_json, ai_journal
-                FROM activities 
-                WHERE id = ?
+                SELECT a.id, a.user_id, a.name, a.sport_type, a.start_time, a.distance_meters,
+                       a.moving_time_seconds, a.elapsed_time_seconds, a.elevation_gain_meters,
+                       a.avg_pace_str, a.average_heartrate, a.max_heartrate, a.average_cadence,
+                       a.map_image_url,
+                       COALESCE(s.gps_track_data, a.gps_track_data, a.route_preview_json) AS gps_track_data,
+                       a.laps_data, a.splits_data,
+                       a.segment_analysis_json, a.ai_journal
+                FROM activities a
+                LEFT JOIN activity_streams s ON s.activity_id = a.id
+                WHERE a.id = ?
             """, (activity_id,))
             row = cursor.fetchone()
             if not row:
@@ -2296,7 +2543,13 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT * FROM activities 
+                SELECT id, user_id, name, sport_type, start_time, distance_meters,
+                       moving_time_seconds, elapsed_time_seconds, elevation_gain_meters,
+                       average_heartrate, max_heartrate, average_cadence, avg_pace_str,
+                       calories, aerobic_training_effect, anaerobic_training_effect, trimp,
+                       ai_journal, map_image_url, exclude_mode, has_gps_track,
+                       COALESCE(route_preview_json, gps_track_data) AS gps_track_data
+                FROM activities 
                 WHERE user_id = ? AND start_time >= ? AND start_time < ? 
                   AND {RUNNING_SQL_FILTER}
                 ORDER BY start_time DESC
@@ -2308,7 +2561,7 @@ class LocalStore:
         max_hr = float(profile.get("max_heart_rate") or 190.0)
         from utils.running_metrics import calculate_workout_effective_vdot
 
-        # Generate Canova critiques and workout_effective_vdot
+        # Generate Canova critiques in memory (no write-on-GET) and workout_effective_vdot
         for r in rows:
             r["exclude_mode"] = r.get("exclude_mode") or "normal"
             if r["exclude_mode"] == "normal" and LocalStore.is_running_activity(r.get("sport_type")):
@@ -2325,11 +2578,7 @@ class LocalStore:
 
             if not r.get("ai_journal") or not str(r["ai_journal"]).strip():
                 try:
-                    critique = LocalStore.generate_canova_critique(r)
-                    r["ai_journal"] = critique
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.cursor().execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (critique, r["id"]))
-                        conn.commit()
+                    r["ai_journal"] = LocalStore.generate_canova_critique(r)
                 except Exception as ex:
                     logger.warning(f"Generate critique in get_month_activities failed: {ex}")
 
@@ -2437,7 +2686,7 @@ class LocalStore:
         Retrieves today's scheduled workout from the runner's active periodized training plan.
         """
         canonical_uid = LocalStore.resolve_user_id(uid)
-        plan = LocalStore.get_user_active_training_plan(canonical_uid)
+        plan = LocalStore.get_user_active_training_plan(canonical_uid, reconcile=False)
         if not plan:
             return None
 
@@ -2491,145 +2740,143 @@ class LocalStore:
 
     @staticmethod
     def get_monthly_trend(uid: str, num_months: int = 6) -> Dict[str, Any]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        today = get_beijing_today()
+        months = []
+        for i in range(num_months - 1, -1, -1):
+            m = today.month - i
+            y = today.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            months.append((y, m))
+
+        first_y, first_m = months[0]
+        last_y, last_m = months[-1]
+        range_start = f"{first_y:04d}-{first_m:02d}-01"
+        range_end = f"{(last_y + 1 if last_m == 12 else last_y):04d}-{(1 if last_m == 12 else last_m + 1):02d}-01"
+
         with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
-            today = get_beijing_today()
-            months = []
-            for i in range(num_months - 1, -1, -1):
-                m = today.month - i
-                y = today.year
-                while m <= 0:
-                    m += 12
-                    y -= 1
-                months.append((y, m))
+            cursor.execute(
+                f"""
+                SELECT substr(start_time, 1, 7) AS ym, COALESCE(SUM(distance_meters), 0.0), COUNT(id)
+                FROM activities
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
+                GROUP BY substr(start_time, 1, 7)
+                """,
+                (canonical_uid, uid, range_start, range_end),
+            )
+            agg_map = {str(r[0]): (float(r[1] or 0.0), int(r[2] or 0)) for r in cursor.fetchall()}
 
-            trend = []
-            for (y, m) in months:
-                label = f"{y}/{m}月"
-                start_iso = f"{y:04d}-{m:02d}-01"
-                next_y = y if m < 12 else y + 1
-                next_m = m + 1 if m < 12 else 1
-                end_iso = f"{next_y:04d}-{next_m:02d}-01"
+        trend = []
+        for (y, m) in months:
+            ym_key = f"{y:04d}-{m:02d}"
+            dist_m, count = agg_map.get(ym_key, (0.0, 0))
+            dist_km = round(dist_m / 1000.0, 1)
+            trend.append({
+                "month_label": f"{y}/{m}月",
+                "year": y,
+                "month": m,
+                "distance_km": dist_km,
+                "count": count,
+                "is_current": (y == today.year and m == today.month),
+            })
 
-                cursor.execute(f"""
-                    SELECT SUM(distance_meters), COUNT(id) 
-                    FROM activities 
-                    WHERE user_id = ? AND start_time >= ? AND start_time < ?
-                      AND {RUNNING_SQL_FILTER}
-                """, (uid, start_iso, end_iso))
-                res = cursor.fetchone()
-                dist_m = float(res[0]) if res and res[0] is not None else 0.0
-                count = int(res[1]) if res and res[1] is not None else 0
-                dist_km = round(dist_m / 1000.0, 1)
+        cur_km = trend[-1]["distance_km"] if trend else 0.0
+        prev_km = trend[-2]["distance_km"] if len(trend) >= 2 else 0.0
+        pct_change = round(((cur_km - prev_km) / prev_km) * 100, 1) if prev_km > 0 else 0.0
 
-                trend.append({
-                    "month_label": label,
-                    "year": y,
-                    "month": m,
-                    "distance_km": dist_km,
-                    "count": count,
-                    "is_current": (y == today.year and m == today.month)
-                })
-
-            cur_km = trend[-1]["distance_km"] if trend else 0.0
-            prev_km = trend[-2]["distance_km"] if len(trend) >= 2 else 0.0
-            pct_change = round(((cur_km - prev_km) / prev_km) * 100, 1) if prev_km > 0 else 0.0
-
-            return {
-                "trend": trend,
-                "current_month_km": cur_km,
-                "prev_month_km": prev_km,
-                "pct_change": pct_change,
-                "recent_3_months": trend[-3:] if len(trend) >= 3 else trend
-            }
+        return {
+            "trend": trend,
+            "current_month_km": cur_km,
+            "prev_month_km": prev_km,
+            "pct_change": pct_change,
+            "recent_3_months": trend[-3:] if len(trend) >= 3 else trend,
+        }
 
     @staticmethod
     def get_yearly_stats(uid: str, year: Optional[int] = None) -> Dict[str, Any]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
         today = get_beijing_today()
         eff_year = int(year) if year else today.year
+        start_iso = f"{eff_year:04d}-01-01"
+        end_iso = f"{eff_year + 1:04d}-01-01"
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
-            start_iso = f"{eff_year:04d}-01-01"
-            end_iso = f"{eff_year + 1:04d}-01-01"
-
-            cursor.execute(f"""
-                SELECT SUM(distance_meters), COUNT(id) 
-                FROM activities 
-                WHERE user_id = ? AND start_time >= ? AND start_time < ?
+            cursor.execute(
+                f"""
+                SELECT CAST(substr(start_time, 6, 2) AS INTEGER) AS m_num,
+                       COALESCE(SUM(distance_meters), 0.0) AS dist_m,
+                       COUNT(id) AS run_cnt
+                FROM activities
+                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
                   AND {RUNNING_SQL_FILTER}
-            """, (uid, start_iso, end_iso))
-            res = cursor.fetchone()
-            total_m = float(res[0]) if res and res[0] is not None else 0.0
-            total_runs = int(res[1]) if res and res[1] is not None else 0
-            total_km = round(total_m / 1000.0, 1)
+                GROUP BY CAST(substr(start_time, 6, 2) AS INTEGER)
+                """,
+                (canonical_uid, uid, start_iso, end_iso),
+            )
+            month_agg = {int(r["m_num"]): (float(r["dist_m"] or 0.0), int(r["run_cnt"] or 0)) for r in cursor.fetchall() if r["m_num"]}
 
-            target_year_km = 3400.0
-            cursor.execute("SELECT monthly_targets, target_distance FROM goals WHERE user_id = ?", (uid,))
+            target_year_km = 2400.0
+            cursor.execute("SELECT monthly_targets, target_distance FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
             g_row = cursor.fetchone()
             if g_row:
                 try:
-                    targets = json.loads(g_row["monthly_targets"])
+                    targets = json.loads(g_row["monthly_targets"]) if g_row["monthly_targets"] else None
                     if isinstance(targets, list) and len(targets) > 0:
                         target_year_km = sum(float(t) for t in targets)
+                    elif g_row["target_distance"]:
+                        target_year_km = float(g_row["target_distance"]) * 12.0
                 except Exception:
                     pass
 
-            passed_months = today.month if eff_year == today.year else (12 if eff_year < today.year else 1)
-            avg_monthly_km = round(total_km / max(1, passed_months), 1)
-            projected_year_km = round(avg_monthly_km * 12, 1)
-            progress_pct = round((total_km / target_year_km) * 100, 1) if target_year_km > 0 else 0.0
+        total_m = sum(v[0] for v in month_agg.values())
+        total_runs = sum(v[1] for v in month_agg.values())
+        total_km = round(total_m / 1000.0, 1)
 
-            best_month_name = f"{today.month if eff_year == today.year else 1}月"
-            best_month_km = 0.0
-            monthly_breakdown = []
-            for m in range(1, 13):
-                m_start = f"{eff_year:04d}-{m:02d}-01"
-                next_y = year if m < 12 else year + 1
-                next_m = m + 1 if m < 12 else 1
-                m_end = f"{next_y:04d}-{next_m:02d}-01"
-                cursor.execute(f"""
-                    SELECT SUM(distance_meters), COUNT(id) 
-                    FROM activities 
-                    WHERE user_id = ? AND start_time >= ? AND start_time < ?
-                      AND {RUNNING_SQL_FILTER}
-                """, (uid, m_start, m_end))
-                m_res = cursor.fetchone()
-                m_dist = float(m_res[0]) if m_res and m_res[0] is not None else 0.0
-                m_count = int(m_res[1]) if m_res and m_res[1] is not None else 0
-                m_km = round(m_dist / 1000.0, 1)
-                if m_km > best_month_km:
-                    best_month_km = m_km
-                    best_month_name = f"{m}月"
+        passed_months = today.month if eff_year == today.year else (12 if eff_year < today.year else 1)
+        avg_monthly_km = round(total_km / max(1, passed_months), 1)
+        projected_year_km = round(avg_monthly_km * 12, 1)
+        progress_pct = round((total_km / target_year_km) * 100, 1) if target_year_km > 0 else 0.0
 
-                monthly_breakdown.append({
-                    "month": m,
-                    "month_label": f"{m}月",
-                    "distance_km": m_km,
-                    "runs_count": m_count,
-                    "is_current": (year == today.year and m == today.month),
-                    "is_past": (year < today.year or (year == today.year and m <= today.month))
-                })
+        best_month_name = f"{today.month if eff_year == today.year else 1}月"
+        best_month_km = 0.0
+        monthly_breakdown = []
+        for m in range(1, 13):
+            m_dist, m_count = month_agg.get(m, (0.0, 0))
+            m_km = round(m_dist / 1000.0, 1)
+            if m_km > best_month_km:
+                best_month_km = m_km
+                best_month_name = f"{m}月"
 
-            return {
-                "year": year,
-                "total_km": total_km,
-                "total_runs": total_runs,
-                "avg_monthly_km": avg_monthly_km,
-                "projected_year_km": projected_year_km,
-                "target_year_km": target_year_km,
-                "monthly_target_km": round(target_year_km / 12, 1),
-                "progress_pct": progress_pct,
-                "best_month": {
-                    "name": best_month_name,
-                    "distance_km": best_month_km,
-                    "avg_pace": "7:41"
-                },
-                "monthly_breakdown": monthly_breakdown
-            }
+            monthly_breakdown.append({
+                "month": m,
+                "month_label": f"{m}月",
+                "distance_km": m_km,
+                "runs_count": m_count,
+                "is_current": (eff_year == today.year and m == today.month),
+                "is_past": (eff_year < today.year or (eff_year == today.year and m <= today.month)),
+            })
+
+        return {
+            "year": eff_year,
+            "total_km": total_km,
+            "total_runs": total_runs,
+            "avg_monthly_km": avg_monthly_km,
+            "projected_year_km": projected_year_km,
+            "target_year_km": target_year_km,
+            "monthly_target_km": round(target_year_km / 12, 1),
+            "progress_pct": progress_pct,
+            "best_month": {
+                "name": best_month_name,
+                "distance_km": best_month_km,
+            },
+            "monthly_breakdown": monthly_breakdown,
+        }
 
     @staticmethod
     def sanitize_daily_health_row(d: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -2769,6 +3016,8 @@ class LocalStore:
         health_row: Optional[Dict[str, Any]] = None,
         profile: Optional[Dict[str, Any]] = None,
         recent_acts: Optional[List[Dict[str, Any]]] = None,
+        health_rows_14d: Optional[List[Dict[str, Any]]] = None,
+        has_older_health_history: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Checks both:
@@ -2779,14 +3028,17 @@ class LocalStore:
         recently so their 7-day HRV/RHR baseline is broken/skewed (e.g. 李敏, 陈晓韵), returns
         `recovery_data_available: False` and `night_wear_missing: True` with specific diagnostics.
         """
-        canonical_uid = LocalStore.resolve_user_id(uid)
+        if profile is not None and profile.get("id"):
+            canonical_uid = str(profile["id"])
+        else:
+            canonical_uid = LocalStore.resolve_user_id(uid)
         if profile is None:
             profile = LocalStore.get_profile(canonical_uid) or {}
         if recent_acts is None:
             recent_acts = LocalStore.get_recent_activities(canonical_uid, limit=15) or []
-        if health_row is None:
+        if health_row is None and health_rows_14d is None:
             health_row = LocalStore.get_latest_health(canonical_uid)
-        else:
+        elif health_row is not None:
             health_row = LocalStore.sanitize_daily_health_row(health_row)
 
         watch_connected = bool(
@@ -2805,24 +3057,36 @@ class LocalStore:
         cutoff_5d = (today - timedelta(days=4)).isoformat()
 
         rows_14d: List[Dict[str, Any]] = []
-        has_older_history = False
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM daily_health
-                    WHERE user_id = ? AND date >= ?
-                    ORDER BY date DESC
-                """, (canonical_uid, cutoff_14d))
-                rows_14d = [LocalStore.sanitize_daily_health_row(dict(r)) for r in cursor.fetchall() if r]
-                cursor.execute("""
-                    SELECT 1 FROM daily_health WHERE user_id = ? AND date <= ? LIMIT 1
-                """, (canonical_uid, cutoff_5d))
-                if cursor.fetchone():
-                    has_older_history = True
-        except Exception:
-            rows_14d = []
+        has_older_history = bool(has_older_health_history) if has_older_health_history is not None else False
+        if health_rows_14d is not None:
+            rows_14d = [
+                LocalStore.sanitize_daily_health_row(dict(r))
+                for r in health_rows_14d
+                if r and str(r.get("date") or "")[:10] >= cutoff_14d
+            ]
+            rows_14d.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
+            if has_older_health_history is None:
+                has_older_history = any(
+                    str(r.get("date") or "")[:10] <= cutoff_5d for r in health_rows_14d if r
+                )
+        else:
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT * FROM daily_health
+                        WHERE user_id = ? AND date >= ?
+                        ORDER BY date DESC
+                    """, (canonical_uid, cutoff_14d))
+                    rows_14d = [LocalStore.sanitize_daily_health_row(dict(r)) for r in cursor.fetchall() if r]
+                    cursor.execute("""
+                        SELECT 1 FROM daily_health WHERE user_id = ? AND date <= ? LIMIT 1
+                    """, (canonical_uid, cutoff_5d))
+                    if cursor.fetchone():
+                        has_older_history = True
+            except Exception:
+                rows_14d = []
 
         if not has_older_history and recent_acts:
             for a in recent_acts:
@@ -3023,70 +3287,81 @@ class LocalStore:
             return trend
 
     @staticmethod
-    def get_goal(uid: str) -> Dict[str, Any]:
-        canonical_uid = LocalStore.resolve_user_id(uid)
-        today = get_beijing_today()
-        cur_monday = today - timedelta(days=today.weekday())
+    def _format_goal_dict(row_dict: Optional[Dict[str, Any]], today: Optional[date] = None) -> Dict[str, Any]:
+        eff_today = today or get_beijing_today()
+        cur_monday = eff_today - timedelta(days=eff_today.weekday())
         next_monday = cur_monday + timedelta(days=7)
         cur_iso_y, cur_iso_w, _ = cur_monday.isocalendar()
         next_iso_y, next_iso_w, _ = next_monday.isocalendar()
         cur_week_key = f"{cur_iso_y}-W{cur_iso_w:02d}"
         next_week_key = f"{next_iso_y}-W{next_iso_w:02d}"
 
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
-            row = cursor.fetchone()
-            if row:
-                d = dict(row)
-                if d.get("monthly_targets"):
+        if row_dict:
+            d = dict(row_dict)
+            if d.get("monthly_targets"):
+                if isinstance(d["monthly_targets"], list):
+                    pass
+                else:
                     try:
                         d["monthly_targets"] = json.loads(d["monthly_targets"])
                     except Exception:
                         d["monthly_targets"] = [200.0] * 12
-                else:
-                    d["monthly_targets"] = [float(d.get("target_distance") or 200.0)] * 12
-                # Ensure weekly_target is populated
-                if d.get("weekly_target") is not None and float(d["weekly_target"]) > 0:
-                    d["weekly_target"] = float(d["weekly_target"])
-                else:
-                    d["weekly_target"] = round(float(d.get("target_distance") or 200.0) / 4.0, 1)
+            else:
+                d["monthly_targets"] = [float(d.get("target_distance") or 200.0)] * 12
+            if d.get("weekly_target") is not None and float(d["weekly_target"]) > 0:
+                d["weekly_target"] = float(d["weekly_target"])
+            else:
+                d["weekly_target"] = round(float(d.get("target_distance") or 200.0) / 4.0, 1)
 
-                w_map: Dict[str, float] = {}
-                if d.get("weekly_targets_map"):
+            w_map: Dict[str, float] = {}
+            if d.get("weekly_targets_map"):
+                if isinstance(d["weekly_targets_map"], dict):
+                    w_map = {str(k): float(v) for k, v in d["weekly_targets_map"].items() if v is not None}
+                else:
                     try:
                         raw_map = json.loads(d["weekly_targets_map"])
                         if isinstance(raw_map, dict):
                             w_map = {str(k): float(v) for k, v in raw_map.items() if v is not None}
                     except Exception:
                         w_map = {}
-                base_w = float(d["weekly_target"])
-                d["weekly_targets_map"] = w_map
-                d["current_week_key"] = cur_week_key
-                d["next_week_key"] = next_week_key
-                d["current_week_target"] = float(w_map.get(cur_week_key, base_w))
-                d["next_weekly_target"] = float(w_map.get(next_week_key, base_w))
-                d["current_week_locked"] = True
-                d["current_month"] = today.month
-                d["locked_months"] = list(range(1, today.month + 1))
-                d["is_default"] = False
-                return d
-            return {
-                "is_default": True,
-                "target_distance": 200.0,
-                "weekly_target": 50.0,
-                "current_week_target": 50.0,
-                "next_weekly_target": 50.0,
-                "weekly_targets_map": {},
-                "current_week_key": cur_week_key,
-                "next_week_key": next_week_key,
-                "current_week_locked": True,
-                "current_month": today.month,
-                "locked_months": list(range(1, today.month + 1)),
-                "period_type": "monthly",
-                "monthly_targets": [200.0] * 12
-            }
+            base_w = float(d["weekly_target"])
+            d["weekly_targets_map"] = w_map
+            d["current_week_key"] = cur_week_key
+            d["next_week_key"] = next_week_key
+            d["current_week_target"] = float(w_map.get(cur_week_key, base_w))
+            d["next_weekly_target"] = float(w_map.get(next_week_key, base_w))
+            d["current_week_locked"] = True
+            d["current_month"] = eff_today.month
+            d["locked_months"] = list(range(1, eff_today.month + 1))
+            d["is_default"] = False
+            return d
+
+        return {
+            "is_default": True,
+            "target_distance": 200.0,
+            "weekly_target": 50.0,
+            "current_week_target": 50.0,
+            "next_weekly_target": 50.0,
+            "weekly_targets_map": {},
+            "current_week_key": cur_week_key,
+            "next_week_key": next_week_key,
+            "current_week_locked": True,
+            "current_month": eff_today.month,
+            "locked_months": list(range(1, eff_today.month + 1)),
+            "period_type": "monthly",
+            "monthly_targets": [200.0] * 12,
+        }
+
+    @staticmethod
+    def get_goal(uid: str) -> Dict[str, Any]:
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        today = get_beijing_today()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
+            row = cursor.fetchone()
+        return LocalStore._format_goal_dict(dict(row) if row else None, today=today)
 
     @staticmethod
     def upsert_goal(uid: str, data: Dict[str, Any], enforce_started_lock: bool = False) -> Dict[str, Any]:
@@ -4135,6 +4410,10 @@ class LocalStore:
 
     @staticmethod
     def get_club_members(club_id: str) -> List[Dict[str, Any]]:
+        today = get_beijing_today()
+        month_start = date(today.year, today.month, 1).isoformat()
+        current_month_idx = today.month - 1
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -4151,13 +4430,29 @@ class LocalStore:
                 ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'coach' THEN 2 ELSE 3 END, m.joined_at ASC
             """, (club_id,))
             rows = cursor.fetchall()
-        today = get_beijing_today()
-        month_start = date(today.year, today.month, 1).isoformat()
-        current_month_idx = today.month - 1
+            if not rows:
+                return []
+
+            uids = [str(r["user_id"]) for r in rows]
+            ph = ",".join("?" for _ in uids)
+            cursor.execute(
+                f"""
+                SELECT user_id, COALESCE(SUM(distance_meters), 0.0) AS total_m
+                FROM activities
+                WHERE user_id IN ({ph}) AND start_time >= ? AND {RUNNING_SQL_FILTER}
+                GROUP BY user_id
+                """,
+                uids + [month_start],
+            )
+            dist_map = {str(r["user_id"]): float(r["total_m"] or 0.0) for r in cursor.fetchall()}
+
+            cursor.execute(f"SELECT * FROM goals WHERE user_id IN ({ph})", uids)
+            goal_map = {str(r["user_id"]): dict(r) for r in cursor.fetchall()}
+
         res = []
         for r in rows:
             d = dict(r)
-            uid = d["user_id"]
+            uid = str(d["user_id"])
             if d.get("date_of_birth"):
                 d["date_of_birth"] = decrypt_pii(d["date_of_birth"])
             v_meta = LocalStore.resolve_verified_runner_profile_and_pbs(uid, profile=d, query_activities=False)
@@ -4166,9 +4461,9 @@ class LocalStore:
             d["age"] = v_meta.get("age")
             d["gender"] = v_meta.get("gender")
             d["gender_label"] = v_meta.get("gender_label")
-            dist_m = LocalStore.get_month_distance_meters(uid, month_start)
+            dist_m = dist_map.get(uid, 0.0)
             d["month_km"] = round(dist_m / 1000.0, 1)
-            g = LocalStore.get_goal(uid)
+            g = LocalStore._format_goal_dict(goal_map.get(uid), today=today)
             tgts = g.get("monthly_targets") or [200.0] * 12
             month_tgt = float(tgts[current_month_idx] if current_month_idx < len(tgts) else 200.0)
             if month_tgt == 200.0 and g.get("target_distance") and float(g.get("target_distance")) != 200.0:
@@ -6495,60 +6790,226 @@ class LocalStore:
     def get_coach_students_metrics(club_id: str, coach_id: str, sort_order: str = "danger_first") -> List[Dict[str, Any]]:
         """
         Calculates TSB fatigue, Resting Heart Rate, Night HRV, and risk levels for all authorized students in the club.
-        Results are sorted by TSB status (danger_first by default for injury risk triage, or peak_first).
+        Batch-preloads all member profiles, 180-day + PB activities, 14-day + plan daily_health, goals, race_plans,
+        active/draft training_plans, and plan backups in a single connection (~7 SQL queries total instead of 2,000+).
         """
         members = LocalStore.get_club_members(club_id)
+        if not members:
+            return []
+
         students = []
-        today = date.today()
-        month_start = date(today.year, today.month, 1).isoformat()
+        today = get_beijing_today()
+        today_str = today.isoformat()
+        cutoff_2d = (today - timedelta(days=2)).isoformat()
+        cutoff_5d = (today - timedelta(days=4)).isoformat()
+        cutoff_14d = (today - timedelta(days=13)).isoformat()
+        cutoff_180d = (today - timedelta(days=180)).isoformat()
+        seven_days_ago_iso = (today - timedelta(days=6)).isoformat()
+        current_month_idx = today.month - 1
+
+        uids = [str(m["user_id"]) for m in members]
+        ph = ",".join("?" for _ in uids)
+
+        profiles_map: Dict[str, Dict[str, Any]] = {}
+        active_plans_map: Dict[str, Dict[str, Any]] = {}
+        draft_plans_map: Dict[str, Dict[str, Any]] = {}
+        health_rows_map: Dict[str, List[Dict[str, Any]]] = {u: [] for u in uids}
+        health_min_date_map: Dict[str, Optional[str]] = {}
+        acts_map: Dict[str, List[Dict[str, Any]]] = {u: [] for u in uids}
+        goals_map: Dict[str, Dict[str, Any]] = {}
+        races_map: Dict[str, List[Dict[str, Any]]] = {u: [] for u in uids}
+        backups_map: Dict[str, Dict[str, Any]] = {}
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # 1. Batch profiles
+            cursor.execute(f"SELECT * FROM profiles WHERE id IN ({ph})", uids)
+            for r in cursor.fetchall():
+                d = LocalStore._decrypt_profile_dict(dict(r)) or {}
+                profiles_map[str(d.get("id"))] = d
+
+            # 2. Batch active & draft training plans
+            cursor.execute(
+                f"""
+                SELECT * FROM training_plans
+                WHERE user_id IN ({ph}) AND status IN ('active', 'draft')
+                ORDER BY updated_at DESC
+                """,
+                uids,
+            )
+            earliest_plan_start = cutoff_180d
+            earliest_health_start = cutoff_14d
+            for r in cursor.fetchall():
+                pd = dict(r)
+                p_uid = str(pd.get("user_id") or "")
+                p_status = str(pd.get("status") or "")
+                if pd.get("schedule_data"):
+                    try:
+                        pd["schedule_data"] = json.loads(pd["schedule_data"])
+                    except Exception:
+                        pass
+                if p_status == "active" and p_uid not in active_plans_map:
+                    active_plans_map[p_uid] = pd
+                    st_d = str(pd.get("start_date") or "")[:10]
+                    if st_d and len(st_d) == 10:
+                        if st_d < earliest_plan_start:
+                            earliest_plan_start = st_d
+                        if st_d < earliest_health_start:
+                            earliest_health_start = st_d
+                elif p_status == "draft" and p_uid not in draft_plans_map:
+                    draft_plans_map[p_uid] = pd
+
+            # 3. Batch daily_health (recent/plan window + earliest history date per user)
+            cursor.execute(
+                f"""
+                SELECT * FROM daily_health
+                WHERE user_id IN ({ph}) AND date >= ?
+                ORDER BY date DESC
+                """,
+                uids + [earliest_health_start],
+            )
+            for r in cursor.fetchall():
+                hd = LocalStore.sanitize_daily_health_row(dict(r)) or {}
+                h_uid = str(hd.get("user_id") or "")
+                if h_uid in health_rows_map:
+                    health_rows_map[h_uid].append(hd)
+
+            cursor.execute(
+                f"SELECT user_id, MIN(date) AS min_date FROM daily_health WHERE user_id IN ({ph}) GROUP BY user_id",
+                uids,
+            )
+            for r in cursor.fetchall():
+                health_min_date_map[str(r["user_id"])] = str(r["min_date"]) if r["min_date"] else None
+
+            # 4. Batch scalar activities (180d + plan window + all-time >=4.85km PB candidates, zero GPS/journal blobs)
+            cursor.execute(
+                f"""
+                SELECT id, user_id, name, sport_type, start_time, distance_meters,
+                       moving_time_seconds, elapsed_time_seconds, avg_pace_str,
+                       average_heartrate, max_heartrate, average_cadence, trimp, exclude_mode
+                FROM activities
+                WHERE user_id IN ({ph})
+                  AND (start_time >= ? OR (distance_meters >= 4850 AND moving_time_seconds >= 800))
+                ORDER BY start_time DESC
+                """,
+                uids + [earliest_plan_start],
+            )
+            for r in cursor.fetchall():
+                ad = dict(r)
+                if ad.get("start_time"):
+                    ad["start_time"] = to_beijing_iso(ad["start_time"])
+                a_uid = str(ad.get("user_id") or "")
+                if a_uid in acts_map:
+                    acts_map[a_uid].append(ad)
+
+            # 5. Batch goals
+            cursor.execute(f"SELECT * FROM goals WHERE user_id IN ({ph})", uids)
+            for r in cursor.fetchall():
+                goals_map[str(r["user_id"])] = dict(r)
+
+            # 6. Batch race plans
+            cursor.execute(f"SELECT * FROM race_plans WHERE user_id IN ({ph}) ORDER BY race_date ASC", uids)
+            for r in cursor.fetchall():
+                rd = dict(r)
+                r_uid = str(rd.get("user_id") or "")
+                if r_uid in races_map:
+                    races_map[r_uid].append(rd)
+
+            # 7. Batch latest un-restored plan backup per user
+            cursor.execute(
+                f"""
+                SELECT id, batch_id, user_id, club_id, action_type, action_label,
+                       previous_active_plan_id, previous_active_plan_json,
+                       created_plan_id, created_status, operator_uid, created_at, restored_at
+                FROM training_plan_backups
+                WHERE user_id IN ({ph}) AND restored_at IS NULL
+                ORDER BY created_at DESC
+                """,
+                uids,
+            )
+            for r in cursor.fetchall():
+                b_uid = str(r["user_id"] or "")
+                if b_uid in backups_map:
+                    continue
+                item = dict(r)
+                prev_title = None
+                prev_source_label = None
+                raw_json = item.pop("previous_active_plan_json", None)
+                if raw_json:
+                    try:
+                        prev_obj = json.loads(raw_json)
+                        prev_title = prev_obj.get("title")
+                        prev_src = LocalStore.classify_plan_source(prev_obj)
+                        prev_source_label = prev_src.get("source_label")
+                    except Exception:
+                        pass
+                item["previous_title"] = prev_title
+                item["previous_plan_title"] = prev_title
+                item["previous_source_label"] = prev_source_label
+                item["created_at"] = to_beijing_iso(item.get("created_at"))
+                item["restored_at"] = to_beijing_iso(item.get("restored_at"))
+                backups_map[b_uid] = item
+
+        from utils.metrics_domain import MetricsDomainService
 
         for m in members:
-            uid = m["user_id"]
-            # Fetch health and training load
-            h = LocalStore.get_latest_health(uid) or {}
-            month_dist_m = LocalStore.get_month_distance_meters(uid, month_start)
-            month_km = round(month_dist_m / 1000.0, 1)
+            uid = str(m["user_id"])
+            profile = profiles_map.get(uid) or {"id": uid}
+            month_km = float(m.get("month_km") or 0.0)
 
-            # Calculate CTL/ATL/TSB using the scientific Banister TRIMP + EWMA model
-            recent_acts = LocalStore.get_recent_activities(uid, limit=100)
-            if not recent_acts or len(recent_acts) == 0:
+            user_health_rows = health_rows_map.get(uid) or []
+            recent_health_candidates = [
+                hr for hr in user_health_rows if str(hr.get("date") or "")[:10] >= cutoff_2d
+            ]
+            h = recent_health_candidates[0] if recent_health_candidates else {}
+            rows_14d = [hr for hr in user_health_rows if str(hr.get("date") or "")[:10] >= cutoff_14d]
+            min_h_date = health_min_date_map.get(uid)
+            has_older_health_hist = bool(min_h_date and min_h_date[:10] <= cutoff_5d)
+
+            all_user_acts = acts_map.get(uid) or []
+            acts_180d = [
+                a for a in all_user_acts
+                if str(a.get("start_time") or "")[:10] >= cutoff_180d
+                and a.get("exclude_mode") != "excluded"
+            ]
+            recent_acts = acts_180d[:100]
+
+            if not acts_180d:
                 atl = 0.0
                 ctl = 0.0
                 tsb = 0.0
                 status_level = "none"
                 status_text = "未同步运动负荷"
             else:
-                from utils.running_metrics import compute_ctl_atl_tsb
-                daily_trimp_map = { (today - timedelta(days=i)).isoformat(): 0.0 for i in range(90, -1, -1) }
-                for a in recent_acts:
-                    st = str(a.get("start_time", ""))[:10]
-                    if st in daily_trimp_map:
-                        daily_trimp_map[st] += float(a.get("trimp") or 0.0)
-                series = sorted(daily_trimp_map.items(), key=lambda x: x[0])
-                c_list = compute_ctl_atl_tsb(series)
-                latest_m = c_list[-1] if c_list else {"ctl": 0.0, "atl": 0.0, "tsb": 0.0}
-                ctl = round(float(latest_m.get("ctl") or 0.0), 1)
-                atl = round(float(latest_m.get("atl") or 0.0), 1)
-                tsb = round(ctl - atl, 1)
+                load_summary = MetricsDomainService.compute_load_and_form(
+                    acts_180d, profile=profile, window_days=90, warmup_days=180, today=today
+                )
+                ctl = round(float(load_summary.get("current_ctl") or 0.0), 1)
+                atl = round(float(load_summary.get("current_atl") or 0.0), 1)
+                tsb = round(float(load_summary.get("current_tsb") or 0.0), 1)
 
-                # Risk classification
                 if tsb > 5:
-                    status_level = "peak" # 🟢 巅峰 (Green)
+                    status_level = "peak"
                     status_text = "巅峰状态 · 适宜测速与冲刺比赛"
                 elif tsb >= -30:
-                    status_level = "optimal" # 🔵 适应 (Blue)
+                    status_level = "optimal"
                     status_text = "专项适应 · 建议按计划执行专项课"
                 elif tsb >= -50:
-                    status_level = "tired" # 🟡 疲劳 (Yellow)
+                    status_level = "tired"
                     status_text = "疲劳累积 · 建议适度穿插轻松慢跑"
                 else:
-                    status_level = "danger" # 🔴 伤病预警 (Red)
+                    status_level = "danger"
                     status_text = "过度训练预警 · 建议彻底休整或低心率排酸"
 
-            # Strict overnight recovery data availability check (no all-time stale fallbacks)
-            profile = LocalStore.get_profile(uid) or {}
             recovery_avail = LocalStore.assess_recovery_data_availability(
-                uid, health_row=h, profile=profile, recent_acts=recent_acts
+                uid,
+                health_row=h if h else None,
+                profile=profile,
+                recent_acts=recent_acts[:15],
+                health_rows_14d=rows_14d,
+                has_older_health_history=has_older_health_hist,
             )
             if recovery_avail.get("recovery_data_available"):
                 rhr = h.get("resting_heart_rate")
@@ -6560,8 +7021,7 @@ class LocalStore:
                 sleep = None
 
             # 1. Goal planning & progress
-            goal_data = LocalStore.get_goal(uid)
-            current_month_idx = today.month - 1
+            goal_data = LocalStore._format_goal_dict(goals_map.get(uid), today=today)
             monthly_targets = goal_data.get("monthly_targets") or [200.0] * 12
             target_km = float(monthly_targets[current_month_idx] if current_month_idx < len(monthly_targets) else goal_data.get("target_distance") or 200.0)
             completion_rate = round((month_km / target_km) * 100.0, 1) if target_km > 0 else 0.0
@@ -6590,8 +7050,10 @@ class LocalStore:
             days_remaining = max(1, days_in_month - today.day)
             suggested_daily_km = round(remaining_km / float(days_remaining), 1)
 
-            # 2. Athlete profile & verified PBs / age / gender
-            verified_meta = LocalStore.resolve_verified_runner_profile_and_pbs(uid, profile, recent_acts=recent_acts)
+            # 2. Athlete profile & verified PBs / age / gender (zero SQL via query_activities=False)
+            verified_meta = LocalStore.resolve_verified_runner_profile_and_pbs(
+                uid, profile, recent_acts=all_user_acts, query_activities=False
+            )
             marathon_pb = verified_meta.get("marathon_pb")
             half_pb = verified_meta.get("half_pb")
             ten_k_pb = verified_meta.get("ten_k_pb")
@@ -6603,10 +7065,9 @@ class LocalStore:
             weight = profile.get("weight") or profile.get("weight_kg")
             height = profile.get("height") or profile.get("height_cm")
 
-            # 3. 7-day distance & TRIMP
-            seven_days_ago_iso = (today - timedelta(days=7)).isoformat()
+            # 3. 7-day distance & TRIMP (7 calendar days including today, skipping excluded)
             acts_7d = [
-                a for a in recent_acts
+                a for a in acts_180d
                 if str(a.get("start_time", ""))[:10] >= seven_days_ago_iso
                 and LocalStore.is_running_activity(a.get("sport_type"))
             ]
@@ -6614,7 +7075,7 @@ class LocalStore:
             runs_7d_count = len(acts_7d)
 
             # 4. Coach diagnostic analysis
-            if not recent_acts or len(recent_acts) == 0:
+            if not acts_180d:
                 coach_diagnosis = "暂未检测到近期运动记录上传，建议提醒队员检查手表蓝牙同步并保持 24 小时佩戴。"
                 canova_phase = "基础期 (待启动)"
             elif recovery_avail.get("night_wear_missing"):
@@ -6640,9 +7101,8 @@ class LocalStore:
 
             # 5. Upcoming races & training plan execution status
             weekly_target = float(goal_data.get("weekly_target") or round(target_km / 4.0, 1))
-            raw_races = LocalStore.get_race_plans(uid) or []
+            raw_races = races_map.get(uid) or []
             upcoming_races = []
-            today_str = today.isoformat()
             for r in raw_races:
                 r_dict = dict(r)
                 is_comp = (r_dict.get("status") == "completed" or bool(r_dict.get("finish_time")) or bool(r_dict.get("is_completed")))
@@ -6653,8 +7113,27 @@ class LocalStore:
             a_races = [r for r in upcoming_races if str(r.get("priority") or "").upper() in ("1", "A")]
             goal_race = a_races[0] if a_races else (upcoming_races[0] if upcoming_races else None)
 
-            active_plan = LocalStore.get_user_active_training_plan(uid, reconcile=True)
-            draft_plan = LocalStore.get_user_draft_training_plan(uid, reconcile=False)
+            raw_active_plan = active_plans_map.get(uid)
+            if raw_active_plan:
+                reconciled_active = LocalStore.reconcile_training_plan_activities(
+                    raw_active_plan,
+                    user_id=uid,
+                    preloaded_activities=all_user_acts,
+                    preloaded_health_rows=user_health_rows,
+                    persist=False,
+                )
+                active_plan = LocalStore._enrich_plan_with_current_week(
+                    reconciled_active, profile=profile, latest_health=h
+                )
+            else:
+                active_plan = None
+
+            raw_draft_plan = draft_plans_map.get(uid)
+            draft_plan = (
+                LocalStore._enrich_plan_with_current_week(raw_draft_plan, profile=profile, latest_health=h)
+                if raw_draft_plan
+                else None
+            )
             display_plan = draft_plan or active_plan
 
             if draft_plan:
@@ -6826,8 +7305,7 @@ class LocalStore:
 
             active_src_info = LocalStore.classify_plan_source(active_plan) if active_plan else None
             draft_src_info = LocalStore.classify_plan_source(draft_plan) if draft_plan else None
-            user_backups = LocalStore.get_user_plan_backups(uid, limit=3, include_restored=False)
-            latest_backup = user_backups[0] if user_backups else None
+            latest_backup = backups_map.get(uid)
 
             # Keep the athlete's currently active plan as the main execution title when an active plan exists,
             # while exposing the pending draft separately so coaches never confuse a draft with a live plan.
@@ -7044,28 +7522,56 @@ class LocalStore:
     def is_club_owner(club_id: str, operator_uid: Optional[str]) -> bool:
         if not operator_uid or not club_id:
             return False
-        club = LocalStore.get_club(club_id)
-        if not club:
-            return False
-        if club.get("owner_id") == operator_uid:
-            return True
-        members = LocalStore.get_club_members(club_id)
-        return any(m["user_id"] == operator_uid and m["role"] == "owner" for m in members)
+        raw_uid = str(operator_uid).strip()
+        canon_uid = LocalStore.resolve_user_id(raw_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM clubs WHERE id = ? AND (owner_id = ? OR owner_id = ?)
+                UNION ALL
+                SELECT 1 FROM club_memberships
+                WHERE club_id = ? AND (user_id = ? OR user_id = ?) AND status = 'active' AND role = 'owner'
+                LIMIT 1
+                """,
+                (club_id, raw_uid, canon_uid, club_id, raw_uid, canon_uid),
+            ).fetchone()
+            return row is not None
 
     @staticmethod
     def is_club_coach(club_id: str, operator_uid: Optional[str]) -> bool:
         if not operator_uid or not club_id:
             return False
-        members = LocalStore.get_club_members(club_id)
-        return any(m["user_id"] == operator_uid and m["role"] == "coach" for m in members)
+        raw_uid = str(operator_uid).strip()
+        canon_uid = LocalStore.resolve_user_id(raw_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM club_memberships
+                WHERE club_id = ? AND (user_id = ? OR user_id = ?) AND status = 'active' AND role = 'coach'
+                LIMIT 1
+                """,
+                (club_id, raw_uid, canon_uid),
+            ).fetchone()
+            return row is not None
 
     @staticmethod
     def is_club_owner_or_coach(club_id: str, operator_uid: Optional[str]) -> bool:
         if not operator_uid or not club_id:
             return False
-        if LocalStore.is_club_owner(club_id, operator_uid):
-            return True
-        return LocalStore.is_club_coach(club_id, operator_uid)
+        raw_uid = str(operator_uid).strip()
+        canon_uid = LocalStore.resolve_user_id(raw_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM clubs WHERE id = ? AND (owner_id = ? OR owner_id = ?)
+                UNION ALL
+                SELECT 1 FROM club_memberships
+                WHERE club_id = ? AND (user_id = ? OR user_id = ?) AND status = 'active' AND role IN ('owner', 'coach')
+                LIMIT 1
+                """,
+                (club_id, raw_uid, canon_uid, club_id, raw_uid, canon_uid),
+            ).fetchone()
+            return row is not None
 
     @staticmethod
     def _generate_team_canova_critique(
@@ -8920,55 +9426,7 @@ class LocalStore:
 
     @staticmethod
     def _slim_feed_gps_track(raw_track: Any) -> Optional[Dict[str, Any]]:
-        """
-        Extracts a smooth <=250-point (up to 300 for multi-lap stadium tracks) polyline thumbnail
-        from gps_track_data for Club Feed cards, stripping heavy telemetry_series, elevation_profile,
-        laps, and splits (~80% smaller raw, ~95% smaller gzipped).
-        Full track + segment diagnosis are loaded on-demand via /api/miniapp/activities/{id}/track.
-        """
-        if not raw_track:
-            return None
-        parsed = raw_track
-        if isinstance(raw_track, str):
-            try:
-                parsed = json.loads(raw_track)
-            except Exception:
-                return None
-        if not isinstance(parsed, dict):
-            return None
-        pts = parsed.get("points")
-        if not isinstance(pts, list) or len(pts) < 2:
-            return None
-
-        valid_pts = [
-            p for p in pts
-            if isinstance(p, dict) and p.get("latitude") is not None and p.get("longitude") is not None
-        ]
-        if len(valid_pts) < 2:
-            return None
-
-        try:
-            from utils.geo_utils import smooth_sparse_stadium_track
-            smoothed = smooth_sparse_stadium_track(valid_pts, max_output_points=300)
-            if smoothed is not valid_pts:
-                return {"points": smoothed}
-        except Exception:
-            pass
-
-        max_pts = 250
-        if len(valid_pts) <= max_pts:
-            sampled = valid_pts
-        else:
-            step = (len(valid_pts) - 1) / float(max_pts - 1)
-            sampled = [valid_pts[int(round(i * step))] for i in range(max_pts - 1)] + [valid_pts[-1]]
-        slim_pts = [
-            {
-                "latitude": round(float(p["latitude"]), 6),
-                "longitude": round(float(p["longitude"]), 6),
-            }
-            for p in sampled
-        ]
-        return {"points": slim_pts} if len(slim_pts) >= 2 else None
+        return _build_slim_route_preview(raw_track)
 
     @staticmethod
     def _batch_get_activity_social(
@@ -9157,7 +9615,7 @@ class LocalStore:
                        a.moving_time_seconds, a.elapsed_time_seconds, a.elevation_gain_meters,
                        a.average_heartrate, a.max_heartrate, a.average_cadence, a.avg_pace_str,
                        a.calories, a.aerobic_training_effect, a.anaerobic_training_effect, a.trimp,
-                       a.ai_journal, a.gps_track_data, a.map_image_url, a.exclude_mode,
+                       a.ai_journal, COALESCE(a.route_preview_json, a.gps_track_data) AS gps_track_data, a.map_image_url, a.exclude_mode,
                        COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url,
                        p.id AS _owner_profile_id,
                        COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
@@ -9226,7 +9684,7 @@ class LocalStore:
                        a.moving_time_seconds, a.elapsed_time_seconds, a.elevation_gain_meters,
                        a.average_heartrate, a.max_heartrate, a.average_cadence, a.avg_pace_str,
                        a.calories, a.aerobic_training_effect, a.anaerobic_training_effect, a.trimp,
-                       a.ai_journal, a.gps_track_data, a.map_image_url, a.exclude_mode,
+                       a.ai_journal, COALESCE(a.route_preview_json, a.gps_track_data) AS gps_track_data, a.map_image_url, a.exclude_mode,
                        COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url,
                        p.id AS _owner_profile_id,
                        COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
@@ -9688,7 +10146,13 @@ class LocalStore:
         return int(max(10, min(99, round(weighted_score))))
 
     @staticmethod
-    def reconcile_training_plan_activities(plan: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
+    def reconcile_training_plan_activities(
+        plan: Dict[str, Any],
+        user_id: Optional[str] = None,
+        preloaded_activities: Optional[List[Dict[str, Any]]] = None,
+        preloaded_health_rows: Optional[List[Dict[str, Any]]] = None,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
         """
         Automatically aligns runner's synced activities with daily workouts in the training plan:
         1. If an activity exists on that day: auto marks completed: True, auto_matched: True, actual_distance_km, actual_pace, actual_heartrate.
@@ -9715,56 +10179,73 @@ class LocalStore:
         uid = user_id or plan.get("user_id")
         if not uid:
             return plan
-        canonical_uid = LocalStore.resolve_user_id(uid)
+        if preloaded_activities is not None and preloaded_health_rows is not None:
+            canonical_uid = str(uid)
+        else:
+            canonical_uid = LocalStore.resolve_user_id(uid)
 
         start_date_str = str(plan.get("start_date") or "")
         now_beijing = datetime.utcnow() + timedelta(hours=8)
         today_str = now_beijing.strftime("%Y-%m-%d")
 
         health_by_day: Dict[str, Dict[str, Any]] = {}
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                if start_date_str:
-                    cursor.execute(f"""
-                        SELECT id, name, sport_type, start_time, distance_meters, 
-                               moving_time_seconds, avg_pace_str, average_heartrate, trimp
-                        FROM activities
-                        WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
-                          AND {RUNNING_SQL_FILTER}
-                        ORDER BY start_time ASC
-                    """, (canonical_uid, uid, start_date_str))
-                else:
-                    cursor.execute(f"""
-                        SELECT id, name, sport_type, start_time, distance_meters, 
-                               moving_time_seconds, avg_pace_str, average_heartrate, trimp
-                        FROM activities
-                        WHERE (user_id = ? OR user_id = ?)
-                          AND {RUNNING_SQL_FILTER}
-                        ORDER BY start_time ASC
-                    """, (canonical_uid, uid))
-                act_rows = [dict(r) for r in cursor.fetchall()]
+        if preloaded_activities is not None and preloaded_health_rows is not None:
+            act_rows = [
+                a for a in preloaded_activities
+                if a.get("exclude_mode") != "excluded"
+                and LocalStore.is_running_activity(a.get("sport_type"))
+                and (not start_date_str or str(a.get("start_time") or "") >= start_date_str)
+            ]
+            act_rows.sort(key=lambda a: str(a.get("start_time") or ""))
+            for hm_row in preloaded_health_rows:
+                hm_d = LocalStore.sanitize_daily_health_row(dict(hm_row)) or {}
+                dt_key = str(hm_d.get("date") or "")[:10]
+                if dt_key:
+                    health_by_day[dt_key] = hm_d
+        else:
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    if start_date_str:
+                        cursor.execute(f"""
+                            SELECT id, name, sport_type, start_time, distance_meters, 
+                                   moving_time_seconds, avg_pace_str, average_heartrate, trimp
+                            FROM activities
+                            WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                              AND {RUNNING_SQL_FILTER}
+                            ORDER BY start_time ASC
+                        """, (canonical_uid, uid, start_date_str))
+                    else:
+                        cursor.execute(f"""
+                            SELECT id, name, sport_type, start_time, distance_meters, 
+                                   moving_time_seconds, avg_pace_str, average_heartrate, trimp
+                            FROM activities
+                            WHERE (user_id = ? OR user_id = ?)
+                              AND {RUNNING_SQL_FILTER}
+                            ORDER BY start_time ASC
+                        """, (canonical_uid, uid))
+                    act_rows = [dict(r) for r in cursor.fetchall()]
 
-                try:
-                    cursor.execute("""
-                        SELECT date, resting_heart_rate, sleep_score, sleep_duration_hours,
-                               sleep_duration_seconds, body_battery_max,
-                               hrv_status, hrv_weekly_avg, hrv_last_night_avg
-                        FROM daily_health
-                        WHERE user_id = ? OR user_id = ?
-                        ORDER BY date ASC
-                    """, (canonical_uid, uid))
-                    for hm_row in cursor.fetchall():
-                        hm_d = LocalStore.sanitize_daily_health_row(dict(hm_row)) or {}
-                        dt_key = str(hm_d.get("date") or "")[:10]
-                        if dt_key:
-                            health_by_day[dt_key] = hm_d
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.error(f"Error querying activities for plan reconciliation: {e}")
-            act_rows = []
+                    try:
+                        cursor.execute("""
+                            SELECT date, resting_heart_rate, sleep_score, sleep_duration_hours,
+                                   sleep_duration_seconds, body_battery_max,
+                                   hrv_status, hrv_weekly_avg, hrv_last_night_avg
+                            FROM daily_health
+                            WHERE user_id = ? OR user_id = ?
+                            ORDER BY date ASC
+                        """, (canonical_uid, uid))
+                        for hm_row in cursor.fetchall():
+                            hm_d = LocalStore.sanitize_daily_health_row(dict(hm_row)) or {}
+                            dt_key = str(hm_d.get("date") or "")[:10]
+                            if dt_key:
+                                health_by_day[dt_key] = hm_d
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Error querying activities for plan reconciliation: {e}")
+                act_rows = []
 
         cutoff_14d_str = (now_beijing.date() - timedelta(days=13)).isoformat()
         cutoff_7d_str = (now_beijing.date() - timedelta(days=6)).isoformat()
@@ -9967,7 +10448,7 @@ class LocalStore:
             }
 
         plan_id = plan.get("id")
-        if changed and plan_id:
+        if changed and plan_id and persist:
             try:
                 now_iso = datetime.utcnow().isoformat() + "Z"
                 with sqlite3.connect(DB_PATH) as conn:
@@ -9984,7 +10465,11 @@ class LocalStore:
         return plan
 
     @staticmethod
-    def _enrich_plan_with_current_week(plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _enrich_plan_with_current_week(
+        plan: Optional[Dict[str, Any]],
+        profile: Optional[Dict[str, Any]] = None,
+        latest_health: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not plan:
             return None
         sched = plan.get("schedule_data") or {}
@@ -9999,8 +10484,8 @@ class LocalStore:
         uid = plan.get("user_id")
         if uid and uid != "__template_preview__" and isinstance(sched, dict):
             try:
-                prof = LocalStore.get_profile(uid) or {}
-                hlth = LocalStore.get_latest_health(uid) or {}
+                prof = profile if profile is not None else (LocalStore.get_profile(uid) or {})
+                hlth = latest_health if latest_health is not None else (LocalStore.get_latest_health(uid) or {})
                 watch_vo2 = hlth.get("vo2_max") or prof.get("vo2max")
                 if watch_vo2 is not None and float(watch_vo2) > 0:
                     vo2_val = round(float(watch_vo2), 1)
@@ -10089,14 +10574,14 @@ class LocalStore:
             if not row:
                 return None
             res = dict(row)
-            if res.get("schedule_data"):
-                try:
-                    res["schedule_data"] = json.loads(res["schedule_data"])
-                except Exception:
-                    pass
-            if reconcile:
-                res = LocalStore.reconcile_training_plan_activities(res, res.get("user_id"))
-            return LocalStore._enrich_plan_with_current_week(res)
+        if res.get("schedule_data"):
+            try:
+                res["schedule_data"] = json.loads(res["schedule_data"])
+            except Exception:
+                pass
+        if reconcile:
+            res = LocalStore.reconcile_training_plan_activities(res, res.get("user_id"))
+        return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
     def get_user_active_training_plan(user_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
@@ -10112,16 +10597,15 @@ class LocalStore:
             row = cursor.fetchone()
             if not row:
                 return None
-
             res = dict(row)
-            if res.get("schedule_data"):
-                try:
-                    res["schedule_data"] = json.loads(res["schedule_data"])
-                except Exception:
-                    pass
-            if reconcile:
-                res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
-            return LocalStore._enrich_plan_with_current_week(res)
+        if res.get("schedule_data"):
+            try:
+                res["schedule_data"] = json.loads(res["schedule_data"])
+            except Exception:
+                pass
+        if reconcile:
+            res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
+        return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
     def get_user_draft_training_plan(user_id: str, reconcile: bool = False) -> Optional[Dict[str, Any]]:
@@ -10137,16 +10621,15 @@ class LocalStore:
             row = cursor.fetchone()
             if not row:
                 return None
-
             res = dict(row)
-            if res.get("schedule_data"):
-                try:
-                    res["schedule_data"] = json.loads(res["schedule_data"])
-                except Exception:
-                    pass
-            if reconcile:
-                res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
-            return LocalStore._enrich_plan_with_current_week(res)
+        if res.get("schedule_data"):
+            try:
+                res["schedule_data"] = json.loads(res["schedule_data"])
+            except Exception:
+                pass
+        if reconcile:
+            res = LocalStore.reconcile_training_plan_activities(res, canonical_uid)
+        return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
     def publish_training_plan(
