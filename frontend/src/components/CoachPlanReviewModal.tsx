@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
+import { showToast as notifyToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
 import {
   Calendar,
   CheckCircle2,
@@ -189,7 +190,7 @@ export default function CoachPlanReviewModal({
       showToast(res.data?.message || `⭐ 已将 W${selectedWeekIdx} 周课表存为教练专属模版：【${nameTrim}】`);
       triggerUpdated();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存为训练模版失败");
+      notifyToast(err.response?.data?.detail || "保存为训练模版失败");
     } finally {
       setSavingWeekAsTemplate(false);
     }
@@ -216,7 +217,7 @@ export default function CoachPlanReviewModal({
       showToast(res.data?.message || "✅ 已套用配速与专项组别模版，您可直接点击任意单日进行个别微调！");
       triggerUpdated();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "套用训练模版失败");
+      notifyToast(err.response?.data?.detail || "套用训练模版失败");
     } finally {
       setApplyingTemplateId(null);
     }
@@ -299,7 +300,7 @@ export default function CoachPlanReviewModal({
     const confirmText = opts.discardDraftOnly
       ? `确认撤回并删除【${student.display_name}】的待审草案「${draftPlan?.title || "新草案"}」吗？\n（队员当前正在执行的正式计划「${activePlan?.title || "原计划"}」不会受任何影响）`
       : `确认将【${student.display_name}】的生效训练计划切换/回退至「${opts.label || "历史版本"}」吗？\n（队员已完成的日常打卡记录将 100% 合并保留）`;
-    if (!window.confirm(confirmText)) return;
+    if (!await askConfirm(confirmText)) return;
 
     setRollingBack(true);
     try {
@@ -313,7 +314,7 @@ export default function CoachPlanReviewModal({
       showToast(res.data?.message || "✅ 已成功回退/切换训练方案！");
       triggerUpdated();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "回退失败，请稍后重试");
+      notifyToast(err.response?.data?.detail || "回退失败，请稍后重试");
     } finally {
       setRollingBack(false);
     }
@@ -431,7 +432,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "生成计划草案失败，请稍后重试");
+      notifyToast(err.response?.data?.detail || "生成计划草案失败，请稍后重试");
     } finally {
       setGenerating(false);
     }
@@ -457,7 +458,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存失败");
+      notifyToast(err.response?.data?.detail || "保存失败");
     } finally {
       setSavingOverview(false);
     }
@@ -488,7 +489,7 @@ export default function CoachPlanReviewModal({
         }
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "发布失败，请稍后重试");
+      notifyToast(err.response?.data?.detail || "发布失败，请稍后重试");
     } finally {
       setPublishing(false);
     }
@@ -514,7 +515,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "周课表调整失败");
+      notifyToast(err.response?.data?.detail || "周课表调整失败");
     } finally {
       setAdjustingWeek(false);
     }
@@ -543,7 +544,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存周小结失败");
+      notifyToast(err.response?.data?.detail || "保存周小结失败");
     } finally {
       setSavingWeekSummary(false);
     }
@@ -572,7 +573,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "滚动生成下周课表失败");
+      notifyToast(err.response?.data?.detail || "滚动生成下周课表失败");
     } finally {
       setRollingNextWeek(false);
     }
@@ -671,7 +672,7 @@ export default function CoachPlanReviewModal({
         triggerUpdated();
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存课表失败");
+      notifyToast(err.response?.data?.detail || "保存课表失败");
     } finally {
       setSavingDay(false);
     }
@@ -2721,7 +2722,7 @@ export default function CoachPlanReviewModal({
                                 triggerUpdated();
                               }
                             } catch (e: any) {
-                              alert(e.response?.data?.detail || "取消对换失败");
+                              notifyToast(e.response?.data?.detail || "取消对换失败");
                             } finally {
                               setSavingDay(false);
                             }

@@ -5,16 +5,38 @@
 :root,
 html {
   color-scheme: dark;
-  --background: #070708;
-  --foreground: #ededed;
-  background-color: #070708;
+  --background: #0b0b0e;
+  --foreground: #f4f4f6;
+  --rgm-bg: #0b0b0e;
+  --rgm-card: #141418;
+  --rgm-card-2: #1b1b22;
+  --rgm-card-3: #23232c;
+  --rgm-border: #27272f;
+  --rgm-line: rgba(255, 255, 255, 0.08);
+  --rgm-text: #f4f4f6;
+  --rgm-text-2: #a1a1aa;
+  --rgm-text-muted: #71717a;
+  --rgm-brand: #fc4c02;
+  --rgm-accent: #fc4c02;
+  background-color: var(--rgm-bg);
 }
 
 html.theme-light {
   color-scheme: light;
   --background: #f6f8fa;
   --foreground: #0f172a;
-  background-color: #f6f8fa;
+  --rgm-bg: #f6f8fa;
+  --rgm-card: #ffffff;
+  --rgm-card-2: #f8fafc;
+  --rgm-card-3: #f1f5f9;
+  --rgm-border: #e2e8f0;
+  --rgm-line: rgba(15, 23, 42, 0.08);
+  --rgm-text: #0f172a;
+  --rgm-text-2: #475569;
+  --rgm-text-muted: #94a3b8;
+  --rgm-brand: #fc4c02;
+  --rgm-accent: #fc4c02;
+  background-color: var(--rgm-bg);
 }
 
 body {
@@ -524,12 +546,17 @@ html.theme-light [class*="text-rose-600"] {
 html.theme-light .recharts-cartesian-grid line {
   stroke: #e2e8f0 !important;
 }
-html.theme-light .recharts-tooltip-wrapper .recharts-default-tooltip {
+html.theme-light .recharts-cartesian-axis-tick-value tspan {
+  fill: #64748b !important;
+}
+html.theme-light .recharts-tooltip-wrapper .recharts-default-tooltip,
+html.theme-light .recharts-tooltip-wrapper > div {
   background-color: #ffffff !important;
   border-color: #e2e8f0 !important;
   color: #0f172a !important;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
 }
+html.theme-light .recharts-tooltip-label,
 html.theme-light .recharts-tooltip-item {
   color: #0f172a !important;
 }

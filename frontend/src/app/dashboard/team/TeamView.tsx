@@ -10,6 +10,13 @@ import PersonalReportModal from "@/components/PersonalReportModal";
 import PacerClubRadarPanel from "@/components/PacerClubRadarPanel";
 import { supabase } from "@/lib/supabase";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
+import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
+import {
+  downloadCanvasAsPng,
+  filterAndSortCoachStudents,
+  renderClubInvitePosterCanvas,
+  renderClubReportPosterCanvas,
+} from "@/lib/teamPosterCanvas";
 import {
   Users,
   Trophy,
@@ -85,67 +92,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   const [selectedStudentForPlan, setSelectedStudentForPlan] = useState<any | null>(null);
   const [batchGeneratingDrafts, setBatchGeneratingDrafts] = useState<boolean>(false);
 
-  const sortedCoachStudents = useMemo(() => {
-    let list = [...(coachCockpit?.students || [])];
-    if (coachStatusFilter !== "all") {
-      list = list.filter((s: any) => s.status_level === coachStatusFilter);
-    }
-    if (coachGroupFilter !== "all") {
-      list = list.filter(
-        (s: any) =>
-          s.plan_info?.template_group_code === coachGroupFilter ||
-          s.recommended_group?.group_code === coachGroupFilter
-      );
-    }
-    if (coachPlanFilter !== "all") {
-      list = list.filter((s: any) => {
-        const pState = s.plan_info?.plan_state || "none";
-        const wExec = s.plan_info?.week_execution || {};
-        if (coachPlanFilter === "draft_pending") return pState === "draft_pending" || s.plan_info?.has_draft_plan;
-        if (coachPlanFilter === "published") return pState === "published" || pState === "self_active" || s.plan_info?.has_active_plan;
-        if (coachPlanFilter === "none") return pState === "none";
-        if (coachPlanFilter === "alert") return Boolean(wExec.injury_note) || (wExec.low_hrv_days || 0) > 0 || (wExec.max_rpe || 0) >= 8;
-        return true;
-      });
-    }
-    if (coachSearchQuery.trim()) {
-      const q = coachSearchQuery.trim().toLowerCase();
-      list = list.filter(
-        (s: any) =>
-          (s.display_name || "").toLowerCase().includes(q) ||
-          (s.user_id || "").toLowerCase().includes(q)
-      );
-    }
-
-    const dangerFirstRanks: Record<string, number> = { danger: 1, tired: 2, optimal: 3, peak: 4, none: 5 };
-    const peakFirstRanks: Record<string, number> = { peak: 1, optimal: 2, tired: 3, danger: 4, none: 5 };
-
-    list.sort((a: any, b: any) => {
-      if (coachSortOrder === "danger_first") {
-        const aInj = a.plan_info?.week_execution?.injury_note ? 1 : 0;
-        const bInj = b.plan_info?.week_execution?.injury_note ? 1 : 0;
-        if (aInj !== bInj) return bInj - aInj;
-        const aDraft = a.plan_info?.plan_state === "draft_pending" ? 1 : 0;
-        const bDraft = b.plan_info?.plan_state === "draft_pending" ? 1 : 0;
-        if (aDraft !== bDraft) return bDraft - aDraft;
-      }
-      const rankMap = coachSortOrder === "peak_first" ? peakFirstRanks : dangerFirstRanks;
-      const rankA = rankMap[a.status_level] ?? 99;
-      const rankB = rankMap[b.status_level] ?? 99;
-      if (rankA !== rankB) {
-        return rankA - rankB;
-      }
-      const tsbA = typeof a.tsb === "number" ? a.tsb : 0;
-      const tsbB = typeof b.tsb === "number" ? b.tsb : 0;
-      if (coachSortOrder === "peak_first") {
-        return tsbB - tsbA;
-      } else {
-        return tsbA - tsbB;
-      }
-    });
-
-    return list;
-  }, [coachCockpit?.students, coachStatusFilter, coachGroupFilter, coachPlanFilter, coachSearchQuery, coachSortOrder]);
+  const sortedCoachStudents = useMemo(
+    () =>
+      filterAndSortCoachStudents(coachCockpit?.students || [], {
+        statusFilter: coachStatusFilter,
+        groupFilter: coachGroupFilter,
+        planFilter: coachPlanFilter,
+        searchQuery: coachSearchQuery,
+        sortOrder: coachSortOrder,
+      }),
+    [coachCockpit?.students, coachStatusFilter, coachGroupFilter, coachPlanFilter, coachSearchQuery, coachSortOrder]
+  );
   const [events, setEvents] = useState<any[]>([]);
   const [feed, setFeed] = useState<any[]>([]);
   const [feedTotal, setFeedTotal] = useState<number>(0);
@@ -430,11 +387,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         localStorage.setItem("rgm_active_club_id", clubId);
       }
       setShowReceivedInviteModal(false);
-      alert(res.data?.message || `🎉 成功加入【${receivedInviteData?.club?.name || "跑团"}】！`);
+      showToast(res.data?.message || `🎉 成功加入【${receivedInviteData?.club?.name || "跑团"}】！`);
       await loadUserClubs(user.id);
       await loadAllClubs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加入跑团失败，请稍后重试");
+      showToast(err.response?.data?.detail || "加入跑团失败，请稍后重试");
     } finally {
       setAcceptingReceivedInvite(false);
     }
@@ -496,168 +453,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     }
   }
 
-  async function buildClubInvitePosterCanvas(): Promise<HTMLCanvasElement | null> {
-    if (!clubInviteShareData) return null;
-    const d = clubInviteShareData;
-    const canvas = document.createElement("canvas");
-    const W = 750;
-    const H = 980;
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    // 1. Background gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-    bgGrad.addColorStop(0, "#141118");
-    bgGrad.addColorStop(0.5, "#0d0f17");
-    bgGrad.addColorStop(1, "#121824");
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, W, H);
-
-    // Top brand accent bar
-    const topBarGrad = ctx.createLinearGradient(0, 0, W, 0);
-    topBarGrad.addColorStop(0, "#FC4C02");
-    topBarGrad.addColorStop(0.5, "#f59e0b");
-    topBarGrad.addColorStop(1, "#10b981");
-    ctx.fillStyle = topBarGrad;
-    ctx.fillRect(0, 0, W, 10);
-
-    // 2. Header badge
-    drawRoundedRectWeb(ctx, 44, 42, 340, 44, 22, "rgba(252, 76, 2, 0.16)", "rgba(252, 76, 2, 0.45)");
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillStyle = "#ff7a45";
-    ctx.fillText("💌 万跑跑团助手 · 官方入团邀请函", 64, 70);
-
-    // Inviter headline
-    ctx.font = "900 30px sans-serif";
-    ctx.fillStyle = "#ffffff";
-    const inviterLabel = d.inviter_name ? `👋 跑友【${d.inviter_name}】诚邀您入团` : "👋 诚邀您加入我们的跑团";
-    ctx.fillText(inviterLabel, 44, 138);
-
-    ctx.font = "18px sans-serif";
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillText("科学耐力训练 · 佳明/高驰数据直连 · 队友同频共进", 44, 172);
-
-    // 3. Main Club Card
-    drawRoundedRectWeb(ctx, 40, 204, W - 80, 500, 28, "#171923", "rgba(255, 255, 255, 0.12)");
-
-    // Club Name
-    ctx.font = "900 40px sans-serif";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText((d.name || "万跑科学跑团").slice(0, 15), 76, 278);
-
-    // Badges row (Parent Org + City + Member Count)
-    let badgeX = 76;
-    const badgeY = 302;
-    if (d.org_name) {
-      const orgTxt = `🏛️ ${d.org_name}`;
-      ctx.font = "bold 17px sans-serif";
-      const orgW = Math.min(ctx.measureText(orgTxt).width + 32, 320);
-      drawRoundedRectWeb(ctx, badgeX, badgeY, orgW, 38, 12, "rgba(245, 158, 11, 0.18)", "rgba(245, 158, 11, 0.45)");
-      ctx.fillStyle = "#fcd34d";
-      ctx.fillText(orgTxt, badgeX + 16, badgeY + 25);
-      badgeX += orgW + 14;
-    }
-
-    const metaTxt = `📍 ${d.city || "上海"} · ${d.member_count || 1} 位跑友同行`;
-    ctx.font = "bold 17px sans-serif";
-    const metaW = ctx.measureText(metaTxt).width + 32;
-    drawRoundedRectWeb(ctx, badgeX, badgeY, metaW, 38, 12, "rgba(16, 185, 129, 0.16)", "rgba(16, 185, 129, 0.4)");
-    ctx.fillStyle = "#6ee7b7";
-    ctx.fillText(metaTxt, badgeX + 16, badgeY + 25);
-
-    // Club Description
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = "#d1d5db";
-    drawWrappedTextWeb(
-      ctx,
-      d.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。欢迎每一位热爱奔跑的伙伴加入！",
-      76,
-      384,
-      W - 152,
-      30,
-      3
-    );
-
-    // Exclusive Invite Code Box
-    drawRoundedRectWeb(
-      ctx,
-      72,
-      490,
-      W - 144,
-      176,
-      22,
-      "rgba(252, 76, 2, 0.10)",
-      "rgba(252, 76, 2, 0.40)"
-    );
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillStyle = "#fdba74";
-    ctx.fillText(
-      d.invite_code ? "🔑 跑团专属入团邀请码（小程序/网页通用）" : "🟢 本跑团已开启免码自由入团",
-      102,
-      534
-    );
-
-    ctx.font = "900 48px monospace";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(d.invite_code || "免码直入", 102, 598);
-
-    ctx.font = "17px sans-serif";
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillText(
-      d.invite_code
-        ? "微信扫码直接免输码入团，或在小程序「跑团 → 输入邀请码」填入"
-        : "微信长按或扫描下方小程序码，即可一键加入跑团",
-      102,
-      638
-    );
-
-    // 4. Footer with Official WeChat Mini Program QR Code
-    const fY = 740;
-    drawRoundedRectWeb(ctx, 40, fY, W - 80, 190, 26, "#121520", "rgba(255, 255, 255, 0.12)");
-
-    ctx.font = "bold 20px sans-serif";
-    ctx.fillStyle = "#FC4C02";
-    ctx.fillText("📱 微信扫码或长按识别 · 一键入团", 72, fY + 54);
-
-    ctx.font = "900 28px sans-serif";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("打开「万跑跑团助手」小程序", 72, fY + 98);
-
-    ctx.font = "17px sans-serif";
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillText("直达跑团受邀页面 · 同步跑表解锁 AI 教练与团队排行榜", 72, fY + 140);
-
-    const qrSrc = d.qrcode_base64
-      ? d.qrcode_base64.startsWith("data:")
-        ? d.qrcode_base64
-        : `data:image/jpeg;base64,${d.qrcode_base64}`
-      : d.qrcode_url || "";
-
-    if (qrSrc) {
-      await new Promise<void>((resolve) => {
-        const qrImg = new Image();
-        qrImg.crossOrigin = "anonymous";
-        qrImg.onload = () => {
-          const qrBoxX = W - 40 - 166;
-          const qrBoxY = fY + 20;
-          drawRoundedRectWeb(ctx, qrBoxX, qrBoxY, 150, 150, 18, "#ffffff");
-          ctx.drawImage(qrImg, qrBoxX + 8, qrBoxY + 8, 134, 134);
-          resolve();
-        };
-        qrImg.onerror = () => resolve();
-        qrImg.src = qrSrc;
-      });
-    }
-
-    return canvas;
-  }
-
   async function handleCopyClubInvitePosterImage() {
     setGeneratingInvitePoster(true);
     try {
-      const canvas = await buildClubInvitePosterCanvas();
+      const canvas = await renderClubInvitePosterCanvas(clubInviteShareData);
       if (!canvas) return;
       const blob: Blob | null = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
       if (blob && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
@@ -666,14 +465,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         setTimeout(() => setCopiedInviteFlag(""), 4000);
         return;
       }
-      // Fallback: download PNG if browser blocks clipboard image write
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${clubInviteShareData?.name || "跑团"}_微信入团邀请函.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      downloadCanvasAsPng(canvas, `${clubInviteShareData?.name || "跑团"}_微信入团邀请函.png`);
       setCopiedInviteFlag("poster");
       setTimeout(() => setCopiedInviteFlag(""), 4000);
     } catch (e) {
@@ -687,15 +479,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   async function handleDownloadClubInvitePoster() {
     setGeneratingInvitePoster(true);
     try {
-      const canvas = await buildClubInvitePosterCanvas();
+      const canvas = await renderClubInvitePosterCanvas(clubInviteShareData);
       if (!canvas) return;
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${clubInviteShareData?.name || "跑团"}_微信入团邀请函.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      downloadCanvasAsPng(canvas, `${clubInviteShareData?.name || "跑团"}_微信入团邀请函.png`);
     } finally {
       setGeneratingInvitePoster(false);
     }
@@ -766,7 +552,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         payload.invite_code = inviteCode;
       }
       const res = await apiClient.post("/api/team/join-club", payload);
-      alert(res.data?.message || "成功加入跑团！");
+      showToast(res.data?.message || "成功加入跑团！");
       if (typeof window !== "undefined") {
         localStorage.setItem("rgm_active_club_id", clubId);
       }
@@ -775,7 +561,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       await loadUserClubs(user.id);
       await loadAllClubs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加入跑团失败，请重试！");
+      showToast(err.response?.data?.detail || "加入跑团失败，请重试！");
     } finally {
       setJoiningClubId(null);
     }
@@ -864,7 +650,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     e.preventDefault();
     if (!activeManagedOrg || !user?.id) return;
     if (!editOrgName.trim()) {
-      alert("大群名称不能为空");
+      showToast("大群名称不能为空");
       return;
     }
     setSavingOrgSettings(true);
@@ -877,12 +663,12 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         invite_code: editOrgInviteCode.trim().toUpperCase() || undefined,
         operator_uid: user.id,
       });
-      alert(res.data?.message || "大群设定保存成功！");
+      showToast(res.data?.message || "大群设定保存成功！");
       setShowOrgSettingsModal(false);
       await loadUserOrgs(user.id);
       await loadUserClubs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存大群设定失败");
+      showToast(err.response?.data?.detail || "保存大群设定失败");
     } finally {
       setSavingOrgSettings(false);
     }
@@ -896,7 +682,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const res = await apiClient.get(`/api/org/${org.id}/field-rules`);
       setOrgFieldRules(res.data?.field_rules || []);
     } catch (err: any) {
-      alert("加载准入字段规则失败");
+      showToast("加载准入字段规则失败");
     } finally {
       setLoadingOrgFieldRules(false);
     }
@@ -914,11 +700,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         setOrgFieldRules(res.data.field_rules);
         setJoinOrgFieldRules(res.data.field_rules);
       }
-      alert(res.data?.message || "大群准入信息规则（必填/选填/不显示）已保存！");
+      showToast(res.data?.message || "大群准入信息规则（必填/选填/不显示）已保存！");
       setShowOrgFieldRulesModal(false);
       await loadUserOrgs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存大群准入规则失败");
+      showToast(err.response?.data?.detail || "保存大群准入规则失败");
     } finally {
       setSavingOrgFieldRules(false);
     }
@@ -933,7 +719,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const res = await apiClient.get(`/api/org/${org.id}/members?operator_uid=${encodeURIComponent(user?.id || "")}`);
       setOrgRosterMembers(res.data?.members || []);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加载大群花名册失败");
+      showToast(err.response?.data?.detail || "加载大群花名册失败");
     } finally {
       setLoadingOrgRoster(false);
     }
@@ -953,14 +739,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const errorMsg = err.response?.data?.detail || "确认成员失败";
       const targetMember = orgRosterMembers.find((m) => m.user_id === targetUid);
       if (targetMember?.status === "expired" && errorMsg.includes("必填资料尚未补齐")) {
-        if (window.confirm(`${errorMsg}\n\n是否为该队员重置 14 天临时访问宽限期？`)) {
+        if (await askConfirm(`${errorMsg}\n\n是否为该队员重置 14 天临时访问宽限期？`)) {
           await apiClient.post(`/api/org/${activeManagedOrg.id}/members/${targetUid}/grace-period`);
           setOrgRosterMembers((prev) =>
             prev.map((m) => (m.user_id === targetUid ? { ...m, status: "temporary", days_remaining: 14 } : m))
           );
         }
       } else {
-        alert(errorMsg);
+        showToast(errorMsg);
       }
     } finally {
       setOrgConfirmingUid(null);
@@ -979,7 +765,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         prev.map((m) => (m.user_id === targetUid ? { ...m, role: newRole } : m))
       );
     } catch (err: any) {
-      alert(err.response?.data?.detail || "调整大群管理员角色失败");
+      showToast(err.response?.data?.detail || "调整大群管理员角色失败");
     } finally {
       setOrgUpdatingRoleUid(null);
     }
@@ -1024,7 +810,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const res = await apiClient.get(`/api/org/${orgId}/reports?${q.toString()}`);
       setOrgReportData(res.data || null);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加载大群全域报表失败");
+      showToast(err.response?.data?.detail || "加载大群全域报表失败");
     } finally {
       setLoadingOrgReport(false);
     }
@@ -1084,7 +870,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       assigningMemberClubMap[targetUid] ||
       orgReportData?.sub_club_rankings?.[0]?.club_id;
     if (!effClubId) {
-      alert("请先选择要划入的下属分跑团");
+      showToast("请先选择要划入的下属分跑团");
       return;
     }
     setAssigningMemberLoadingUid(targetUid);
@@ -1096,10 +882,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           club_id: effClubId,
         }
       );
-      alert(res.data?.message || "已成功分配至下属跑团！");
+      showToast(res.data?.message || "已成功分配至下属跑团！");
       await fetchOrgReport(activeManagedOrg.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "分配跑团失败");
+      showToast(err.response?.data?.detail || "分配跑团失败");
     } finally {
       setAssigningMemberLoadingUid(null);
     }
@@ -1114,7 +900,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       );
       setOrgEventsData(res.data || null);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加载跨跑团联合活动失败");
+      showToast(err.response?.data?.detail || "加载跨跑团联合活动失败");
     } finally {
       setLoadingOrgEvents(false);
     }
@@ -1142,11 +928,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     e.preventDefault();
     if (!activeManagedOrg || !user?.id) return;
     if (!orgEvtTitle.trim()) {
-      alert("请输入跨跑团联合活动名称");
+      showToast("请输入跨跑团联合活动名称");
       return;
     }
     if (orgEvtScopeMode === "selected" && orgEvtSelectedClubs.length === 0) {
-      alert("请至少勾选 1 个参与的下属分跑团，或切换为「大群下属全部跑团」");
+      showToast("请至少勾选 1 个参与的下属分跑团，或切换为「大群下属全部跑团」");
       return;
     }
     setCreatingOrgEvent(true);
@@ -1164,13 +950,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         rules: orgEvtRules.trim(),
         scope_club_ids: orgEvtScopeMode === "all" ? "all" : orgEvtSelectedClubs,
       });
-      alert(res.data?.message || "跨跑团联合活动发布成功！");
+      showToast(res.data?.message || "跨跑团联合活动发布成功！");
       await fetchOrgEvents(activeManagedOrg.id);
       if (currentClub?.id) {
         await loadClubDetails(currentClub.id, user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "发布跨跑团活动失败");
+      showToast(err.response?.data?.detail || "发布跨跑团活动失败");
     } finally {
       setCreatingOrgEvent(false);
     }
@@ -1180,11 +966,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     e.preventDefault();
     if (!user?.id) return;
     if (!orgInviteCode.trim()) {
-      alert("请输入大群体专属邀请码");
+      showToast("请输入大群体专属邀请码");
       return;
     }
     if (isJoinFieldRequired("real_name") && !orgRealName.trim()) {
-      alert("请填写真实姓名以便管理员核对确认");
+      showToast("请填写真实姓名以便管理员核对确认");
       return;
     }
     const finalClass = isJoinFieldVisible("class_name")
@@ -1193,39 +979,39 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         : orgClassName.trim()
       : "";
     if (isJoinFieldRequired("class_name") && (!finalClass || (orgProgram && !orgClassDetail.trim()))) {
-      alert("请选择商学院项目并填写具体班级（例如 23春、21级）");
+      showToast("请选择商学院项目并填写具体班级（例如 23春、21级）");
       return;
     }
     if (isJoinFieldRequired("date_of_birth") && !orgDob.trim()) {
-      alert("请选择出生日期");
+      showToast("请选择出生日期");
       return;
     }
     if (isJoinFieldRequired("phone") && !orgPhone.trim()) {
-      alert("请填写联系手机");
+      showToast("请填写联系手机");
       return;
     }
     if (isJoinFieldRequired("id_card") && !orgIdCard.trim()) {
-      alert("请填写证件号码");
+      showToast("请填写证件号码");
       return;
     }
     if (isJoinFieldRequired("emergency_contact") && !orgEmergencyContact.trim()) {
-      alert("请填写紧急联系人及电话");
+      showToast("请填写紧急联系人及电话");
       return;
     }
     if (isJoinFieldRequired("clothing_size") && !orgClothingSize.trim()) {
-      alert("请选择队服尺码");
+      showToast("请选择队服尺码");
       return;
     }
     if (isJoinFieldRequired("shoe_size") && !orgShoeSize.trim()) {
-      alert("请选择跑鞋尺码");
+      showToast("请选择跑鞋尺码");
       return;
     }
     if (isJoinFieldRequired("marathon_pb") && !orgMarathonPb.trim()) {
-      alert("请填写全马PB成绩");
+      showToast("请填写全马PB成绩");
       return;
     }
     if (isJoinFieldRequired("health_declaration") && !orgHealthChecked) {
-      alert("请勾选参赛健康状况声明");
+      showToast("请勾选参赛健康状况声明");
       return;
     }
 
@@ -1255,13 +1041,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         marathon_pb: isJoinFieldVisible("marathon_pb") ? orgMarathonPb.trim() : undefined,
         health_declaration: isJoinFieldVisible("health_declaration") ? orgHealthChecked : undefined,
       });
-      alert(res.data?.message || "实名认证登记成功，已加入大群体！");
+      showToast(res.data?.message || "实名认证登记成功，已加入大群体！");
       setShowOrgJoinModal(false);
       await loadUserOrgs(user.id);
       await loadUserClubs(user.id);
       await loadAllClubs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加入大群体失败，请检查邀请码后重试！");
+      showToast(err.response?.data?.detail || "加入大群体失败，请检查邀请码后重试！");
     } finally {
       setOrgJoining(false);
     }
@@ -1274,14 +1060,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         operator_uid: user.id,
         join_mode: mode,
       });
-      alert(res.data?.message || "入团规则已更新！");
+      showToast(res.data?.message || "入团规则已更新！");
       setCurrentClub((prev: any) => ({
         ...prev,
         join_mode: mode,
         ...(res.data?.club?.invite_code ? { invite_code: res.data.club.invite_code } : {})
       }));
     } catch (e: any) {
-      alert(e.response?.data?.detail || "更新入团规则失败，请重试！");
+      showToast(e.response?.data?.detail || "更新入团规则失败，请重试！");
     }
   }
 
@@ -1293,11 +1079,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         operator_uid: user.id,
         status: newStatus,
       });
-      alert(res.data?.message || "跑团运行状态已更新！");
+      showToast(res.data?.message || "跑团运行状态已更新！");
       setCurrentClub((prev: any) => ({ ...prev, status: newStatus }));
       setClubs(clubs.map((c) => (c.id === currentClub.id ? { ...c, status: newStatus } : c)));
     } catch (e: any) {
-      alert(e.response?.data?.detail || "更新跑团状态失败，请重试！");
+      showToast(e.response?.data?.detail || "更新跑团状态失败，请重试！");
     } finally {
       setStatusUpdating(false);
     }
@@ -1307,13 +1093,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     e.preventDefault();
     if (!currentClub?.id || !user?.id) return;
     if (dissolveConfirmName.trim() !== currentClub.name.trim()) {
-      alert("输入的跑团名称与当前跑团不一致，请核实后重试！");
+      showToast("输入的跑团名称与当前跑团不一致，请核实后重试！");
       return;
     }
     setDissolving(true);
     try {
       const res = await apiClient.delete(`/api/team/${currentClub.id}?operator_uid=${user.id}`);
-      alert(res.data?.message || "跑团已成功解散并清理，全体队员个人数据已完整保留！");
+      showToast(res.data?.message || "跑团已成功解散并清理，全体队员个人数据已完整保留！");
       setShowDissolveModal(false);
       setDissolveConfirmName("");
       // Refresh clubs list
@@ -1325,7 +1111,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         setCurrentClub(null);
       }
     } catch (e: any) {
-      alert(e.response?.data?.detail || "解散跑团失败，请重试！");
+      showToast(e.response?.data?.detail || "解散跑团失败，请重试！");
     } finally {
       setDissolving(false);
     }
@@ -1365,7 +1151,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setReportData(res.data);
     } catch (err: any) {
       console.error("fetchClubReport error:", err);
-      alert(err.response?.data?.detail || "获取跑团报表失败");
+      showToast(err.response?.data?.detail || "获取跑团报表失败");
     } finally {
       setLoadingReport(false);
     }
@@ -1406,12 +1192,12 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setShowCreateClubModal(false);
       setNewClubName("");
       setNewClubDesc("");
-      alert(res.data?.message || "✅ 跑团创建成功！");
+      showToast(res.data?.message || "✅ 跑团创建成功！");
       if (createdClub?.id) {
         await loadClubDetails(createdClub.id, user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "创建跑团失败，请检查邀请解锁条件后重试");
+      showToast(err.response?.data?.detail || "创建跑团失败，请检查邀请解锁条件后重试");
     } finally {
       setCreatingClub(false);
     }
@@ -1437,7 +1223,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         await loadClubDetails(currentClub.id, user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "操作失败，请稍后重试");
+      showToast(err.response?.data?.detail || "操作失败，请稍后重试");
     } finally {
       setTogglingEventId(null);
     }
@@ -1459,11 +1245,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         target_pace: bcastTargetPace,
         description: bcastDescription,
       });
-      alert(res.data?.message || "已成功将跑团合练课表同步派发给全体队员！");
+      showToast(res.data?.message || "已成功将跑团合练课表同步派发给全体队员！");
       setShowBroadcastModal(false);
       await loadClubDetails(currentClub.id, user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "派发跑团合练课表失败");
+      showToast(err.response?.data?.detail || "派发跑团合练课表失败");
     } finally {
       setBroadcastingWorkout(false);
     }
@@ -1479,13 +1265,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         weeks: 4,
         only_without_plan: onlyWithoutPlan,
       });
-      alert(res.data?.message || "已批量生成个性化训练计划草案，请点击学员卡片进行审核与发布！");
+      showToast(res.data?.message || "已批量生成个性化训练计划草案，请点击学员卡片进行审核与发布！");
       await loadClubDetails(currentClub.id, user.id);
       if ((res.data?.generated_count || 0) > 0) {
         setCoachPlanFilter("draft_pending");
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "批量生成训练计划草案失败，请稍后重试");
+      showToast(err.response?.data?.detail || "批量生成训练计划草案失败，请稍后重试");
     } finally {
       setBatchGeneratingDrafts(false);
     }
@@ -1668,7 +1454,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     const shortNameTrim = tplEditShortName.trim();
     const groupCodeTrim = tplEditGroupCode.trim();
     if (!shortNameTrim || !groupCodeTrim) {
-      alert("请填写模版组别代号与模版名称");
+      showToast("请填写模版组别代号与模版名称");
       return;
     }
     const computedWeeklyKm = Math.round(
@@ -1728,9 +1514,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         syncTemplateEditorFields(savedTpl);
       }
       setShowTemplateMetaEditor(false);
-      alert(res.data?.message || "✅ 已成功保存为教练专属训练模版！");
+      showToast(res.data?.message || "✅ 已成功保存为教练专属训练模版！");
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存自定义模版失败");
+      showToast(err.response?.data?.detail || "保存自定义模版失败");
     } finally {
       setSavingCustomTemplate(false);
     }
@@ -1738,7 +1524,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
   async function handleDeleteCustomTemplate(tplId: string) {
     if (!user?.id || !tplId) return;
-    if (!confirm("确定要删除这个教练自定义训练模版吗？")) return;
+    if (!await askConfirm("确定要删除这个教练自定义训练模版吗？")) return;
     try {
       const res = await apiClient.delete(
         `/api/coach/plan/templates/${tplId}?club_id=${currentClub?.id || ""}&operator_uid=${user.id}`
@@ -1751,7 +1537,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         syncTemplateEditorFields(fallback);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "删除自定义模版失败");
+      showToast(err.response?.data?.detail || "删除自定义模版失败");
     }
   }
 
@@ -1939,11 +1725,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           setSelectedStudentForPlan(firstAssigned);
         }
       } else {
-        alert(res.data?.message || "已成功批量分配组别训练模版！");
+        showToast(res.data?.message || "已成功批量分配组别训练模版！");
       }
       await loadClubPlanBatches(currentClub.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "分配训练模版失败，请稍后重试");
+      showToast(err.response?.data?.detail || "分配训练模版失败，请稍后重试");
     } finally {
       setAssigningTemplate(false);
     }
@@ -1980,11 +1766,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const res = await apiClient.post(`/api/coach/plan/club-batches/${batchId}/rollback`, {
         operator_uid: user.id,
       });
-      alert(res.data?.message || "✅ 已整批撤回该次课表派发，所有队员原课表已恢复！");
+      showToast(res.data?.message || "✅ 已整批撤回该次课表派发，所有队员原课表已恢复！");
       await loadClubDetails(currentClub.id, user.id);
       await loadClubPlanBatches(currentClub.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "整批撤回失败，请稍后重试");
+      showToast(err.response?.data?.detail || "整批撤回失败，请稍后重试");
     } finally {
       setRollingBackBatchId(null);
     }
@@ -1999,7 +1785,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     const confirmMsg = opts?.discardDraftOnly
       ? `确认撤回并删除【${student.display_name}】的待审草案「${pInfo.draft_plan_title || "新草案"}」吗？\n（队员当前正在执行的「${pInfo.active_plan_title || pInfo.title || "原计划"}」将保持完好不变）`
       : `确认将【${student.display_name}】的训练计划回退到上一版本「${pInfo.latest_backup?.previous_plan_title || "原训练计划"}」吗？\n（队员已完成的日常打卡数据将 100% 保留）`;
-    if (!window.confirm(confirmMsg)) return;
+    if (!await askConfirm(confirmMsg)) return;
 
     setRollingBackUserUid(student.user_id);
     try {
@@ -2009,11 +1795,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         backup_id: opts?.backupId,
         target_plan_id: opts?.targetPlanId,
       });
-      alert(res.data?.message || "✅ 已成功回退队员训练计划！");
+      showToast(res.data?.message || "✅ 已成功回退队员训练计划！");
       await loadClubDetails(currentClub.id, user.id);
       await loadClubPlanBatches(currentClub.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "回退失败，请稍后重试");
+      showToast(err.response?.data?.detail || "回退失败，请稍后重试");
     } finally {
       setRollingBackUserUid(null);
     }
@@ -2027,7 +1813,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     const confirmMsg = hasActive
       ? `🚀 确认将【${student.display_name}】的待审草案「${pInfo.draft_plan_title}」正式发布并生效吗？\n\n• 原生效计划「${pInfo.active_plan_title || pInfo.title}」将自动归档备份（历史打卡 100% 合并保留），之后仍可随时一键切回。`
       : `🚀 确认将【${student.display_name}】的待审草案「${pInfo.draft_plan_title}」正式发布给队员吗？`;
-    if (!window.confirm(confirmMsg)) return;
+    if (!await askConfirm(confirmMsg)) return;
 
     setPublishingDraftUid(student.user_id);
     try {
@@ -2037,7 +1823,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       });
       await loadClubDetails(currentClub.id, user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "发布草案失败，请稍后重试");
+      showToast(err.response?.data?.detail || "发布草案失败，请稍后重试");
     } finally {
       setPublishingDraftUid(null);
     }
@@ -2100,386 +1886,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     window.open(url, "_blank");
   }
 
-  function drawRoundedRectWeb(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number, fillStyle?: string, strokeStyle?: string) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.arcTo(x + width, y, x + width, y + radius, radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
-    ctx.lineTo(x + radius, y + height);
-    ctx.arcTo(x, y + height, x, y + height - radius, radius);
-    ctx.lineTo(x, y + radius);
-    ctx.arcTo(x, y, x + radius, y, radius);
-    ctx.closePath();
-    if (fillStyle) {
-      ctx.fillStyle = fillStyle;
-      ctx.fill();
-    }
-    if (strokeStyle) {
-      ctx.strokeStyle = strokeStyle;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  function drawWrappedTextWeb(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number = 5) {
-    let line = "";
-    let lineCount = 0;
-    for (let i = 0; i < text.length; i++) {
-      const testLine = line + text[i];
-      if (ctx.measureText(testLine).width > maxWidth && i > 0) {
-        ctx.fillText(line, x, y);
-        line = text[i];
-        y += lineHeight;
-        lineCount++;
-        if (lineCount >= maxLines - 1) {
-          const remaining = text.substring(i);
-          let lastLine = "";
-          const suffix = text.startsWith("“") ? "…”" : "...";
-          for (let j = 0; j < remaining.length; j++) {
-            if (ctx.measureText(lastLine + remaining[j] + suffix).width > maxWidth) {
-              break;
-            }
-            lastLine += remaining[j];
-          }
-          ctx.fillText(lastLine + suffix, x, y);
-          return y + lineHeight;
-        }
-      } else {
-        line = testLine;
-      }
-    }
-    ctx.fillText(line, x, y);
-    return y + lineHeight;
-  }
-
   const handleDownloadPosterImage = async () => {
     if (!reportData) return;
-    const canvas = document.createElement("canvas");
-    const W = 750;
-    const H = 1380;
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const rep = reportData;
     const isLight =
       typeof document !== "undefined" &&
       document.documentElement.classList.contains("theme-light");
-
-    // Background gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-    if (isLight) {
-      bgGrad.addColorStop(0, "#F8FAFC");
-      bgGrad.addColorStop(0.5, "#FFFFFF");
-      bgGrad.addColorStop(1, "#F1F5F9");
-    } else {
-      bgGrad.addColorStop(0, "#0e1017");
-      bgGrad.addColorStop(0.5, "#131620");
-      bgGrad.addColorStop(1, "#0a0b10");
-    }
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, W, H);
-
-    // Outer border
-    drawRoundedRectWeb(
-      ctx,
-      16,
-      16,
-      W - 32,
-      H - 32,
-      24,
-      undefined,
-      isLight ? "rgba(217, 119, 6, 0.3)" : "rgba(255, 215, 0, 0.25)"
-    );
-
-    // Header
-    drawRoundedRectWeb(
-      ctx,
-      40,
-      42,
-      190,
-      42,
-      21,
-      isLight ? "rgba(245, 158, 11, 0.14)" : "rgba(255, 215, 0, 0.15)",
-      isLight ? "rgba(217, 119, 6, 0.4)" : "rgba(255, 215, 0, 0.4)"
-    );
-    ctx.font = "bold 20px sans-serif";
-    ctx.fillStyle = isLight ? "#b45309" : "#ffd700";
-    ctx.fillText("👑 跑团专属战报", 52, 71);
-
-    ctx.font = "900 36px sans-serif";
-    ctx.fillStyle = isLight ? "#0f172a" : "#ffffff";
-    ctx.fillText(rep.club_name || "跑团战报", 40, 130);
-
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillStyle = isLight ? "#b45309" : "#ffd700";
-    const trailTagCanvas =
-      rep.trail_mode === "exclude_pace"
-        ? " · 仅去除越野配速"
-        : rep.trail_mode === "exclude_all"
-        ? " · 去除越野跑量与配速"
-        : "";
-    ctx.fillText(`${rep.period_label} · ${rep.date_range_str}${trailTagCanvas}`, 40, 172);
-
-    ctx.beginPath();
-    ctx.moveTo(40, 195);
-    ctx.lineTo(W - 40, 195);
-    ctx.strokeStyle = isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(255, 255, 255, 0.12)";
-    ctx.stroke();
-
-    // Hero Total Mileage
-    drawRoundedRectWeb(
-      ctx,
-      40,
-      215,
-      W - 80,
-      155,
-      20,
-      isLight ? "#FFF7ED" : "#181b26",
-      isLight ? "rgba(252, 76, 2, 0.3)" : "rgba(252, 76, 2, 0.35)"
-    );
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillStyle = isLight ? "#475569" : "#9ca3af";
-    ctx.fillText("全团累计奔跑总里程", 64, 252);
-
-    ctx.font = "900 72px monospace";
-    ctx.fillStyle = "#fc4c02";
-    ctx.fillText(`${rep.total_distance_km}`, 64, 326);
-
-    const kmWidth = ctx.measureText(`${rep.total_distance_km}`).width;
-    ctx.font = "900 30px sans-serif";
-    ctx.fillStyle = isLight ? "#b45309" : "#f59e0b";
-    ctx.fillText("KM", 64 + kmWidth + 12, 324);
-
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = isLight ? "#64748b" : "#71717a";
-    ctx.fillText("汇聚全员热血汗水 · 每一步都在突破极限", 64, 355);
-
-    // 4-Metrics Grid
-    const gW = (W - 80 - 18) / 2;
-    const gH = 92;
-    const metricBg = isLight ? "#FFFFFF" : "#151722";
-    const metricStroke = isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(255, 255, 255, 0.08)";
-    const metricLabel = isLight ? "#64748b" : "#9ca3af";
-    const metricVal = isLight ? "#0f172a" : "#ffffff";
-
-    drawRoundedRectWeb(ctx, 40, 390, gW, gH, 16, metricBg, metricStroke);
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = metricLabel;
-    ctx.fillText("队员出勤率", 56, 422);
-    ctx.font = "bold 30px sans-serif";
-    ctx.fillStyle = metricVal;
-    ctx.fillText(`${rep.attendance_rate_pct}%`, 56, 462);
-    ctx.font = "18px sans-serif";
-    ctx.fillStyle = isLight ? "#64748b" : "#6b7280";
-    ctx.fillText(`(${rep.active_members_count}/${rep.total_members_count}人)`, 160, 460);
-
-    drawRoundedRectWeb(ctx, 40 + gW + 18, 390, gW, gH, 16, metricBg, metricStroke);
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = metricLabel;
-    ctx.fillText("全团平均配速", 56 + gW + 18, 422);
-    ctx.font = "bold 30px monospace";
-    ctx.fillStyle = metricVal;
-    ctx.fillText(`${rep.avg_pace_str}`, 56 + gW + 18, 462);
-
-    drawRoundedRectWeb(ctx, 40, 498, gW, gH, 16, metricBg, metricStroke);
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = metricLabel;
-    ctx.fillText("累计爬升克服", 56, 530);
-    ctx.font = "bold 30px sans-serif";
-    ctx.fillStyle = metricVal;
-    ctx.fillText(`+${rep.total_elevation_gain_m}m`, 56, 570);
-
-    drawRoundedRectWeb(ctx, 40 + gW + 18, 498, gW, gH, 16, metricBg, metricStroke);
-    ctx.font = "20px sans-serif";
-    ctx.fillStyle = metricLabel;
-    ctx.fillText("累计打卡总人次", 56 + gW + 18, 530);
-    ctx.font = "bold 30px sans-serif";
-    ctx.fillStyle = metricVal;
-    ctx.fillText(`${rep.total_activities_count} 次`, 56 + gW + 18, 570);
-
-    // Podium Top 3
-    drawRoundedRectWeb(
-      ctx,
-      40,
-      606,
-      W - 80,
-      235,
-      20,
-      isLight ? "#FFFBEB" : "#151722",
-      isLight ? "rgba(217, 119, 6, 0.3)" : "rgba(255, 215, 0, 0.3)"
-    );
-    ctx.font = "bold 24px sans-serif";
-    ctx.fillStyle = isLight ? "#b45309" : "#ffd700";
-    ctx.fillText("🏆 荣誉榜单 Top 3", 60, 642);
-
-    const podium = rep.podium || [];
-    const medals = ["🥇 冠军", "🥈 亚军", "🥉 季军"];
-    const medalBgs = isLight
-      ? ["#FFFFFF", "#FFFFFF", "#FFFFFF"]
-      : ["rgba(255, 215, 0, 0.12)", "rgba(192, 192, 192, 0.10)", "rgba(205, 127, 50, 0.10)"];
-    const medalStrokes = isLight
-      ? ["rgba(217, 119, 6, 0.35)", "rgba(100, 116, 139, 0.25)", "rgba(180, 83, 9, 0.28)"]
-      : ["rgba(255, 215, 0, 0.35)", "rgba(192, 192, 192, 0.3)", "rgba(205, 127, 50, 0.3)"];
-
-    for (let i = 0; i < 3; i++) {
-      const pY = 660 + i * 55;
-      if (podium[i]) {
-        drawRoundedRectWeb(ctx, 60, pY, W - 120, 48, 12, medalBgs[i], medalStrokes[i]);
-        ctx.font = "bold 22px sans-serif";
-        ctx.fillStyle = isLight ? "#b45309" : "#ffd700";
-        ctx.fillText(medals[i], 76, pY + 32);
-
-        ctx.font = "bold 22px sans-serif";
-        ctx.fillStyle = metricVal;
-        ctx.fillText(podium[i].display_name || "跑者", 185, pY + 32);
-
-        ctx.font = "900 22px monospace";
-        ctx.fillStyle = "#fc4c02";
-        ctx.fillText(`${podium[i].distance_km} km`, W - 250, pY + 32);
-
-        ctx.font = "20px monospace";
-        ctx.fillStyle = isLight ? "#475569" : "#9ca3af";
-        ctx.fillText(podium[i].avg_pace_str || "—", W - 145, pY + 32);
-      }
-    }
-
-    // Highlights
-    const hY = 858;
-    const hW = (W - 80 - 18) / 2;
-    if (rep.hardcore_runner) {
-      drawRoundedRectWeb(
-        ctx,
-        40,
-        hY,
-        hW,
-        82,
-        14,
-        isLight ? "#F0F9FF" : "#151722",
-        isLight ? "rgba(2, 132, 199, 0.25)" : "rgba(56, 189, 248, 0.25)"
-      );
-      ctx.font = "bold 18px sans-serif";
-      ctx.fillStyle = isLight ? "#0369a1" : "#38bdf8";
-      ctx.fillText("🌟 毅力先锋", 54, hY + 28);
-      ctx.font = "bold 20px sans-serif";
-      ctx.fillStyle = metricVal;
-      ctx.fillText(`${rep.hardcore_runner.display_name}`, 54, hY + 54);
-      ctx.font = "16px sans-serif";
-      ctx.fillStyle = isLight ? "#475569" : "#9ca3af";
-      ctx.fillText(`打卡 ${rep.hardcore_runner.runs_count} 次 · ${rep.hardcore_runner.distance_km}km`, 54, hY + 74);
-    }
-    if (rep.longest_run) {
-      drawRoundedRectWeb(
-        ctx,
-        40 + hW + 18,
-        hY,
-        hW,
-        82,
-        14,
-        isLight ? "#F0F9FF" : "#151722",
-        isLight ? "rgba(2, 132, 199, 0.25)" : "rgba(56, 189, 248, 0.25)"
-      );
-      ctx.font = "bold 18px sans-serif";
-      ctx.fillStyle = isLight ? "#0369a1" : "#38bdf8";
-      ctx.fillText("🚀 最长突破", 54 + hW + 18, hY + 28);
-      ctx.font = "bold 20px sans-serif";
-      ctx.fillStyle = metricVal;
-      ctx.fillText(`${rep.longest_run.runner_name}`, 54 + hW + 18, hY + 54);
-      ctx.font = "16px sans-serif";
-      ctx.fillStyle = isLight ? "#475569" : "#9ca3af";
-      ctx.fillText(`单次 ${rep.longest_run.distance_km}km · ${rep.longest_run.avg_pace_str}`, 54 + hW + 18, hY + 74);
-    }
-
-    // Canova Quote Box
-    const cY = 955;
-    drawRoundedRectWeb(
-      ctx,
-      40,
-      cY,
-      W - 80,
-      225,
-      18,
-      isLight ? "#FAF5FF" : "#181624",
-      isLight ? "rgba(147, 51, 234, 0.28)" : "rgba(191, 90, 242, 0.35)"
-    );
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillStyle = isLight ? "#6d28d9" : "#bf5af2";
-    ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
-
-    ctx.font = "italic 17px sans-serif";
-    ctx.fillStyle = isLight ? "#1e293b" : "#d1d5db";
-    drawWrappedTextWeb(ctx, `“${rep.canova_critique}”`, 58, cY + 68, W - 116, 26, 5);
-
-    // Footer with Pure Mini-Program QR Code (no club invite)
-    const fY = 1200;
-    drawRoundedRectWeb(
-      ctx,
-      40,
-      fY,
-      W - 80,
-      145,
-      20,
-      isLight ? "#FFFFFF" : "#121520",
-      isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(255, 255, 255, 0.1)"
-    );
-
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillStyle = "#fc4c02";
-    ctx.fillText("🏃 万跑跑团助手 · 跑团官方认证战报", 64, fY + 42);
-
-    ctx.font = "900 24px sans-serif";
-    ctx.fillStyle = metricVal;
-    ctx.fillText("微信扫码打开万跑跑团助手小程序", 64, fY + 78);
-
-    ctx.font = "16px sans-serif";
-    ctx.fillStyle = isLight ? "#475569" : "#9ca3af";
-    ctx.fillText("万跑跑团助手 · 科学耐力训练与跑团系统 · 官方认证战报", 64, fY + 112);
-
-    const qrSrc = rep.qrcode_base64
-      ? `data:image/jpeg;base64,${rep.qrcode_base64}`
-      : rep.qrcode_url || "";
-    if (qrSrc) {
-      await new Promise<void>((resolve) => {
-        const qrImg = new Image();
-        qrImg.crossOrigin = "anonymous";
-        qrImg.onload = () => {
-          const qrBoxX = W - 40 - 134;
-          const qrBoxY = fY + 14;
-          drawRoundedRectWeb(ctx, qrBoxX, qrBoxY, 118, 118, 14, "#ffffff");
-          ctx.drawImage(qrImg, qrBoxX + 6, qrBoxY + 6, 106, 106);
-          resolve();
-        };
-        qrImg.onerror = () => resolve();
-        qrImg.src = qrSrc;
-      });
-    } else {
-      drawRoundedRectWeb(
-        ctx,
-        W - 160,
-        fY + 48,
-        100,
-        44,
-        12,
-        isLight ? "rgba(245, 158, 11, 0.14)" : "rgba(255, 215, 0, 0.15)",
-        isLight ? "rgba(217, 119, 6, 0.4)" : "rgba(255, 215, 0, 0.4)"
-      );
-      ctx.font = "bold 18px sans-serif";
-      ctx.fillStyle = isLight ? "#b45309" : "#ffd700";
-      ctx.fillText("官方战报", W - 146, fY + 76);
-    }
-
-    // Download PNG
-    const dataUrl = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `${rep.club_name || "跑团"}_${rep.period_label || "战报"}_海报.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const canvas = await renderClubReportPosterCanvas(reportData, isLight);
+    if (!canvas) return;
+    downloadCanvasAsPng(canvas, `${reportData.club_name || "跑团"}_${reportData.period_label || "战报"}_海报.png`);
   };
 
   async function loadUserClubs(uid: string) {
@@ -2565,9 +1979,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         operator_uid: user.id,
         target_uid: targetUid,
       });
-      alert(res.data?.message || `已向【${displayName}】发送绑定手表与设定目标提醒！`);
+      showToast(res.data?.message || `已向【${displayName}】发送绑定手表与设定目标提醒！`);
     } catch (e: any) {
-      alert(e.response?.data?.detail || "发送提醒失败，请稍后重试");
+      showToast(e.response?.data?.detail || "发送提醒失败，请稍后重试");
     } finally {
       setRemindingMemberUid(null);
     }
@@ -2753,7 +2167,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setCommentInputs((prev) => ({ ...prev, [activityId]: "" }));
       setReplyTargets((prev) => ({ ...prev, [activityId]: null }));
     } catch (e) {
-      alert("评论发布失败");
+      showToast("评论发布失败");
     } finally {
       setSubmittingComment((prev) => ({ ...prev, [activityId]: false }));
     }
@@ -2775,7 +2189,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         })
       );
     } catch (e) {
-      alert("删除失败");
+      showToast("删除失败");
     }
   }
 
@@ -2788,13 +2202,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         invite_code: inviteCodeInput.trim().toUpperCase(),
         privacy_consent: true,
       });
-      alert(res.data.message || "加入跑团成功！");
+      showToast(res.data.message || "加入跑团成功！");
       setShowJoinModal(false);
       setInviteCodeInput("");
       await loadUserClubs(user.id);
       await loadAllClubs(user.id);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加入失败，请核对邀请码！");
+      showToast(err.response?.data?.detail || "加入失败，请核对邀请码！");
     }
   }
 
@@ -2806,10 +2220,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         target_uid: targetUid,
         role: role,
       });
-      alert(`已成功将该成员设为【${role === "coach" ? "认证教练" : role === "owner" ? "团长" : "普通跑者"}】`);
+      showToast(`已成功将该成员设为【${role === "coach" ? "认证教练" : role === "owner" ? "团长" : "普通跑者"}】`);
       loadClubDetails(currentClub.id);
     } catch (e: any) {
-      alert("操作失败");
+      showToast("操作失败");
     }
   }
 
@@ -2840,10 +2254,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       );
       setRemoveMemberTarget(null);
       setRemoveMemberChecked(false);
-      alert(`已成功将【${displayName}】移出跑团`);
+      showToast(`已成功将【${displayName}】移出跑团`);
       await loadClubDetails(currentClub.id, user?.id);
     } catch (e: any) {
-      alert(e.response?.data?.detail || "移除成员失败");
+      showToast(e.response?.data?.detail || "移除成员失败");
     } finally {
       setRemovingMemberLoading(false);
     }
@@ -2852,7 +2266,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   function openLeaveClubModal() {
     if (!currentClub || currentClub.is_virtual_unaffiliated) return;
     if (currentRole === "owner") {
-      alert(
+      showToast(
         `您当前是【${currentClub.name}】的跑团团长。\n\n为防止跑团群龙无首，请先在「👥 跑团成员与管理」中将团长身份移交给其他成员后再退出；若需停办跑团，可在底部选择解散跑团。`
       );
       return;
@@ -2881,11 +2295,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           localStorage.removeItem("rgm_active_club_id");
         }
       }
-      alert(`您已成功退出跑团【${leavingClubName}】，个人运动历史与数据档案 100% 完整保留！`);
+      showToast(`您已成功退出跑团【${leavingClubName}】，个人运动历史与数据档案 100% 完整保留！`);
       await loadUserClubs(user.id);
       await loadAllClubs(user.id);
     } catch (e: any) {
-      alert(e.response?.data?.detail || "退出跑团失败");
+      showToast(e.response?.data?.detail || "退出跑团失败");
     } finally {
       setLeavingClubLoading(false);
     }
@@ -2893,17 +2307,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
   async function handleTransferOwner(targetUid: string, displayName: string) {
     if (!currentClub || !user?.id) return;
-    if (!confirm(`确定要将跑团【${currentClub.name}】的团长身份移交给【${displayName}】吗？移交后您将转为认证教练身份。`)) return;
+    if (!await askConfirm(`确定要将跑团【${currentClub.name}】的团长身份移交给【${displayName}】吗？移交后您将转为认证教练身份。`)) return;
     try {
       await apiClient.post(`/api/team/${currentClub.id}/role`, {
         operator_uid: user.id,
         target_uid: targetUid,
         role: "owner",
       });
-      alert(`已成功将团长身份移交给【${displayName}】！`);
+      showToast(`已成功将团长身份移交给【${displayName}】！`);
       loadUserClubs(user.id);
     } catch (e: any) {
-      alert(e.response?.data?.detail || "移交团长失败");
+      showToast(e.response?.data?.detail || "移交团长失败");
     }
   }
 
@@ -2927,13 +2341,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
   async function handleDeleteEvent(eventId: string) {
     if (!currentClub) return;
-    if (!confirm("确定要删除该跑团挑战赛活动吗？")) return;
+    if (!await askConfirm("确定要删除该跑团挑战赛活动吗？")) return;
     try {
       await apiClient.delete(`/api/team/${currentClub.id}/events/${eventId}`);
-      alert("活动已成功删除");
+      showToast("活动已成功删除");
       loadClubDetails(currentClub.id);
     } catch (e: any) {
-      alert("删除失败");
+      showToast("删除失败");
     }
   }
 
@@ -2948,7 +2362,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           target_km: Number(eventTargetKm),
           rules: eventRules.trim(),
         });
-        alert("挑战赛修改成功！");
+        showToast("挑战赛修改成功！");
       } else {
         await apiClient.post(`/api/team/${currentClub.id}/events`, {
           operator_uid: user.id,
@@ -2956,7 +2370,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           target_km: Number(eventTargetKm),
           rules: eventRules.trim(),
         });
-        alert("活动挑战发布成功！");
+        showToast("活动挑战发布成功！");
       }
       setShowCreateEventModal(false);
       setEditingEvent(null);
@@ -2965,7 +2379,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setActiveTab("events");
       loadClubDetails(currentClub.id);
     } catch (e: any) {
-      alert("发布或修改失败");
+      showToast("发布或修改失败");
     }
   }
 
@@ -2978,7 +2392,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       );
       setSelectedMenteeDetail(res.data || null);
     } catch (e: any) {
-      alert(e.response?.data?.detail || "加载徒弟训练与休息数据失败");
+      showToast(e.response?.data?.detail || "加载徒弟训练与休息数据失败");
     } finally {
       setLoadingMenteeDetail(false);
     }
@@ -2997,14 +2411,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         mentee_id: menteeUid,
         operator_uid: user.id,
       });
-      alert(res.data?.message || "师徒结对成功！");
+      showToast(res.data?.message || "师徒结对成功！");
       setMentorshipTargetUid("");
       setShowMentorshipBindModal(false);
       if (currentClub?.id) {
         await loadClubDetails(currentClub.id, user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "师徒结对失败");
+      showToast(err.response?.data?.detail || "师徒结对失败");
     } finally {
       setBindingMentorship(false);
     }
@@ -3012,20 +2426,20 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
   async function handleUnbindMentorshipWeb(mentorUid: string, menteeUid: string, labelName: string) {
     if (!user?.id) return;
-    if (!confirm(`确定要解除与【${labelName}】的 1对1 师徒关系吗？`)) return;
+    if (!await askConfirm(`确定要解除与【${labelName}】的 1对1 师徒关系吗？`)) return;
     try {
       const res = await apiClient.post("/api/team/mentorship/unbind", {
         mentor_id: mentorUid,
         mentee_id: menteeUid,
         operator_uid: user.id,
       });
-      alert(res.data?.message || "已解除师徒关系");
+      showToast(res.data?.message || "已解除师徒关系");
       setSelectedMenteeDetail(null);
       if (currentClub?.id) {
         await loadClubDetails(currentClub.id, user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "解除失败");
+      showToast(err.response?.data?.detail || "解除失败");
     }
   }
 
@@ -4623,7 +4037,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(currentClub.invite_code);
-                          alert("跑团邀请码已复制到剪贴板！");
+                          showToast("跑团邀请码已复制到剪贴板！");
                         }}
                         className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold rounded-xl border border-amber-500/20 transition flex items-center gap-1"
                       >
@@ -5177,8 +4591,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     {!batchGeneratingDrafts && (
                       <div className="absolute right-0 top-full pt-1 hidden group-hover:block z-20">
                         <button
-                          onClick={() => {
-                            if (confirm("为全团所有成员重新生成新周期待审草案？（不影响正在执行的计划，审核发布后才切换）")) {
+                          onClick={async () => {
+                            if (await askConfirm("为全团所有成员重新生成新周期待审草案？（不影响正在执行的计划，审核发布后才切换）")) {
                               handleBatchGenerateClubDrafts(false);
                             }
                           }}
@@ -5240,9 +4654,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                             </div>
                           </div>
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               if (
-                                window.confirm(
+                                await askConfirm(
                                   `确认整批撤回「${b.action_label}」（共 ${b.affected_users_count} 位队员）吗？\n撤回后将自动移除本次草案或恢复队员派发前的原训练计划。`
                                 )
                               ) {
@@ -7050,8 +6464,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </button>
                   <button
                     disabled={assigningTemplate || selectedMemberIdsForTemplate.length === 0}
-                    onClick={() => {
-                      if (confirm(`确认将【${activeTemplateObj?.short_name}】直接发布给 ${selectedMemberIdsForTemplate.length} 名队员？发布后队员立即可见。`)) {
+                    onClick={async () => {
+                      if (await askConfirm(`确认将【${activeTemplateObj?.short_name}】直接发布给 ${selectedMemberIdsForTemplate.length} 名队员？发布后队员立即可见。`)) {
                         handleAssignTemplateToMembers(false, false);
                       }
                     }}
@@ -8215,7 +7629,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     onClick={() => {
                       if (editOrgInviteCode) {
                         navigator.clipboard.writeText(editOrgInviteCode);
-                        alert(`已复制邀请码：${editOrgInviteCode}`);
+                        showToast(`已复制邀请码：${editOrgInviteCode}`);
                       }
                     }}
                     className="px-3 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold"

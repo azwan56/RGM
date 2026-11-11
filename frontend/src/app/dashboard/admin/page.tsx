@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import axios from "axios";
 import { formatBeijingTime } from "@/lib/apiClient";
+import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
 import {
   Shield,
   Crown,
@@ -162,11 +163,11 @@ export default function AdminPage() {
   async function handleFileUpload(file: File, target: "newClub" | "editClub" | "newOrg" | "editOrg") {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("请选择有效的图片文件（JPG, PNG, WebP 等）");
+      showToast("请选择有效的图片文件（JPG, PNG, WebP 等）");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      alert("图片文件大小不能超过 10MB");
+      showToast("图片文件大小不能超过 10MB");
       return;
     }
 
@@ -196,7 +197,7 @@ export default function AdminPage() {
       console.error("Upload error:", err);
       const msg = err.response?.data?.detail || "上传图片失败，请稍后重试";
       setUploadLogoError(msg);
-      alert(msg);
+      showToast(msg);
     } finally {
       setUploadingLogo(false);
     }
@@ -304,7 +305,7 @@ export default function AdminPage() {
       );
       setActionSuccessMsg(res.data?.message || `已向【${displayName || targetUid}】发送完善绑表与目标设定提醒！`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "发送提醒失败");
+      showToast(err.response?.data?.detail || "发送提醒失败");
     } finally {
       setRemindingUnaffiliatedUid("");
     }
@@ -314,7 +315,7 @@ export default function AdminPage() {
     if (!adminToken) return;
     const replyText = (replyDrafts[ticketId] || "").trim();
     if (!replyText) {
-      alert("请输入回复内容");
+      showToast("请输入回复内容");
       return;
     }
     setReplyingTicketId(ticketId);
@@ -327,7 +328,7 @@ export default function AdminPage() {
       setActionSuccessMsg("已保存技术支持回复，用户端「我的 -> 帮助与技术支持」将实时可见！");
       loadAdminData(adminToken);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "回复失败");
+      showToast(err.response?.data?.detail || "回复失败");
     } finally {
       setReplyingTicketId(null);
     }
@@ -388,7 +389,7 @@ export default function AdminPage() {
       });
       setUserJourneyData(res.data || null);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "加载该跑者历史访问记录失败");
+      showToast(err.response?.data?.detail || "加载该跑者历史访问记录失败");
     } finally {
       setUserJourneyLoading(false);
     }
@@ -515,7 +516,7 @@ export default function AdminPage() {
       setShowOrgFieldRulesModal(false);
       loadAdminData(adminToken);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存准入规则失败");
+      showToast(err.response?.data?.detail || "保存准入规则失败");
     } finally {
       setSavingFieldRules(false);
     }
@@ -730,7 +731,7 @@ export default function AdminPage() {
       );
       setActionSuccessMsg("已成功为该队员重置 14 天临时宽限期！");
     } catch (err: any) {
-      alert(err.response?.data?.detail || "重置宽限期失败");
+      showToast(err.response?.data?.detail || "重置宽限期失败");
     } finally {
       setConfirmingUid(null);
     }
@@ -752,13 +753,13 @@ export default function AdminPage() {
       const errorMsg = err.response?.data?.detail || "确认成员失败";
       const targetMember = orgMembers.find((m) => m.user_id === targetUid);
       if (targetMember?.status === 'expired' && errorMsg.includes("必填资料尚未补齐")) {
-        const grant = window.confirm(`${errorMsg}\n\n是否为该队员重置 14 天临时访问宽限期，给予其充足时间在小程序补齐资料？`);
+        const grant = await askConfirm(`${errorMsg}\n\n是否为该队员重置 14 天临时访问宽限期，给予其充足时间在小程序补齐资料？`);
         if (grant) {
           await handleGrantGracePeriod(targetUid);
           return;
         }
       } else {
-        alert(errorMsg);
+        showToast(errorMsg);
       }
     } finally {
       setConfirmingUid(null);
@@ -778,7 +779,7 @@ export default function AdminPage() {
       );
       setActionSuccessMsg(newRole === "admin" ? "已成功委派为大群管理员！" : "已撤销管理员权限！");
     } catch (err: any) {
-      alert(err.response?.data?.detail || "调整角色失败");
+      showToast(err.response?.data?.detail || "调整角色失败");
     } finally {
       setUpdatingRoleUid(null);
     }
@@ -799,7 +800,7 @@ export default function AdminPage() {
       // Refresh global clubs list
       loadAdminData(adminToken);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "操作挂靠失败");
+      showToast(err.response?.data?.detail || "操作挂靠失败");
     } finally {
       setBindingClubLoading(null);
     }

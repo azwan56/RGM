@@ -343,7 +343,7 @@ export default function PersonalShareCardModal({
       ctx.fillStyle = isLight ? "#0F172A" : "#ffffff";
       ctx.fillText(runnerName, 132, 76);
 
-      const clubName = String(usr.club_name || "万跑科学跑团").slice(0, 14);
+      const clubName = String(usr.club_name || "万跑跑团助手").slice(0, 14);
       const nameW = Math.min(220, ctx.measureText(runnerName).width + 20);
       drawRoundRect(
         ctx,

@@ -1373,6 +1373,7 @@ import {
   chooseAndImportScreenshot,
   UserProfile,
   syncTabBarIndex,
+  setTabBarHidden,
   checkAndPromptOrgReminder,
   navigateToProfileRequiredFields,
   navigateToDeviceBinding,
@@ -1631,7 +1632,6 @@ function handleSystemNotifPrimaryAction(notif: any) {
     return;
   }
   if (nType.includes("profile")) {
-    syncTabBarIndex(4);
     uni.switchTab({ url: "/pages/profile/profile" });
     return;
   }
@@ -1640,7 +1640,6 @@ function handleSystemNotifPrimaryAction(notif: any) {
       uni.setStorageSync("rgm_team_open_section", "new_members");
     } catch (_) {}
   }
-  syncTabBarIndex(2);
   uni.switchTab({ url: "/pages/team/team" });
 }
 
@@ -1824,7 +1823,6 @@ function handleOpenTrackFromCritique() {
 
 function handleGoToCoachFromCritique() {
   selectedCritiqueNotif.value = null;
-  syncTabBarIndex(1);
   uni.switchTab({ url: "/pages/coach/coach" });
 }
 
@@ -2500,6 +2498,16 @@ const FEELING_TAG_OPTIONS = [
 ];
 
 const showCheckinLogModal = ref(false);
+const isAnyHomePageModalOpen = computed(() =>
+  Boolean(
+    showAuthModal.value ||
+      showNotificationsModal.value ||
+      selectedCritiqueNotif.value ||
+      showCheckinLogModal.value ||
+      showLayoutOrderModal.value
+  )
+);
+watch(isAnyHomePageModalOpen, (open) => setTabBarHidden(open, "index_page"));
 const savingCheckinLog = ref(false);
 const checkinForm = ref<{
   feeling_tag: string;

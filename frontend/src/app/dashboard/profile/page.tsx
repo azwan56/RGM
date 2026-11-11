@@ -5,6 +5,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
+import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
 import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check, BookOpen } from "lucide-react";
 
 export interface RacePlan {
@@ -359,10 +360,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       });
       if (res.data?.avatar_url) {
         setAvatarUrl(res.data.avatar_url);
-        alert("✅ 头像上传成功并已实时生效！");
+        showToast("✅ 头像上传成功并已实时生效！");
       }
     } catch (err: any) {
-      alert("头像上传失败: " + (err.response?.data?.detail || err.message));
+      showToast("头像上传失败: " + (err.response?.data?.detail || err.message));
     } finally {
       setUploadingAvatar(false);
       e.target.value = "";
@@ -371,19 +372,19 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
   async function handleUnbindGarmin() {
     if (!user?.id) {
-      alert("无法获取当前用户ID，请刷新页面后重试");
+      showToast("无法获取当前用户ID，请刷新页面后重试");
       return;
     }
-    if (!confirm("确定解除佳明账号绑定吗？解除后将停止自动同步运动数据。")) return;
+    if (!await askConfirm("确定解除佳明账号绑定吗？解除后将停止自动同步运动数据。")) return;
     setUnbinding(true);
     try {
       const res = await apiClient.post("/api/auth/garmin/unbind", { uid: user.id });
       setGarminConnected(false);
       setGarminEmail("");
-      alert(res.data?.message || "佳明账号已解除绑定");
+      showToast(res.data?.message || "佳明账号已解除绑定");
       loadProfile(user.id);
     } catch (e: any) {
-      alert("解除失败: " + (e?.response?.data?.detail || e?.message || e));
+      showToast("解除失败: " + (e?.response?.data?.detail || e?.message || e));
     } finally {
       setUnbinding(false);
     }
@@ -391,19 +392,19 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
   async function handleUnbindCoros() {
     if (!user?.id) {
-      alert("无法获取当前用户ID，请刷新页面后重试");
+      showToast("无法获取当前用户ID，请刷新页面后重试");
       return;
     }
-    if (!confirm("确定解除高驰账号绑定吗？解除后将停止自动同步运动数据。")) return;
+    if (!await askConfirm("确定解除高驰账号绑定吗？解除后将停止自动同步运动数据。")) return;
     setUnbindingCoros(true);
     try {
       const res = await apiClient.post("/api/auth/coros/unbind", { uid: user.id });
       setCorosConnected(false);
       setCorosAccount("");
-      alert(res.data?.message || "高驰账号已解除绑定");
+      showToast(res.data?.message || "高驰账号已解除绑定");
       loadProfile(user.id);
     } catch (e: any) {
-      alert("解除失败: " + (e?.response?.data?.detail || e?.message || e));
+      showToast("解除失败: " + (e?.response?.data?.detail || e?.message || e));
     } finally {
       setUnbindingCoros(false);
     }
@@ -460,7 +461,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   async function handleAutoFetchRaceInfo(index: number) {
     const race = races[index];
     if (!race.name || !race.name.trim()) {
-      alert("请先在上方输入比赛名称（例如：无锡马拉松、上海半马、崇礼168 或 武功山 50K）");
+      showToast("请先在上方输入比赛名称（例如：无锡马拉松、上海半马、崇礼168 或 武功山 50K）");
       return;
     }
 
@@ -493,13 +494,13 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         setRaces(updated);
         // Automatically expand panel so user sees and can review/edit
         setExpandedRaceInfo((prev) => ({ ...prev, [index]: true }));
-        alert(`✅ ${res.data.message || "已成功获取赛事情报"}！\n已自动填充赛道特点、爬升、历史天气与参赛规模，您可以自由检查与修改。`);
+        showToast(`✅ ${res.data.message || "已成功获取赛事情报"}！\n已自动填充赛道特点、爬升、历史天气与参赛规模，您可以自由检查与修改。`);
       } else {
-        alert(res.data?.message || "未能检索到该赛事信息，请直接在下方手动填写。");
+        showToast(res.data?.message || "未能检索到该赛事信息，请直接在下方手动填写。");
       }
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || "检索失败";
-      alert("自动检索提示: " + msg);
+      showToast("自动检索提示: " + msg);
     } finally {
       setSearchingRaceInfo((prev) => ({ ...prev, [index]: false }));
     }
@@ -530,7 +531,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     const race = races[index];
     if (!user) return;
     if (!race.race_date) {
-      alert("请先选择比赛日期");
+      showToast("请先选择比赛日期");
       return;
     }
     setMatchingActivityIdx(index);
@@ -574,12 +575,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           finish_notes: updated[index].finish_notes || `匹配到手表记录【${act.name}】(${act.distance_km}km, 平均配速 ${act.avg_pace_str})`,
         };
         setRaces(updated);
-        alert(`🎉 成功从手表记录匹配到成绩！\n记录名称: ${act.name}\n完赛用时: ${formattedTime} (${act.distance_km}km)\n已为您自动填报成绩并标记完赛。`);
+        showToast(`🎉 成功从手表记录匹配到成绩！\n记录名称: ${act.name}\n完赛用时: ${formattedTime} (${act.distance_km}km)\n已为您自动填报成绩并标记完赛。`);
       } else {
-        alert(res.data?.message || "未在比赛日找到匹配的运动记录，您可以手动输入完赛用时。");
+        showToast(res.data?.message || "未在比赛日找到匹配的运动记录，您可以手动输入完赛用时。");
       }
     } catch (e: any) {
-      alert("手表记录检索失败: " + (e?.message || e));
+      showToast("手表记录检索失败: " + (e?.message || e));
     } finally {
       setMatchingActivityIdx(null);
     }
@@ -611,10 +612,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           photos: res.data.photos || [res.data.photo_url],
         };
         setRaces(updated);
-        alert("📸 完赛照片上传成功！");
+        showToast("📸 完赛照片上传成功！");
       }
     } catch (err: any) {
-      alert("上传照片失败: " + (err?.message || err));
+      showToast("上传照片失败: " + (err?.message || err));
     } finally {
       setUploadingPhotoIdx(null);
       e.target.value = "";
@@ -622,7 +623,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   }
 
   async function handleDeleteRacePhoto(index: number, photoUrl: string) {
-    if (!confirm("确定要删除这张照片吗？")) return;
+    if (!await askConfirm("确定要删除这张照片吗？")) return;
     const race = races[index];
     if (!user || !race.id) {
       const updated = [...races];
@@ -641,7 +642,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       updated[index].photo_url = updated[index].photos?.[0] || "";
       setRaces(updated);
     } catch (e: any) {
-      alert("删除照片失败: " + (e?.message || e));
+      showToast("删除照片失败: " + (e?.message || e));
     }
   }
 
@@ -674,11 +675,11 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         if (f.half_pb) setHalfPb(f.half_pb);
         if (f.ten_k_pb) setTenKPb(f.ten_k_pb);
         if (f.five_k_pb) setFiveKPb(f.five_k_pb);
-        alert("✅ 成功从 Garmin 官方同步个人最佳成绩 (PB)！");
+        showToast("✅ 成功从 Garmin 官方同步个人最佳成绩 (PB)！");
       }
     } catch (e: any) {
       const errMsg = e.response?.data?.detail || e.message || "导入失败，请检查 Garmin 账号绑定";
-      alert("Garmin 导入提示: " + errMsg);
+      showToast("Garmin 导入提示: " + errMsg);
     } finally {
       setImportingGarmin(false);
     }
@@ -707,13 +708,13 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         if (p.avatar_url && !avatarUrl) {
           setAvatarUrl(p.avatar_url);
         }
-        alert(res.data.message || "✅ 成功从手表同步身体指标！");
+        showToast(res.data.message || "✅ 成功从手表同步身体指标！");
       } else {
-        alert(res.data?.message || "未能获取到手表数据");
+        showToast(res.data?.message || "未能获取到手表数据");
       }
     } catch (e: any) {
       const errMsg = e.response?.data?.detail || e.message || "同步失败，请检查手表账号连接";
-      alert("手表同步提示: " + errMsg);
+      showToast("手表同步提示: " + errMsg);
     } finally {
       setSyncingDeviceProfile(false);
     }
@@ -736,13 +737,13 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       });
       if (res.data?.success && res.data?.estimated_vo2max) {
         setVo2max(res.data.estimated_vo2max);
-        alert(`✅ ${res.data.message}\n\n已自动填入上方 VO2Max 框，点击页面底部“保存跑者档案”即可持久保存！`);
+        showToast(`✅ ${res.data.message}\n\n已自动填入上方 VO2Max 框，点击页面底部“保存跑者档案”即可持久保存！`);
       } else {
-        alert(res.data?.message || "未能推算出 VO2Max，请先填写任意距离 PB 成绩");
+        showToast(res.data?.message || "未能推算出 VO2Max，请先填写任意距离 PB 成绩");
       }
     } catch (e: any) {
       const errMsg = e.response?.data?.detail || e.message || "推算失败";
-      alert("VO2Max 推算提示: " + errMsg);
+      showToast("VO2Max 推算提示: " + errMsg);
     } finally {
       setEstimatingVo2(false);
     }
@@ -755,9 +756,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}/goal`, {
         weekly_target: weeklyTarget,
       });
-      alert(`✅ 常规周跑量目标已单独保存为 ${weeklyTarget} km/周！`);
+      showToast(`✅ 常规周跑量目标已单独保存为 ${weeklyTarget} km/周！`);
     } catch (e: any) {
-      alert("保存失败: " + (e?.message || e));
+      showToast("保存失败: " + (e?.message || e));
     } finally {
       setSavingWeekly(false);
     }
@@ -767,7 +768,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     if (!user?.id) return;
     const name = displayName.trim();
     if (!name) {
-      alert("跑者昵称不能为空！");
+      showToast("跑者昵称不能为空！");
       return;
     }
     setSavingNickname(true);
@@ -793,9 +794,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
       setNicknameSavedSuccess(true);
       setTimeout(() => setNicknameSavedSuccess(false), 3000);
-      alert(`✅ 跑者昵称已成功更新并保存为「${name}」！`);
+      showToast(`✅ 跑者昵称已成功更新并保存为「${name}」！`);
     } catch (err: any) {
-      alert("保存昵称失败: " + (err?.response?.data?.detail || err?.message || err));
+      showToast("保存昵称失败: " + (err?.response?.data?.detail || err?.message || err));
     } finally {
       setSavingNickname(false);
     }
@@ -872,9 +873,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         setUser((prev: any) => (prev ? { ...prev, display_name: cleanName } : prev));
       }
 
-      alert("🎉 个人资料、比赛计划与跑量目标保存成功！");
+      showToast("🎉 个人资料、比赛计划与跑量目标保存成功！");
     } catch (e: any) {
-      alert("保存失败: " + (e?.message || e));
+      showToast("保存失败: " + (e?.message || e));
     } finally {
       setSaving(false);
     }
@@ -885,7 +886,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     setPurgingPrivacy(true);
     try {
       const res = await apiClient.post(`/api/profile/${user.id}/purge-privacy`);
-      alert(res.data?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！");
+      showToast(res.data?.message || "所有个人隐私数据（真实姓名、身份证、生日、手机号及第三方手表账号凭证）已彻底安全清除！");
       if (res.data?.anonymized_display_name) {
         setDisplayName(res.data.anonymized_display_name);
       }
@@ -900,7 +901,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       setCorosAccount("");
       setShowPurgeConfirmModal(false);
     } catch (e: any) {
-      alert("清除失败: " + (e.response?.data?.detail || e.message || "网络异常"));
+      showToast("清除失败: " + (e.response?.data?.detail || e.message || "网络异常"));
     } finally {
       setPurgingPrivacy(false);
     }

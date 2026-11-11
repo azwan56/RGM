@@ -58,6 +58,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 const IGNORED_TRANSIENT_ROUTES = new Set<string>([
   "pages/modals/placeholder",
+  "pages/cockpit/placeholder",
   "pages/team/rank",
   "pages/team/group-run",
 ]);

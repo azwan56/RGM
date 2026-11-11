@@ -2867,6 +2867,7 @@ import {
   resolveActiveClub,
   setActiveClubId,
   syncTabBarIndex,
+  setTabBarHidden,
   submitSupportTicket,
   fetchMySupportTickets,
   formatBeijingTime,
@@ -3571,6 +3572,18 @@ const showJoinModal = ref(false);
 const inviteCodeInput = ref("");
 const joiningClub = ref(false);
 const userClubs = ref<any[]>([]);
+
+const isAnyProfilePageModalOpen = computed(() =>
+  Boolean(
+    showAuthModal.value ||
+      showGarminModal.value ||
+      showJoinModal.value ||
+      showEditProfileModal.value ||
+      showRaceModal.value ||
+      showPurgeConfirmModal.value
+  )
+);
+watch(isAnyProfilePageModalOpen, (open) => setTabBarHidden(open, "profile_page"));
 
 const currentCalendarMonth = new Date().getMonth() + 1;
 const targetDistance = ref(200);

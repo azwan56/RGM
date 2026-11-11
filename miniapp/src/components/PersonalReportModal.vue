@@ -444,7 +444,7 @@ const qrDisplaySrc = computed(() => {
 watch(
   () => [props.visible, props.defaultPeriodType],
   ([vis, defType]) => {
-    setTabBarHidden(Boolean(vis));
+    setTabBarHidden(Boolean(vis), "personal_report");
     if (vis) {
       if (defType === "week" || defType === "month") {
         periodType.value = defType;
@@ -457,11 +457,11 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  setTabBarHidden(false);
+  setTabBarHidden(false, "personal_report");
 });
 
 function handleClose() {
-  setTabBarHidden(false);
+  setTabBarHidden(false, "personal_report");
   emit("close");
 }
 

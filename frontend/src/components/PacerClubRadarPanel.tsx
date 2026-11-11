@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import apiClient from "@/lib/apiClient";
+import { showToast } from "@/components/ui/UiFeedbackProvider";
 import {
   Search,
   Copy,
@@ -176,7 +177,7 @@ export default function PacerClubRadarPanel({
         setTimeout(() => setAssignToast(""), 4200);
       }
     } catch (e: any) {
-      alert(e?.response?.data?.detail || "指派领跑兔失败，请稍后重试");
+      showToast(e?.response?.data?.detail || "指派领跑兔失败，请稍后重试");
     } finally {
       setAssigning(false);
     }

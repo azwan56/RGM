@@ -46,7 +46,7 @@ const contractName = ref("");
 let pendingResolve: PrivacyResolve | null = null;
 
 // 自定义 TabBar 在页面之上，会盖住底部弹窗按钮：弹窗显示期间隐藏 TabBar
-watch(visible, (v) => setTabBarHidden(v));
+watch(visible, (v) => setTabBarHidden(v, "privacy_popup"));
 let route = "";
 
 function handler(resolve: PrivacyResolve | null) {

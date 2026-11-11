@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
+import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
 import {
   Upload,
   Sparkles,
@@ -109,14 +110,14 @@ export default function CoachScheduleImportModal({
       const res = await apiClient.post(`/api/coach/plan/club-batches/${batchId}/rollback`, {
         operator_uid: coachUid,
       });
-      alert(res.data?.message || "✅ 已成功撤回该批次派发，队员原课表已完整恢复！");
+      showToast(res.data?.message || "✅ 已成功撤回该批次派发，队员原课表已完整恢复！");
       if (lastDispatchResult?.batch_id === batchId) {
         setLastDispatchResult(null);
       }
       await fetchRecentBatches();
       onAssignedSuccess();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "撤回派发失败，请稍后重试");
+      showToast(err.response?.data?.detail || "撤回派发失败，请稍后重试");
     } finally {
       setRollingBackBatchId(null);
     }
@@ -358,7 +359,7 @@ export default function CoachScheduleImportModal({
     if (!parsedData || groups.length === 0 || totalSelectedMembers === 0 || submitting) return;
 
     if (!asDraft && activePlanSelectedCount > 0) {
-      const ok = window.confirm(
+      const ok = await askConfirm(
         `⚠️ 正式生效确认：\n\n您选择了【直接正式发布并生效】（共 ${totalSelectedMembers} 人，其中 ${activePlanSelectedCount} 人当前已有正在执行的 AI/教练周期计划）。\n\n• 正式发布将立即更新这 ${totalSelectedMembers} 位队员 ${effectiveMonday} ~ ${effectiveSunday} 当周的正式课表（历史打卡 100% 保留，原课表自动生成备份快照，可随时一键回退）。\n• 如果您希望先让教练逐人核对、不立即改动队员当前课表，请点击取消并选择【📝 存入待审草案】。\n\n确认立即正式发布并生效吗？`
       );
       if (!ok) return;
@@ -401,7 +402,7 @@ export default function CoachScheduleImportModal({
       await fetchRecentBatches();
       onAssignedSuccess();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "派发周课表失败");
+      showToast(err.response?.data?.detail || "派发周课表失败");
     } finally {
       setSubmitting(false);
     }
@@ -540,9 +541,9 @@ export default function CoachScheduleImportModal({
                         </div>
                       </div>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            window.confirm(
+                            await askConfirm(
                               `确认撤回该批次（${b.action_label}，共 ${b.affected_users_count} 人）吗？\n撤回后将自动清理本次派发的草案或恢复队员派发前的原课表。`
                             )
                           ) {

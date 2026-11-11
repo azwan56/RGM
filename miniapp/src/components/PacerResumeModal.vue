@@ -120,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, getCurrentInstance } from "vue";
+import { ref, computed, watch, nextTick, getCurrentInstance, onBeforeUnmount } from "vue";
 import { setTabBarHidden } from "../utils/api";
 import { isVolt, themeClass } from "../utils/theme";
 
@@ -144,18 +144,23 @@ const hasRealName = computed(() => Boolean(props.evalData?.runner?.real_name));
 watch(
   () => props.visible,
   (val) => {
-    setTabBarHidden(Boolean(val));
+    setTabBarHidden(Boolean(val), "pacer_resume");
     if (val) {
       posterLight.value = Boolean(isVolt.value);
       nextTick(() => {
         setTimeout(() => drawPoster(), 100);
       });
     }
-  }
+  },
+  { immediate: true }
 );
 
+onBeforeUnmount(() => {
+  setTabBarHidden(false, "pacer_resume");
+});
+
 function handleClose() {
-  setTabBarHidden(false);
+  setTabBarHidden(false, "pacer_resume");
   emit("close");
 }
 

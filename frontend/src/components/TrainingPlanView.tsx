@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
+import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
 import {
   Calendar,
   CheckCircle2,
@@ -276,7 +277,7 @@ function computeCurrentWeekIndex(planData: any): number {
   async function handleRunnerSwitchOrRollbackPlan(opts: { backupId?: string; targetPlanId?: string; label?: string }) {
     if (!user?.id || rollingBackPlan) return;
     if (
-      !window.confirm(
+      !await askConfirm(
         `确认将当前训练计划切换/回退至「${opts.label || "历史方案"}」吗？\n（您已完成的每日跑步打卡数据将 100% 合并保留）`
       )
     ) {
@@ -294,7 +295,7 @@ function computeCurrentWeekIndex(planData: any): number {
       await loadUserPlan(user.id);
       setTimeout(() => setSyncSuccessMsg(""), 5000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || "切换方案失败，请稍后重试");
+      showToast(err.response?.data?.detail || "切换方案失败，请稍后重试");
     } finally {
       setRollingBackPlan(false);
     }
@@ -319,7 +320,7 @@ function computeCurrentWeekIndex(planData: any): number {
       }
     } catch (err: any) {
       console.error("Sync goals error:", err);
-      alert(err.response?.data?.detail || "同步失败，请稍后重试");
+      showToast(err.response?.data?.detail || "同步失败，请稍后重试");
     } finally {
       setSyncingGoal(false);
     }
@@ -365,7 +366,7 @@ function computeCurrentWeekIndex(planData: any): number {
       }
     } catch (err) {
       console.error("Generate plan error:", err);
-      alert("生成训练计划失败，请稍后重试！");
+      showToast("生成训练计划失败，请稍后重试！");
     } finally {
       setGenerating(false);
     }
@@ -385,7 +386,7 @@ function computeCurrentWeekIndex(planData: any): number {
         await loadUserPlan(user.id);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "确认启用新课表失败，请稍后重试");
+      showToast(err.response?.data?.detail || "确认启用新课表失败，请稍后重试");
     } finally {
       setConfirmingPreview(false);
     }
@@ -462,7 +463,7 @@ function computeCurrentWeekIndex(planData: any): number {
       }
     } catch (err) {
       console.error("Failed to undo swap:", err);
-      alert("取消对换失败，请重试！");
+      showToast("取消对换失败，请重试！");
     } finally {
       setSavingWorkout(false);
     }
@@ -509,7 +510,7 @@ function computeCurrentWeekIndex(planData: any): number {
       }
     } catch (err) {
       console.error("Failed to update workout:", err);
-      alert("保存课表更新失败，请重试！");
+      showToast("保存课表更新失败，请重试！");
     } finally {
       setSavingWorkout(false);
     }
@@ -533,7 +534,7 @@ function computeCurrentWeekIndex(planData: any): number {
         setTimeout(() => setSyncSuccessMsg(""), 4000);
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || "保存周小结失败");
+      showToast(err.response?.data?.detail || "保存周小结失败");
     } finally {
       setSavingWeekSummary(false);
     }

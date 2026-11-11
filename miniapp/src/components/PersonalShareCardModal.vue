@@ -365,7 +365,7 @@ const posterImageUrl = ref<string>("");
 watch(
   () => [props.visible, props.raceId, props.activityId, props.targetUid],
   async ([val]) => {
-    setTabBarHidden(Boolean(val));
+    setTabBarHidden(Boolean(val), "share_card");
     if (val) {
       if (props.raceId) {
         cardMode.value = "race";
@@ -390,12 +390,12 @@ watch(isVolt, () => {
 });
 
 function handleClose() {
-  setTabBarHidden(false);
+  setTabBarHidden(false, "share_card");
   emit("close");
 }
 
 onBeforeUnmount(() => {
-  setTabBarHidden(false);
+  setTabBarHidden(false, "share_card");
 });
 
 function setOverlayMode(mode: "both" | "map" | "elevation") {
@@ -1176,7 +1176,7 @@ async function renderPosterCanvas() {
     ctx.setFillStyle(isLight ? "#0F172A" : "#ffffff");
     ctx.fillText(runnerName, 132, 76);
 
-    const clubName = String(usr.club_name || "万跑科学跑团").slice(0, 14);
+    const clubName = String(usr.club_name || "万跑跑团助手").slice(0, 14);
     const clubLabel = `${isRace ? "🏅" : "🏃"} ${clubName}`;
     const nameW = Math.min(200, Math.ceil(getTextVisualWidth(ctx, runnerName, 26) + 18));
     const clubTextW = getTextVisualWidth(ctx, clubLabel, 15);

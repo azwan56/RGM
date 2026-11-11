@@ -6,6 +6,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
+import { showToast } from "@/components/ui/UiFeedbackProvider";
 import GarminConnectModal from "@/components/GarminConnectModal";
 import RouteMapPreview from "@/components/RouteMapPreview";
 import OrgRequirementModal, { OrgReminderInfo } from "@/components/OrgRequirementModal";
@@ -351,7 +352,7 @@ export default function DashboardPage() {
     try {
       const res = await apiClient.post("/api/sync/trigger", { uid: user.id });
       if (res.data?.success === false) {
-        alert("同步提示: " + (res.data?.error || "设备连接中，请稍后再试"));
+        showToast("同步提示: " + (res.data?.error || "设备连接中，请稍后再试"));
       }
       await loadDashboardData(user.id);
     } catch (e) {
@@ -459,7 +460,7 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error("Failed to save checkin log:", err);
-      alert("保存感受与照片失败，请重试");
+      showToast("保存感受与照片失败，请重试");
     } finally {
       setSavingCheckinLog(false);
     }

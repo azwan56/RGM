@@ -7,6 +7,7 @@ import TrainingPlanView from "@/components/TrainingPlanView";
 import TrainingTabSwitcher from "@/components/TrainingTabSwitcher";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
+import { showToast } from "@/components/ui/UiFeedbackProvider";
 import {
   Zap,
   Sparkles,
@@ -173,7 +174,7 @@ export default function CoachPage() {
       }
     } catch (e: any) {
       console.error("Failed to update race priority:", e);
-      alert("调整赛事定位失败: " + (e.response?.data?.detail || e.message));
+      showToast("调整赛事定位失败: " + (e.response?.data?.detail || e.message));
     } finally {
       setUpdatingPriority(null);
     }
@@ -194,7 +195,7 @@ export default function CoachPage() {
       }
     } catch (e) {
       console.error("Coach generation failed:", e);
-      alert("AI 分析生成提示: 正在使用最近一次训练诊断缓存");
+      showToast("AI 分析生成提示: 正在使用最近一次训练诊断缓存");
     } finally {
       setLoading(false);
     }

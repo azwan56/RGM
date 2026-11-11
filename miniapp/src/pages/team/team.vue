@@ -6813,7 +6813,7 @@ watch([currentClub, isClubManager], () => {
   }
 });
 // 跑团页已是 Tab 页：自定义 TabBar 会盖住底部弹窗，弹窗打开时临时隐藏
-watch(isAnyModalOpen, (open) => setTabBarHidden(!!open));
+watch(isAnyModalOpen, (open) => setTabBarHidden(!!open, "team_page"));
 const firstLoadPending = ref(true);
 
 const isOrgOwner = computed(() => {

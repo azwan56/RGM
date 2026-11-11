@@ -1621,13 +1621,13 @@ def get_personal_share_card_data(
     if not target_club:
         target_club = LocalStore.get_club("club_fudan_gobi_main") or LocalStore.get_club("club_rgm_flagship") or {
             "id": "club_fudan_gobi_main",
-            "name": "万跑科学跑团",
+            "name": "万跑跑团助手",
             "invite_code": "FD8888",
             "logo_url": "https://rgm.vanpower.net/api/avatars/rgm-logo.png",
         }
 
     eff_club_id = target_club.get("id") or "club_fudan_gobi_main"
-    eff_club_name = target_club.get("name") or "万跑科学跑团"
+    eff_club_name = target_club.get("name") or "万跑跑团助手"
     eff_club_code = (target_club.get("invite_code") or "").strip()
 
     eff_env = env_version if env_version in ("release", "trial", "develop") else "release"

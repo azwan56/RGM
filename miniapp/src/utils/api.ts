@@ -130,8 +130,10 @@ export function registerApiTelemetryReporter(fn: ApiTelemetryReporter) {
   _apiTelemetryReporter = fn;
 }
 
+const _inflightGetRequests = new Map<string, Promise<any>>();
+
 /**
- * Universal Request Wrapper with Bearer Token Injection
+ * Universal Request Wrapper with Bearer Token Injection & In-Flight GET Deduplication
  */
 export async function request<T = any>(
   url: string,
@@ -142,9 +144,25 @@ export async function request<T = any>(
   const token = getToken();
   const storedUid = getStoredUser()?.id || "";
   const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
-  const reqStartedAt = Date.now();
+  const upperMethod = String(method || "GET").toUpperCase();
 
-  return new Promise((resolve, reject) => {
+  let dedupKey = "";
+  if (upperMethod === "GET" && !_retried401) {
+    let serializedData = "";
+    if (data !== undefined && data !== null) {
+      try {
+        serializedData = JSON.stringify(data);
+      } catch (_) {}
+    }
+    dedupKey = `${storedUid}|${token.slice(-16)}|${fullUrl}|${serializedData}`;
+    const existing = _inflightGetRequests.get(dedupKey);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+  }
+
+  const reqStartedAt = Date.now();
+  const execPromise = new Promise<T>((resolve, reject) => {
     uni.request({
       url: fullUrl,
       method,
@@ -180,7 +198,7 @@ export async function request<T = any>(
               }
             }
           } catch (_) {}
-          if (method && method.toUpperCase() !== "GET" && !url.includes("/notifications/read")) {
+          if (upperMethod !== "GET" && !url.includes("/notifications/read")) {
             try {
               uni.setStorageSync("rgm_dashboard_dirty", 1);
             } catch (_) {}
@@ -254,6 +272,17 @@ export async function request<T = any>(
       },
     });
   });
+
+  if (dedupKey) {
+    _inflightGetRequests.set(dedupKey, execPromise);
+    execPromise.finally(() => {
+      if (_inflightGetRequests.get(dedupKey) === execPromise) {
+        _inflightGetRequests.delete(dedupKey);
+      }
+    });
+  }
+
+  return execPromise;
 }
 
 export function getPendingInviterUid(): string {
@@ -1356,7 +1385,8 @@ export function updateCoachOrOwnerRole(isCoach: boolean) {
 }
 
 /**
- * Helper to update custom tabBar selected index and role-based tab list on page onShow
+ * Helper to update custom tabBar selected index and role-based tab list on page onShow.
+ * Always resolves active tab by current page route so 4-tab vs 5-tab layouts never drift.
  */
 export function syncTabBarIndex(_index?: number) {
   try {
@@ -1371,9 +1401,6 @@ export function syncTabBarIndex(_index?: number) {
           }
           if (typeof tb.syncSelected === "function") {
             tb.syncSelected();
-          } else if (typeof tb.setData === "function" && typeof _index === "number") {
-            const theme = uni.getStorageSync("rgm_theme") || "dark";
-            tb.setData({ selected: _index, theme });
           }
         }
       }
@@ -1383,17 +1410,29 @@ export function syncTabBarIndex(_index?: number) {
   }
 }
 
+const _hiddenTabBarSourcesByRoute: Record<string, Set<string>> = {};
+
 /**
- * 临时隐藏 / 恢复自定义 TabBar。
- * 自定义 TabBar 渲染在页面之上，页面里的底部弹窗无论 z-index 多高都会被它盖住，
- * 所以弹窗打开时需要先隐藏 TabBar。非 Tab 页调用无副作用。
+ * 临时隐藏 / 恢复自定义 TabBar（支持多弹窗/嵌套弹窗按 sourceKey 引用计数，避免内层弹窗关闭时误恢复底部栏遮挡外层弹窗）。
  */
-export function setTabBarHidden(hidden: boolean) {
+export function setTabBarHidden(hidden: boolean, sourceKey = "default") {
   try {
     const pages = getCurrentPages();
     const cur = pages && (pages[pages.length - 1] as any);
+    const route = String(cur?.route || cur?.$page?.route || "global");
+    if (!_hiddenTabBarSourcesByRoute[route]) {
+      _hiddenTabBarSourcesByRoute[route] = new Set<string>();
+    }
+    const set = _hiddenTabBarSourcesByRoute[route];
+    if (hidden) {
+      set.add(sourceKey);
+    } else {
+      set.delete(sourceKey);
+    }
     const tb = cur && typeof cur.getTabBar === "function" ? cur.getTabBar() : null;
-    if (tb && typeof tb.setData === "function") tb.setData({ hidden });
+    if (tb && typeof tb.setData === "function") {
+      tb.setData({ hidden: set.size > 0 });
+    }
   } catch (e) {
     // ignore
   }

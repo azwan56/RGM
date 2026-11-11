@@ -78,7 +78,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, getCurrentInstance } from "vue";
+import { ref, computed, watch, getCurrentInstance, onBeforeUnmount } from "vue";
+import { setTabBarHidden } from "../utils/api";
 import { searchGroupRunGeocode, pickGroupRunLocation, GroupRunVenuePreset } from "../utils/groupRun";
 import { fontScaleClass, themeClass } from "../utils/theme";
 
@@ -130,6 +131,7 @@ const mapMarkers = computed(() => [
 watch(
   () => props.visible,
   async (val) => {
+    setTabBarHidden(Boolean(val), "map_pin");
     if (!val) return;
     const kw = (props.initialKeyword || "").trim();
     keyword.value = kw;
@@ -187,6 +189,10 @@ watch(
   },
   { immediate: true }
 );
+
+onBeforeUnmount(() => {
+  setTabBarHidden(false, "map_pin");
+});
 
 async function handleSearchKeyword() {
   const kw = keyword.value.trim();

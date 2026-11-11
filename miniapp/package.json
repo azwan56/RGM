@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "scripts": {
     "dev:mp-weixin": "uni -p mp-weixin",
-    "build:mp-weixin": "rm -rf dist/build/mp-weixin && uni build -p mp-weixin && node scripts/optimize-wxss.cjs && rsync -a --delete dist/build/mp-weixin/ dist/dev/mp-weixin/",
+    "build:mp-weixin": "rm -rf dist/build/mp-weixin && uni build -p mp-weixin && rsync -a --delete dist/build/mp-weixin/ dist/dev/mp-weixin/",
     "dev:app": "uni -p app",
     "build:app": "uni build -p app"
   },

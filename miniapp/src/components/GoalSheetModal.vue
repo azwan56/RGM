@@ -188,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from "vue";
+import { ref, reactive, computed, watch, onBeforeUnmount } from "vue";
 import { currentTheme, themeClass } from "../utils/theme";
 import { request, getStoredUser, setTabBarHidden } from "../utils/api";
 import { trackModal } from "../utils/telemetry";
@@ -272,10 +272,14 @@ function hydrateFromGoal(g: any) {
   Object.assign(goalState, createGoalSheetState(g, currentCalMonth));
 }
 
+onBeforeUnmount(() => {
+  setTabBarHidden(false, "goal_sheet");
+});
+
 watch(
   () => props.visible,
   async (val) => {
-    setTabBarHidden(val);
+    setTabBarHidden(Boolean(val), "goal_sheet");
     if (!val) return;
     activeTab.value = props.defaultTab === "month" ? "month" : "week";
     trackModal("goal_sheet", "打开周/月目标二合一弹窗", "open", {

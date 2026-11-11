@@ -15,51 +15,89 @@ function walk(dir, filterFn) {
   return results;
 }
 
-const targetDir = path.resolve(__dirname, "../dist/build/mp-weixin");
+const cliTargetDir = process.argv[2];
+const targetDir = cliTargetDir
+  ? path.resolve(cliTargetDir)
+  : path.resolve(__dirname, "../dist/build/mp-weixin");
+
 if (!fs.existsSync(targetDir)) {
   process.exit(0);
 }
 
-// 1. Relocate heavy modal components into `pages/modals/components` subpackage
+// 1. Relocate heavy components into dedicated subpackages (`pages/modals/components` & `pages/cockpit/components`)
 //    and wire WeChat native cross-subpackage async loading (`componentPlaceholder`).
-const ASYNC_MODALS = [
-  "GpsTrackModal",
-  "PersonalShareCardModal",
-  "PersonalReportModal",
-  "MapPinPickerModal",
-];
+const SUBPACKAGE_COMPONENTS = {
+  "pages/modals": [
+    "GpsTrackModal",
+    "PersonalShareCardModal",
+    "PersonalReportModal",
+    "MapPinPickerModal",
+    "GoalSheetModal",
+    "PacerClubRadarSection",
+    "PacerEvaluationCard",
+    "PacerResumeModal",
+  ],
+  "pages/cockpit": [
+    "CockpitWorkspace",
+  ],
+};
+
+const compToSubpkg = new Map();
+for (const [subpkgRoot, names] of Object.entries(SUBPACKAGE_COMPONENTS)) {
+  for (const name of names) {
+    compToSubpkg.set(name, subpkgRoot);
+  }
+}
 
 const srcCompDir = path.join(targetDir, "components");
-const dstCompDir = path.join(targetDir, "pages", "modals", "components");
-fs.mkdirSync(dstCompDir, { recursive: true });
-
 let relocatedBytes = 0;
-const relocatedNames = new Set();
 
-for (const compName of ASYNC_MODALS) {
-  const exts = [".js", ".json", ".wxml", ".wxss"];
-  const existsAll = exts.every((ext) => fs.existsSync(path.join(srcCompDir, compName + ext)));
-  if (!existsAll) continue;
+for (const [subpkgRoot, compNames] of Object.entries(SUBPACKAGE_COMPONENTS)) {
+  const dstCompDir = path.join(targetDir, subpkgRoot, "components");
+  fs.mkdirSync(dstCompDir, { recursive: true });
 
-  for (const ext of exts) {
-    const oldFile = path.join(srcCompDir, compName + ext);
-    const newFile = path.join(dstCompDir, compName + ext);
-    let content = fs.readFileSync(oldFile, "utf8");
-    relocatedBytes += Buffer.byteLength(content);
+  for (const compName of compNames) {
+    const exts = [".js", ".json", ".wxml", ".wxss"];
+    const existsAll = exts.every((ext) => fs.existsSync(path.join(srcCompDir, compName + ext)));
+    if (!existsAll) continue;
 
-    if (ext === ".js") {
-      // Rewrite relative require("../xxx") from `components/` (depth 1) to `pages/modals/components/` (depth 3)
-      content = content.replace(/require\("(\.\.\/[^"]+)"\)/g, (_m, relReq) => {
-        const absTarget = path.resolve(srcCompDir, relReq);
-        let newRel = path.relative(dstCompDir, absTarget).split(path.sep).join("/");
-        if (!newRel.startsWith(".")) newRel = "./" + newRel;
-        return `require("${newRel}")`;
-      });
+    for (const ext of exts) {
+      const oldFile = path.join(srcCompDir, compName + ext);
+      const newFile = path.join(dstCompDir, compName + ext);
+      let content = fs.readFileSync(oldFile, "utf8");
+      relocatedBytes += Buffer.byteLength(content);
+
+      if (ext === ".js") {
+        // Rewrite relative require("../xxx") from `components/` (depth 1) to `<subpkgRoot>/components/` (depth 3)
+        content = content.replace(/require\("(\.\.?\/[^"]+)"\)/g, (_m, relReq) => {
+          const absTarget = path.resolve(srcCompDir, relReq);
+          let newRel = path.relative(dstCompDir, absTarget).split(path.sep).join("/");
+          if (!newRel.startsWith(".")) newRel = "./" + newRel;
+          return `require("${newRel}")`;
+        });
+      } else if (ext === ".json") {
+        // Rebase relative `usingComponents` entries from `components/` to `<subpkgRoot>/components/`
+        // so non-relocated main-package siblings (e.g., `PageSkeleton`) keep valid relative paths.
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed && parsed.usingComponents && typeof parsed.usingComponents === "object") {
+            for (const [tag, refVal] of Object.entries(parsed.usingComponents)) {
+              if (typeof refVal === "string" && refVal.startsWith(".")) {
+                const absOrig = path.resolve(srcCompDir, refVal);
+                let rebased = path.relative(dstCompDir, absOrig).split(path.sep).join("/");
+                if (!rebased.startsWith(".")) rebased = "./" + rebased;
+                parsed.usingComponents[tag] = rebased;
+              }
+            }
+            content = JSON.stringify(parsed);
+          }
+        } catch (_) {}
+      }
+
+      fs.writeFileSync(newFile, content, "utf8");
+      fs.unlinkSync(oldFile);
     }
-    fs.writeFileSync(newFile, content, "utf8");
-    fs.unlinkSync(oldFile);
   }
-  relocatedNames.add(compName);
 }
 
 // Update all page/component .json files referencing relocated components + ensure app.json flags
@@ -74,43 +112,53 @@ for (const jsonFile of walk(targetDir, (f) => f.endsWith(".json"))) {
   const relJsonPath = path.relative(targetDir, jsonFile).split(path.sep).join("/");
   if (relJsonPath === "app.json") {
     obj.lazyCodeLoading = "requiredComponents";
-    if (!obj.preloadRule) {
-      obj.preloadRule = {
-        "pages/index/index": {
-          network: "all",
-          packages: ["pages/rank", "pages/modals", "pages/activities"],
-        },
-        "pages/team/team": {
-          network: "all",
-          packages: ["pages/rank", "pages/group-run", "pages/modals"],
-        },
-        "pages/coach/coach": {
-          network: "all",
-          packages: ["pages/modals", "pages/analysis"],
-        },
-      };
-    }
+    if (!obj.preloadRule) obj.preloadRule = {};
+    obj.preloadRule["pages/index/index"] = {
+      network: "all",
+      packages: ["pages/rank", "pages/modals", "pages/activities", "pages/cockpit"],
+    };
+    obj.preloadRule["pages/team/team"] = {
+      network: "all",
+      packages: ["pages/rank", "pages/group-run", "pages/modals", "pages/cockpit"],
+    };
+    obj.preloadRule["pages/coach/coach"] = {
+      network: "all",
+      packages: ["pages/modals", "pages/analysis"],
+    };
   } else if (obj && obj.usingComponents && typeof obj.usingComponents === "object") {
     const jsonDir = path.dirname(jsonFile);
-    let touched = false;
+    let ownerSubpkg = "";
+    for (const sp of Object.keys(SUBPACKAGE_COMPONENTS)) {
+      if (relJsonPath.startsWith(sp + "/")) {
+        ownerSubpkg = sp;
+        break;
+      }
+    }
+
     for (const [tag, compRef] of Object.entries(obj.usingComponents)) {
       if (typeof compRef !== "string") continue;
-      for (const compName of relocatedNames) {
+      for (const [compName, targetSubpkg] of compToSubpkg.entries()) {
+        const dstCompJson = path.join(targetDir, targetSubpkg, "components", compName + ".json");
+        if (!fs.existsSync(dstCompJson)) continue;
         if (compRef.endsWith(`/${compName}`) || compRef === compName) {
-          const newTargetNoExt = path.join(dstCompDir, compName);
+          const newTargetNoExt = path.join(targetDir, targetSubpkg, "components", compName);
           let newRelRef = path.relative(jsonDir, newTargetNoExt).split(path.sep).join("/");
           if (!newRelRef.startsWith(".")) newRelRef = "./" + newRelRef;
           obj.usingComponents[tag] = newRelRef;
-          if (!obj.componentPlaceholder) obj.componentPlaceholder = {};
-          if (!obj.componentPlaceholder[tag]) {
-            obj.componentPlaceholder[tag] = "view";
+
+          if (ownerSubpkg !== targetSubpkg) {
+            if (!obj.componentPlaceholder) obj.componentPlaceholder = {};
+            if (!obj.componentPlaceholder[tag]) {
+              obj.componentPlaceholder[tag] = "view";
+            }
+          } else if (obj.componentPlaceholder && obj.componentPlaceholder[tag]) {
+            delete obj.componentPlaceholder[tag];
           }
-          touched = true;
         }
       }
     }
-    if (touched && jsonDir === dstCompDir && obj.componentPlaceholder) {
-      // Components inside the same `pages/modals` subpackage do not need placeholder for siblings
+
+    if (obj.componentPlaceholder && Object.keys(obj.componentPlaceholder).length === 0) {
       delete obj.componentPlaceholder;
     }
   }
@@ -184,7 +232,9 @@ for (const file of walk(targetDir, (f) => f.endsWith(".wxss"))) {
 
   const relWxss = path.relative(targetDir, file).split(path.sep).join("/");
   if (
-    (relWxss.startsWith("components/") || relWxss.startsWith("pages/modals/components/")) &&
+    (relWxss.startsWith("components/") ||
+      relWxss.startsWith("pages/modals/components/") ||
+      relWxss.startsWith("pages/cockpit/components/")) &&
     !out.includes(".font-large{")
   ) {
     out += ".font-large{--rgm-fs:1.12}.font-xlarge{--rgm-fs:1.22}";
@@ -227,7 +277,8 @@ for (const file of walk(targetDir, (f) => f.endsWith(".wxml"))) {
 }
 
 console.log(
-  `[optimize-mp] Relocated ${(relocatedBytes / 1024).toFixed(1)} KB modals to subpackage | ` +
+  `[optimize-mp] Target=${path.basename(path.dirname(targetDir))}/${path.basename(targetDir)} | ` +
+    `Relocated ${(relocatedBytes / 1024).toFixed(1)} KB components to subpackages | ` +
     `Scaled ${scaledFontRules} font-size rules | Normalized ${normalizedBtnRules} button rules | ` +
     `Net delta ${(savedWxssBytes / 1024).toFixed(1)} KB (.wxss) + ${(savedWxmlBytes / 1024).toFixed(1)} KB (.wxml)`
 );

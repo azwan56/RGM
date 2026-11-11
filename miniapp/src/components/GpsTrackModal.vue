@@ -407,8 +407,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, getCurrentInstance } from "vue";
-import { request, getStoredUser } from "../utils/api";
+import { ref, computed, watch, nextTick, getCurrentInstance, onBeforeUnmount } from "vue";
+import { request, getStoredUser, setTabBarHidden } from "../utils/api";
 import { chartPalette, fontScaleClass, themeClass } from "../utils/theme";
 import { trackModal, trackSubView } from "../utils/telemetry";
 
@@ -428,6 +428,7 @@ const activeTab = ref<"map" | "segments" | "elevation" | "image">("map");
 watch(
   () => props.visible,
   (val, oldVal) => {
+    setTabBarHidden(Boolean(val), "gps_track");
     if (val && !oldVal) {
       trackModal("gps_track", "打开跑步轨迹与分段诊断弹窗", "open", {
         activity_id: props.activityId || props.initialActivity?.id,
@@ -435,8 +436,13 @@ watch(
     } else if (!val && oldVal) {
       trackModal("gps_track", "关闭跑步轨迹弹窗", "close");
     }
-  }
+  },
+  { immediate: true }
 );
+
+onBeforeUnmount(() => {
+  setTabBarHidden(false, "gps_track");
+});
 
 watch(activeTab, (tab) => {
   if (!props.visible) return;

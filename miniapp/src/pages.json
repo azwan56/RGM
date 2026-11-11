@@ -116,6 +116,20 @@
       ]
     },
     {
+      "root": "pages/cockpit",
+      "pages": [
+        {
+          "path": "placeholder",
+          "style": {
+            "navigationBarTitleText": "教练工作台",
+            "navigationBarBackgroundColor": "#0b0b0e",
+            "navigationBarTextStyle": "white",
+            "backgroundColor": "#0b0b0e"
+          }
+        }
+      ]
+    },
+    {
       "root": "pages/analysis",
       "pages": [
         {
@@ -201,11 +215,11 @@
   "preloadRule": {
     "pages/index/index": {
       "network": "all",
-      "packages": ["pages/rank", "pages/modals", "pages/activities"]
+      "packages": ["pages/rank", "pages/modals", "pages/activities", "pages/cockpit"]
     },
     "pages/team/team": {
       "network": "all",
-      "packages": ["pages/rank", "pages/group-run", "pages/modals"]
+      "packages": ["pages/rank", "pages/group-run", "pages/modals", "pages/cockpit"]
     },
     "pages/coach/coach": {
       "network": "all",

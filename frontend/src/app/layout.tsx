@@ -1,8 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import UiFeedbackProvider from "@/components/ui/UiFeedbackProvider";
 
 export const viewport: Viewport = {
-  themeColor: "#070708",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0b0e" },
+  ],
   colorScheme: "dark light",
 };
 
@@ -31,10 +35,12 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="antialiased min-h-screen">
-        <div className="min-h-screen bg-[#0a0a0a] text-white transition-colors duration-200">
-          {children}
-        </div>
+      <body className="antialiased min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
+        <UiFeedbackProvider>
+          <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)] transition-colors duration-200">
+            {children}
+          </div>
+        </UiFeedbackProvider>
       </body>
     </html>
   );

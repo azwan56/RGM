@@ -1198,7 +1198,7 @@ import { trackClick, trackSubView, trackFunnelStep } from "../../utils/telemetry
 import { ref, computed, watch, onMounted, nextTick } from "vue";
 import { onShow, onPullDownRefresh, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
-import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex } from "../../utils/api";
+import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex, setTabBarHidden } from "../../utils/api";
 import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
 import PersonalReportModal from "../../components/PersonalReportModal.vue";
 import GoalSheetModal from "../../components/GoalSheetModal.vue";
@@ -2387,10 +2387,13 @@ onMounted(() => {
 
 onShow(() => {
   applySystemTheme(currentTheme.value);
-  syncTabBarIndex(1);
+  syncTabBarIndex();
   loadLatestReport();
   loadUserPlan();
 });
+
+const isAnyCoachPageModalOpen = computed(() => Boolean(editModalOpen.value || showCoachChatModal.value));
+watch(isAnyCoachPageModalOpen, (open) => setTabBarHidden(open, "coach_page"));
 
 onPullDownRefresh(async () => {
   try {

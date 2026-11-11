@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import apiClient from "@/lib/apiClient";
+import { showToast } from "@/components/ui/UiFeedbackProvider";
 import { X, ShieldCheck, Activity, Globe } from "lucide-react";
 
 interface GarminModalProps {
@@ -68,7 +69,7 @@ export default function GarminConnectModal({
           return;
         }
 
-        alert(`佳明账号 (${domain}) 绑定成功！已开始自动同步最近运动数据。`);
+        showToast(`佳明账号 (${domain}) 绑定成功！已开始自动同步最近运动数据。`);
         setNeedsMfa(false);
         setMfaCode("");
       } else {
@@ -90,7 +91,7 @@ export default function GarminConnectModal({
           return;
         }
 
-        alert(`高驰账号 (${corosDomain.includes("cn") ? "中国区" : "国际区"}) 绑定成功！已开始自动同步最近运动数据。`);
+        showToast(`高驰账号 (${corosDomain.includes("cn") ? "中国区" : "国际区"}) 绑定成功！已开始自动同步最近运动数据。`);
         setNeedsCoros2fa(false);
         setCoros2faCode("");
       }
