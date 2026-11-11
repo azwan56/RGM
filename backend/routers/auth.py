@@ -1780,8 +1780,12 @@ class WebQrConfirmRequest(BaseModel):
     avatar_url: Optional[str] = None
 
 
+class WebQrCreateRequest(BaseModel):
+    env_version: Optional[str] = None
+
+
 @router.post("/wechat/web-qr/create")
-def create_wechat_web_qr_login():
+def create_wechat_web_qr_login(request: Optional[WebQrCreateRequest] = None):
     """
     Creates a 5-minute dynamic WeChat Mini-Program QR login session for Web.
     Generates an official `wxacode.getUnlimited` code pointing to `pages/share/share?scene=wlogin_<hex>`.
@@ -1793,7 +1797,8 @@ def create_wechat_web_qr_login():
     scene_id = f"wlogin_{secrets.token_hex(8)}"  # 23 chars (<= 32 WeChat scene limit)
     sess = LocalStore.create_web_qr_session(scene_id, ttl_seconds=300)
 
-    raw_state = (getattr(settings, "WECHAT_MINIPROGRAM_STATE", "formal") or "formal").lower()
+    req_env = (request.env_version if request and request.env_version else "").strip().lower()
+    raw_state = req_env or (getattr(settings, "WECHAT_MINIPROGRAM_STATE", "formal") or "formal").lower()
     env_map = {"formal": "release", "release": "release", "trial": "trial", "developer": "develop", "develop": "develop"}
     env_version = env_map.get(raw_state, "release")
 
@@ -1810,6 +1815,7 @@ def create_wechat_web_qr_login():
 
     return {
         "scene_id": scene_id,
+        "env_version": env_version,
         "qrcode_base64": b64_str,
         "has_official_wxacode": bool(b64_str),
         "miniapp_path": f"/pages/share/share?scene={scene_id}",

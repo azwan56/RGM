@@ -718,8 +718,7 @@ export async function scanWebQrLogin(sceneId: string, displayName?: string, avat
  * Confirms a Web WeChat Mini-Program QR login session using current Mini-Program JWT (or fresh wx.login code).
  */
 export async function confirmWebQrLogin(sceneId: string, displayName?: string, avatarUrl?: string): Promise<any> {
-  let code = "";
-  if (!getToken()) {
+  const fetchWxCode = async (): Promise<string> => {
     try {
       const loginRes: any = await new Promise((resolve) => {
         uni.login({
@@ -729,15 +728,33 @@ export async function confirmWebQrLogin(sceneId: string, displayName?: string, a
           fail: () => resolve(null),
         });
       });
-      if (loginRes?.code) code = loginRes.code;
-    } catch (e) {}
+      return loginRes?.code ? String(loginRes.code) : "";
+    } catch {
+      return "";
+    }
+  };
+
+  let code = !getToken() ? await fetchWxCode() : "";
+  try {
+    return await request("/api/auth/wechat/web-qr/confirm", "POST", {
+      scene_id: sceneId,
+      code: code || undefined,
+      display_name: displayName || "",
+      avatar_url: avatarUrl || "",
+    });
+  } catch (err: any) {
+    if (String(err?.message || "").includes("Unauthorized")) {
+      const freshUser = await wechatLogin();
+      const retryCode = !getToken() ? await fetchWxCode() : "";
+      return request("/api/auth/wechat/web-qr/confirm", "POST", {
+        scene_id: sceneId,
+        code: retryCode || undefined,
+        display_name: displayName || freshUser?.display_name || "",
+        avatar_url: avatarUrl || freshUser?.avatar_url || "",
+      });
+    }
+    throw err;
   }
-  return request("/api/auth/wechat/web-qr/confirm", "POST", {
-    scene_id: sceneId,
-    code: code || undefined,
-    display_name: displayName || "",
-    avatar_url: avatarUrl || "",
-  });
 }
 
 /**

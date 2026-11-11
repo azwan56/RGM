@@ -14,16 +14,18 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [hasOfficialWxacode, setHasOfficialWxacode] = useState<boolean>(false);
   const [miniappPath, setMiniappPath] = useState<string>("");
+  const [envVersion, setEnvVersion] = useState<"release" | "trial">("release");
   const [status, setStatus] = useState<"loading" | "pending" | "scanned" | "confirmed" | "expired" | "error">("loading");
   const [scannedUser, setScannedUser] = useState<{ name: string; avatar: string }>({ name: "", avatar: "" });
   const [errText, setErrText] = useState<string>("");
 
-  const createQrSession = useCallback(async () => {
+  const createQrSession = useCallback(async (targetEnv?: "release" | "trial") => {
+    const useEnv = targetEnv || envVersion;
     setStatus("loading");
     setErrText("");
     setScannedUser({ name: "", avatar: "" });
     try {
-      const res = await axios.post("/api/auth/wechat/web-qr/create");
+      const res = await axios.post("/api/auth/wechat/web-qr/create", { env_version: useEnv });
       const data = res.data || {};
       setSceneId(data.scene_id || "");
       setQrBase64(data.qrcode_base64 || null);
@@ -34,7 +36,7 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
       setStatus("error");
       setErrText(err.response?.data?.detail || "获取微信扫码登录凭证失败，请点击重试");
     }
-  }, []);
+  }, [envVersion]);
 
   useEffect(() => {
     createQrSession();
@@ -136,7 +138,7 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
               </span>
               <button
                 type="button"
-                onClick={createQrSession}
+                onClick={() => createQrSession()}
                 className="px-4 py-2 rounded-xl bg-[#07C160] hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -153,20 +155,36 @@ export default function WeChatQrLoginPanel({ onSuccess }: WeChatQrLoginPanelProp
           </div>
           <p className="text-[11px] text-zinc-400">
             {hasOfficialWxacode
-              ? "动态小程序码有效期 5 分钟 · 一次一密防重放保护"
+              ? envVersion === "trial"
+                ? "当前为体验版测试码 · 适合小程序审核发布前即时验证"
+                : "动态小程序码有效期 5 分钟 · 一次一密防重放保护"
               : "支持与已绑定的佳明 / 高驰运动手表档案自动合并互通"}
           </p>
         </div>
 
         {(status === "pending" || status === "scanned") && (
-          <button
-            type="button"
-            onClick={createQrSession}
-            className="mt-3 inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition cursor-pointer"
-          >
-            <RefreshCw className="w-3 h-3" />
-            刷新二维码
-          </button>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => createQrSession()}
+              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition cursor-pointer"
+            >
+              <RefreshCw className="w-3 h-3" />
+              刷新二维码
+            </button>
+            <span className="text-zinc-600 text-[10px]">|</span>
+            <button
+              type="button"
+              onClick={() => {
+                const next = envVersion === "release" ? "trial" : "release";
+                setEnvVersion(next);
+                createQrSession(next);
+              }}
+              className="text-[11px] text-zinc-400 hover:text-emerald-400 transition cursor-pointer"
+            >
+              {envVersion === "release" ? "切换体验版码" : "切回正式版码"}
+            </button>
+          </div>
         )}
       </div>
 

@@ -30,6 +30,37 @@ function checkMiniProgramUpdate() {
   // #endif
 }
 
+declare function getCurrentPages(): any[];
+
+function routeWebQrSceneIfNeeded(options?: any) {
+  try {
+    const rawScene = decodeURIComponent(String(options?.query?.scene || "")).trim();
+    if (!rawScene.startsWith("wlogin_")) return;
+    const lastRouted = (uni as any).__lastWebQrScene || "";
+    if (lastRouted === rawScene) return;
+    (uni as any).__lastWebQrScene = rawScene;
+
+    const curPath = String(options?.path || "").replace(/^\/+/, "");
+    if (curPath !== "pages/share/share") {
+      setTimeout(() => {
+        uni.navigateTo({
+          url: `/pages/share/share?scene=${encodeURIComponent(rawScene)}`,
+        });
+      }, 150);
+    } else {
+      const pages = typeof getCurrentPages === "function" ? getCurrentPages() : [];
+      const top: any = pages && pages.length > 0 ? pages[pages.length - 1] : null;
+      const topRoute = String(top?.route || top?.$page?.route || "").replace(/^\/+/, "");
+      const topScene = decodeURIComponent(String(top?.options?.scene || "")).trim();
+      if (topRoute === "pages/share/share" && topScene && topScene !== rawScene) {
+        uni.redirectTo({
+          url: `/pages/share/share?scene=${encodeURIComponent(rawScene)}`,
+        });
+      }
+    }
+  } catch (_) {}
+}
+
 onLaunch((options?: any) => {
   console.log("RGM MiniApp Launched", options);
   onTelemetryAppLaunch(options);
@@ -37,6 +68,7 @@ onLaunch((options?: any) => {
   checkMiniProgramUpdate();
   // 微信隐私保护指引：全局只注册一次，按当前页面分发到 <PrivacyPopup>
   installPrivacyListener();
+  routeWebQrSceneIfNeeded(options);
   const inviterUid = options?.query?.inviter_uid;
   if (inviterUid) {
     setPendingInviterUid(inviterUid);
@@ -52,6 +84,7 @@ onShow((options?: any) => {
   onTelemetryAppShow(options);
   applySystemTheme(currentTheme.value);
   checkMiniProgramUpdate();
+  routeWebQrSceneIfNeeded(options);
   const inviterUid = options?.query?.inviter_uid;
   if (inviterUid) {
     setPendingInviterUid(inviterUid);
