@@ -709,18 +709,91 @@ def _aggregate_laps(
     }
 
 
+def _is_trail_or_mountain_activity(
+    activity: Optional[Dict[str, Any]],
+    primary_laps: Optional[List[Dict[str, Any]]] = None,
+) -> bool:
+    """
+    Returns True when an activity is a trail, mountain, or significant hill-climb run.
+    In trail/mountain running, slow segments (power-hiking on climbs) are terrain adaptations
+    and must NEVER be interpreted as interval recovery bouts or road pace fade.
+    """
+    if not activity:
+        return False
+    sport_type = str(activity.get("sport_type") or activity.get("activity_type") or "").lower()
+    act_name = str(activity.get("name") or "")
+    act_name_lower = act_name.lower()
+    if any(k in sport_type for k in ("trail", "mountain", "越野", "登山")):
+        return True
+    if any(k in act_name for k in ("越野", "山地", "爬山", "登山", "山野", "爬坡")) or "trail" in act_name_lower:
+        return True
+    elev_gain = float(
+        activity.get("elevation_gain_meters")
+        or activity.get("total_elevation_gain")
+        or activity.get("elevationGain")
+        or 0.0
+    )
+    if elev_gain <= 0 and primary_laps:
+        elev_gain = sum(float(l.get("elev_gain_m") or 0.0) for l in primary_laps)
+    dist_km = float(activity.get("distance_meters") or 0.0) / 1000.0
+    if dist_km <= 0 and primary_laps:
+        dist_km = sum(float(l.get("distance_m") or 0.0) for l in primary_laps) / 1000.0
+    if elev_gain >= 180.0:
+        return True
+    if dist_km >= 3.0 and (elev_gain / dist_km) >= 22.0:
+        return True
+    return False
+
+
+def _has_explicit_interval_intent(
+    activity: Optional[Dict[str, Any]],
+    planned_day: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Returns True if the activity name or matched plan explicitly indicates an interval/fartlek session."""
+    act_name = str((activity or {}).get("name") or "")
+    reps_a, rep_km_a = _extract_planned_interval_spec(act_name)
+    if (reps_a >= 2 and rep_km_a >= 0.15) or re.search(
+        r"(\d+\s*(?:m|米|km|k)\s*\+\s*\d+\s*(?:m|米|km|k)|\b(?:1st|2nd|3rd|\d+th)\b|间歇|变速|法特莱克)",
+        act_name,
+        re.I,
+    ):
+        return True
+    if planned_day:
+        w_type = str(planned_day.get("workout_type") or "").lower()
+        p_text = f"{planned_day.get('title') or ''} {planned_day.get('description') or ''}"
+        reps_p, rep_km_p = _extract_planned_interval_spec(p_text)
+        if (
+            w_type in ("interval", "intervals", "fartlek", "speed", "track", "reps")
+            or any(k in p_text for k in ("间歇", "变速", "法特莱克", "重复跑"))
+            or (reps_p >= 2 and rep_km_p >= 0.18)
+        ):
+            return True
+    return False
+
+
 def segment_workout_phases(
     primary_laps: List[Dict[str, Any]],
     telemetry: List[Dict[str, Any]],
     planned_wu_km: float = 0.0,
     planned_cd_km: float = 0.0,
+    is_trail: bool = False,
+    is_explicit_interval: bool = False,
+    aerobic_ceiling: float = 152.0,
 ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Segments a training session into ordered phases (Warm-up, Main Cruise / Progression / Intervals, Cool-down).
     Returns (phases_list, interval_summary_or_None).
+    Strictly guards against misclassifying:
+    1) Trail / mountain runs (where uphill power-hiking causes slow splits) as intervals.
+    2) Road or track runs with pauses / stops / water breaks as intervals.
     """
     if not primary_laps:
         return [], None
+
+    # ── Priority 0: Trail / Mountain Running (never segment uphill hiking as interval rest or road fade) ──
+    if is_trail:
+        trail_phase = _aggregate_laps(primary_laps, "cruise", "🏔️ 山地越野巡航", telemetry)
+        return [trail_phase], None
 
     # ── Priority 1: Watch explicitly tagged WARMUP / ACTIVE / RECOVERY / COOLDOWN ──
     explicit_tags = [l.get("intensity_type") for l in primary_laps]
@@ -741,38 +814,56 @@ def segment_workout_phases(
             phases.append(_aggregate_laps(leading_wu, "warmup", "🔥 热身激活", telemetry))
 
         work_reps = [l for l in core_laps if l.get("intensity_type") in ("ACTIVE", "AUTO")]
-        rest_reps = [l for l in core_laps if l.get("intensity_type") == "RECOVERY"]
+        # Exclude stationary/near-zero-distance pause records (< 40m or > 13:00/km) from valid interval recovery joggers
+        valid_rest_reps = [
+            l for l in core_laps
+            if l.get("intensity_type") == "RECOVERY"
+            and float(l.get("distance_m") or 0.0) >= 40.0
+            and (l.get("pace_sec") is None or int(l["pace_sec"]) <= 780)
+        ]
+        has_paired_recoveries = (
+            len(work_reps) >= 2
+            and len(valid_rest_reps) >= max(1, len(work_reps) - 1)
+        )
         interval_meta: Optional[Dict[str, Any]] = None
-        if len(work_reps) >= 2 and len(rest_reps) >= 1:
+        if has_paired_recoveries:
             work_agg = _aggregate_laps(work_reps, "intervals", f"⚡ 间歇主课 ({len(work_reps)}组)", telemetry)
-            rest_agg = _aggregate_laps(rest_reps, "recovery", "🫧 间歇慢跑/休息", telemetry)
-            rep_paces = [l["pace_str"].replace("/km", "") for l in work_reps if l.get("pace_sec")]
-            rep_secs = [int(l["pace_sec"]) for l in work_reps if l.get("pace_sec")]
-            fade_s = (rep_secs[-1] - rep_secs[0]) if len(rep_secs) >= 2 else 0
-            hr_drop = (
-                (work_agg["steady_hr"] - rest_agg["avg_hr"])
-                if (work_agg.get("steady_hr") and rest_agg.get("avg_hr"))
-                else None
-            )
-            interval_meta = {
-                "rep_count": len(work_reps),
-                "avg_rep_km": round(sum(float(x["distance_m"]) for x in work_reps) / len(work_reps) / 1000.0, 2),
-                "work_pace_sec": work_agg["pace_sec"],
-                "work_pace_str": work_agg["pace_str"],
-                "work_steady_hr": work_agg["steady_hr"],
-                "rest_pace_str": rest_agg["pace_str"],
-                "rest_avg_hr": rest_agg["avg_hr"],
-                "hr_recovery_drop": hr_drop,
-                "rep_paces": rep_paces[:12],
-                "fade_sec": fade_s,
-            }
-            work_agg["start_km"] = round(float(core_laps[0]["start_km"]), 2)
-            work_agg["end_km"] = round(float(core_laps[-1]["end_km"]), 2)
-            work_agg["range_str"] = f"{round(work_agg['start_km'], 1)}~{round(work_agg['end_km'], 1)}km"
-            work_agg["interval_detail"] = interval_meta
-            phases.append(work_agg)
-        elif core_laps:
-            phases.append(_aggregate_laps(core_laps, "cruise", "🎯 主课巡航", telemetry))
+            rest_agg = _aggregate_laps(valid_rest_reps, "recovery", "🫧 间歇慢跑/休息", telemetry)
+            w_p = work_agg.get("pace_sec") or 999
+            r_p = rest_agg.get("pace_sec") or 0
+            # Ensure work reps are genuinely faster than recovery reps and not slow walking/hiking
+            max_allowed_work_pace = 400 if is_explicit_interval else 360
+            if w_p <= max_allowed_work_pace and (r_p == 0 or r_p - w_p >= 15):
+                rep_paces = [l["pace_str"].replace("/km", "") for l in work_reps if l.get("pace_sec")]
+                rep_secs = [int(l["pace_sec"]) for l in work_reps if l.get("pace_sec")]
+                fade_s = (rep_secs[-1] - rep_secs[0]) if len(rep_secs) >= 2 else 0
+                hr_drop = (
+                    (work_agg["steady_hr"] - rest_agg["avg_hr"])
+                    if (work_agg.get("steady_hr") and rest_agg.get("avg_hr"))
+                    else None
+                )
+                interval_meta = {
+                    "rep_count": len(work_reps),
+                    "avg_rep_km": round(sum(float(x["distance_m"]) for x in work_reps) / len(work_reps) / 1000.0, 2),
+                    "work_pace_sec": work_agg["pace_sec"],
+                    "work_pace_str": work_agg["pace_str"],
+                    "work_steady_hr": work_agg["steady_hr"],
+                    "rest_pace_str": rest_agg["pace_str"],
+                    "rest_avg_hr": rest_agg["avg_hr"],
+                    "hr_recovery_drop": hr_drop,
+                    "rep_paces": rep_paces[:12],
+                    "fade_sec": fade_s,
+                }
+                work_agg["start_km"] = round(float(core_laps[0]["start_km"]), 2)
+                work_agg["end_km"] = round(float(core_laps[-1]["end_km"]), 2)
+                work_agg["range_str"] = f"{round(work_agg['start_km'], 1)}~{round(work_agg['end_km'], 1)}km"
+                work_agg["interval_detail"] = interval_meta
+                phases.append(work_agg)
+
+        if interval_meta is None and core_laps:
+            # Continuous run (e.g. had 1-2 isolated pause/REST laps on road or track): keep moving laps together
+            moving_core = [l for l in core_laps if float(l.get("distance_m") or 0.0) >= 30.0] or core_laps
+            phases.append(_aggregate_laps(moving_core, "cruise", "🎯 主课巡航", telemetry))
 
         if trailing_cd:
             phases.append(_aggregate_laps(trailing_cd, "cooldown", "🧊 冷身排酸", telemetry))
@@ -786,11 +877,12 @@ def segment_workout_phases(
 
     paces_eff = [int(l.get("gap_sec") or l["pace_sec"]) for l in usable]
     sorted_paces = sorted(paces_eff)
-    # Typical fast/main reference pace (35th percentile so warm-up/rest laps don't skew it)
+    # Typical fast/main reference pace (35th percentile so warm-up/pause laps don't skew it)
     ref_idx = max(0, int((len(sorted_paces) - 1) * 0.35))
     fast_ref_sec = sorted_paces[ref_idx]
 
-    # 2A. Detect Warm-up at start (1 to 3 laps slower than main body by >= 15s/km, or aligned with planned_wu_km)
+    # 2A. Detect Warm-up at start (1 to 3 laps slower than main body by >= 16s/km, or aligned with planned_wu_km)
+    # Do not misclassify a severe pause/stop on lap 1 (> 90s/km slower or >= 7:30/km) as warmup when unplanned.
     wu_end_idx = 0
     max_wu_laps = min(len(primary_laps) - 1, max(3, int(round(planned_wu_km)) + 1 if planned_wu_km > 0 else 3))
     cum_wu_km = 0.0
@@ -804,13 +896,17 @@ def segment_workout_phases(
         if planned_wu_km > 0 and cum_wu_km + lap_km <= planned_wu_km + 0.35 and (lp - fast_ref_sec >= 8):
             wu_end_idx = i + 1
             cum_wu_km += lap_km
-        elif lp - fast_ref_sec >= wu_threshold_delta and cum_wu_km + lap_km <= 3.3:
+        elif (
+            wu_threshold_delta <= (lp - fast_ref_sec) <= 90
+            and lp < 450
+            and cum_wu_km + lap_km <= 3.3
+        ):
             wu_end_idx = i + 1
             cum_wu_km += lap_km
         else:
             break
 
-    # 2B. Detect Cool-down at end (1 to 3 laps slower than main body by >= 16s/km, or aligned with planned_cd_km)
+    # 2B. Detect Cool-down at end (1 to 3 laps slower than main body by >= 18s/km, or aligned with planned_cd_km)
     cd_start_idx = len(primary_laps)
     cum_cd_km = 0.0
     cd_threshold_delta = 12 if planned_cd_km > 0 else 18
@@ -820,11 +916,15 @@ def segment_workout_phases(
         lap_km = float(lap.get("distance_m") or 0.0) / 1000.0
         if lp is None or j <= wu_end_idx:
             break
-        # Avoid classifying a tiny 100m GPS tail as cool-down unless it's >= 350m or slow
         if planned_cd_km > 0 and cum_cd_km + lap_km <= planned_cd_km + 0.4 and (lp - fast_ref_sec >= 8):
             cd_start_idx = j
             cum_cd_km += lap_km
-        elif lp - fast_ref_sec >= cd_threshold_delta and cum_cd_km + lap_km <= 3.2 and (lap_km >= 0.30 or cum_cd_km > 0):
+        elif (
+            cd_threshold_delta <= (lp - fast_ref_sec) <= 95
+            and lp < 450
+            and cum_cd_km + lap_km <= 3.2
+            and (lap_km >= 0.30 or cum_cd_km > 0)
+        ):
             cd_start_idx = j
             cum_cd_km += lap_km
         else:
@@ -839,7 +939,8 @@ def segment_workout_phases(
         wu_laps = []
         cd_laps = []
 
-    # 2C. Check if Core Laps exhibit Alternating Fast/Slow Intervals (>= 3 fast bouts separated by >= 32s/km slower bouts)
+    # 2C. Check if Core Laps exhibit genuine Alternating Fast/Slow Intervals
+    # Strictly reject pauses / stops / traffic lights / walking segments during road or track runs!
     fallback_ref_sec = int(fast_ref_sec or 330)
     core_paces = [int(l.get("gap_sec") or l.get("pace_sec") or fallback_ref_sec) for l in core_laps]
     interval_meta = None
@@ -856,51 +957,116 @@ def segment_workout_phases(
             transitions = sum(1 for a, b in zip(flags, flags[1:]) if a != b)
             fast_laps = [l for l, fl in zip(core_laps, flags) if fl == "F"]
             slow_laps = [l for l, fl in zip(core_laps, flags) if fl == "S"]
-            if transitions >= 3 and len(fast_laps) >= 2 and len(slow_laps) >= 1:
+
+            # Compute contiguous run lengths of 'F' and 'S' to verify 1-to-1 alternation
+            # (In a continuous run with 1-3 pauses, there are multiple consecutive 'F' laps like F,F,F,S,F,F,S)
+            max_consec_f = 0
+            cur_f = 0
+            for fl in flags:
+                if fl == "F":
+                    cur_f += 1
+                    if cur_f > max_consec_f:
+                        max_consec_f = cur_f
+                else:
+                    cur_f = 0
+
+            fast_paces_raw = [int(l.get("gap_sec") or l.get("pace_sec") or fallback_ref_sec) for l in fast_laps]
+            slow_paces_raw = [int(l.get("gap_sec") or l.get("pace_sec") or fallback_ref_sec) for l in slow_laps]
+            fast_spread = (max(fast_paces_raw) - min(fast_paces_raw)) if len(fast_paces_raw) >= 2 else 0
+            avg_core_lap_m = sum(float(l.get("distance_m") or 0.0) for l in core_laps) / len(core_laps)
+            is_auto_km_laps = avg_core_lap_m >= 750.0
+
+            # Check whether slow_laps are actually paused/stopped/walked laps rather than interval recovery floats
+            max_slow_p = max(slow_paces_raw) if slow_paces_raw else 999
+            min_fast_p = sum(fast_paces_raw) / len(fast_paces_raw) if fast_paces_raw else 999
+            has_pause_contaminated_lap = bool(
+                not is_explicit_interval
+                and (
+                    max_slow_p >= 420  # >= 7:00/km on an unlabeled lap indicates a pause/stop/walk
+                    or (is_auto_km_laps and (max_slow_p - min_fast_p >= 75 or max_slow_p >= 400))
+                )
+            )
+
+            is_strictly_alternating = (
+                transitions >= 4
+                and len(fast_laps) >= 3
+                and len(slow_laps) >= len(fast_laps) - 1
+                and len(fast_laps) <= len(slow_laps) + 1
+                and max_consec_f <= (2 if is_explicit_interval else 1)
+            )
+            max_work_pace_sec = 360 if is_explicit_interval else 330
+            max_work_spread_sec = 35 if is_explicit_interval else 25
+
+            if (
+                is_strictly_alternating
+                and not has_pause_contaminated_lap
+                and min_fast_p <= max_work_pace_sec
+                and fast_spread <= max_work_spread_sec
+            ):
                 work_agg = _aggregate_laps(fast_laps, "intervals", f"⚡ 变速/间歇主课 ({len(fast_laps)}组)", telemetry)
                 rest_agg = _aggregate_laps(slow_laps, "recovery", "🫧 间休慢跑", telemetry)
-                rep_paces = [l["pace_str"].replace("/km", "") for l in fast_laps if l.get("pace_sec")]
-                rep_secs = [int(l["pace_sec"]) for l in fast_laps if l.get("pace_sec")]
-                fade_s = (rep_secs[-1] - rep_secs[0]) if len(rep_secs) >= 2 else 0
-                hr_drop = (
-                    (work_agg["steady_hr"] - rest_agg["avg_hr"])
-                    if (work_agg.get("steady_hr") and rest_agg.get("avg_hr"))
-                    else None
-                )
-                interval_meta = {
-                    "rep_count": len(fast_laps),
-                    "avg_rep_km": round(sum(float(x["distance_m"]) for x in fast_laps) / len(fast_laps) / 1000.0, 2),
-                    "work_pace_sec": work_agg["pace_sec"],
-                    "work_pace_str": work_agg["pace_str"],
-                    "work_steady_hr": work_agg["steady_hr"],
-                    "rest_pace_str": rest_agg["pace_str"],
-                    "rest_avg_hr": rest_agg["avg_hr"],
-                    "hr_recovery_drop": hr_drop,
-                    "rep_paces": rep_paces[:12],
-                    "fade_sec": fade_s,
-                }
-                work_agg["start_km"] = round(float(core_laps[0]["start_km"]), 2)
-                work_agg["end_km"] = round(float(core_laps[-1]["end_km"]), 2)
-                work_agg["range_str"] = f"{round(work_agg['start_km'], 1)}~{round(work_agg['end_km'], 1)}km"
-                work_agg["interval_detail"] = interval_meta
-                phases.append(work_agg)
+                w_hr = work_agg.get("steady_hr") or work_agg.get("avg_hr")
+                # Unlabeled laps must not be low-HR Zone 1/2 easy jogging masquerading as intervals
+                hr_ok = bool(is_explicit_interval or w_hr is None or w_hr >= aerobic_ceiling - 10)
+                if hr_ok:
+                    rep_paces = [l["pace_str"].replace("/km", "") for l in fast_laps if l.get("pace_sec")]
+                    rep_secs = [int(l["pace_sec"]) for l in fast_laps if l.get("pace_sec")]
+                    fade_s = (rep_secs[-1] - rep_secs[0]) if len(rep_secs) >= 2 else 0
+                    hr_drop = (
+                        (work_agg["steady_hr"] - rest_agg["avg_hr"])
+                        if (work_agg.get("steady_hr") and rest_agg.get("avg_hr"))
+                        else None
+                    )
+                    interval_meta = {
+                        "rep_count": len(fast_laps),
+                        "avg_rep_km": round(sum(float(x["distance_m"]) for x in fast_laps) / len(fast_laps) / 1000.0, 2),
+                        "work_pace_sec": work_agg["pace_sec"],
+                        "work_pace_str": work_agg["pace_str"],
+                        "work_steady_hr": work_agg["steady_hr"],
+                        "rest_pace_str": rest_agg["pace_str"],
+                        "rest_avg_hr": rest_agg["avg_hr"],
+                        "hr_recovery_drop": hr_drop,
+                        "rep_paces": rep_paces[:12],
+                        "fade_sec": fade_s,
+                    }
+                    work_agg["start_km"] = round(float(core_laps[0]["start_km"]), 2)
+                    work_agg["end_km"] = round(float(core_laps[-1]["end_km"]), 2)
+                    work_agg["range_str"] = f"{round(work_agg['start_km'], 1)}~{round(work_agg['end_km'], 1)}km"
+                    work_agg["interval_detail"] = interval_meta
+                    phases.append(work_agg)
 
     # 2D. Non-interval Core: Check Progression vs Steady Cruise vs Late Fade
+    # Filter out single-lap pause outliers (e.g. traffic light / water stop > fast_ref_sec + 75s) when comparing thirds
     if interval_meta is None:
         if len(core_laps) >= 4:
             third = max(1, len(core_laps) // 3)
             first_part = core_laps[:third]
             last_part = core_laps[-third:]
-            p_first = sum(int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) for x in first_part) / len(first_part)
-            p_last = sum(int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) for x in last_part) / len(last_part)
-            delta = p_last - p_first  # negative = sped up, positive = slowed down
+            pause_cut = fallback_ref_sec + 75
+            p_first_vals = [
+                int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec)
+                for x in first_part
+                if int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) <= pause_cut
+            ] or [int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) for x in first_part]
+            p_last_vals = [
+                int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec)
+                for x in last_part
+                if int(x.get("gap_sec") or x.get("pace_sec") or fallback_ref_sec) <= pause_cut
+            ]
+            p_first = sum(p_first_vals) / len(p_first_vals)
+            # Only evaluate progression/fade if last_part isn't purely a paused outlier lap
+            if p_last_vals:
+                p_last = sum(p_last_vals) / len(p_last_vals)
+                delta = p_last - p_first  # negative = sped up, positive = slowed down
+            else:
+                delta = 0.0
 
-            if delta <= -12:
+            if delta <= -12 and len(p_last_vals) >= max(1, len(last_part) - 1):
                 # Split core into Base Cruise + Progression Finish
                 split_pt = len(core_laps) - third
                 phases.append(_aggregate_laps(core_laps[:split_pt], "cruise", "🎯 前中段稳态巡航", telemetry))
                 phases.append(_aggregate_laps(core_laps[split_pt:], "progression", "🚀 后程渐进提速", telemetry))
-            elif delta >= 16 and not cd_laps:
+            elif delta >= 16 and not cd_laps and len(p_last_vals) == len(last_part):
                 split_pt = len(core_laps) - third
                 phases.append(_aggregate_laps(core_laps[:split_pt], "cruise", "🎯 前中段巡航", telemetry))
                 phases.append(_aggregate_laps(core_laps[split_pt:], "fade", "⚠️ 后程心率漂移/掉速", telemetry))
@@ -1209,11 +1375,17 @@ def analyze_activity_segments(
         else:
             planned_main_km = plan_dist
 
+    is_trail = _is_trail_or_mountain_activity(activity, primary_laps)
+    is_explicit_interval = _has_explicit_interval_intent(activity, planned_day)
+
     phases, interval_meta = segment_workout_phases(
         primary_laps,
         telemetry,
         planned_wu_km=wu_hint_km,
         planned_cd_km=cd_hint_km,
+        is_trail=is_trail,
+        is_explicit_interval=is_explicit_interval,
+        aerobic_ceiling=aerobic_ceiling,
     )
 
     # Fallback single-phase when activity only has summary metrics (e.g. screenshot import without splits)
@@ -1221,7 +1393,7 @@ def analyze_activity_segments(
         avg_hr_val = int(round(float(activity["average_heartrate"]))) if activity.get("average_heartrate") else None
         phases = [{
             "phase_type": "cruise",
-            "label": "🎯 全程汇总段",
+            "label": "🏔️ 山地越野巡航" if is_trail else "🎯 全程汇总段",
             "start_km": 0.0,
             "end_km": dist_km,
             "range_str": f"0~{dist_km}km",
@@ -1292,6 +1464,9 @@ def analyze_activity_segments(
                     telemetry,
                     planned_wu_km=0.0,
                     planned_cd_km=0.0,
+                    is_trail=is_trail,
+                    is_explicit_interval=_has_explicit_interval_intent(activity, None),
+                    aerobic_ceiling=aerobic_ceiling,
                 )
                 main_phases = [p for p in phases if p["phase_type"] not in ("warmup", "cooldown")]
                 if not main_phases:
@@ -1424,7 +1599,7 @@ def analyze_activity_segments(
 
         return {
             "mode": "planned_workout",
-            "schema_version": 2,
+            "schema_version": 3,
             "mode_label": "📋 课表分段达成比对",
             "is_track_run": is_track,
             "has_granular_splits": len(primary_laps) >= 2,
@@ -1443,19 +1618,22 @@ def analyze_activity_segments(
     elev_gain_act = float(activity.get("elevation_gain_meters") or activity.get("total_elevation_gain") or 0.0)
     act_reps_n, act_rep_km_n = _extract_planned_interval_spec(act_name_str)
     is_name_interval = bool(
-        (act_reps_n >= 2 and act_rep_km_n >= 0.15)
-        or re.search(
-            r"(\d+\s*(?:m|米|km|k)\s*\+\s*\d+\s*(?:m|米|km|k)|\b(?:1st|2nd|3rd|\d+th)\b|间歇|变速|法特莱克)",
-            act_name_str,
-            re.I,
+        not is_trail
+        and (
+            (act_reps_n >= 2 and act_rep_km_n >= 0.15)
+            or re.search(
+                r"(\d+\s*(?:m|米|km|k)\s*\+\s*\d+\s*(?:m|米|km|k)|\b(?:1st|2nd|3rd|\d+th)\b|间歇|变速|法特莱克)",
+                act_name_str,
+                re.I,
+            )
         )
     )
-    if interval_meta:
+    if is_trail:
+        archetype = "山地专项耐力跑" if (elev_gain_act >= 500 or dist_km >= 20) else "山地有氧爬坡跑"
+    elif interval_meta:
         archetype = f"变速/间歇训练（{interval_meta['rep_count']}组快跑）"
     elif is_name_interval:
         archetype = "变速/间歇专项训练"
-    elif elev_gain_act >= 200 or "越野" in act_name_str or "trail" in act_name_str.lower():
-        archetype = "山地专项耐力跑" if (elev_gain_act >= 500 or dist_km >= 20) else "山地有氧爬坡跑"
     elif any(p["phase_type"] == "progression" for p in phases):
         archetype = "渐进加速跑"
     elif any(p["phase_type"] == "fade" for p in phases):
@@ -1477,7 +1655,13 @@ def analyze_activity_segments(
 
     for p in phases:
         ptype = p["phase_type"]
-        if ptype == "warmup":
+        if is_trail:
+            eff_elev = int(round(elev_gain_act or p.get("elev_gain_m") or 0))
+            elev_note = f"（累计爬升 +{eff_elev}m）" if eff_elev > 0 else ""
+            hr_note = f"，心率 {p['steady_hr']}bpm" if p.get("steady_hr") else ""
+            p["status_tag"] = "🏔️ 爬升徒步与越野巡航"
+            p["comment"] = f"全程 {p['distance_km']}km{elev_note}，均速 {p['pace_str']}{hr_note}，爬升段结合徒步稳控心率，平缓及下坡段稳健跑动。"
+        elif ptype == "warmup":
             p["status_tag"] = "✅ 渐进激活"
             p["comment"] = f"前段 {p['distance_km']}km 按 {p['pace_str']} 柔和起步，心率热身充分。"
         elif ptype == "cooldown":
@@ -1506,7 +1690,9 @@ def analyze_activity_segments(
 
     phase_briefs = [f"{p['label'].split(' ', 1)[-1]} {p['distance_km']}k({p['pace_str'].replace('/km', '')})" for p in phases]
     structure_line = " → ".join(phase_briefs)
-    if main_decoupling is not None:
+    if is_trail:
+        advice_free = "越野跑中遇爬升路段主动切换徒步（Power Hiking）节能、下坡注意小步高频缓震，课后做好股四头肌与小腿放松。"
+    elif main_decoupling is not None:
         if main_decoupling <= 4.5:
             advice_free = f"核心段心率解耦率仅 {main_decoupling}%（<5% 优秀），有氧耐力非常稳固。"
         else:
@@ -1516,14 +1702,14 @@ def analyze_activity_segments(
     else:
         advice_free = "分段节奏清晰，跑后做好小腿与臀中肌放松拉伸。"
 
-    venue_tag = "🏟️ 田径场 · " if is_track else ""
+    venue_tag = "🏟️ 田径场 · " if (is_track and not is_trail) else ""
     concise_critique = f"⚡【{venue_tag}{archetype}】分段表现：{structure_line}。💡 {advice_free}"
 
     return {
         "mode": "free_workout",
-        "schema_version": 2,
+        "schema_version": 3,
         "mode_label": "⚡ 智能训练分段复盘",
-        "is_track_run": is_track,
+        "is_track_run": bool(is_track and not is_trail),
         "has_granular_splits": len(primary_laps) >= 2,
         "summary_title": f"{venue_tag}{archetype}",
         "summary_verdict": structure_line,

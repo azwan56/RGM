@@ -2070,8 +2070,7 @@ class LocalStore:
             else:
                 r["workout_effective_vdot"] = None
 
-            if not r.get("ai_journal") or not str(r["ai_journal"]).strip():
-                r["ai_journal"] = LocalStore.generate_canova_critique(r)
+            LocalStore._heal_stale_activity_critique(r, profile)
 
         return rows
 
@@ -2297,10 +2296,11 @@ class LocalStore:
 
         existing_seg = act_row.get("segment_analysis_json")
         if isinstance(existing_seg, dict) and existing_seg.get("mode") and not force:
-            # Recompute if legacy planned_workout cache predates schema_version 2 discrepancy filter,
+            # Recompute if legacy cache predates schema_version 3 (trail/pause interval guard + discrepancy filter),
             # or if track_override brings newly fetched granular splits where previously none existed.
             needs_schema_upgrade = (
-                existing_seg.get("mode") == "planned_workout" and existing_seg.get("schema_version") != 2
+                existing_seg.get("mode") in ("planned_workout", "free_workout")
+                and existing_seg.get("schema_version") != 3
             )
             has_new_splits = bool(
                 not existing_seg.get("has_granular_splits")
@@ -2576,11 +2576,7 @@ class LocalStore:
             else:
                 r["workout_effective_vdot"] = None
 
-            if not r.get("ai_journal") or not str(r["ai_journal"]).strip():
-                try:
-                    r["ai_journal"] = LocalStore.generate_canova_critique(r)
-                except Exception as ex:
-                    logger.warning(f"Generate critique in get_month_activities failed: {ex}")
+            LocalStore._heal_stale_activity_critique(r, profile)
 
         return rows
 
@@ -8913,6 +8909,8 @@ class LocalStore:
 
         from utils.workout_segmentation import (
             _extract_normalized_splits,
+            _has_explicit_interval_intent,
+            _is_trail_or_mountain_activity,
             has_large_plan_discrepancy,
             segment_workout_phases,
         )
@@ -8934,8 +8932,18 @@ class LocalStore:
         primary_laps, _, telemetry = _extract_normalized_splits(
             merged_act, raw_track if isinstance(raw_track, dict) else None
         )
+        is_trail_act = _is_trail_or_mountain_activity(merged_act, primary_laps)
+        is_exp_iv = _has_explicit_interval_intent(merged_act, planned_day)
         seg_phases, seg_interval_meta = (
-            segment_workout_phases(primary_laps, telemetry, planned_wu_km=wu_km, planned_cd_km=cd_km)
+            segment_workout_phases(
+                primary_laps,
+                telemetry,
+                planned_wu_km=wu_km,
+                planned_cd_km=cd_km,
+                is_trail=is_trail_act,
+                is_explicit_interval=is_exp_iv,
+                aerobic_ceiling=aerobic_ceiling,
+            )
             if len(primary_laps) >= 2
             else ([], None)
         )
@@ -9384,9 +9392,16 @@ class LocalStore:
             }
 
     @staticmethod
-    def _needs_canova_critique_refresh(ai_journal: Optional[str]) -> bool:
+    def _needs_canova_critique_refresh(
+        ai_journal: Optional[str],
+        activity: Optional[Dict[str, Any]] = None,
+        strict_format_upgrade: bool = True,
+    ) -> bool:
         if not ai_journal or not ai_journal.strip():
             return True
+        stripped = ai_journal.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            return False
         if "📋【课表核对】" in ai_journal or "跑量缩减·达成率" in ai_journal:
             return True
         if "📋【" in ai_journal:
@@ -9398,6 +9413,28 @@ class LocalStore:
                 return True
             if re.search(r"分段\s*(?:[4-9]|\d{2,})\s*趟", ai_journal):
                 return True
+        # Catch false-positive interval classification on trail runs or runs with pauses/slow paces
+        if "变速/间歇" in ai_journal or "间歇主课" in ai_journal:
+            # 1) If the work pace in '主课 (N组) X.Xk(MM:SS)' is slower than 5:30/km, it was a trail/paused run
+            m_iv_pace = re.search(r"主课\s*\(\d+组\)\s*\d+(?:\.\d+)?k\((\d{1,2}):(\d{2})\)", ai_journal)
+            if m_iv_pace:
+                iv_sec = int(m_iv_pace.group(1)) * 60 + int(m_iv_pace.group(2))
+                if iv_sec > 330:
+                    return True
+            # 2) If activity metadata shows it's a trail/mountain run or not an explicit interval and phase distances lost >15% of total km
+            if isinstance(activity, dict):
+                act_name = str(activity.get("name") or "")
+                sport_t = str(activity.get("sport_type") or "").lower()
+                elev_g = float(activity.get("elevation_gain_meters") or activity.get("total_elevation_gain") or 0.0)
+                if elev_g >= 180.0 or any(k in act_name for k in ("越野", "山地", "爬山", "登山", "爬坡")) or "trail" in sport_t:
+                    return True
+                act_km = float(activity.get("distance_meters") or 0.0) / 1000.0
+                if act_km >= 3.0 and not any(k in act_name for k in ("间歇", "变速", "法特莱克")):
+                    seg_kms = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)k\(\d{1,2}:\d{2}\)", ai_journal)]
+                    if seg_kms and sum(seg_kms) < act_km * 0.85:
+                        return True
+        if not strict_format_upgrade:
+            return False
         if any(tag in ai_journal for tag in ("分段表现：", "🏆【赛事复盘", "📋【课表")):
             return False
         # Refresh legacy critiques or verbose v1 critiques so feed displays the streamlined format
@@ -9423,6 +9460,43 @@ class LocalStore:
         ):
             return True
         return False
+
+    @staticmethod
+    def _heal_stale_activity_critique(
+        activity: Dict[str, Any],
+        profile: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Regenerate missing or stale activity critiques without overwriting custom journals."""
+        if not LocalStore._needs_canova_critique_refresh(
+            activity.get("ai_journal"),
+            activity,
+            strict_format_upgrade=False,
+        ):
+            return
+        try:
+            old_j = str(activity.get("ai_journal") or "")
+            if not old_j.strip():
+                # Generate missing critiques in memory (preserve zero writes on GET).
+                activity["ai_journal"] = LocalStore.generate_canova_critique(activity, profile)
+                return
+            act_id = activity.get("id")
+            refreshed_seg = None
+            if "分段表现：" in old_j and act_id:
+                try:
+                    refreshed_seg = LocalStore.compute_and_cache_segment_analysis(str(act_id), force=True)
+                except Exception:
+                    refreshed_seg = None
+            if refreshed_seg and refreshed_seg.get("updated_ai_journal"):
+                activity["ai_journal"] = refreshed_seg["updated_ai_journal"]
+                return
+            new_j = LocalStore.generate_canova_critique(activity, profile)
+            activity["ai_journal"] = new_j
+            if act_id and new_j:
+                with sqlite3.connect(DB_PATH) as c_upd:
+                    c_upd.execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (new_j, act_id))
+                    c_upd.commit()
+        except Exception as ex:
+            logger.warning(f"Generate/refresh critique failed for {activity.get('id')}: {ex}")
 
     @staticmethod
     def _slim_feed_gps_track(raw_track: Any) -> Optional[Dict[str, Any]]:
@@ -9540,7 +9614,7 @@ class LocalStore:
                 profile_cache[str(owner_prof_id)] = prof_stub
 
             ai_journal = act.get("ai_journal")
-            if LocalStore._needs_canova_critique_refresh(ai_journal):
+            if LocalStore._needs_canova_critique_refresh(ai_journal, act):
                 try:
                     ai_journal = LocalStore.generate_canova_critique(act)
                     act["ai_journal"] = ai_journal

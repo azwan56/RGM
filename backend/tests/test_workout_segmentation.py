@@ -616,4 +616,118 @@ def test_large_plan_discrepancy_skips_schedule_comparison_and_critiques_training
     assert "📋【课表" in critique_aligned
 
 
+def test_trail_hiking_and_road_or_track_pauses_are_never_misclassified_as_intervals():
+    """
+    Verifies that:
+    1) A trail run (10.52km, +479m, avg pace 10:08/km, avg HR 114bpm) with alternating uphill
+       power-hiking splits (11:30~13:00/km) and downhill/flat running splits (8:09~9:56/km)
+       is NEVER classified as an interval workout ('变速/间歇训练'), preserves all 10.52km,
+       and receives trail-specific commentary.
+    2) A road run with multiple pauses / traffic-light stops (causing alternating fast/slow 1km splits)
+       is NEVER misclassified as an interval workout.
+    3) A stadium track continuous run with water-stop pauses (either unlabeled slow splits or 1-2
+       isolated RECOVERY/REST pause laps) is NEVER misclassified as an interval workout.
+    """
+    # 1. Trail run reproducing user's exact 10.52km +479m @ 10:08/km (HR 114bpm) case
+    trail_laps = [
+        _make_lap(1, 1000, 489, 108, elev_gain=25.0, intensity="AUTO"),   # 8:09/km
+        _make_lap(2, 1000, 690, 118, elev_gain=85.0, intensity="AUTO"),   # 11:30/km uphill hike
+        _make_lap(3, 1000, 580, 112, elev_gain=15.0, intensity="AUTO"),   # 9:40/km
+        _make_lap(4, 1000, 720, 120, elev_gain=95.0, intensity="AUTO"),   # 12:00/km uphill hike
+        _make_lap(5, 1000, 595, 113, elev_gain=20.0, intensity="AUTO"),   # 9:55/km
+        _make_lap(6, 1000, 710, 119, elev_gain=80.0, intensity="AUTO"),   # 11:50/km uphill hike
+        _make_lap(7, 1000, 600, 112, elev_gain=18.0, intensity="AUTO"),   # 10:00/km
+        _make_lap(8, 1000, 680, 117, elev_gain=70.0, intensity="AUTO"),   # 11:20/km uphill hike
+        _make_lap(9, 1000, 590, 111, elev_gain=22.0, intensity="AUTO"),   # 9:50/km
+        _make_lap(10, 1000, 670, 116, elev_gain=40.0, intensity="AUTO"),  # 11:10/km uphill hike
+        _make_lap(11, 520, 610, 110, elev_gain=9.0, intensity="AUTO"),    # 0.52km @ 10:10/km
+    ]
+    trail_act = {
+        "id": "act_trail_10_52k",
+        "name": "越野跑",
+        "sport_type": "Run",
+        "start_time": "2026-11-13T10:54:00",
+        "distance_meters": 10520.0,
+        "moving_time_seconds": int(sum(x["duration_s"] for x in trail_laps)),
+        "avg_pace_str": "10:08/km",
+        "average_heartrate": 114,
+        "elevation_gain_meters": 479.0,
+    }
+    seg_trail = analyze_activity_segments(activity=trail_act, track_data={"laps": trail_laps})
+    assert seg_trail["mode"] == "free_workout"
+    assert "间歇" not in seg_trail["summary_title"]
+    assert "变速" not in seg_trail["summary_title"]
+    assert "山地" in seg_trail["summary_title"]
+    assert all(p["phase_type"] != "intervals" for p in seg_trail["phases"])
+    assert sum(p["distance_km"] for p in seg_trail["phases"]) == pytest.approx(10.52, abs=0.05)
+    assert "徒步" in seg_trail["concise_critique"]
+
+    # Verify stale ai_journal refresh detector catches the old false-positive interval critique
+    stale_journal = (
+        "⚡【变速/间歇训练（5组快跑）】分段表现：热身激活 1.0k(8:09) → 变速/间歇主课 (5组) 4.52k(9:56)。 "
+        "🌟【亮点】距离稳健完成 10.52km、主动压速 179秒/km 稳住有氧、均心下降 16bpm（114bpm），进步扎实！"
+    )
+    assert LocalStore._needs_canova_critique_refresh(stale_journal, trail_act) is True
+
+    # 2. Road run with multiple pauses / traffic-light stops (even alternating every other km!)
+    road_pause_laps = [
+        _make_lap(1, 1000, 312, 146, intensity="AUTO"),  # 5:12/km
+        _make_lap(2, 1000, 435, 132, intensity="AUTO"),  # 7:15/km (paused at traffic light)
+        _make_lap(3, 1000, 310, 148, intensity="AUTO"),  # 5:10/km
+        _make_lap(4, 1000, 450, 130, intensity="AUTO"),  # 7:30/km (paused for water/bathroom)
+        _make_lap(5, 1000, 314, 147, intensity="AUTO"),  # 5:14/km
+        _make_lap(6, 1000, 425, 134, intensity="AUTO"),  # 7:05/km (paused at intersection)
+        _make_lap(7, 1000, 311, 148, intensity="AUTO"),  # 5:11/km
+        _make_lap(8, 1000, 313, 149, intensity="AUTO"),  # 5:13/km
+    ]
+    road_act = {
+        "id": "act_road_paused_8k",
+        "name": "晨间路跑",
+        "sport_type": "Run",
+        "distance_meters": 8000.0,
+        "moving_time_seconds": int(sum(x["duration_s"] for x in road_pause_laps)),
+        "avg_pace_str": "5:56/km",
+        "average_heartrate": 142,
+        "elevation_gain_meters": 12.0,
+    }
+    seg_road = analyze_activity_segments(activity=road_act, track_data={"laps": road_pause_laps})
+    assert "间歇" not in seg_road["summary_title"]
+    assert "变速" not in seg_road["summary_title"]
+    assert all(p["phase_type"] != "intervals" for p in seg_road["phases"])
+    assert sum(p["distance_km"] for p in seg_road["phases"]) == pytest.approx(8.0, abs=0.05)
+
+    # 3. Stadium track run with water-stop pauses (including 1-2 watch RECOVERY/REST pause laps)
+    track_bounds = {
+        "southwest": {"latitude": 31.3000, "longitude": 121.5000},
+        "northeast": {"latitude": 31.3014, "longitude": 121.5010},
+    }
+    track_pause_laps = [
+        _make_lap(1, 1000, 300, 152, intensity="ACTIVE"),
+        _make_lap(2, 1000, 298, 154, intensity="ACTIVE"),
+        _make_lap(3, 1000, 299, 155, intensity="ACTIVE"),
+        _make_lap(4, 20, 900, 120, intensity="RECOVERY"),  # Stopped at trackside bench to drink water
+        _make_lap(5, 1000, 301, 154, intensity="ACTIVE"),
+        _make_lap(6, 1000, 299, 156, intensity="ACTIVE"),
+        _make_lap(7, 1000, 300, 156, intensity="ACTIVE"),
+    ]
+    track_act = {
+        "id": "act_track_paused_6k",
+        "name": "操场有氧巡航",
+        "sport_type": "Run",
+        "distance_meters": 6020.0,
+        "moving_time_seconds": int(sum(x["duration_s"] for x in track_pause_laps)),
+        "avg_pace_str": "5:03/km",
+        "average_heartrate": 154,
+    }
+    seg_track = analyze_activity_segments(
+        activity=track_act,
+        track_data={"laps": track_pause_laps, "bounds": track_bounds},
+    )
+    assert seg_track["is_track_run"] is True
+    assert "间歇" not in seg_track["summary_title"]
+    assert "变速" not in seg_track["summary_title"]
+    assert all(p["phase_type"] != "intervals" for p in seg_track["phases"])
+
+
+
 
