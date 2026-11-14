@@ -51,26 +51,297 @@ def _fmt_km_cn(km: float) -> str:
     return f"{km:.1f}公里"
 
 
-def _sanitize_display_name(raw_name: Optional[str], fallback: str = "跑友") -> str:
-    """Extracts a safe public nickname, never leaking full emails or internal UIDs."""
+COMMON_SINGLE_SURNAMES = set(
+    "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖萧田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤"
+    "葛奚范郎鲁昌苗凤俞柳鲍费廉岑倪滕殷罗毕郝邬安常乐时傅皮卞齐康伍元卜平穆湛祁禹狄米贝明臧计伏成谈茅庞纪舒屈项祝董阮蓝闵席季麻强路娄危童颜梅盛刁骆樊凌霍虞支柯管卢莫经房裘缪干解应宗宣贲郁单杭洪包诸左钮嵇滑荣翁荀羊於惠甄曲家封芮储靳邴糜松井段富巫乌焦巴弓牧隗谷车宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符景詹束幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴郁胥能苍双闻莘党翟贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿边扈燕冀郏浦尚农温庄晏柴瞿阎充慕连茹习宦艾容向古易慎庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖冷訾辛阚那简饶空毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公晋楚法汝鄢涂钦归海岳帅缑亢况后琴商牟佘佴伯赏墨哈谯笪阳佟言福百楼畅官衣迟邝辜植盘麦冼旷练谌揭储"
+    "厳嚴張陳劉楊黃趙吳徐孫馬胡郭羅鄭謝韓馮鄧蕭蔣葉蘇呂盧鍾譚陸賈鄒邱閆龍黎賀顧龔萬錢"
+) - set("爱哈百有归别满空鱼羊山海花富幸能通广东西南北越师融红益年来")
+
+COMPOUND_SURNAMES = {
+    "欧阳", "太史", "端木", "上官", "司马", "东方", "独孤", "南宫", "万俟", "闻人",
+    "夏侯", "诸葛", "尉迟", "公羊", "赫连", "澹台", "皇甫", "宗政", "濮阳", "公冶",
+    "太叔", "申屠", "公孙", "慕容", "仲孙", "钟离", "长孙", "宇文", "司徒", "鲜于",
+    "司空", "闾丘", "子车", "亓官", "司寇", "巫马", "公西", "颛孙", "壤驷", "公良",
+    "漆雕", "乐正", "宰父", "谷梁", "拓跋", "夹谷", "轩辕", "令狐", "段干", "百里",
+    "呼延", "东郭", "南门", "羊舌", "微生", "公户", "公玉", "公仪", "梁丘", "公仲",
+    "公上", "公门", "公输", "公山", "公坚", "左丘", "公伯", "西门", "公祖", "第五",
+    "公乘", "贯丘", "公皙", "南荣", "东里", "东宫", "仲长", "子书", "子桑", "即墨",
+    "达奚", "褚师", "歐陽", "司馬", "諸葛", "東方", "皇甫", "長孫",
+}
+
+EXTRA_COMMON_NAME_CHARS = set(
+    "玥珺珣琪瑶瑾瑜璇璐璟璨镕喆淼鑫焱垚犇旻昊昱昶晟晔晖暄昀旸昕昉煦炀炫煊煌煜炜祺祎祯泓洵潆潇灏瀚宸宥骞騫龑曌"
+    "厳嚴張陳劉楊黃趙吳徐孫馬胡郭羅鄭謝韓馮鄧蕭蔣葉蘇呂盧鍾譚陸賈鄒邱閆龍黎賀顧龔萬錢"
+    "東華國偉強軍傑麗靜芳燕玲婷潔穎韻鵬飛維達凱瑋瑤賢輝榮慶鋒銘錦欽鈞鎮鈺澤鴻濤瀅歐陽諸長"
+)
+
+FORBIDDEN_NAME_CHARS = set(
+    "鬼魔傻疯呆死杀血泪痛恨怨渣废猪狗鼠猫虫虾蟹屎尿屁婊贱蠢笨胖病毒尸坟墓丧妖怪邪淫赌毒匪盗贼骗偷懒臭脏乱破烂穷苦悲惨愁哭亡灭绝"
+    "魑魅魍魉饕餮旮旯孑孓蛆蛔蟑螂蛤蟆蜈蚣蝎蜘蛛蚊蝇蚤虱"
+)
+
+ROLE_PLACEHOLDER_SUBSTRINGS = (
+    "跑者", "跑友", "团友", "用户", "微信", "匿名", "测试", "演示", "游客", "系统",
+    "管理员", "官方", "助手", "机器人", "客服", "账号", "注销", "未知", "默认",
+    "保密", "同团", "徒弟", "团员", "队员", "成员",
+)
+
+NON_NAME_CN_WORDS = {
+    "柠檬", "叮当", "跑马", "随风", "飞天", "淡定", "小小", "大大", "多多", "少少",
+    "哈哈", "呵呵", "嘻嘻", "啦啦", "加油", "开心", "快乐", "阳光", "清风", "明月",
+    "自由", "追风", "奔跑", "慢跑", "夜跑", "晨跑", "快跑", "健康", "平安", "幸福",
+    "无名", "路人", "过客", "普通", "神秘", "寂寞", "孤独", "逍遥", "自在", "随缘",
+    "空白", "清零", "归零", "初心", "坚持", "努力", "奋斗", "拼搏", "无畏", "勇敢",
+    "山野", "江湖", "天涯", "海角", "星辰", "大海", "蓝天", "白云", "微风", "细雨",
+    "跑步", "开水", "辣椒", "山野侠", "逍遥王", "香饽饽", "橙子妹", "静宝儿", "乐意李",
+    "独行侠", "追风者", "跑步机", "马拉松", "半程马", "全程马", "配速员", "兔子哥",
+    "小胖纸", "大胖子",
+}
+
+STANDALONE_2CHAR_BLOCK_CHARS = set(
+    "跑马随飞淡柠檬叮当鱼猫狗猪胖鬼神魔仙侠客狂浪醉空无不未非普通测试演示野买卖赌毒茶酒烟糖果菜饭肉汤泥草虫鸟鸭鸡鹅牛羊驴骡猴熊狼狐兔鹿象虎豹狮鹰蛇蛙龟蟹虾"
+)
+
+TITLE_SUFFIXES = {
+    "团长", "队长", "会长", "教练", "老师", "班长", "书记", "主任", "委员",
+    "先生", "女士", "同学", "师兄", "师姐", "学长", "学姐", "师傅",
+}
+AFFECTIONATE_PREFIXES = set("小阿老")
+AFFECTIONATE_SUFFIXES = set("哥姐叔姨娃总队")
+
+COMMON_EN_LOWER_NAMES = {
+    "alex", "alan", "alice", "amanda", "amber", "amy", "andy", "angela", "anna", "annie",
+    "arthur", "ashley", "austin", "bella", "ben", "betty", "bill", "bob", "brian", "bruce",
+    "carl", "carol", "cathy", "charles", "charlie", "chris", "cindy", "claire", "clara", "clark",
+    "coco", "colin", "crystal", "daisy", "dan", "daniel", "danny", "dave", "david", "dean",
+    "dennis", "derek", "diana", "dora", "dylan", "eddie", "eden", "edward", "elena", "eli",
+    "ella", "ellen", "elsa", "emily", "emma", "eric", "erica", "ethan", "eva", "evan",
+    "eve", "felix", "fiona", "frank", "fred", "gary", "george", "grace", "greg", "hannah",
+    "harry", "helen", "henry", "hugo", "ian", "iris", "isaac", "ivan", "ivy", "jack",
+    "jacky", "jacob", "jade", "jake", "james", "jane", "jason", "jay", "jean", "jeff",
+    "jenny", "jerry", "jesse", "jessica", "jill", "jim", "jimmy", "joan", "joe", "joey",
+    "john", "johnny", "jordan", "josh", "joy", "joyce", "judy", "julia", "julie", "justin",
+    "karen", "kate", "kathy", "katie", "kay", "keith", "kelly", "ken", "kevin", "kiko",
+    "kim", "kyle", "larry", "laura", "lauren", "leo", "leon", "lily", "linda", "lisa",
+    "logan", "lori", "louis", "lucas", "lucy", "luke", "lynn", "maggie", "mandy", "marc",
+    "marco", "maria", "marie", "mark", "martin", "mary", "matt", "max", "may", "megan",
+    "melody", "mia", "michael", "michelle", "mike", "mila", "mina", "molly", "monica", "nancy",
+    "nathan", "neil", "nick", "nicole", "nina", "noah", "nora", "oliver", "olivia", "oscar",
+    "owen", "pam", "patrick", "paul", "paula", "peggy", "penny", "peter", "phil", "phoebe",
+    "rachel", "ray", "rebecca", "rex", "richard", "rick", "rita", "rob", "robert", "robin",
+    "rock", "roger", "ron", "rose", "roy", "ruby", "ryan", "sabrina", "sakura",
+    "sally", "sam", "samantha", "sandy", "sara", "sarah", "scott", "sean", "serena", "shane",
+    "sharon", "sherry", "shirley", "simon", "sky", "sophia", "sophie", "stella", "stephen", "steve",
+    "steven", "sue", "summer", "sunny", "susan", "sylvia", "taylor", "ted", "teresa", "terry",
+    "thomas", "tim", "tina", "toby", "tom", "tommy", "tony", "tracy", "travis", "tyler",
+    "vera", "vicky", "victor", "victoria", "vincent", "vivian", "walter", "wanda", "wayne", "wendy",
+    "will", "william", "winnie", "yuki", "zack", "zoe", "zoey",
+}
+
+FORBIDDEN_EN_WORDS = {
+    "admin", "user", "runner", "running", "run", "jog", "fit", "gym", "test", "demo", "guest",
+    "anon", "anonymous", "null", "none", "undefined", "system", "apple", "wechat", "weixin",
+    "strava", "garmin", "coros", "huawei", "xiaomi", "keep", "nike", "adidas", "asics",
+    "club", "team", "coach", "captain", "boss", "king", "queen", "hero", "ghost", "devil",
+    "angel", "super", "ultra", "fast", "slow", "lazy", "crazy", "happy", "lucky", "free",
+    "wind", "fire", "water", "moon", "star", "dark", "light", "shadow", "solo", "piggy",
+    "vip", "ceo", "cfo", "cto", "pro", "dog", "cat", "pig", "cow", "fox", "ant", "bee",
+    "egg", "ice", "sun", "sea", "air", "red", "blue", "big", "old", "new", "one", "two",
+    "six", "ten", "yes", "not", "bad", "sad", "mad", "boy", "guy", "bro", "sis",
+}
+
+DEPT_KEYWORDS = (
+    "部", "组", "司", "处", "科", "室", "厂", "院", "局", "中心", "支队", "分队",
+    "松下", "洗护", "资材", "研发", "制造", "销售", "市场", "财务", "人事", "品质", "技术", "工程",
+)
+
+
+def _is_common_cjk_name_char(ch: str) -> bool:
+    if ch in FORBIDDEN_NAME_CHARS:
+        return False
+    if ch in EXTRA_COMMON_NAME_CHARS:
+        return True
+    try:
+        ch.encode("gb2312")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _resolve_pure_cn(s: str) -> Optional[str]:
+    if not re.match(r"^[\u4e00-\u9fff]{2,4}$", s):
+        return None
+    if s in NON_NAME_CN_WORDS:
+        return None
+    if any(sub in s for sub in ROLE_PLACEHOLDER_SUBSTRINGS):
+        return None
+    if not all(_is_common_cjk_name_char(ch) for ch in s):
+        return None
+
+    n = len(s)
+    if n == 2:
+        if s[0] in AFFECTIONATE_PREFIXES or s[1] in AFFECTIONATE_SUFFIXES:
+            return s
+        if s[0] in COMMON_SINGLE_SURNAMES:
+            if s[1] in "团群队组员号者友迷":
+                return None
+            return s
+        if s[0] == s[1]:
+            return s
+        if any(ch in STANDALONE_2CHAR_BLOCK_CHARS for ch in s):
+            return None
+        return s
+
+    if n == 3:
+        if s[0] in COMMON_SINGLE_SURNAMES and s[1:] in TITLE_SUFFIXES:
+            return s
+        if s[0] == "小" and s[1] == s[2]:
+            return s
+        if s[:2] in COMPOUND_SURNAMES:
+            if s[2] in "团群队组员号者友迷":
+                return None
+            return s
+        if s[:2] in ("乐意", "开心", "快乐", "逍遥", "山野", "奔跑", "追风", "随风", "阳光"):
+            return None
+        if s[2] in "侠王神仙圣霸帝皇狂客妹弟哥姐叔姨儿仔佬鬼魔怪迷者友员":
+            return None
+        if s[0] in COMMON_SINGLE_SURNAMES:
+            given = s[1:]
+            if given in NON_NAME_CN_WORDS:
+                return None
+            return given
+        return None
+
+    if n == 4:
+        if s[:2] in COMPOUND_SURNAMES:
+            given = s[2:]
+            if given in NON_NAME_CN_WORDS or any(c in "侠王神仙圣霸帝皇狂客妹弟儿仔佬鬼魔怪迷者友员" for c in given):
+                return None
+            return given
+        return None
+
+    return None
+
+
+def _resolve_pure_en(s: str) -> Optional[str]:
+    parts = s.split()
+    if len(parts) == 1:
+        tok = parts[0]
+        low = tok.lower()
+        if not (3 <= len(tok) <= 12) or not tok.isalpha():
+            return None
+        if low in FORBIDDEN_EN_WORDS:
+            return None
+        if not re.search(r"[aeiouyAEIOUY]", tok):
+            return None
+        if re.match(r"^[A-Z][a-z]{2,11}$", tok):
+            return tok
+        if low in COMMON_EN_LOWER_NAMES:
+            return tok.capitalize()
+        return None
+
+    if len(parts) == 2:
+        t1, t2 = parts
+        if not (t1.isalpha() and t2.isalpha()):
+            return None
+        if not (2 <= len(t1) <= 12 and 2 <= len(t2) <= 12):
+            return None
+        if t1.lower() in FORBIDDEN_EN_WORDS or t2.lower() in FORBIDDEN_EN_WORDS:
+            return None
+        if not (re.search(r"[aeiouyAEIOUY]", t1) and re.search(r"[aeiouyAEIOUY]", t2)):
+            return None
+        if t1.isupper() and re.match(r"^[A-Z][a-z]{1,11}$", t2):
+            return t2 if len(t2) >= 3 else f"{t1.capitalize()} {t2}"
+        if re.match(r"^[A-Z][a-z]{1,11}$", t1) and t2.isupper():
+            return t1 if (len(t1) >= 4 or t1.lower() in COMMON_EN_LOWER_NAMES) else f"{t1} {t2.capitalize()}"
+        if re.match(r"^[A-Z][a-z]{1,11}$", t1) and re.match(r"^[A-Z][a-z]{1,11}$", t2):
+            return t1 if (t1.lower() in COMMON_EN_LOWER_NAMES or len(t1) >= 4) else f"{t1} {t2}"
+        return None
+
+    return None
+
+
+def resolve_runner_salutation(raw_name: Optional[str]) -> Optional[str]:
+    """
+    Resolves a warm, natural teammate salutation exclusively from public `display_name`:
+    - 3-char / 4-char Chinese full names drop surname ("陈晓韵" -> "晓韵", "欧阳晓韵" -> "晓韵").
+    - 2-char / 3-char single given names keep full name ("李敏" -> "李敏", "欧阳修" -> "欧阳修").
+    - English names are addressed directly ("Alex" -> "Alex", "Alex Chen" -> "Alex").
+    - Strange symbols, auto-generated IDs, phone numbers, acronyms, and uncommon/non-name
+      handles return None so cheers omit a forced name (`避免称呼`).
+    """
     if not raw_name:
-        return fallback
+        return None
     s = str(raw_name).strip()
+    if not s or len(s) > 32:
+        return None
+    if "@" in s or "_" in s or re.search(r"\d", s):
+        return None
+
+    # Strip trailing org/dept parenthetical e.g. "郭渭炳（EP）"
+    s = re.sub(r"\s*[（(][A-Za-z\u4e00-\u9fff\s\-]{1,8}[)）]\s*$", "", s).strip()
     if not s:
-        return fallback
-    if "@" in s:
-        s = s.split("@", 1)[0].strip()
-    if not s or s.startswith(("u_", "wx_", "anon_")) or s in ("跑者", "用户", "微信用户"):
-        return fallback
-    return s[:16]
+        return None
+
+    if not re.match(r"^[\u4e00-\u9fffA-Za-z\s\-]+$", s):
+        return None
+
+    # Special case: "跑者Daniel" / "跑友Alex"
+    m_runner_en = re.match(r"^(?:跑者|跑友)\s*([A-Za-z]{3,12})$", s)
+    if m_runner_en:
+        return _resolve_pure_en(m_runner_en.group(1))
+
+    # Pure Chinese
+    if re.match(r"^[\u4e00-\u9fff]+$", s):
+        return _resolve_pure_cn(s)
+
+    # Pure English
+    if re.match(r"^[A-Za-z]+(?:\s+[A-Za-z]+)?$", s):
+        return _resolve_pure_en(s)
+
+    # Hyphen/space separated dept/company prefix + Chinese name, e.g. "PAPWMHZ-陈鹏", "松下洗护 吴维达"
+    sep_parts = [p.strip() for p in re.split(r"[\-\s]+", s) if p.strip()]
+    if len(sep_parts) == 2:
+        p0, p1 = sep_parts
+        if re.match(r"^[\u4e00-\u9fff]{2,4}$", p1):
+            has_ascii_prefix = bool(re.search(r"[A-Za-z]", p0))
+            has_dept_kw = any(kw in p0 for kw in DEPT_KEYWORDS) or len(p0) >= 3
+            if has_ascii_prefix or has_dept_kw:
+                return _resolve_pure_cn(p1)
+
+    # Unseparated ASCII dept/English prefix + Chinese name, e.g. "EP王奇平", "Ashin阿信"
+    m_prefix_cn = re.match(r"^([A-Za-z]{1,10})([\u4e00-\u9fff]{2,4})$", s)
+    if m_prefix_cn:
+        return _resolve_pure_cn(m_prefix_cn.group(2))
+
+    return None
 
 
 def _sanitize_captain_display_name(raw_name: Optional[str]) -> str:
-    """Formats captain role name without duplicating '团长'."""
-    nick = _sanitize_display_name(raw_name, fallback="")
-    if not nick:
+    """Formats captain role name safely without duplicating '团长' or surfacing strange handles."""
+    if not raw_name:
         return "团长"
-    return nick if nick.endswith("团长") else f"{nick}团长"
+    s = str(raw_name).strip()
+    if not s or len(s) > 32 or "@" in s or "_" in s or re.search(r"\d", s):
+        return "团长"
+    s = re.sub(r"\s*[（(][A-Za-z\u4e00-\u9fff\s\-]{1,8}[)）]\s*$", "", s).strip()
+    if not s or not re.match(r"^[\u4e00-\u9fffA-Za-z\s\-]+$", s):
+        return "团长"
+    if s.endswith("团长"):
+        if (
+            2 <= len(s) <= 6
+            and re.match(r"^[\u4e00-\u9fff]+$", s)
+            and not any(sub in s for sub in ROLE_PLACEHOLDER_SUBSTRINGS)
+            and all(_is_common_cjk_name_char(ch) for ch in s)
+        ):
+            return s
+        return "团长"
+    if len(s) == 1 and s in COMMON_SINGLE_SURNAMES:
+        return f"{s}团长"
+    sal = resolve_runner_salutation(s)
+    if not sal:
+        return "团长"
+    return sal if sal.endswith("团长") else f"{sal}团长"
 
 
 def _sanitize_public_cheer(text: str) -> str:
@@ -151,7 +422,7 @@ def _build_captain_cheer_text(
     *,
     act: Dict[str, Any],
     act_date: Optional[date],
-    runner_name: str,
+    runner_name: Optional[str],
     is_captain_self: bool,
     gender_bucket: str,
     age_bucket: str,
@@ -217,10 +488,15 @@ def _build_captain_cheer_text(
                 f"顺利拿下【{race_title}】{dist_str}，以身作则带队燃爆全场！",
                 f"完美完赛【{race_title}】{dist_str}，咱们【{club_name}】的荣誉勋章又添一枚！",
             ])
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 0, [
                 f"热烈祝贺{runner_name}顺利完赛【{race_title}】{dist_str}！全团都为你骄傲，{runner_name}太强了！",
                 f"太燃了！恭喜{runner_name}稳稳拿下【{race_title}】{dist_str}，每一公里都是实打实的底气，加油！",
+            ])
+        else:
+            opener = _pick_variant(seed, 0, [
+                f"热烈祝贺顺利完赛【{race_title}】{dist_str}！全团都为你骄傲，太强了！",
+                f"太燃了！恭喜稳稳拿下【{race_title}】{dist_str}，每一公里都是实打实的底气，继续加油！",
             ])
     elif matched_event or is_group_kw:
         scenario = "group_run"
@@ -231,11 +507,17 @@ def _build_captain_cheer_text(
                 f"合练涨功力！今天带领大家一起跑完{ev_label}（{dist_str}），感谢每位一起流汗的团友！",
                 f"和大家并肩跑完{ev_label}，稳稳进账{dist_str}，团队一起奔跑氛围太棒了！",
             ])
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 1, [
                 f"合练涨功力！谢谢{runner_name}参加{ev_label}，稳稳进账{dist_str}，{runner_name}太赞了！",
                 f"今天{ev_label}（{dist_str}）和大家一起并肩突破，合练涨功力！谢谢{runner_name}积极参与！",
                 f"合练氛围拉满！谢谢{runner_name}打卡{ev_label}，顺利完成{dist_str}！",
+            ])
+        else:
+            opener = _pick_variant(seed, 1, [
+                f"合练涨功力！谢谢参加{ev_label}，稳稳进账{dist_str}，表现太赞了！",
+                f"今天{ev_label}（{dist_str}）和大家一起并肩突破，合练涨功力！感谢积极参与！",
+                f"合练氛围拉满！谢谢准时打卡{ev_label}，顺利完成{dist_str}！",
             ])
     elif planned_day and not _is_rest_day_dict(planned_day) and float(planned_day.get("distance_km") or 0.0) >= 2.0:
         plan_km = float(planned_day.get("distance_km") or 0.0)
@@ -249,20 +531,31 @@ def _build_captain_cheer_text(
                     f"顺利拿下今天的课表{plan_km_str}，自己先带头打卡表率，大家一起加油！",
                     f"今天的课表{plan_km_str}准时交卷，跟全团伙伴并肩进步！",
                 ])
-            else:
+            elif runner_name:
                 opener = _pick_variant(seed, 2, [
                     f"太强了，完成了今天的课表{plan_km_str}，{runner_name}加油！",
                     f"执行力满分！{runner_name}稳稳拿下了今天的课表{plan_km_str}{f'（{plan_title}）' if plan_title else ''}，继续加油！",
                     f"今天{plan_km_str}的课表{runner_name}完美兑现，节奏拿捏得很稳，{runner_name}加油！",
                 ])
+            else:
+                opener = _pick_variant(seed, 2, [
+                    f"太强了，完成了今天的课表{plan_km_str}，继续加油！",
+                    f"执行力满分！稳稳拿下了今天的课表{plan_km_str}{f'（{plan_title}）' if plan_title else ''}，太棒了！",
+                    f"今天{plan_km_str}的课表完美兑现，节奏拿捏得很稳，继续加油！",
+                ])
         else:
             scenario = "plan_adjusted"
             if is_captain_self:
                 opener = f"今天稳稳跑完{dist_str}，顺应体感灵活微调课表节奏，健康持久奔跑最重要！"
-            else:
+            elif runner_name:
                 opener = _pick_variant(seed, 2, [
                     f"很棒！{runner_name}今天扎实跑完{dist_str}，能倾听身体体感灵活调整课表，这份自律和清醒太难得了，加油！",
                     f"为你点赞，{runner_name}完成{dist_str}！懂得结合当下状态把控课表节奏才是长跑高手，{runner_name}继续加油！",
+                ])
+            else:
+                opener = _pick_variant(seed, 2, [
+                    f"很棒！今天扎实跑完{dist_str}，能倾听身体体感灵活调整课表，这份自律和清醒太难得了，加油！",
+                    f"为你点赞，顺利完成{dist_str}！懂得结合当下状态把控课表节奏才是长跑高手，继续加油！",
                 ])
     elif is_trail:
         scenario = "trail"
@@ -270,47 +563,73 @@ def _build_captain_cheer_text(
         elev_desc = f"（累计爬升+{elev_int}米）" if elev_int >= 50 else ""
         if is_captain_self:
             opener = f"进山拉练{dist_str}{elev_desc}圆满打卡，爬坡磨意志，回头继续带大家浪山！"
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 3, [
                 f"野性拉满！{runner_name}在山野中稳稳拿下了{dist_str}{elev_desc}，每一步爬升都在长功力，加油！",
                 f"太牛了！{runner_name}完成{dist_str}山地越野{elev_desc}，硬核腿力与毅力双在线，继续加油！",
+            ])
+        else:
+            opener = _pick_variant(seed, 3, [
+                f"野性拉满！在山野中稳稳拿下了{dist_str}{elev_desc}，每一步爬升都在长功力，加油！",
+                f"太牛了！顺利完成{dist_str}山地越野{elev_desc}，硬核腿力与毅力双在线，继续加油！",
             ])
     elif dist_km >= 16.0:
         scenario = "long_run"
         if is_captain_self:
             opener = f"周末长距离{dist_str}顺利拿下，稳步积累有氧里程，跟伙伴们一起冲！"
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 4, [
                 f"耐力大片上线！{runner_name}稳稳拿下{dist_str}长距离拉练，这份韧劲真棒，{runner_name}加油！",
                 f"太给力了！{dist_str}长距离顺利交卷，有氧底盘又厚了一大截，{runner_name}真棒！",
+            ])
+        else:
+            opener = _pick_variant(seed, 4, [
+                f"耐力大片上线！稳稳拿下{dist_str}长距离拉练，这份韧劲真的太棒了，加油！",
+                f"太给力了！{dist_str}长距离顺利交卷，有氧底盘又厚了一大截，表现真棒！",
             ])
     elif days_since_prev is not None and days_since_prev >= 6:
         scenario = "comeback"
         if is_captain_self:
             opener = f"重启跑鞋稳稳拿下{dist_str}，重新找回风驰电掣的自由节奏！"
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 5, [
                 f"欢迎{runner_name}元气回归跑道！顺利拿下{dist_str}，跑起来就赢了一半，{runner_name}加油！",
                 f"好久不见的赛道身影回来啦！{runner_name}稳稳完成{dist_str}回归跑，循序渐进找回快乐节奏，加油！",
+            ])
+        else:
+            opener = _pick_variant(seed, 5, [
+                f"欢迎元气回归跑道！顺利拿下{dist_str}，跑起来就赢了一半，继续加油！",
+                f"好久不见的赛道身影回来啦！稳稳完成{dist_str}回归跑，循序渐进找回快乐节奏，加油！",
             ])
     elif streak_days >= 3:
         scenario = "streak"
         if is_captain_self:
             opener = f"连续第{streak_days}天稳稳打卡（今日{dist_str}），热爱不停步也要注意劳逸结合！"
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 6, [
                 f"这股恒心太顶了！{runner_name}连续第{streak_days}天准时打卡（今日{dist_str}），{runner_name}真稳！",
                 f"连续{streak_days}天线上打卡集结，今天再收下{dist_str}！自律的{runner_name}太强了，加油！",
+            ])
+        else:
+            opener = _pick_variant(seed, 6, [
+                f"这股恒心太顶了！连续第{streak_days}天准时打卡（今日{dist_str}），节奏真稳！",
+                f"连续{streak_days}天线上打卡集结，今天再收下{dist_str}！这份自律太强了，继续加油！",
             ])
     else:
         scenario = "daily"
         if is_captain_self:
             opener = f"今天日常打卡{dist_str}顺利完成，继续保持好状态陪全团一起稳步奔跑！"
-        else:
+        elif runner_name:
             opener = _pick_variant(seed, 7, [
                 f"漂亮，{runner_name}今天顺利打卡{dist_str}！每次迈出脚步都在积蓄能量，{runner_name}加油！",
                 f"太稳了，{runner_name}轻松完成今天{dist_str}奔跑！享受汗水与晚风，继续加油！",
                 f"给{runner_name}点个大赞！今日{dist_str}稳健进账，步履不停就是最好的榜样，加油！",
+            ])
+        else:
+            opener = _pick_variant(seed, 7, [
+                f"漂亮！今天顺利打卡{dist_str}，每次迈出脚步都在积蓄能量，继续加油！",
+                f"太稳了！轻松完成今天{dist_str}奔跑，享受汗水与晚风，继续加油！",
+                f"点个大赞！今日{dist_str}稳健进账，步履不停就是最好的榜样，加油！",
             ])
 
     # ── 2. Persona & Mileage Clause (Gender / Age Bucket / Running Years / Volume) ──
@@ -853,9 +1172,8 @@ def enrich_activities_with_captain_cheer(
         cid = str(chosen_club["id"])
         prof = profiles_map.get(canon_uid) or {}
 
-        runner_name = _sanitize_display_name(
-            prof.get("display_name") or act.get("display_name"),
-            fallback="跑友",
+        runner_name = resolve_runner_salutation(
+            prof.get("display_name") or act.get("display_name")
         )
         gender_bucket = _normalize_gender_bucket(prof.get("gender"))
         age_bucket = _normalize_age_bucket(prof.get("date_of_birth"))

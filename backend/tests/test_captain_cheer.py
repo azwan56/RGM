@@ -11,7 +11,11 @@ import routers.miniapp as miniapp_mod
 import utils.local_store as ls_mod
 from config import settings
 from main import app
-from utils.captain_cheer import enrich_activities_with_captain_cheer, generate_activity_captain_cheer
+from utils.captain_cheer import (
+    enrich_activities_with_captain_cheer,
+    generate_activity_captain_cheer,
+    resolve_runner_salutation,
+)
 from utils.local_store import LocalStore, init_db
 
 
@@ -651,3 +655,289 @@ def test_multi_club_attribution_and_solo_runner_exclusion(isolated_db):
     )
     assert del_cheer is None
     assert del_meta is None
+
+
+def test_resolve_runner_salutation_categories():
+    # 1. Full Chinese names (单姓双名 / 复姓双名 / 附带部门公司后缀) drop surname cleanly
+    full_name_cases = [
+        ("陈晓韵", "晓韵"),
+        ("王鹏飞", "鹏飞"),
+        ("戴维飞", "维飞"),
+        ("楼达可", "达可"),
+        ("厳旭東", "旭東"),
+        ("欧阳晓韵", "晓韵"),
+        ("司马相如", "相如"),
+        ("郭渭炳（EP）", "渭炳"),
+        ("松下洗护 吴维达", "维达"),
+        ("EP王奇平", "奇平"),
+    ]
+    for raw, expected in full_name_cases:
+        assert resolve_runner_salutation(raw) == expected, f"{raw} -> expected {expected}"
+
+    # 2. Single given names (单姓单名 / 复姓单名) and affectionate appellations keep full name
+    single_given_and_affectionate = [
+        ("李敏", "李敏"),
+        ("杨杰", "杨杰"),
+        ("陈侠", "陈侠"),
+        ("欧阳修", "欧阳修"),
+        ("PAPWMHZ-陈鹏", "陈鹏"),
+        ("WMHZ资材-程琦", "程琦"),
+        ("老梁", "老梁"),
+        ("阿哲", "阿哲"),
+        ("阿玥", "阿玥"),
+        ("小光", "小光"),
+        ("小凯", "小凯"),
+        ("梅姐", "梅姐"),
+        ("琪哥", "琪哥"),
+        ("林林", "林林"),
+        ("小辉辉", "小辉辉"),
+        ("王团长", "王团长"),
+    ]
+    for raw, expected in single_given_and_affectionate:
+        assert resolve_runner_salutation(raw) == expected, f"{raw} -> expected {expected}"
+
+    # 3. English names are addressed directly
+    en_cases = [
+        ("Alex", "Alex"),
+        ("Mina", "Mina"),
+        ("Amanda", "Amanda"),
+        ("Sakura", "Sakura"),
+        ("Alex Chen", "Alex"),
+        ("WANG Xiaoyun", "Xiaoyun"),
+        ("eden", "Eden"),
+        ("kiko", "Kiko"),
+        ("跑者Daniel", "Daniel"),
+    ]
+    for raw, expected in en_cases:
+        assert resolve_runner_salutation(raw) == expected, f"{raw} -> expected {expected}"
+
+    # 4. Strange symbols, system IDs, phone numbers, acronyms, and uncommon/non-name handles -> None
+    avoid_cases = [
+        "",
+        None,
+        "跑者_105d",
+        "Apple跑者_f368",
+        "微信用户",
+        "小🐑",
+        "往。",
+        "GKG.",
+        "13805768239",
+        "LM",
+        "sw",
+        "TSB",
+        "吕",
+        "鱼",
+        "月亮魅力",
+        "横笛清风",
+        "成路路成",
+        "精力充沛之鬼",
+        "灵活的小胖纸",
+        "风从海上来",
+        "山野侠",
+        "逍遥王",
+        "香饽饽",
+        "乐意李",
+        "中島 洋",
+        "宮地健介",
+        "piggyapple",
+        "solojack",
+        "wnaglihui",
+        "柠檬",
+        "叮当",
+        "跑马",
+        "随风",
+        "飞天",
+        "淡定",
+        "小小",
+        "魑魅",
+        "饕餮",
+        "龘靐",
+    ]
+    for raw in avoid_cases:
+        assert resolve_runner_salutation(raw) is None, f"{raw!r} should resolve to None"
+
+
+def test_end_to_end_salutation_in_cheer_sentences_and_privacy(isolated_db):
+    today = LocalStore.get_beijing_today()
+    today_iso = today.isoformat()
+    owner = "u_cc_sal_owner"
+    r_full = "u_cc_sal_full"
+    r_single = "u_cc_sal_single"
+    r_en = "u_cc_sal_en"
+    r_sym = "u_cc_sal_sym"
+    club_id = "club_cc_salutation"
+
+    # Captain has symbol/acronym handle -> falls back cleanly to generic "团长"
+    LocalStore.upsert_profile(owner, {"id": owner, "display_name": "GKG."})
+    LocalStore.upsert_profile(r_full, {"id": r_full, "display_name": "陈晓韵", "gender": "female"})
+    LocalStore.upsert_profile(r_single, {"id": r_single, "display_name": "李敏", "gender": "female"})
+    LocalStore.upsert_profile(r_en, {"id": r_en, "display_name": "Alex", "gender": "male"})
+    LocalStore.upsert_profile(
+        r_sym,
+        {
+            "id": r_sym,
+            "display_name": "小🐑",
+            "real_name": "张建国",
+            "gender": "male",
+        },
+    )
+
+    _seed_club(
+        club_id,
+        "清风跑团",
+        owner,
+        [
+            (owner, "owner"),
+            (r_full, "member"),
+            (r_single, "member"),
+            (r_en, "member"),
+            (r_sym, "member"),
+        ],
+        invite_code="CCSAL1",
+    )
+
+    # Scheduled 20km plan and group run event for testing nameless r_sym across multiple scenarios
+    sched = {
+        "weeks": [
+            {
+                "week": 1,
+                "days": [{"date": today_iso, "title": "周末有氧课表", "distance_km": 20, "workout_type": "Long"}],
+            }
+        ]
+    }
+    with sqlite3.connect(ls_mod.DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO training_plans
+            (id, user_id, title, goal_type, status, schedule_data, creator_id, created_at, updated_at)
+            VALUES (?, ?, '备赛计划', 'marathon', 'active', ?, ?, ?, ?)
+            """,
+            ("tp_cc_sal_sym", r_sym, json.dumps(sched, ensure_ascii=False), r_sym, today_iso, today_iso),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO club_events
+            (id, club_id, title, event_type, start_date, end_date, meet_time, created_at)
+            VALUES (?, ?, '滨江例跑', 'lsd_group_run', ?, ?, '07:00', ?)
+            """,
+            ("ev_cc_sal", club_id, today_iso, today_iso, today_iso),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO club_event_participants
+            (id, event_id, club_id, user_id, joined_at, status, activity_id)
+            VALUES (?, 'ev_cc_sal', ?, ?, ?, 'joined', ?)
+            """,
+            ("cep_cc_sal_sym", club_id, r_sym, today_iso, "act_sal_sym_grp"),
+        )
+        conn.commit()
+
+    # Daily check-ins for the 3 named categories
+    c_full, m_full = generate_activity_captain_cheer(
+        {
+            "id": "act_sal_full",
+            "user_id": r_full,
+            "name": "晨跑打卡",
+            "sport_type": "Run",
+            "start_time": f"{today_iso}T07:00:00",
+            "distance_meters": 10000.0,
+            "moving_time_seconds": 3200,
+        },
+        club_id=club_id,
+    )
+    assert m_full["captain_title"] == "清风跑团 · 团长"
+    assert "晓韵" in c_full
+    assert "陈晓韵" not in c_full
+
+    c_single, _ = generate_activity_captain_cheer(
+        {
+            "id": "act_sal_single",
+            "user_id": r_single,
+            "name": "夜跑打卡",
+            "sport_type": "Run",
+            "start_time": f"{today_iso}T20:00:00",
+            "distance_meters": 8000.0,
+            "moving_time_seconds": 2600,
+        },
+        club_id=club_id,
+    )
+    assert "李敏" in c_single
+
+    c_en, _ = generate_activity_captain_cheer(
+        {
+            "id": "act_sal_en",
+            "user_id": r_en,
+            "name": "Tempo",
+            "sport_type": "Run",
+            "start_time": f"{today_iso}T07:30:00",
+            "distance_meters": 12000.0,
+            "moving_time_seconds": 3300,
+        },
+        club_id=club_id,
+    )
+    assert "Alex" in c_en
+
+    # Nameless member across plan_completed, group_run, daily, and race scenarios:
+    # NEVER surface display_name emoji, NEVER substitute "跑友", and NEVER leak encrypted real_name!
+    sym_acts = [
+        (
+            "plan_completed",
+            {
+                "id": "act_sal_sym_plan",
+                "user_id": r_sym,
+                "name": "20K专项课",
+                "sport_type": "Run",
+                "start_time": f"{today_iso}T06:00:00",
+                "distance_meters": 20000.0,
+                "moving_time_seconds": 6000,
+            },
+        ),
+        (
+            "group_run",
+            {
+                "id": "act_sal_sym_grp",
+                "user_id": r_sym,
+                "name": "滨江合练",
+                "sport_type": "Run",
+                "start_time": f"{today_iso}T07:00:00",
+                "distance_meters": 15000.0,
+                "moving_time_seconds": 4600,
+            },
+        ),
+        (
+            "race",
+            {
+                "id": "act_sal_sym_race",
+                "user_id": r_sym,
+                "name": "上海马拉松",
+                "sport_type": "Run",
+                "start_time": f"{today_iso}T07:30:00",
+                "distance_meters": 42195.0,
+                "moving_time_seconds": 12000,
+            },
+        ),
+        (
+            "daily",
+            {
+                "id": "act_sal_sym_daily",
+                "user_id": r_sym,
+                "name": "放松跑",
+                "sport_type": "Run",
+                "start_time": f"{(today - ls_mod.timedelta(days=1)).isoformat()}T07:30:00",
+                "distance_meters": 6000.0,
+                "moving_time_seconds": 2100,
+            },
+        ),
+    ]
+    for expected_scenario, act_payload in sym_acts:
+        sc_cheer, sc_meta = generate_activity_captain_cheer(act_payload, club_id=club_id)
+        assert sc_meta["scenario"] == expected_scenario
+        assert sc_cheer
+        assert "小🐑" not in sc_cheer
+        assert "🐑" not in sc_cheer
+        assert "跑友" not in sc_cheer
+        assert "张建国" not in sc_cheer
+        assert "建国" not in sc_cheer
+        assert "，，" not in sc_cheer
+        assert "  " not in sc_cheer
+        assert not sc_cheer.startswith(("，", "！", "。"))
