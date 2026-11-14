@@ -1966,8 +1966,8 @@ export default function DashboardPage() {
                         )}
 
                         {mode !== "excluded" && act.captain_cheer && (
-                          <div className="bg-[#1b1812] border-l-[3px] border-l-amber-400 rounded-r-xl px-3.5 py-2.5 text-xs text-amber-100/90 leading-relaxed">
-                            <strong className="font-bold text-amber-300">
+                          <div className="bg-[#18181c] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 leading-relaxed">
+                            <strong className="font-bold text-[#FC4C02]">
                               📣 {act.captain_cheer_meta?.captain_title || "团长加油"}：
                             </strong>
                             {act.captain_cheer}

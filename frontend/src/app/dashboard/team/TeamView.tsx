@@ -3475,17 +3475,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                       {/* Public Club Captain Cheer Bubble */}
                       {act.captain_cheer && (
-                        <div className="bg-gradient-to-r from-amber-950/30 via-[#221c15] to-orange-950/25 border border-amber-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
-                          <div className="flex items-center justify-between gap-2 font-bold text-amber-300 mb-1.5">
-                            <span className="flex items-center gap-1.5">
-                              <span>📣</span>
-                              <span>{act.captain_cheer_meta?.captain_title || "团长加油"}</span>
-                            </span>
-                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              全员可见
+                        <div className="bg-[#121214] border border-white/5 rounded-2xl p-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-[#FC4C02] text-[11px]">
+                              📣 {act.captain_cheer_meta?.captain_title || "团长加油"}
                             </span>
                           </div>
-                          <p className="text-xs text-amber-100/90 leading-relaxed font-sans">
+                          <p className="text-zinc-200 mt-1 text-xs leading-relaxed">
                             {act.captain_cheer}
                           </p>
                         </div>

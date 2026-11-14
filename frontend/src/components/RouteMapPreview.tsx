@@ -805,16 +805,11 @@ export default function RouteMapPreview({
 
               {/* Public Club Captain Cheer */}
               {(fetchedCaptainCheer ?? captainCheer) && (
-                <div className="rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-[#221c15] to-orange-950/25 p-4 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-xs font-bold text-amber-300">
-                    <span>
-                      📣 {(fetchedCaptainMeta ?? captainCheerMeta)?.captain_title || "团长加油"}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                      全员可见
-                    </span>
+                <div className="rounded-2xl border border-white/10 bg-[#121216] p-4 space-y-1">
+                  <div className="text-[11px] font-bold text-[#FC4C02]">
+                    📣 {(fetchedCaptainMeta ?? captainCheerMeta)?.captain_title || "团长加油"}
                   </div>
-                  <p className="text-xs text-amber-100/90 leading-relaxed">
+                  <p className="text-xs text-zinc-200 leading-relaxed">
                     {fetchedCaptainCheer ?? captainCheer}
                   </p>
                 </div>
