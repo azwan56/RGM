@@ -611,6 +611,8 @@ async function fetchShareCardData(actId?: string, dateStr?: string, rId?: string
 
     const activeClubId = getActiveClubId() || "";
     const qs: string[] = [`env_version=${encodeURIComponent(envVer)}`];
+    const viewerUid = getStoredUser()?.id || "";
+    if (viewerUid) qs.push(`viewer_uid=${encodeURIComponent(viewerUid)}`);
     if (rId) {
       qs.push(`race_id=${encodeURIComponent(rId)}`);
     } else {
@@ -1636,8 +1638,22 @@ async function renderPosterCanvas() {
     );
 
     const finalCommentary = (customCommentary.value || d.canova_commentary || "").trim();
-    ctx.setFillStyle(isLight ? "#334155" : "#e4e4e7");
-    drawWrappedText(ctx, `“${finalCommentary}”`, pX + 24, cY + 80, pW - 52, 33, showDailyPlan.value ? 5 : 6, 18);
+    if (finalCommentary) {
+      ctx.setFillStyle(isLight ? "#334155" : "#e4e4e7");
+      drawWrappedText(ctx, `“${finalCommentary}”`, pX + 24, cY + 80, pW - 52, 33, showDailyPlan.value ? 5 : 6, 18);
+    } else if (d.is_critique_hidden) {
+      ctx.setFillStyle(isLight ? "#64748B" : "#94a3b8");
+      drawWrappedText(
+        ctx,
+        "🔒 该跑者已将 Canova 教练评语设为仅自己或特定范围可见",
+        pX + 24,
+        cY + 84,
+        pW - 52,
+        33,
+        2,
+        18
+      );
+    }
     ctx.restore();
 
     // ── SECTION 5: Invitation QR Code Footer (邀请二维码, Y: 1224 -> 1412, H: 188) ──

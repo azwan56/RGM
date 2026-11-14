@@ -68,6 +68,15 @@ export default function PersonalShareCardModal({
       setLoading(true);
       try {
         const qs = new URLSearchParams();
+        try {
+          const rawSess = typeof window !== "undefined" ? localStorage.getItem("rgm_auth_session") : null;
+          if (rawSess) {
+            const parsedSess = JSON.parse(rawSess);
+            if (parsedSess?.user?.id) {
+              qs.set("viewer_uid", String(parsedSess.user.id));
+            }
+          }
+        } catch {}
         if (rId) {
           qs.set("race_id", rId);
         } else if (actId) {
@@ -877,17 +886,32 @@ export default function PersonalShareCardModal({
       ctx.fillStyle = isLight ? "#0F172A" : "#c084fc";
       ctx.fillText(isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评", pX + 24, cY + 40);
 
-      ctx.font = "18px sans-serif";
-      ctx.fillStyle = isLight ? "#334155" : "#e4e4e7";
-      drawWrappedText(
-        ctx,
-        `“${(customCommentary || d.canova_commentary || "").trim()}”`,
-        pX + 24,
-        cY + 80,
-        pW - 52,
-        33,
-        showDailyPlan ? 5 : 6
-      );
+      const cardQuote = (customCommentary || d.canova_commentary || "").trim();
+      if (cardQuote) {
+        ctx.font = "18px sans-serif";
+        ctx.fillStyle = isLight ? "#334155" : "#e4e4e7";
+        drawWrappedText(
+          ctx,
+          `“${cardQuote}”`,
+          pX + 24,
+          cY + 80,
+          pW - 52,
+          33,
+          showDailyPlan ? 5 : 6
+        );
+      } else if (d.is_critique_hidden) {
+        ctx.font = "18px sans-serif";
+        ctx.fillStyle = isLight ? "#64748B" : "#a1a1aa";
+        drawWrappedText(
+          ctx,
+          "🔒 该跑者已将 Canova 教练评语设为仅自己或特定范围可见",
+          pX + 24,
+          cY + 84,
+          pW - 52,
+          33,
+          2
+        );
+      }
       ctx.restore();
 
       // Section 5: Invite QR Code

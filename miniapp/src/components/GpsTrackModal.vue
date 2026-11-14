@@ -461,6 +461,7 @@ const elevationProfile = ref<Array<{ dist_km: number; elevation_m: number; hr?: 
 const mapImageUrl = ref("");
 const segmentAnalysis = ref<any>(null);
 const isSegmentHidden = ref(false);
+const isCritiqueHidden = ref(false);
 const segmentHiddenMsg = ref("");
 
 const trackCenter = ref<{ latitude: number; longitude: number }>({ latitude: 28.0, longitude: 114.0 });
@@ -482,6 +483,7 @@ const elevationGain = computed(() => {
 });
 
 const coachCritique = computed(() => {
+  if (isCritiqueHidden.value) return "";
   const raw = activityData.value?.ai_journal ?? props.initialActivity?.ai_journal;
   if (!raw) return "";
   if (typeof raw === "object") {
@@ -855,6 +857,7 @@ function resetState() {
   mapImageUrl.value = "";
   segmentAnalysis.value = null;
   isSegmentHidden.value = false;
+  isCritiqueHidden.value = false;
   segmentHiddenMsg.value = "";
   errorMsg.value = "";
   activeTab.value = "map";
@@ -874,6 +877,7 @@ async function loadTrack() {
   if (props.initialActivity) {
     activityData.value = props.initialActivity;
     mapImageUrl.value = props.initialActivity.map_image_url || "";
+    isCritiqueHidden.value = Boolean(props.initialActivity.is_critique_hidden);
   }
 
   try {
@@ -884,6 +888,7 @@ async function loadTrack() {
       activityData.value = res.activity || activityData.value;
       mapImageUrl.value = res.map_image_url || mapImageUrl.value;
       isSegmentHidden.value = Boolean(res.is_segment_hidden);
+      isCritiqueHidden.value = Boolean(res.is_critique_hidden ?? res.activity?.is_critique_hidden);
       segmentHiddenMsg.value = res.segment_hidden_message || res.message || "";
       segmentAnalysis.value = res.segment_analysis || null;
 

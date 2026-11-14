@@ -755,6 +755,16 @@ def init_db():
             cursor.execute("ALTER TABLE profiles ADD COLUMN hide_gps_route BOOLEAN DEFAULT 0")
         if "hide_biometrics" not in existing_cols:
             cursor.execute("ALTER TABLE profiles ADD COLUMN hide_biometrics BOOLEAN DEFAULT 0")
+        if "canova_critique_visibility" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN canova_critique_visibility TEXT DEFAULT 'self'")
+        if "canova_critique_club_ids" not in existing_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN canova_critique_club_ids TEXT DEFAULT '[]'")
+        cursor.execute(
+            "UPDATE profiles SET canova_critique_visibility = 'self' WHERE canova_critique_visibility IS NULL OR TRIM(canova_critique_visibility) = ''"
+        )
+        cursor.execute(
+            "UPDATE profiles SET canova_critique_club_ids = '[]' WHERE canova_critique_club_ids IS NULL OR TRIM(canova_critique_club_ids) = ''"
+        )
 
         # Mentorship relationships table (1-on-1 per mentee, max 3 mentees per mentor, cross-club within same org)
         cursor.execute("""
@@ -1227,6 +1237,36 @@ class LocalStore:
     RUNNING_SPORT_TYPES = RUNNING_SPORT_TYPES
     RUNNING_SQL_FILTER = RUNNING_SQL_FILTER
     SUPER_ADMIN_UIDS = {"admin", "super_admin", "u_df65d9a588c9", "u_wx_0f769b6cfb"}
+    VALID_CANOVA_CRITIQUE_VISIBILITY = ("self", "coach_mentor", "selected_clubs", "all_clubs")
+
+    @staticmethod
+    def normalize_canova_critique_visibility(val: Any) -> str:
+        s = str(val or "").strip().lower()
+        return s if s in LocalStore.VALID_CANOVA_CRITIQUE_VISIBILITY else "self"
+
+    @staticmethod
+    def parse_canova_critique_club_ids(val: Any) -> List[str]:
+        if val is None or val == "":
+            return []
+        items: Any = val
+        if isinstance(val, str):
+            raw_s = val.strip()
+            if not raw_s:
+                return []
+            try:
+                items = json.loads(raw_s)
+            except Exception:
+                return []
+        if not isinstance(items, (list, tuple, set)):
+            return []
+        out: List[str] = []
+        seen = set()
+        for it in items:
+            cid = str(it or "").strip()
+            if cid and cid not in seen:
+                seen.add(cid)
+                out.append(cid)
+        return out
 
     @staticmethod
     def is_running_activity(sport_type: Optional[str]) -> bool:
@@ -1589,6 +1629,12 @@ class LocalStore:
         for flag in ("garmin_connected", "coros_connected", "apple_watch_connected", "huawei_connected", "suunto_connected"):
             if flag in res:
                 res[flag] = bool(res.get(flag))
+        res["canova_critique_visibility"] = LocalStore.normalize_canova_critique_visibility(
+            res.get("canova_critique_visibility")
+        )
+        res["canova_critique_club_ids"] = LocalStore.parse_canova_critique_club_ids(
+            res.get("canova_critique_club_ids")
+        )
         for f in ["id_card", "date_of_birth", "phone", "real_name"]:
             if f in res and res[f]:
                 res[f] = decrypt_pii(res[f])
@@ -1775,6 +1821,15 @@ class LocalStore:
         for pii in ["id_card", "date_of_birth", "phone", "real_name"]:
             if pii in data and data[pii] is not None:
                 data[pii] = encrypt_pii(data[pii])
+        if "canova_critique_visibility" in data and data["canova_critique_visibility"] is not None:
+            data["canova_critique_visibility"] = LocalStore.normalize_canova_critique_visibility(
+                data["canova_critique_visibility"]
+            )
+        if "canova_critique_club_ids" in data and data["canova_critique_club_ids"] is not None:
+            data["canova_critique_club_ids"] = json.dumps(
+                LocalStore.parse_canova_critique_club_ids(data["canova_critique_club_ids"]),
+                ensure_ascii=False,
+            )
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -9561,8 +9616,16 @@ class LocalStore:
             owner_prof_id = act.pop("_owner_profile_id", None)
             h_gps = act.pop("_owner_hide_gps", None)
             h_bio = act.pop("_owner_hide_bio", None)
-            if owner_uid and owner_prof_id and (h_gps is not None or h_bio is not None):
-                prof_stub = {"id": str(owner_prof_id), "hide_gps_route": bool(h_gps), "hide_biometrics": bool(h_bio)}
+            c_vis = act.pop("_owner_critique_vis", None)
+            c_clubs = act.pop("_owner_critique_clubs", None)
+            if owner_uid and owner_prof_id and (h_gps is not None or h_bio is not None or c_vis is not None):
+                prof_stub = {
+                    "id": str(owner_prof_id),
+                    "hide_gps_route": bool(h_gps),
+                    "hide_biometrics": bool(h_bio),
+                    "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(c_vis),
+                    "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(c_clubs),
+                }
                 profile_cache[owner_uid] = prof_stub
                 profile_cache[str(owner_prof_id)] = prof_stub
 
@@ -9646,7 +9709,9 @@ class LocalStore:
                        COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url,
                        p.id AS _owner_profile_id,
                        COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
-                       COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio
+                       COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_visibility), ''), 'self') AS _owner_critique_vis,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_club_ids), ''), '[]') AS _owner_critique_clubs
                 FROM activities a
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
@@ -9715,7 +9780,9 @@ class LocalStore:
                        COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url,
                        p.id AS _owner_profile_id,
                        COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
-                       COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio
+                       COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_visibility), ''), 'self') AS _owner_critique_vis,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_club_ids), ''), '[]') AS _owner_critique_clubs
                 FROM activities a
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({','.join(placeholders)})
@@ -9791,18 +9858,46 @@ class LocalStore:
 
             cursor.execute(
                 f"""
-                SELECT COUNT(*),
-                       SUM(CASE WHEN ai_journal IS NOT NULL AND TRIM(ai_journal) != '' THEN 1 ELSE 0 END)
-                FROM activities
-                WHERE user_id IN ({placeholders})
-                  AND substr(start_time, 1, 10) >= ?
-                  AND {RUNNING_SQL_FILTER}
+                SELECT a.user_id, a.ai_journal,
+                       p.id AS _owner_profile_id,
+                       COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
+                       COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_visibility), ''), 'self') AS _owner_critique_vis,
+                       COALESCE(NULLIF(TRIM(p.canova_critique_club_ids), ''), '[]') AS _owner_critique_clubs
+                FROM activities a
+                LEFT JOIN profiles p ON a.user_id = p.id
+                WHERE a.user_id IN ({placeholders})
+                  AND substr(a.start_time, 1, 10) >= ?
+                  AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
                 """,
                 uids + [month_start_str],
             )
-            m_row = cursor.fetchone()
-            month_count = (m_row[0] or 0) if m_row else 0
-            coach_critique_count = (m_row[1] or month_count) if m_row else 0
+            month_rows = cursor.fetchall()
+            month_count = len(month_rows)
+            summary_profile_cache: Dict[str, Dict[str, Any]] = {}
+            coach_critique_count = 0
+            for mr in month_rows:
+                owner_uid = str(mr["user_id"] or "")
+                prof_id = mr["_owner_profile_id"]
+                if owner_uid and prof_id and owner_uid not in summary_profile_cache:
+                    stub = {
+                        "id": str(prof_id),
+                        "hide_gps_route": bool(mr["_owner_hide_gps"]),
+                        "hide_biometrics": bool(mr["_owner_hide_bio"]),
+                        "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(
+                            mr["_owner_critique_vis"]
+                        ),
+                        "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
+                            mr["_owner_critique_clubs"]
+                        ),
+                    }
+                    summary_profile_cache[owner_uid] = stub
+                    summary_profile_cache[str(prof_id)] = stub
+                if (mr["ai_journal"] or "").strip():
+                    if LocalStore.can_view_canova_critique(
+                        eff_uid, owner_uid, club_id=club_id, profile_cache=summary_profile_cache
+                    ):
+                        coach_critique_count += 1
 
             cursor.execute(
                 f"""
@@ -9853,7 +9948,7 @@ class LocalStore:
             "today_checkin_count": today_count,
             "week_checkin_count": week_count,
             "month_checkin_count": month_count,
-            "coach_critique_count": max(coach_critique_count, month_count),
+            "coach_critique_count": coach_critique_count,
             "interaction_count": interaction_count,
             "latest_checkins": latest_checkins,
         }
@@ -16951,6 +17046,12 @@ class LocalStore:
                 "target_distance": target_dist or 200.0,
                 "hide_gps_route": bool(profile.get("hide_gps_route")),
                 "hide_biometrics": bool(profile.get("hide_biometrics")),
+                "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(
+                    profile.get("canova_critique_visibility")
+                ),
+                "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
+                    profile.get("canova_critique_club_ids")
+                ),
             }
         }
 
@@ -16967,7 +17068,7 @@ class LocalStore:
         elif action == "complete_onboarding":
             updates["onboarding_completed"] = 1
             if payload:
-                for k in ("is_solo_runner", "device_skipped", "history_skipped", "onboarding_completed", "hide_gps_route", "hide_biometrics"):
+                for k in ("is_solo_runner", "device_skipped", "history_skipped", "onboarding_completed", "hide_gps_route", "hide_biometrics", "canova_critique_visibility", "canova_critique_club_ids"):
                     if k in payload:
                         updates[k] = payload[k]
 
@@ -17230,6 +17331,303 @@ class LocalStore:
         return False
 
     @staticmethod
+    def is_strict_coach_or_mentor_of_runner(
+        viewer_uid: Optional[str],
+        runner_uid: Optional[str],
+        club_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Strictly checks whether viewer_uid is:
+        1. An active 1-on-1 Mentor (师傅) of runner_uid, OR
+        2. A certified Coach (club_memberships.role = 'coach', status = 'active' in a non-deleted club)
+           in the same club as runner_uid (or in `club_id` when specified).
+        Explicitly excludes club owners, admins, and platform SUPER_ADMIN_UIDS.
+        """
+        if not viewer_uid or not runner_uid:
+            return False
+        v_uid = LocalStore.resolve_user_id(viewer_uid)
+        r_uid = LocalStore.resolve_user_id(runner_uid)
+        if LocalStore.is_mentor_of_runner(v_uid, r_uid):
+            return True
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if club_id:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM club_memberships cm_coach
+                    INNER JOIN club_memberships cm_runner ON cm_coach.club_id = cm_runner.club_id
+                    LEFT JOIN clubs c ON c.id = cm_coach.club_id
+                    WHERE cm_coach.club_id = ?
+                      AND (cm_coach.user_id = ? OR cm_coach.user_id = ?)
+                      AND cm_coach.role = 'coach'
+                      AND cm_coach.status = 'active'
+                      AND (cm_runner.user_id = ? OR cm_runner.user_id = ?)
+                      AND cm_runner.status = 'active'
+                      AND COALESCE(c.status, 'active') != 'deleted'
+                    LIMIT 1
+                    """,
+                    (club_id, v_uid, viewer_uid, r_uid, runner_uid),
+                )
+                if cursor.fetchone() is not None:
+                    return True
+            cursor.execute(
+                """
+                SELECT 1
+                FROM club_memberships cm_coach
+                INNER JOIN club_memberships cm_runner ON cm_coach.club_id = cm_runner.club_id
+                LEFT JOIN clubs c ON c.id = cm_coach.club_id
+                WHERE (cm_coach.user_id = ? OR cm_coach.user_id = ?)
+                  AND cm_coach.role = 'coach'
+                  AND cm_coach.status = 'active'
+                  AND (cm_runner.user_id = ? OR cm_runner.user_id = ?)
+                  AND cm_runner.status = 'active'
+                  AND COALESCE(c.status, 'active') != 'deleted'
+                LIMIT 1
+                """,
+                (v_uid, viewer_uid, r_uid, runner_uid),
+            )
+            return cursor.fetchone() is not None
+
+    @staticmethod
+    def _are_active_members_in_clubs(
+        uid_a: str,
+        uid_b: str,
+        allowed_club_ids: Optional[List[str]] = None,
+        club_id: Optional[str] = None,
+    ) -> bool:
+        """Checks whether uid_a and uid_b share an active membership in a non-deleted club (optionally scoped)."""
+        ca = LocalStore.resolve_user_id(uid_a)
+        cb = LocalStore.resolve_user_id(uid_b)
+        if club_id:
+            target_ids = [str(club_id).strip()]
+            if allowed_club_ids is not None and target_ids[0] not in allowed_club_ids:
+                return False
+        elif allowed_club_ids is not None:
+            target_ids = [str(c).strip() for c in allowed_club_ids if str(c).strip()]
+            if not target_ids:
+                return False
+        else:
+            target_ids = None
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if target_ids is not None:
+                placeholders = ",".join(["?"] * len(target_ids))
+                cursor.execute(
+                    f"""
+                    SELECT 1
+                    FROM club_memberships m1
+                    INNER JOIN club_memberships m2 ON m1.club_id = m2.club_id
+                    LEFT JOIN clubs c ON c.id = m1.club_id
+                    WHERE m1.club_id IN ({placeholders})
+                      AND (m1.user_id = ? OR m1.user_id = ?)
+                      AND (m2.user_id = ? OR m2.user_id = ?)
+                      AND m1.status = 'active'
+                      AND m2.status = 'active'
+                      AND COALESCE(c.status, 'active') != 'deleted'
+                    LIMIT 1
+                    """,
+                    target_ids + [ca, uid_a, cb, uid_b],
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM club_memberships m1
+                    INNER JOIN club_memberships m2 ON m1.club_id = m2.club_id
+                    LEFT JOIN clubs c ON c.id = m1.club_id
+                    WHERE (m1.user_id = ? OR m1.user_id = ?)
+                      AND (m2.user_id = ? OR m2.user_id = ?)
+                      AND m1.status = 'active'
+                      AND m2.status = 'active'
+                      AND COALESCE(c.status, 'active') != 'deleted'
+                    LIMIT 1
+                    """,
+                    (ca, uid_a, cb, uid_b),
+                )
+            return cursor.fetchone() is not None
+
+    @staticmethod
+    def _resolve_owner_profile_for_privacy(
+        owner_uid: str,
+        profile_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Loads and caches the owner's privacy profile fields (ensuring critique visibility keys exist)."""
+        raw_owner = str(owner_uid).strip()
+        if profile_cache is not None and raw_owner in profile_cache:
+            owner_prof = profile_cache[raw_owner]
+            canonical_owner = str(owner_prof.get("id") or raw_owner)
+        else:
+            canonical_owner = LocalStore.resolve_user_id(raw_owner)
+            if profile_cache is not None and canonical_owner in profile_cache:
+                owner_prof = profile_cache[canonical_owner]
+            else:
+                owner_prof = LocalStore.get_profile(canonical_owner) or {}
+                if profile_cache is not None:
+                    profile_cache[canonical_owner] = owner_prof
+                    profile_cache[raw_owner] = owner_prof
+        if "canova_critique_visibility" not in owner_prof:
+            loaded = LocalStore.get_profile(canonical_owner) or {}
+            if loaded:
+                owner_prof = {**owner_prof, **loaded}
+                if profile_cache is not None:
+                    profile_cache[canonical_owner] = owner_prof
+                    profile_cache[raw_owner] = owner_prof
+        return canonical_owner, owner_prof
+
+    @staticmethod
+    def can_view_canova_critique(
+        viewer_uid: Optional[str],
+        target_uid: Optional[str],
+        club_id: Optional[str] = None,
+        profile_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> bool:
+        """
+        Evaluates whether viewer_uid can view target_uid's Canova coach critique under the 4-tier rule:
+        - 'self' (default): ONLY target_uid themselves (no coach/mentor/admin/club bypass).
+        - 'coach_mentor': self + active 1-on-1 mentor + strict club coach (excludes owner/admin/super_admin).
+        - 'selected_clubs': self + strict coach/mentor + active members of whitelisted club_ids.
+        - 'all_clubs': self + strict coach/mentor + active members of any shared non-deleted club.
+        """
+        if not viewer_uid or not target_uid:
+            return False
+        v_uid = LocalStore.resolve_user_id(viewer_uid)
+        t_uid = LocalStore.resolve_user_id(target_uid)
+        if v_uid == t_uid or str(viewer_uid).strip() == str(target_uid).strip():
+            return True
+
+        canonical_owner, owner_prof = LocalStore._resolve_owner_profile_for_privacy(t_uid, profile_cache=profile_cache)
+        vis = LocalStore.normalize_canova_critique_visibility(owner_prof.get("canova_critique_visibility"))
+        if vis == "self":
+            return False
+
+        allowed_clubs = LocalStore.parse_canova_critique_club_ids(owner_prof.get("canova_critique_club_ids"))
+        cache_key = f"__crit:{v_uid}:{canonical_owner}:{club_id or ''}:{vis}:{','.join(sorted(allowed_clubs))}"
+        if profile_cache is not None and cache_key in profile_cache:
+            return bool(profile_cache[cache_key].get("allow"))
+
+        allow = False
+        if LocalStore.is_strict_coach_or_mentor_of_runner(v_uid, canonical_owner, club_id=club_id):
+            allow = True
+        elif vis == "selected_clubs":
+            allow = LocalStore._are_active_members_in_clubs(
+                v_uid, canonical_owner, allowed_club_ids=allowed_clubs, club_id=club_id
+            )
+        elif vis == "all_clubs":
+            allow = LocalStore._are_active_members_in_clubs(
+                v_uid, canonical_owner, allowed_club_ids=None, club_id=club_id
+            )
+
+        if profile_cache is not None:
+            profile_cache[cache_key] = {"allow": allow}
+        return allow
+
+    @staticmethod
+    def sanitize_canova_critique_biometrics(text: Optional[str]) -> str:
+        """
+        Scrubs concrete HR / HRV / resting HR / sleep numbers from a Canova critique when
+        owner has hide_biometrics=True and the authorized viewer is a club peer (not coach/mentor/self).
+        Preserves training recommendations and generic future sleep advice (e.g. '早睡补足8h').
+        """
+        if not text:
+            return ""
+        out = str(text)
+        # Holistic / segmented concrete HR metrics (match specific phrases before general ones)
+        out = re.sub(
+            r"提速下均心(?:稳守|稳控)?\s*\d+(?:\.\d+)?\s*bpm",
+            "提速下节奏稳控",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"均心(?:下降|上升|波动|稳守|稳控|仅|为|达)?\s*\d+(?:\.\d+)?\s*bpm(?:\s*(?:[<＜≤>＞≥≈]\s*(?:有氧)?上限\s*\d+(?:\.\d+)?\s*bpm|\s*[（(][^()（）]*bpm[^()（）]*[)）]))?",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"较有氧上限留出\s*\d+(?:\.\d+)?\s*bpm\s*安全余量", "", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"(?:主课)?稳态心率\s*\d+(?:\.\d+)?\s*bpm(?:\s*超上限\s*\d+(?:\.\d+)?\s*bpm)?",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"组间心率回落\s*\d+(?:\.\d+)?\s*bpm", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"(?:超|低于|高于)?(?:有氧)?上限\s*\d+(?:\.\d+)?\s*bpm", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"静息(?:心率)?\s*\d+(?:\.\d+)?\s*bpm", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"约?\s*\d+(?:\.\d+)?%\s*储备心率", "", out)
+        # HRV and recorded sleep duration/score (does not touch '早睡补足8h' or '7.5h+睡眠')
+        out = re.sub(r"(?<![A-Za-z])HRV(?![A-Za-z])\s*\d+(?:\.\d+)?\s*ms(?:\s*[（(][^()（）]*[)）])?", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"\d+(?:\.\d+)?\s*ms\s*[（(][^()（）]*HRV[^()（）]*[)）]", "", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"(?:昨夜|昨晚|近期|当前)?\s*睡眠(?:得分|评分)?\s*(?:\d+(?:\.\d+)?\s*h\s*(?:[（(]\s*\d+(?:\.\d+)?\s*分\s*[)）])?|\d+(?:\.\d+)?\s*分)",
+            "",
+            out,
+        )
+        # Labeled/range HR expressions and catch-all for any remaining concrete bpm numbers
+        out = re.sub(
+            r"(?:平均心率|最大心率|峰值心率|目标心率|心率区间|心率)\s*[:：]?\s*(?:\d+(?:\.\d+)?\s*[-~～—/]\s*)?\d+(?:\.\d+)?\s*bpm",
+            "",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"(?:\d+(?:\.\d+)?\s*[-~～—/]\s*)?\d+(?:\.\d+)?\s*bpm", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"(?<![A-Za-z])HRV(?![A-Za-z])(?:\s*[:：]?\s*\d+(?:\.\d+)?\s*(?:ms)?)?", "", out, flags=re.IGNORECASE)
+
+        # Punctuation and dangling-bracket cleanup
+        out = re.sub(r"[（(][\s·、，,;；/|+-]*[)）]", "", out)
+        out = re.sub(r"([（(])[\s·、，,;；]+", r"\1", out)
+        out = re.sub(r"[\s·、，,;；]+([)）])", r"\1", out)
+        out = re.sub(r"\s*[·、]+\s*(?=[，,；;。！!]|$)", "", out)
+        out = re.sub(r"(^|[\s💡⚡🌟（(，,；;：:。！!])[·、，,;；]+", r"\1", out)
+        out = re.sub(r"[·]{2,}", "·", out)
+        out = re.sub(r"[，,]{2,}", "，", out)
+        out = re.sub(r"[；;]{2,}", "；", out)
+        out = re.sub(r"[、]{2,}", "、", out)
+        out = re.sub(r"[ ]{2,}", " ", out)
+        out = re.sub(r"([💡⚡🌟])\s*(?=[^\s【])", r"\1 ", out)
+        return out.strip()
+
+    @staticmethod
+    def filter_canova_critique_for_viewer(
+        critique: Optional[str],
+        viewer_uid: Optional[str],
+        target_uid: Optional[str],
+        club_id: Optional[str] = None,
+        profile_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Tuple[Optional[str], bool]:
+        """
+        Returns (filtered_critique_or_None, is_critique_hidden) for viewer_uid reading target_uid's critique.
+        """
+        if not viewer_uid or not target_uid:
+            return None, True
+        v_uid = LocalStore.resolve_user_id(viewer_uid)
+        t_uid = LocalStore.resolve_user_id(target_uid)
+        if v_uid == t_uid or str(viewer_uid).strip() == str(target_uid).strip():
+            return critique, False
+
+        canonical_owner, owner_prof = LocalStore._resolve_owner_profile_for_privacy(t_uid, profile_cache=profile_cache)
+        allow = LocalStore.can_view_canova_critique(
+            v_uid, canonical_owner, club_id=club_id, profile_cache=profile_cache
+        )
+        if not allow:
+            return None, True
+
+        if critique and bool(owner_prof.get("hide_biometrics")):
+            coach_key = f"__strict_cm:{v_uid}:{canonical_owner}:{club_id or ''}"
+            if profile_cache is not None and coach_key in profile_cache:
+                is_cm = bool(profile_cache[coach_key].get("allow"))
+            else:
+                is_cm = LocalStore.is_strict_coach_or_mentor_of_runner(v_uid, canonical_owner, club_id=club_id)
+                if profile_cache is not None:
+                    profile_cache[coach_key] = {"allow": is_cm}
+            if not is_cm:
+                return LocalStore.sanitize_canova_critique_biometrics(critique), False
+
+        return critique, False
+
+    @staticmethod
     def apply_activity_privacy_filter(
         act: Dict[str, Any],
         viewer_uid: Optional[str],
@@ -17237,8 +17635,7 @@ class LocalStore:
         profile_cache: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Enforces hide_gps_route and hide_biometrics on an activity dictionary when viewed in club feeds.
-        Only the runner themselves, their Coach (教练), and their Mentor (师傅) can see confidential fields.
+        Enforces hide_gps_route, hide_biometrics, and canova_critique_visibility on an activity dictionary.
         """
         if not act:
             return act
@@ -17246,19 +17643,7 @@ class LocalStore:
         if not owner_uid:
             return act
 
-        if profile_cache is not None and owner_uid in profile_cache:
-            owner_prof = profile_cache[owner_uid]
-            canonical_owner = str(owner_prof.get("id") or owner_uid)
-        else:
-            canonical_owner = LocalStore.resolve_user_id(owner_uid)
-            if profile_cache is not None and canonical_owner in profile_cache:
-                owner_prof = profile_cache[canonical_owner]
-            else:
-                owner_prof = LocalStore.get_profile(canonical_owner) or {}
-                if profile_cache is not None:
-                    profile_cache[canonical_owner] = owner_prof
-                    profile_cache[owner_uid] = owner_prof
-
+        canonical_owner, owner_prof = LocalStore._resolve_owner_profile_for_privacy(owner_uid, profile_cache=profile_cache)
         hide_gps = bool(owner_prof.get("hide_gps_route"))
         hide_bio = bool(owner_prof.get("hide_biometrics"))
         act["owner_hide_gps_route"] = hide_gps
@@ -17267,39 +17652,69 @@ class LocalStore:
         if not hide_gps and not hide_bio:
             act["is_gps_hidden"] = False
             act["is_biometrics_hidden"] = False
-            return act
-
-        perm_key = f"__perm:{viewer_uid or ''}:{canonical_owner}:{club_id or ''}"
-        if profile_cache is not None and perm_key in profile_cache:
-            can_view = bool(profile_cache[perm_key].get("allow"))
-        else:
-            can_view = LocalStore.can_view_confidential_runner_data(viewer_uid, canonical_owner, club_id=club_id)
-            if profile_cache is not None:
-                profile_cache[perm_key] = {"allow": can_view}
-        if hide_gps and not can_view:
-            act["gps_track_data"] = None
-            act["map_image_url"] = None
-            act["has_gps_track"] = False
-            act["is_gps_hidden"] = True
-        else:
-            act["is_gps_hidden"] = False
-
-        if hide_bio and not can_view:
-            act["average_heartrate"] = None
-            act["max_heartrate"] = None
-            act["trimp"] = None
-            act["is_biometrics_hidden"] = True
-        else:
-            act["is_biometrics_hidden"] = False
-
-        if (hide_gps or hide_bio) and not can_view:
-            act["segment_analysis_json"] = None
-            act["segment_analysis"] = None
-            act["laps_data"] = None
-            act["splits_data"] = None
-            act["is_segment_hidden"] = True
-        else:
             act["is_segment_hidden"] = False
+        else:
+            perm_key = f"__perm:{viewer_uid or ''}:{canonical_owner}:{club_id or ''}"
+            if profile_cache is not None and perm_key in profile_cache:
+                can_view = bool(profile_cache[perm_key].get("allow"))
+            else:
+                can_view = LocalStore.can_view_confidential_runner_data(viewer_uid, canonical_owner, club_id=club_id)
+                if profile_cache is not None:
+                    profile_cache[perm_key] = {"allow": can_view}
+            if hide_gps and not can_view:
+                act["gps_track_data"] = None
+                act["map_image_url"] = None
+                act["has_gps_track"] = False
+                act["is_gps_hidden"] = True
+            else:
+                act["is_gps_hidden"] = False
+
+            if hide_bio and not can_view:
+                act["average_heartrate"] = None
+                act["max_heartrate"] = None
+                act["trimp"] = None
+                act["is_biometrics_hidden"] = True
+            else:
+                act["is_biometrics_hidden"] = False
+
+            if (hide_gps or hide_bio) and not can_view:
+                act["segment_analysis_json"] = None
+                act["segment_analysis"] = None
+                act["laps_data"] = None
+                act["splits_data"] = None
+                act["is_segment_hidden"] = True
+            else:
+                act["is_segment_hidden"] = False
+
+        filtered_journal, is_critique_hidden = LocalStore.filter_canova_critique_for_viewer(
+            act.get("ai_journal"),
+            viewer_uid=viewer_uid,
+            target_uid=canonical_owner,
+            club_id=club_id,
+            profile_cache=profile_cache,
+        )
+        act["ai_journal"] = filtered_journal
+        act["is_critique_hidden"] = is_critique_hidden
+
+        if isinstance(act.get("segment_analysis"), dict):
+            seg_copy = dict(act["segment_analysis"])
+            if is_critique_hidden:
+                seg_copy["concise_critique"] = None
+                seg_copy["coach_advice"] = None
+            elif hide_bio and viewer_uid:
+                v_uid = LocalStore.resolve_user_id(viewer_uid)
+                if v_uid != canonical_owner and not LocalStore.is_strict_coach_or_mentor_of_runner(
+                    v_uid, canonical_owner, club_id=club_id
+                ):
+                    if seg_copy.get("concise_critique"):
+                        seg_copy["concise_critique"] = LocalStore.sanitize_canova_critique_biometrics(
+                            seg_copy["concise_critique"]
+                        )
+                    if seg_copy.get("coach_advice"):
+                        seg_copy["coach_advice"] = LocalStore.sanitize_canova_critique_biometrics(
+                            seg_copy["coach_advice"]
+                        )
+            act["segment_analysis"] = seg_copy
 
         return act
 
@@ -18080,14 +18495,21 @@ class LocalStore:
                 d["recovery_pct"] = LocalStore.compute_physiological_recovery_pct(d)
                 rest_logs.append(d)
 
-        # Fetch recent 15 running activities (unredacted for Mentor/Coach)
+        # Fetch recent 15 running activities (critique filtered by runner's canova_critique_visibility)
         raw_acts = LocalStore.get_recent_activities(s_uid, limit=15) or []
         recent_activities = []
+        crit_cache: Dict[str, Dict[str, Any]] = {}
         for a in raw_acts:
             dist_m = float(a.get("distance_meters") or 0.0)
             has_gps = bool(a.get("gps_track_data") or a.get("map_image_url") or str(a.get("id")).startswith(("garmin_", "coros_")))
             st_str = a.get("start_time") or ""
             pace_str = a.get("avg_pace_str") or "—"
+            filtered_journal, is_critique_hidden = LocalStore.filter_canova_critique_for_viewer(
+                a.get("ai_journal") or "",
+                viewer_uid=v_uid,
+                target_uid=s_uid,
+                profile_cache=crit_cache,
+            )
             recent_activities.append({
                 "id": a.get("id"),
                 "name": a.get("name") or "跑步",
@@ -18101,7 +18523,8 @@ class LocalStore:
                 "max_heartrate": a.get("max_heartrate"),
                 "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0.0), 1),
                 "trimp": a.get("trimp"),
-                "ai_journal": a.get("ai_journal") or "",
+                "ai_journal": filtered_journal or "",
+                "is_critique_hidden": is_critique_hidden,
                 "has_gps_track": has_gps,
                 "map_image_url": a.get("map_image_url"),
             })

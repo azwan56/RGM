@@ -49,6 +49,8 @@ class ProfileUpdateRequest(BaseModel):
     health_declaration: Optional[Any] = None
     hide_gps_route: Optional[bool] = None
     hide_biometrics: Optional[bool] = None
+    canova_critique_visibility: Optional[str] = None
+    canova_critique_club_ids: Optional[List[str]] = None
     first_aid_cert_type: Optional[str] = None
     pacer_bio_tags: Optional[str] = None
 
@@ -171,12 +173,20 @@ def get_user_profile(uid: str):
     profile["is_coach_or_owner"] = LocalStore.is_user_coach_or_owner(uid)
     profile["hide_gps_route"] = bool(profile.get("hide_gps_route"))
     profile["hide_biometrics"] = bool(profile.get("hide_biometrics"))
+    profile["canova_critique_visibility"] = LocalStore.normalize_canova_critique_visibility(
+        profile.get("canova_critique_visibility")
+    )
+    profile["canova_critique_club_ids"] = LocalStore.parse_canova_critique_club_ids(
+        profile.get("canova_critique_club_ids")
+    )
     profile["first_aid_cert_type"] = profile.get("first_aid_cert_type") or ""
     profile["pacer_bio_tags"] = profile.get("pacer_bio_tags") or ""
+    owner_uid = profile.get("id") or uid
+    clubs = LocalStore.get_user_clubs(owner_uid) or []
     goal = LocalStore.get_goal(uid)
     races = LocalStore.get_race_plans(uid)
 
-    return {"profile": profile, "goal": goal, "races": races}
+    return {"profile": profile, "goal": goal, "races": races, "clubs": clubs}
 
 
 @router.put("/{uid}")

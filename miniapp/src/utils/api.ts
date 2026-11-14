@@ -32,6 +32,10 @@ export interface UserProfile {
   role?: string;
   is_coach_or_owner?: boolean;
   is_admin?: boolean;
+  hide_gps_route?: boolean;
+  hide_biometrics?: boolean;
+  canova_critique_visibility?: string;
+  canova_critique_club_ids?: string[];
 }
 
 export function getToken(): string {

@@ -3455,18 +3455,20 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       )}
 
                       {/* AI Coach Critique Bubble */}
-                      <div className="bg-gradient-to-r from-purple-950/30 via-[#1e1b2e] to-indigo-950/30 border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
-                        <div className="flex items-center gap-2 font-bold text-purple-300 mb-1.5">
-                          <Bot className="w-4 h-4 text-purple-400" />
-                          <span>Canova教练专属点评</span>
-                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                            智能生成
-                          </span>
+                      {!act.is_critique_hidden && (act.ai_journal || act.user_id === user?.id) && (
+                        <div className="bg-gradient-to-r from-purple-950/30 via-[#1e1b2e] to-indigo-950/30 border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
+                          <div className="flex items-center gap-2 font-bold text-purple-300 mb-1.5">
+                            <Bot className="w-4 h-4 text-purple-400" />
+                            <span>Canova教练专属点评</span>
+                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              智能生成
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-300 leading-relaxed font-sans">
+                            {act.ai_journal || "正在基于 Canova 耐力生理模型生成点评..."}
+                          </p>
                         </div>
-                        <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                          {act.ai_journal || "正在基于 Canova 耐力生理模型生成点评..."}
-                        </p>
-                      </div>
+                      )}
 
                       {/* Social Actions: Like & Comment Counter */}
                       <div className="flex items-center justify-between pt-2 border-t border-white/5">

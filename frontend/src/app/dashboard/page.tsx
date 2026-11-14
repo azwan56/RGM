@@ -235,7 +235,7 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       const [dashRes, sciRes, planRes, coachRes, racesRes, clubsRes] = await Promise.all([
-        apiClient.get(`/api/miniapp/dashboard/${uid}`),
+        apiClient.get(`/api/miniapp/dashboard/${uid}?viewer_uid=${encodeURIComponent(uid)}`),
         apiClient.get(`/api/science/metrics/${uid}`),
         apiClient.get(`/api/coach/plan/user/${uid}`).catch(() => null),
         apiClient.get(`/api/coach/latest/${uid}`).catch(() => null),
@@ -320,7 +320,7 @@ export default function DashboardPage() {
     if (!user?.id) return;
     setLoadingMonthActs(true);
     try {
-      const res = await apiClient.get(`/api/miniapp/activities/month/${user.id}?year=${newYear}&month=${newMonth}`);
+      const res = await apiClient.get(`/api/miniapp/activities/month/${user.id}?year=${newYear}&month=${newMonth}&viewer_uid=${encodeURIComponent(user.id)}`);
       setMonthActivities(res.data?.activities || []);
     } catch (e) {
       console.error("Fetch month activities error:", e);
@@ -504,7 +504,7 @@ export default function DashboardPage() {
       });
       if (res.data?.success && res.data?.plan) {
         setActivePlan(res.data.plan);
-        const dashRes = await apiClient.get(`/api/miniapp/dashboard/${user.id}`).catch(() => null);
+        const dashRes = await apiClient.get(`/api/miniapp/dashboard/${user.id}?viewer_uid=${encodeURIComponent(user.id)}`).catch(() => null);
         if (dashRes?.data) setDashboardData(dashRes.data);
       }
     } catch (err) {

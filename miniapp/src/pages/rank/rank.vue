@@ -412,7 +412,10 @@
             </view>
 
             <!-- Coach Critique Bubble -->
-            <view class="coach-bubble">
+            <view
+              v-if="!act.is_critique_hidden && (act.ai_journal || act.user_id === user?.id)"
+              class="coach-bubble"
+            >
               <view class="coach-badge-row">
                 <view class="coach-badge-left">
                   <text class="coach-robot-icon">🎯</text>

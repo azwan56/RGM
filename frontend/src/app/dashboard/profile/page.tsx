@@ -101,6 +101,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [showDob, setShowDob] = useState(false);
   const [hideGpsRoute, setHideGpsRoute] = useState(false);
   const [hideBiometrics, setHideBiometrics] = useState(false);
+  const [canovaCritiqueVisibility, setCanovaCritiqueVisibility] = useState<string>("self");
+  const [canovaCritiqueClubIds, setCanovaCritiqueClubIds] = useState<string[]>([]);
+  const [joinedClubs, setJoinedClubs] = useState<any[]>([]);
+  const [savingVisibility, setSavingVisibility] = useState(false);
 
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
@@ -213,7 +217,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   async function loadProfile(uid: string) {
     try {
       const res = await apiClient.get(`/api/profile/${uid}`);
-      const { profile, goal, races: userRaces } = res.data;
+      const { profile, goal, races: userRaces, clubs: profileClubs } = res.data;
+      setJoinedClubs(Array.isArray(profileClubs) ? profileClubs : []);
       if (profile) {
         setDisplayName(profile.display_name || "");
         setAvatarUrl(profile.avatar_url || "");
@@ -251,6 +256,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         }
         setHideGpsRoute(Boolean(profile.hide_gps_route));
         setHideBiometrics(Boolean(profile.hide_biometrics));
+        setCanovaCritiqueVisibility(profile.canova_critique_visibility || "self");
+        setCanovaCritiqueClubIds(
+          Array.isArray(profile.canova_critique_club_ids) ? profile.canova_critique_club_ids : []
+        );
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.date_of_birth) {
@@ -802,6 +811,28 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     }
   }
 
+  async function persistCanovaVisibility(nextVis: string, nextClubIds: string[]) {
+    if (!user?.id) return;
+    const prevVis = canovaCritiqueVisibility;
+    const prevClubIds = canovaCritiqueClubIds;
+    setCanovaCritiqueVisibility(nextVis);
+    setCanovaCritiqueClubIds(nextClubIds);
+    setSavingVisibility(true);
+    try {
+      await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}`, {
+        canova_critique_visibility: nextVis,
+        canova_critique_club_ids: nextClubIds,
+      });
+      showToast("✅ Canova 评语可见度已更新并同步");
+    } catch (err: any) {
+      setCanovaCritiqueVisibility(prevVis);
+      setCanovaCritiqueClubIds(prevClubIds);
+      showToast("更新评语可见度失败: " + (err?.response?.data?.detail || err?.message || err));
+    } finally {
+      setSavingVisibility(false);
+    }
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -831,6 +862,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         health_declaration: healthDeclaration,
         hide_gps_route: hideGpsRoute,
         hide_biometrics: hideBiometrics,
+        canova_critique_visibility: canovaCritiqueVisibility,
+        canova_critique_club_ids: canovaCritiqueClubIds,
         date_of_birth: dateOfBirth || null,
         vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
@@ -1804,6 +1837,120 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
                 />
               </label>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>🎯 Canova 教练评语可见范围</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    默认仅自己可见；选择向跑团或教练/师傅开放时，与网页版和微信小程序实时同步
+                  </p>
+                </div>
+                {savingVisibility && (
+                  <span className="text-[11px] text-[#FC4C02] font-medium">同步保存中...</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {[
+                  {
+                    value: "self",
+                    title: "🔒 仅自己可见（默认）",
+                    desc: "仅本人可见 Canova 训练点评，对跑团、教练与师傅均隐藏",
+                  },
+                  {
+                    value: "coach_mentor",
+                    title: "👨‍🏫 仅认证教练与 1v1 师傅可见",
+                    desc: "本人、结对 1v1 师傅与所属跑团认证教练可见（不含团长/管理员）",
+                  },
+                  {
+                    value: "selected_clubs",
+                    title: "🏃 指定跑团可见",
+                    desc: "本人、认证教练/师傅，以及下方勾选跑团的成员可见",
+                  },
+                  {
+                    value: "all_clubs",
+                    title: "🌐 所有所在跑团可见",
+                    desc: "本人、认证教练/师傅，以及所有已加入跑团的成员可见",
+                  },
+                ].map((opt) => {
+                  const selected = canovaCritiqueVisibility === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      disabled={savingVisibility}
+                      onClick={() => persistCanovaVisibility(opt.value, canovaCritiqueClubIds)}
+                      className={`text-left p-3 rounded-xl border transition ${
+                        selected
+                          ? "bg-[#FC4C02]/15 border-[#FC4C02]/60 text-white"
+                          : "bg-white/[0.02] border-white/10 text-zinc-300 hover:border-white/25"
+                      }`}
+                    >
+                      <div className="text-xs font-bold flex items-center justify-between gap-2">
+                        <span>{opt.title}</span>
+                        {selected && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FC4C02] text-white font-semibold">
+                            当前
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">{opt.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {canovaCritiqueVisibility === "selected_clubs" && (
+                <div className="pt-2 border-t border-white/10 space-y-2">
+                  <div className="text-[11px] font-semibold text-zinc-300">
+                    选择允许查看评语的跑团（可多选）：
+                  </div>
+                  {joinedClubs.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {joinedClubs.map((c: any) => {
+                        const cid = String(c.id || "");
+                        const active = canovaCritiqueClubIds.includes(cid);
+                        return (
+                          <button
+                            key={cid}
+                            type="button"
+                            disabled={savingVisibility}
+                            onClick={() => {
+                              const nextIds = active
+                                ? canovaCritiqueClubIds.filter((x) => x !== cid)
+                                : [...canovaCritiqueClubIds, cid];
+                              persistCanovaVisibility("selected_clubs", nextIds);
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                              active
+                                ? "bg-[#FC4C02]/20 border-[#FC4C02] text-orange-200"
+                                : "bg-white/[0.03] border-white/15 text-zinc-400 hover:border-white/30"
+                            }`}
+                          >
+                            {active ? "✓ " : "+ "}
+                            {c.name || cid}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-zinc-500">
+                      暂未加入跑团，当前配置下仅自己与认证教练/师傅可见。
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {(canovaCritiqueVisibility === "selected_clubs" || canovaCritiqueVisibility === "all_clubs") &&
+                hideBiometrics && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
+                    💡 已联动开启“隐藏 HRV 与生理恢复”：普通团友查看您的 Canova 评语时，仅展示训练结构与建议，心率（bpm）、HRV 与睡眠评分等具体数值将自动脱敏（认证教练与 1v1 师傅不受影响）。
+                  </div>
+                )}
             </div>
 
             <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

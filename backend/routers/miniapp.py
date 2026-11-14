@@ -31,7 +31,11 @@ router = APIRouter()
 
 
 @router.get("/dashboard/{uid}")
-def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
+def get_miniapp_dashboard_data(
+    uid: str,
+    viewer_uid: Optional[str] = Query(None, description="Viewer user ID"),
+    request: Request = None,
+) -> Dict[str, Any]:
     """
     Bundles all data needed for Home Screen & Web Dashboard:
     1. Monthly & Weekly Goal Progress (Distance, Target, %, Daily needed)
@@ -44,11 +48,27 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
     """
     try:
         eff_uid = LocalStore.resolve_user_id(uid)
+        eff_viewer = (
+            viewer_uid
+            if isinstance(viewer_uid, str) and viewer_uid.strip()
+            else (
+                (request.headers.get("x-user-id") if request else None)
+                or (getattr(getattr(request, "state", None), "user_id", None) if request else None)
+            )
+        )
+        resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
+        is_cross_viewer = bool(resolved_viewer and resolved_viewer != eff_uid)
         profile = LocalStore.get_profile(eff_uid) or {
             "id": eff_uid,
             "display_name": "微信跑者",
             "garmin_connected": False,
         }
+        dash_privacy_cache: Dict[str, Dict[str, Any]] = {eff_uid: profile}
+        hide_dash_bio = (
+            is_cross_viewer
+            and bool(profile.get("hide_biometrics"))
+            and not LocalStore.can_view_confidential_runner_data(resolved_viewer, eff_uid)
+        )
 
         # 2. Compute Monthly Goal Progress
         today = LocalStore.get_beijing_today()
@@ -94,6 +114,15 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                     and (LocalStore.is_running_activity(a.get("sport_type")) or a.get("sport_type") in ["Ride", "Hike", "Walk"])
                 )
             )
+            if is_cross_viewer:
+                filtered_journal, j_hidden = LocalStore.filter_canova_critique_for_viewer(
+                    a.get("ai_journal"),
+                    viewer_uid=resolved_viewer,
+                    target_uid=eff_uid,
+                    profile_cache=dash_privacy_cache,
+                )
+            else:
+                filtered_journal, j_hidden = a.get("ai_journal"), False
             formatted_month_acts.append({
                 "id": a["id"],
                 "name": a["name"],
@@ -102,12 +131,13 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "distance_km": dist_km,
                 "moving_time_seconds": a.get("moving_time_seconds") or 0,
                 "avg_pace_str": a.get("avg_pace_str") or "—",
-                "average_heartrate": a.get("average_heartrate"),
+                "average_heartrate": None if hide_dash_bio else a.get("average_heartrate"),
                 "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
-                "trimp": a.get("trimp"),
+                "trimp": None if hide_dash_bio else a.get("trimp"),
                 "workout_effective_vdot": a.get("workout_effective_vdot"),
                 "exclude_mode": a.get("exclude_mode") or "normal",
-                "ai_journal": a.get("ai_journal"),
+                "ai_journal": filtered_journal,
+                "is_critique_hidden": j_hidden,
                 "has_gps_track": has_gps,
                 "map_image_url": a.get("map_image_url")
             })
@@ -129,6 +159,15 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                     and (LocalStore.is_running_activity(a.get("sport_type")) or a.get("sport_type") in ["Ride", "Hike", "Walk"])
                 )
             )
+                if is_cross_viewer:
+                    filtered_journal, j_hidden = LocalStore.filter_canova_critique_for_viewer(
+                        a.get("ai_journal"),
+                        viewer_uid=resolved_viewer,
+                        target_uid=eff_uid,
+                        profile_cache=dash_privacy_cache,
+                    )
+                else:
+                    filtered_journal, j_hidden = a.get("ai_journal"), False
                 fallback_recent.append({
                     "id": a["id"],
                     "name": a["name"],
@@ -137,12 +176,13 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                     "distance_km": dist_km,
                     "moving_time_seconds": a.get("moving_time_seconds") or 0,
                     "avg_pace_str": a.get("avg_pace_str") or "—",
-                    "average_heartrate": a.get("average_heartrate"),
+                    "average_heartrate": None if hide_dash_bio else a.get("average_heartrate"),
                     "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
-                    "trimp": a.get("trimp"),
+                    "trimp": None if hide_dash_bio else a.get("trimp"),
                     "workout_effective_vdot": a.get("workout_effective_vdot"),
                     "exclude_mode": a.get("exclude_mode") or "normal",
-                    "ai_journal": a.get("ai_journal"),
+                    "ai_journal": filtered_journal,
+                    "is_critique_hidden": j_hidden,
                     "has_gps_track": has_gps,
                     "map_image_url": a.get("map_image_url")
                 })
@@ -373,6 +413,12 @@ def get_miniapp_dashboard_data(uid: str) -> Dict[str, Any]:
                 "vo2max": profile.get("vo2max"),
                 "hide_gps_route": bool(profile.get("hide_gps_route")),
                 "hide_biometrics": bool(profile.get("hide_biometrics")),
+                "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(
+                    profile.get("canova_critique_visibility")
+                ),
+                "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
+                    profile.get("canova_critique_club_ids")
+                ),
                 "is_coach_or_owner": LocalStore.is_user_coach_or_owner(eff_uid),
             },
             "vdot": current_vdot,
@@ -505,6 +551,16 @@ def get_miniapp_activities(
             detail="不在同一跑团的用户之间仅可查看基本状态，不能相互查看具体的运动记录",
         )
     eff_uid = uid
+    canon_uid = LocalStore.resolve_user_id(uid)
+    resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
+    is_cross_viewer = bool(resolved_viewer and resolved_viewer != canon_uid)
+    owner_prof_acts = (LocalStore.get_profile(canon_uid) or {}) if is_cross_viewer else {}
+    act_privacy_cache: Dict[str, Dict[str, Any]] = {canon_uid: owner_prof_acts} if owner_prof_acts else {}
+    hide_bio_viewer = (
+        is_cross_viewer
+        and bool(owner_prof_acts.get("hide_biometrics"))
+        and not LocalStore.can_view_confidential_runner_data(resolved_viewer, canon_uid)
+    )
     acts = LocalStore.get_recent_activities(eff_uid, limit=limit)
     formatted = []
     for a in acts:
@@ -517,6 +573,15 @@ def get_miniapp_activities(
                 and (LocalStore.is_running_activity(a.get("sport_type")) or a.get("sport_type") in ["Ride", "Hike", "Walk"])
             )
         )
+        if is_cross_viewer:
+            filtered_j, j_hidden = LocalStore.filter_canova_critique_for_viewer(
+                a.get("ai_journal"),
+                viewer_uid=resolved_viewer,
+                target_uid=canon_uid,
+                profile_cache=act_privacy_cache,
+            )
+        else:
+            filtered_j, j_hidden = a.get("ai_journal"), False
         formatted.append({
             "id": a["id"],
             "name": a["name"],
@@ -525,12 +590,13 @@ def get_miniapp_activities(
             "distance_km": round(dist_m / 1000.0, 2),
             "moving_time_seconds": a.get("moving_time_seconds") or 0,
             "avg_pace_str": a.get("avg_pace_str") or "—",
-            "average_heartrate": a.get("average_heartrate"),
+            "average_heartrate": None if hide_bio_viewer else a.get("average_heartrate"),
             "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
-            "trimp": a.get("trimp"),
+            "trimp": None if hide_bio_viewer else a.get("trimp"),
             "workout_effective_vdot": a.get("workout_effective_vdot"),
             "exclude_mode": a.get("exclude_mode") or "normal",
-            "ai_journal": a.get("ai_journal"),
+            "ai_journal": filtered_j,
+            "is_critique_hidden": j_hidden,
             "has_gps_track": has_gps,
             "map_image_url": a.get("map_image_url")
         })
@@ -560,6 +626,15 @@ def get_user_month_activities(
             detail="不在同一跑团的用户之间仅可查看基本状态，不能相互查看具体的运动记录",
         )
     eff_uid = LocalStore.resolve_user_id(uid)
+    resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
+    is_cross_viewer = bool(resolved_viewer and resolved_viewer != eff_uid)
+    owner_prof_m = (LocalStore.get_profile(eff_uid) or {}) if is_cross_viewer else {}
+    month_privacy_cache: Dict[str, Dict[str, Any]] = {eff_uid: owner_prof_m} if owner_prof_m else {}
+    hide_bio_viewer = (
+        is_cross_viewer
+        and bool(owner_prof_m.get("hide_biometrics"))
+        and not LocalStore.can_view_confidential_runner_data(resolved_viewer, eff_uid)
+    )
     today = LocalStore.get_beijing_today()
     target_year = year or today.year
     target_month = month or today.month
@@ -581,6 +656,15 @@ def get_user_month_activities(
                 and (LocalStore.is_running_activity(a.get("sport_type")) or a.get("sport_type") in ["Ride", "Hike", "Walk"])
             )
         )
+        if is_cross_viewer:
+            filtered_j, j_hidden = LocalStore.filter_canova_critique_for_viewer(
+                a.get("ai_journal"),
+                viewer_uid=resolved_viewer,
+                target_uid=eff_uid,
+                profile_cache=month_privacy_cache,
+            )
+        else:
+            filtered_j, j_hidden = a.get("ai_journal"), False
         formatted.append({
             "id": a["id"],
             "name": a["name"],
@@ -589,12 +673,13 @@ def get_user_month_activities(
             "distance_km": dist_km,
             "moving_time_seconds": a.get("moving_time_seconds") or 0,
             "avg_pace_str": a.get("avg_pace_str") or "—",
-            "average_heartrate": a.get("average_heartrate"),
+            "average_heartrate": None if hide_bio_viewer else a.get("average_heartrate"),
             "elevation_gain_meters": round(float(a.get("elevation_gain_meters") or a.get("total_elevation_gain") or 0), 1),
-            "trimp": a.get("trimp"),
+            "trimp": None if hide_bio_viewer else a.get("trimp"),
             "workout_effective_vdot": a.get("workout_effective_vdot"),
             "exclude_mode": a.get("exclude_mode") or "normal",
-            "ai_journal": a.get("ai_journal"),
+            "ai_journal": filtered_j,
+            "is_critique_hidden": j_hidden,
             "has_gps_track": has_gps,
             "map_image_url": a.get("map_image_url")
         })
@@ -746,13 +831,43 @@ def get_activity_track(
 
         # Compute & cache segment_analysis for running activities (when authorized to view)
         segment_analysis = None
-        ai_journal_out = track_row.get("ai_journal")
+        raw_journal = track_row.get("ai_journal")
         if not is_segment_hidden and LocalStore.is_running_activity(track_row.get("sport_type")):
             segment_analysis = LocalStore.compute_and_cache_segment_analysis(
                 act_id, track_override=track_data if isinstance(track_data, dict) else None
             )
             if isinstance(segment_analysis, dict) and segment_analysis.get("updated_ai_journal"):
-                ai_journal_out = segment_analysis["updated_ai_journal"]
+                raw_journal = segment_analysis["updated_ai_journal"]
+
+        crit_cache: Dict[str, Dict[str, Any]] = {owner_uid: owner_prof} if owner_uid else {}
+        ai_journal_out, is_critique_hidden = LocalStore.filter_canova_critique_for_viewer(
+            raw_journal,
+            viewer_uid=eff_viewer,
+            target_uid=owner_uid,
+            profile_cache=crit_cache,
+        )
+
+        segment_analysis_out = None
+        if not is_segment_hidden and isinstance(segment_analysis, dict):
+            segment_analysis_out = dict(segment_analysis)
+            if is_critique_hidden:
+                segment_analysis_out["concise_critique"] = None
+                segment_analysis_out["coach_advice"] = None
+                if "updated_ai_journal" in segment_analysis_out:
+                    segment_analysis_out["updated_ai_journal"] = None
+            elif is_bio_hidden:
+                if segment_analysis_out.get("concise_critique"):
+                    segment_analysis_out["concise_critique"] = LocalStore.sanitize_canova_critique_biometrics(
+                        segment_analysis_out["concise_critique"]
+                    )
+                if segment_analysis_out.get("coach_advice"):
+                    segment_analysis_out["coach_advice"] = LocalStore.sanitize_canova_critique_biometrics(
+                        segment_analysis_out["coach_advice"]
+                    )
+                if segment_analysis_out.get("updated_ai_journal"):
+                    segment_analysis_out["updated_ai_journal"] = LocalStore.sanitize_canova_critique_biometrics(
+                        segment_analysis_out["updated_ai_journal"]
+                    )
 
         dist_m = float(track_row.get("distance_meters") or 0)
         act_payload = {
@@ -767,6 +882,7 @@ def get_activity_track(
             "avg_pace_str": track_row.get("avg_pace_str"),
             "average_heartrate": None if is_bio_hidden else track_row.get("average_heartrate"),
             "ai_journal": ai_journal_out,
+            "is_critique_hidden": is_critique_hidden,
         }
 
         if is_gps_hidden:
@@ -775,6 +891,7 @@ def get_activity_track(
                 "is_gps_hidden": True,
                 "is_biometrics_hidden": is_bio_hidden,
                 "is_segment_hidden": is_segment_hidden,
+                "is_critique_hidden": is_critique_hidden,
                 "has_track": False,
                 "track": None,
                 "has_segment_analysis": False,
@@ -816,11 +933,12 @@ def get_activity_track(
             "is_gps_hidden": False,
             "is_biometrics_hidden": is_bio_hidden,
             "is_segment_hidden": is_segment_hidden,
+            "is_critique_hidden": is_critique_hidden,
             "activity": act_payload,
             "has_track": has_gps_points,
             "track": public_track,
-            "has_segment_analysis": bool(segment_analysis) and not is_segment_hidden,
-            "segment_analysis": None if is_segment_hidden else segment_analysis,
+            "has_segment_analysis": bool(segment_analysis_out) and not is_segment_hidden,
+            "segment_analysis": None if is_segment_hidden else segment_analysis_out,
             "segment_hidden_message": "该跑者已开启运动隐私保护，分段诊断仅对本人、师傅及教练开放" if is_segment_hidden else None,
             "map_image_url": track_row.get("map_image_url"),
         }
@@ -1027,6 +1145,7 @@ def get_personal_share_card_data(
     race_id: Optional[str] = Query(None, description="Optional completed race ID or name"),
     target_date: Optional[str] = Query(None, description="Optional YYYY-MM-DD date"),
     club_id: Optional[str] = Query(None, description="Optional preferred club ID for invite QR"),
+    viewer_uid: Optional[str] = Query(None, description="Optional viewer user ID"),
     env_version: Optional[str] = Query("release", description="WeChat QR code env_version"),
 ) -> Dict[str, Any]:
     """
@@ -1375,6 +1494,25 @@ def get_personal_share_card_data(
         "elevation_gain_m": 0.0,
     }
 
+    raw_caller = (
+        getattr(getattr(request, "state", None), "user_id", None)
+        or (request.headers.get("x-user-id") if request else None)
+        or (viewer_uid if isinstance(viewer_uid, str) and viewer_uid.strip() else None)
+    )
+    caller_uid = LocalStore.resolve_user_id(str(raw_caller).strip()) if raw_caller else None
+    can_view_confidential = (
+        LocalStore.can_view_confidential_runner_data(caller_uid, eff_uid)
+        if caller_uid
+        else False
+    )
+    is_bio_hidden = bool(profile.get("hide_biometrics")) and not can_view_confidential
+    can_view_critique = (
+        LocalStore.can_view_canova_critique(caller_uid, eff_uid, club_id=club_id)
+        if caller_uid
+        else False
+    )
+    is_critique_hidden = not can_view_critique
+
     if selected_act:
         act_id = str(selected_act["id"])
         dist_m = float(selected_act.get("distance_meters") or 0.0)
@@ -1393,14 +1531,6 @@ def get_personal_share_card_data(
             r_info_elev = (selected_race.get("race_info") or {}).get("elevation_gain_m")
             if r_info_elev:
                 elev_gain = round(float(r_info_elev), 1)
-        verified_caller = getattr(getattr(request, "state", None), "user_id", None)
-        caller_uid = LocalStore.resolve_user_id(str(verified_caller).strip()) if verified_caller else None
-        can_view_confidential = (
-            LocalStore.can_view_confidential_runner_data(caller_uid, eff_uid)
-            if caller_uid
-            else False
-        )
-        is_bio_hidden = bool(profile.get("hide_biometrics")) and not can_view_confidential
 
         avg_hr = None if is_bio_hidden else selected_act.get("average_heartrate")
         max_hr = None if is_bio_hidden else selected_act.get("max_heartrate")
@@ -1489,8 +1619,8 @@ def get_personal_share_card_data(
             "moving_time_seconds": f_secs,
             "duration_str": f_time_str,
             "avg_pace_str": calc_pace,
-            "average_heartrate": 162,
-            "max_heartrate": 182,
+            "average_heartrate": None if is_bio_hidden else 162,
+            "max_heartrate": None if is_bio_hidden else 182,
             "average_cadence": 180,
             "elevation_gain_meters": r_elev,
             "trimp": round(r_dist_km * 4.8, 1),
@@ -1640,7 +1770,7 @@ def get_personal_share_card_data(
                 logger.warning(f"[miniapp] Holistic context eval fallback for {eff_uid}: {h_err}")
                 holistic_ctx = {}
 
-            bio_visible = (act_hr is not None) or not bool((profile or {}).get("hide_biometrics"))
+            bio_visible = not is_bio_hidden
 
             phys_extras: List[str] = []
             h_load = (holistic_ctx or {}).get("load") or {}
@@ -1705,21 +1835,19 @@ def get_personal_share_card_data(
                     pass
             plan_notes_txt = "" if large_discrepancy else _extract_journal_text(day_plan.get("coach_notes"))
             raw_journal = _clean_ai_terms(act_journal_txt or plan_notes_txt)
-            if not bio_visible and raw_journal:
-                raw_journal = re.sub(
-                    r"[，,、]?\s*(?:平均心率|均心(?:下降\d+bpm)?|静息(?:心率)?)\s*(?:稳控)?\s*\d+\s*bpm",
-                    "",
-                    raw_journal,
-                )
-                raw_journal = re.sub(r"[，,、]?\s*\d+\s*bpm", "", raw_journal)
-                raw_journal = re.sub(r"[，,、]?\s*HRV\s*\d+\s*ms(?:\([^)]*\))?", "", raw_journal)
-                raw_journal = re.sub(r"[（(]\s*[)）]", "", raw_journal)
+            if not bio_visible:
+                if raw_journal:
+                    raw_journal = LocalStore.sanitize_canova_critique_biometrics(raw_journal)
+                commentary_exec = LocalStore.sanitize_canova_critique_biometrics(commentary_exec)
+                commentary_phys = LocalStore.sanitize_canova_critique_biometrics(commentary_phys)
             commentary_journal = raw_journal.replace("休整日", "跑休") if len(raw_journal) >= 15 else commentary_exec
         else:
             commentary_exec = (
                 f"今日计划课目为【{plan_title_short} · {plan_km}km】，目标配速 {day_plan['target_pace']}，"
                 f"目标心率 {day_plan['target_hr_zone']}。专注呼吸与步频节奏，跑出属于你的科学耐力节奏！"
             )
+            if is_bio_hidden:
+                commentary_exec = LocalStore.sanitize_canova_critique_biometrics(commentary_exec)
             commentary_phys = commentary_exec
             commentary_journal = commentary_exec
 
@@ -1728,6 +1856,10 @@ def get_personal_share_card_data(
             {"key": "phys", "label": "❤️ 生理与负荷深评", "text": commentary_phys},
             {"key": "journal", "label": "📝 课目专项点评", "text": commentary_journal},
         ]
+
+    if is_critique_hidden:
+        commentary_exec = ""
+        commentary_options = []
 
     # 5. Resolve User's Primary Club & Generate Official WeChat Invite QR Code (wxacode)
     user_clubs = LocalStore.get_user_clubs(eff_uid)
@@ -1841,6 +1973,8 @@ def get_personal_share_card_data(
         "track_overlay": track_overlay,
         "canova_commentary": commentary_exec,
         "commentary_options": commentary_options,
+        "is_critique_hidden": is_critique_hidden,
+        "is_biometrics_hidden": is_bio_hidden,
         "recent_runs": recent_selector,
         "completed_races": races_selector,
         "default_photo_base64": default_photo_b64,

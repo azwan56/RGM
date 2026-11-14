@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import time
 import uuid
 
@@ -483,17 +484,52 @@ def test_point3_forward_training_plan_race_countdown_and_share_card_privacy(isol
         assert "CTL" in opts_owner["phys"]
         assert "睡眠" in opts_owner["phys"] or "HRV" in opts_owner["phys"]
 
-        # Enable hide_biometrics and query as public/unauthenticated viewer
+        # Default critique visibility is 'self': unauthenticated public share-card viewer must not see commentary
         LocalStore.upsert_profile(uid, {**profile, "hide_biometrics": True})
         res_public = client.get(
             f"/api/miniapp/personal-share-card/{uid}?activity_id=p3_act_nov13&target_date=2026-11-13",
         )
         assert res_public.status_code == 200
-        opts_public = {item["key"]: item["text"] for item in res_public.json()["commentary_options"]}
-        assert "bpm" not in opts_public["phys"]
-        assert "HRV" not in opts_public["phys"]
-        assert "bpm" not in opts_public["journal"]
-        assert "HRV" not in opts_public["journal"]
+        d_public = res_public.json()
+        assert d_public["is_critique_hidden"] is True
+        assert d_public["canova_commentary"] == ""
+        assert d_public["commentary_options"] == []
+
+        # Under 'all_clubs' + hide_biometrics=True, an authorized club teammate sees commentary with biometrics scrubbed
+        club_id = f"club_holistic_{ts}" if "ts" in locals() else f"club_holistic_{uid}"
+        mate_uid = f"u_holistic_mate_{uid}"
+        LocalStore.upsert_profile(mate_uid, {"id": mate_uid, "display_name": "同团跑友"})
+        LocalStore.upsert_profile(
+            uid,
+            {**profile, "hide_biometrics": True, "canova_critique_visibility": "all_clubs"},
+        )
+        with sqlite3.connect(ls_mod.DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO clubs (id, name, invite_code, owner_id, status) VALUES (?, ?, ?, ?, 'active')",
+                (club_id, "测试跑团", f"HC{club_id[-6:]}", uid),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO club_memberships (id, club_id, user_id, role, status) VALUES (?, ?, ?, 'member', 'active')",
+                (f"cm_{club_id}_owner", club_id, uid),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO club_memberships (id, club_id, user_id, role, status) VALUES (?, ?, ?, 'member', 'active')",
+                (f"cm_{club_id}_mate", club_id, mate_uid),
+            )
+            conn.commit()
+
+        res_mate = client.get(
+            f"/api/miniapp/personal-share-card/{uid}?activity_id=p3_act_nov13&target_date=2026-11-13&club_id={club_id}",
+            headers={"Authorization": f"Bearer {_make_jwt(mate_uid)}"},
+        )
+        assert res_mate.status_code == 200
+        d_mate = res_mate.json()
+        assert d_mate["is_critique_hidden"] is False
+        opts_mate = {item["key"]: item["text"] for item in d_mate["commentary_options"]}
+        assert "bpm" not in opts_mate["phys"]
+        assert "HRV" not in opts_mate["phys"]
+        assert "bpm" not in opts_mate["journal"]
+        assert "HRV" not in opts_mate["journal"]
     finally:
         if os.path.isdir(avatar_dir):
             for fname in os.listdir(avatar_dir):

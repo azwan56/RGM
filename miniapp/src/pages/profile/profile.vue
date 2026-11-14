@@ -844,7 +844,7 @@
         />
       </view>
 
-      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
+      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
         <view style="flex: 1; padding-right: 20rpx;">
           <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
             💓 心率/HRV/睡眠数据保密
@@ -855,6 +855,99 @@
           color="#10b981"
           @change="(e: any) => handleToggleDataConfidentiality('hide_biometrics', !!e.detail.value)"
         />
+      </view>
+
+      <!-- 🎯 Canova 教练评语可见范围（4-tier selector） -->
+      <view style="padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
+        <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+          🎯 Canova 教练评语可见范围
+        </text>
+        <text style="font-size: 22rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-bottom: 16rpx; line-height: 1.45;">
+          默认仅自己可见；选择后将与网页版实时同步
+        </text>
+
+        <view style="display: flex; flex-direction: column; gap: 12rpx;">
+          <view
+            v-for="opt in [
+              { value: 'self', label: '🔒 仅自己可见（默认）', desc: '仅本人可见，对跑团、教练与师傅均隐藏' },
+              { value: 'coach_mentor', label: '👨‍🏫 仅认证教练与 1v1 师傅可见', desc: '本人、结对师傅与跑团认证教练可见（不含团长/管理员）' },
+              { value: 'selected_clubs', label: '🏃 指定跑团可见', desc: '本人、认证教练/师傅，及所选跑团成员可见' },
+              { value: 'all_clubs', label: '🌐 所有所在跑团可见', desc: '本人、认证教练/师傅，及所有所在跑团成员可见' },
+            ]"
+            :key="opt.value"
+            @tap="handleSelectCritiqueVisibility(opt.value)"
+            :style="{
+              padding: '18rpx 20rpx',
+              borderRadius: '14rpx',
+              border: (profile?.canova_critique_visibility || 'self') === opt.value
+                ? '1px solid rgba(16, 185, 129, 0.65)'
+                : '1px solid rgba(255, 255, 255, 0.08)',
+              background: (profile?.canova_critique_visibility || 'self') === opt.value
+                ? 'rgba(16, 185, 129, 0.14)'
+                : 'rgba(255, 255, 255, 0.02)',
+            }"
+          >
+            <view style="display: flex; align-items: center; justify-content: space-between;">
+              <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">
+                {{ opt.label }}
+              </text>
+              <text
+                v-if="(profile?.canova_critique_visibility || 'self') === opt.value"
+                style="font-size: 20rpx; font-weight: 700; color: #10b981; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(16, 185, 129, 0.16);"
+              >
+                当前
+              </text>
+            </view>
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 6rpx; line-height: 1.4;">
+              {{ opt.desc }}
+            </text>
+          </view>
+        </view>
+
+        <view
+          v-if="(profile?.canova_critique_visibility || 'self') === 'selected_clubs'"
+          style="margin-top: 16rpx; padding-top: 16rpx; border-top: 1px solid rgba(255, 255, 255, 0.08);"
+        >
+          <text style="font-size: 22rpx; font-weight: 600; color: var(--rgm-text, #e2e8f0); display: block; margin-bottom: 12rpx;">
+            勾选允许查看评语的跑团（可多选）：
+          </text>
+          <view v-if="userClubs.length > 0" style="display: flex; flex-wrap: wrap; gap: 12rpx;">
+            <view
+              v-for="club in userClubs"
+              :key="club.id"
+              @tap="handleToggleCritiqueClub(String(club.id))"
+              :style="{
+                padding: '10rpx 20rpx',
+                borderRadius: '999rpx',
+                fontSize: '22rpx',
+                fontWeight: 600,
+                border: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                  ? '1px solid #10b981'
+                  : '1px solid rgba(255, 255, 255, 0.16)',
+                background: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                  ? 'rgba(16, 185, 129, 0.2)'
+                  : 'rgba(255, 255, 255, 0.04)',
+                color: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                  ? '#34d399'
+                  : 'var(--rgm-text-muted, #cbd5e1)',
+              }"
+            >
+              <text>{{ (profile?.canova_critique_club_ids || []).includes(String(club.id)) ? '✓ ' : '+ ' }}{{ club.name || club.id }}</text>
+            </view>
+          </view>
+          <text v-else style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">
+            当前暂未加入跑团，保存后暂仅本人与认证教练/师傅可见。
+          </text>
+        </view>
+
+        <view
+          v-if="((profile?.canova_critique_visibility === 'selected_clubs') || (profile?.canova_critique_visibility === 'all_clubs')) && profile?.hide_biometrics"
+          style="margin-top: 16rpx; padding: 14rpx 16rpx; border-radius: 12rpx; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35);"
+        >
+          <text style="font-size: 21rpx; color: #fbbf24; line-height: 1.45; display: block;">
+            💡 已联动开启心率/HRV保密：普通团友查看您的 Canova 评语时，心率、HRV 与睡眠具体数值将自动脱敏（认证教练与师傅不受影响）。
+          </text>
+        </view>
       </view>
     </view>
 
@@ -2912,6 +3005,8 @@ const defaultProfile = {
   resting_heart_rate: 56,
   hide_gps_route: false,
   hide_biometrics: false,
+  canova_critique_visibility: "self",
+  canova_critique_club_ids: [] as string[],
 };
 
 const ORG_PROGRAM_OPTIONS = ["中文EMBA", "台大班", "复旦-BI（挪威）", "奥林班", "港大班"];
@@ -3915,7 +4010,13 @@ async function loadProfileData() {
     userOrgs.value = orgRes?.organizations || [];
 
     if (res?.profile) {
-      profile.value = res.profile;
+      profile.value = {
+        ...res.profile,
+        canova_critique_visibility: res.profile.canova_critique_visibility || "self",
+        canova_critique_club_ids: Array.isArray(res.profile.canova_critique_club_ids)
+          ? res.profile.canova_critique_club_ids
+          : [],
+      };
       if (res.profile.gobi_experience) {
         if (res.profile.gobi_experience === "新戈") {
           gobiType.value = "new";
@@ -3992,7 +4093,7 @@ async function loadProfileData() {
       races.value = res.races;
     }
 
-    const clubs = clubRes?.clubs || [];
+    const clubs = clubRes?.clubs || res?.clubs || [];
     userClubs.value = clubs;
     userClub.value = resolveActiveClub(clubs);
 
@@ -5049,6 +5150,10 @@ async function handleSaveAll() {
       years_running: profile.value?.years_running,
       hide_gps_route: !!profile.value?.hide_gps_route,
       hide_biometrics: !!profile.value?.hide_biometrics,
+      canova_critique_visibility: profile.value?.canova_critique_visibility || "self",
+      canova_critique_club_ids: Array.isArray(profile.value?.canova_critique_club_ids)
+        ? profile.value.canova_critique_club_ids
+        : [],
     });
 
     const finalMonthlyTargets = monthlyTargets.value.map((v, idx) => {
@@ -5100,6 +5205,63 @@ async function handleToggleDataConfidentiality(
     });
   } catch (err: any) {
     uni.showToast({ title: err?.message || "保存保密设置失败", icon: "none" });
+  }
+}
+
+async function handleSelectCritiqueVisibility(vis: string) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!profile.value) profile.value = { ...defaultProfile };
+  const prevVis = profile.value.canova_critique_visibility || "self";
+  const clubIds = Array.isArray(profile.value.canova_critique_club_ids)
+    ? profile.value.canova_critique_club_ids
+    : [];
+  profile.value.canova_critique_visibility = vis;
+  try {
+    await request(`/api/profile/${encodeURIComponent(uid)}`, "PUT", {
+      canova_critique_visibility: vis,
+      canova_critique_club_ids: clubIds,
+    });
+    const labelMap: Record<string, string> = {
+      self: "已设为仅自己可见 🔒",
+      coach_mentor: "已设为仅教练与师傅可见",
+      selected_clubs: "已设为指定跑团可见",
+      all_clubs: "已设为所有所在跑团可见",
+    };
+    uni.showToast({ title: labelMap[vis] || "可见范围已更新", icon: "none" });
+  } catch (err: any) {
+    profile.value.canova_critique_visibility = prevVis;
+    uni.showToast({ title: err?.message || "保存评语可见范围失败", icon: "none" });
+  }
+}
+
+async function handleToggleCritiqueClub(clubId: string) {
+  const uid = user.value?.id;
+  if (!uid) {
+    uni.showToast({ title: "请先登录", icon: "none" });
+    return;
+  }
+  if (!profile.value) profile.value = { ...defaultProfile };
+  const prevIds = Array.isArray(profile.value.canova_critique_club_ids)
+    ? [...profile.value.canova_critique_club_ids]
+    : [];
+  const nextIds = prevIds.includes(clubId)
+    ? prevIds.filter((id: string) => id !== clubId)
+    : [...prevIds, clubId];
+  profile.value.canova_critique_visibility = "selected_clubs";
+  profile.value.canova_critique_club_ids = nextIds;
+  try {
+    await request(`/api/profile/${encodeURIComponent(uid)}`, "PUT", {
+      canova_critique_visibility: "selected_clubs",
+      canova_critique_club_ids: nextIds,
+    });
+    uni.showToast({ title: "指定跑团白名单已同步 ✓", icon: "none" });
+  } catch (err: any) {
+    profile.value.canova_critique_club_ids = prevIds;
+    uni.showToast({ title: err?.message || "保存指定跑团失败", icon: "none" });
   }
 }
 
