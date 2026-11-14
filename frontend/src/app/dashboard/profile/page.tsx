@@ -105,12 +105,25 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [canovaCritiqueClubIds, setCanovaCritiqueClubIds] = useState<string[]>([]);
   const [joinedClubs, setJoinedClubs] = useState<any[]>([]);
   const [savingVisibility, setSavingVisibility] = useState(false);
+  const [savingConfidentiality, setSavingConfidentiality] = useState(false);
 
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"profile" | "training">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "device" | "training">("profile");
   const [highlightPulse, setHighlightPulse] = useState(false);
+
+  function scrollToSection(elementId: string) {
+    setActiveTab("profile");
+    setTimeout(() => {
+      if (typeof document !== "undefined") {
+        const el = document.getElementById(elementId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    }, 120);
+  }
 
   function scrollToRequiredFields() {
     setActiveTab("profile");
@@ -118,7 +131,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       if (typeof document !== "undefined") {
         const el = document.getElementById("required-personal-fields");
         if (el) {
-          el.scrollIntoView({ behavior: "smooth" });
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
           setHighlightPulse(true);
           setTimeout(() => setHighlightPulse(false), 3200);
         }
@@ -129,6 +142,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   useEffect(() => {
     if (typeof window !== "undefined") {
       const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get("tab");
+      if (tabParam === "device") {
+        setActiveTab("device");
+      } else if (tabParam === "training") {
+        setActiveTab("training");
+      } else if (tabParam === "privacy" || tabParam === "profile") {
+        setActiveTab("profile");
+      }
       const shouldScroll =
         urlParams.get("scroll_to_required") === "1" ||
         sessionStorage.getItem("auto_scroll_to_required_fields") === "1";
@@ -811,6 +832,62 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     }
   }
 
+  async function persistConfidentialityToggle(
+    field: "hide_gps_route" | "hide_biometrics",
+    nextVal: boolean
+  ) {
+    if (!user?.id) return;
+    const prevVal = field === "hide_gps_route" ? hideGpsRoute : hideBiometrics;
+    if (field === "hide_gps_route") {
+      setHideGpsRoute(nextVal);
+    } else {
+      setHideBiometrics(nextVal);
+    }
+    setSavingConfidentiality(true);
+    try {
+      await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}`, {
+        [field]: nextVal,
+      });
+      showToast(
+        nextVal
+          ? "✅ 已开启保密（仅本人、认证教练与 1v1 师傅可见）"
+          : "✅ 已恢复对所在跑团可见"
+      );
+    } catch (err: any) {
+      if (field === "hide_gps_route") {
+        setHideGpsRoute(prevVal);
+      } else {
+        setHideBiometrics(prevVal);
+      }
+      showToast("更新保密设定失败: " + (err?.response?.data?.detail || err?.message || err));
+    } finally {
+      setSavingConfidentiality(false);
+    }
+  }
+
+  const allPiiVisible = showRealName && showPhone && showDob && showIdCard;
+  function toggleAllPiiVisibility() {
+    const next = !allPiiVisible;
+    setShowRealName(next);
+    setShowPhone(next);
+    setShowDob(next);
+    setShowIdCard(next);
+  }
+
+  const piiFilledCount = [realName.trim(), phone.trim(), dateOfBirth.trim(), idCard.trim()].filter(Boolean).length;
+  const bodyFilledCount = [vo2max, heightCm, weightKg, maxHr, restHr, yearsRunning].filter(
+    (v) => v !== "" && v !== null && v !== undefined
+  ).length;
+  const connectedWatchCount = [garminConnected, corosConnected].filter(Boolean).length;
+  const critiqueVisSummary =
+    canovaCritiqueVisibility === "coach_mentor"
+      ? "👨‍🏫 教练师傅"
+      : canovaCritiqueVisibility === "selected_clubs"
+      ? `🏃 指定跑团 (${canovaCritiqueClubIds.length})`
+      : canovaCritiqueVisibility === "all_clubs"
+      ? "🌐 全部跑团"
+      : "🔒 仅自己";
+
   async function persistCanovaVisibility(nextVis: string, nextClubIds: string[]) {
     if (!user?.id) return;
     const prevVis = canovaCritiqueVisibility;
@@ -928,6 +1005,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       setPhone("");
       setDateOfBirth("");
       setAge(null);
+      setEmergencyContact("");
+      setProgram("");
+      setClassDetail("");
+      setClassName("");
+      setHideGpsRoute(true);
+      setHideBiometrics(true);
+      setCanovaCritiqueVisibility("self");
+      setCanovaCritiqueClubIds([]);
       setGarminConnected(false);
       setGarminEmail("");
       setCorosConnected(false);
@@ -940,6 +1025,270 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     }
   }
 
+  function renderPhysioMetricsCard(showPrivacyBadge = false) {
+    return (
+      <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Heart className="w-5 h-5 text-rose-500" />
+              <h2 className="text-lg font-bold text-white tracking-wide">
+                生理指标
+              </h2>
+              {showPrivacyBadge && (
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    hideBiometrics
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                      : "bg-zinc-800 text-zinc-300 border-white/10"
+                  }`}
+                >
+                  {hideBiometrics ? "🔒 生理保密" : "🌐 跑团可见"}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Renato Canova 教练根据实际体能参数与 VO2Max 精准自适应训练配速与超量恢复窗口
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSyncDeviceProfile}
+            disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-white transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#FC4C02] ${syncingDeviceProfile ? "animate-spin" : ""}`} />
+            {syncingDeviceProfile ? "同步中..." : "同步指标"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+          {/* 最大摄氧量 VO2Max */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs text-zinc-400">最大摄氧 (VO2Max)</label>
+              {(garminConnected || corosConnected) && vo2max !== "" && Number(vo2max) > 0 ? (
+                <span className="text-[11px] text-emerald-500 font-bold flex items-center gap-1" title="已直接采用手表 VO2Max 数据，不另作推算">
+                  ⌚ 手表直读
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEstimateVo2max}
+                  disabled={estimatingVo2}
+                  className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
+                  title="仅在无手表 VO2Max 数据时，基于 PB 成绩推算"
+                >
+                  <span>⚡ PB测算</span>
+                </button>
+              )}
+            </div>
+            <input
+              type="number"
+              step="0.1"
+              value={vo2max}
+              onChange={(e) => setVo2max(e.target.value ? Number(e.target.value) : "")}
+              placeholder="例如 54.0"
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+
+          {/* 身高 */}
+          <div>
+            <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
+            <input
+              type="number"
+              value={heightCm}
+              onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+
+          {/* 体重 */}
+          <div>
+            <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={weightKg}
+              onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+
+          {/* 最大心率 */}
+          <div>
+            <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (bpm)</label>
+            <input
+              type="number"
+              value={maxHr}
+              onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+
+          {/* 静息心率 */}
+          <div>
+            <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (bpm)</label>
+            <input
+              type="number"
+              value={restHr}
+              onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+
+          {/* 跑龄 */}
+          <div>
+            <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
+            <input
+              type="number"
+              value={yearsRunning}
+              onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
+              className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderWatchConnectionsCard(compactRedirect = false) {
+    return (
+      <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-wide">
+              {compactRedirect ? "手表授权" : "手表直连"}
+            </h2>
+            {compactRedirect && (
+              <p className="text-xs text-zinc-400 mt-1">
+                随时核查已连接的第三方运动平台授权凭据，可一键解除绑定
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Garmin Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#0A84FF]/10 border border-[#0A84FF]/30 flex items-center justify-center text-[#0A84FF] shrink-0 font-bold text-xs">
+              佳明
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">佳明手表</h3>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
+                    garminConnected
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                      : "bg-zinc-800 text-zinc-400 border-white/5"
+                  }`}
+                >
+                  {garminConnected ? "已连接 ✓" : "未连接"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                {garminConnected
+                  ? `已绑定：${garminEmail} (${garminDomain}) · 自动同步跑步记录与生理健康数据`
+                  : "直连官方服务器，自动同步跑步记录、心率、夜间 HRV 与睡眠体能"}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            {garminConnected ? (
+              <button
+                type="button"
+                onClick={handleUnbindGarmin}
+                disabled={unbinding}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
+              >
+                {unbinding ? "解绑中..." : "解除绑定"}
+              </button>
+            ) : compactRedirect ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("device")}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-200 hover:bg-white/10 transition"
+              >
+                前往绑定 ›
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setModalBrand("garmin"); setGarminModalOpen(true); }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-600 text-white transition active:scale-95 shadow-lg shadow-blue-500/20"
+              >
+                <Zap className="w-4 h-4" />
+                绑定佳明
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* COROS Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 flex items-center justify-center text-[#FC4C02] shrink-0 font-bold text-xs">
+              高驰
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">高驰手表</h3>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
+                    corosConnected
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                      : "bg-zinc-800 text-zinc-400 border-white/5"
+                  }`}
+                >
+                  {corosConnected ? "已连接 ✓" : "未连接"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                {corosConnected
+                  ? `已绑定：${corosAccount} (${corosDomain}) · 自动同步跑步记录与训练负荷`
+                  : "直连高驰 Training Hub，自动同步跑步记录、心率区间与训练负荷"}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            {corosConnected ? (
+              <button
+                type="button"
+                onClick={handleUnbindCoros}
+                disabled={unbindingCoros}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
+              >
+                {unbindingCoros ? "解绑中..." : "解除绑定"}
+              </button>
+            ) : compactRedirect ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("device")}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-200 hover:bg-white/10 transition"
+              >
+                前往绑定 ›
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setModalBrand("coros"); setGarminModalOpen(true); }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] hover:bg-orange-600 text-white transition active:scale-95 shadow-lg shadow-[#FC4C02]/20"
+              >
+                <Zap className="w-4 h-4" />
+                绑定高驰
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#070708] text-white">
       <Navbar />
@@ -947,9 +1296,11 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">跑者档案、比赛计划与目标</h1>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
+              {activeTab === "device" ? "手表连接" : activeTab === "training" ? "训练档案" : "隐私设定"}
+            </h1>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              完善生理指标、赛事周期倒计时与各距离 PB，驱动 Canova教练 精准配速生成
+              集中检查并管理实名加密资料、身体参数、GPS/HRV 保密、Canova 评语可见范围与数据源授权
             </p>
           </div>
           <Link
@@ -957,45 +1308,340 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 transition self-start sm:self-auto shrink-0 shadow-sm"
           >
             <BookOpen className="w-3.5 h-3.5 text-[#FC4C02]" />
-            <span>📖 新用户手册与指引 ›</span>
+            <span>📖 用户手册 ›</span>
           </Link>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-white/10 mb-8 space-x-2">
+        <div className="flex border-b border-white/10 mb-8 space-x-2 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab("profile")}
-            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
               activeTab === "profile"
                 ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
                 : "text-zinc-400 border-transparent hover:text-zinc-200"
             }`}
           >
-            <span>👤</span>
-            <span>个人资料与账号</span>
+            <span>🛡️</span>
+            <span>隐私设定</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("device")}
+            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
+              activeTab === "device"
+                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
+                : "text-zinc-400 border-transparent hover:text-zinc-200"
+            }`}
+          >
+            <span>⌚</span>
+            <span>手表连接</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("training")}
-            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
               activeTab === "training"
                 ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
                 : "text-zinc-400 border-transparent hover:text-zinc-200"
             }`}
           >
             <span>🏃</span>
-            <span>训练档案与赛事</span>
+            <span>训练档案</span>
           </button>
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
           {/* ══════════════════════════════════════════════════════════════════ */}
-          {/* TAB 1: 个人资料与账号 (Profile & Account)                         */}
+          {/* TAB 1: 隐私设定 (Unified Personal Data & Privacy Center)            */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {activeTab === "profile" && (
             <div className="space-y-8">
-              {/* ── CARD: 大群体成员认证与审核状态 (Grand Org Membership Status Card) ── */}
+              {/* ── 顶部总览与快速跳转 ── */}
+              <div className="bg-[#121215] border border-emerald-500/20 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-emerald-400" />
+                    <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                      📊 状态总览
+                    </h2>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 self-start sm:self-auto">
+                    🔒 实时同步
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection("section-privacy-controls")}
+                    className="text-left p-3.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 transition space-y-1"
+                  >
+                    <div className="text-[11px] text-zinc-400">🎯 评语可见</div>
+                    <div className="text-xs sm:text-sm font-bold text-white truncate">{critiqueVisSummary}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection("section-privacy-controls")}
+                    className="text-left p-3.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 transition space-y-1"
+                  >
+                    <div className="text-[11px] text-zinc-400">🗺️ 数据保密</div>
+                    <div className="text-xs font-bold text-white">
+                      GPS:{hideGpsRoute ? "🔒保密" : "🌐可见"} · 心率:{hideBiometrics ? "🔒保密" : "🌐可见"}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection("required-personal-fields")}
+                    className="text-left p-3.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 transition space-y-1"
+                  >
+                    <div className="text-[11px] text-zinc-400">👤 实名生理</div>
+                    <div className="text-xs font-bold text-white">
+                      实名 {piiFilledCount}/4 已加密 · 身体 {bodyFilledCount}/6
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection("section-data-lifecycle")}
+                    className="text-left p-3.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 transition space-y-1"
+                  >
+                    <div className="text-[11px] text-zinc-400">⌚ 手表授权</div>
+                    <div className="text-xs sm:text-sm font-bold text-white">
+                      {connectedWatchCount > 0 ? `已授权 ${connectedWatchCount} 个平台` : "未绑定外部平台"}
+                    </div>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {[
+                    { id: "section-privacy-controls", label: "🔒 权限设定" },
+                    { id: "required-personal-fields", label: "👤 实名信息" },
+                    { id: "section-body-and-org", label: "💓 生理资料" },
+                    { id: "section-data-lifecycle", label: "🔐 授权清除" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => scrollToSection(item.id)}
+                      className="px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.04] hover:bg-[#FC4C02]/15 text-zinc-300 hover:text-white border border-white/10 hover:border-[#FC4C02]/40 transition"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── SECTION 1: 🔒 权限设定（即时生效） ── */}
+              <div
+                id="section-privacy-controls"
+                className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-2xl bg-emerald-500/15 text-emerald-400">
+                      <Shield className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-white tracking-wide">
+                        权限设定
+                      </h2>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        所有隐私开关点选后即时生效，与网页版和微信小程序实时同步
+                      </p>
+                    </div>
+                  </div>
+                  {savingConfidentiality && (
+                    <span className="text-xs text-[#FC4C02] font-semibold">正在保存保密设定...</span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                        <span>🗺️ 路线保密</span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                            hideGpsRoute
+                              ? "bg-emerald-500/15 text-emerald-400"
+                              : "bg-zinc-800 text-zinc-400"
+                          }`}
+                        >
+                          {hideGpsRoute ? "🔒 教练师傅" : "🌐 跑团可见"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        开启后，跑团动态墙与分享页对普通成员隐藏起终点与详细街道轨迹（认证教练与 1v1 师傅不受影响）
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={hideGpsRoute}
+                      disabled={savingConfidentiality}
+                      onChange={(e) => persistConfidentialityToggle("hide_gps_route", e.target.checked)}
+                      className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                        <span>💓 生理保密</span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                            hideBiometrics
+                              ? "bg-emerald-500/15 text-emerald-400"
+                              : "bg-zinc-800 text-zinc-400"
+                          }`}
+                        >
+                          {hideBiometrics ? "🔒 教练师傅" : "🌐 跑团可见"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        开启后，夜间 HRV、静息心率与睡眠恢复评分仅本人、认证教练与 1v1 师傅可见
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={hideBiometrics}
+                      disabled={savingConfidentiality}
+                      onChange={(e) => persistConfidentialityToggle("hide_biometrics", e.target.checked)}
+                      className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Canova Critique 4-tier Visibility */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>🎯 评语可见</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        默认仅自己可见；选择向跑团或教练/师傅开放时，与网页版和微信小程序实时同步
+                      </p>
+                    </div>
+                    {savingVisibility && (
+                      <span className="text-[11px] text-[#FC4C02] font-medium">同步保存中...</span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {[
+                      {
+                        value: "self",
+                        title: "🔒 仅自己",
+                        desc: "默认设置：仅本人可见 Canova 训练点评，对跑团、教练与师傅均隐藏",
+                      },
+                      {
+                        value: "coach_mentor",
+                        title: "👨‍🏫 教练师傅",
+                        desc: "本人、结对 1v1 师傅与所属跑团认证教练可见（不含团长/管理员）",
+                      },
+                      {
+                        value: "selected_clubs",
+                        title: "🏃 指定跑团",
+                        desc: "本人、认证教练/师傅，以及下方勾选跑团的成员可见",
+                      },
+                      {
+                        value: "all_clubs",
+                        title: "🌐 全部跑团",
+                        desc: "本人、认证教练/师傅，以及所有已加入跑团的成员可见",
+                      },
+                    ].map((opt) => {
+                      const selected = canovaCritiqueVisibility === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          disabled={savingVisibility}
+                          onClick={() => persistCanovaVisibility(opt.value, canovaCritiqueClubIds)}
+                          className={`text-left p-3 rounded-xl border transition ${
+                            selected
+                              ? "bg-[#FC4C02]/15 border-[#FC4C02]/60 text-white"
+                              : "bg-white/[0.02] border-white/10 text-zinc-300 hover:border-white/25"
+                          }`}
+                        >
+                          <div className="text-xs font-bold flex items-center justify-between gap-2">
+                            <span>{opt.title}</span>
+                            {selected && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FC4C02] text-white font-semibold">
+                                当前
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">{opt.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {canovaCritiqueVisibility === "selected_clubs" && (
+                    <div className="pt-2 border-t border-white/10 space-y-2">
+                      <div className="text-[11px] font-semibold text-zinc-300">
+                        选择跑团（可多选）：
+                      </div>
+                      {joinedClubs.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {joinedClubs.map((c: any) => {
+                            const cid = String(c.id || "");
+                            const active = canovaCritiqueClubIds.includes(cid);
+                            return (
+                              <button
+                                key={cid}
+                                type="button"
+                                disabled={savingVisibility}
+                                onClick={() => {
+                                  const nextIds = active
+                                    ? canovaCritiqueClubIds.filter((x) => x !== cid)
+                                    : [...canovaCritiqueClubIds, cid];
+                                  persistCanovaVisibility("selected_clubs", nextIds);
+                                }}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                                  active
+                                    ? "bg-[#FC4C02]/20 border-[#FC4C02] text-orange-200"
+                                    : "bg-white/[0.03] border-white/15 text-zinc-400 hover:border-white/30"
+                                }`}
+                              >
+                                {active ? "✓ " : "+ "}
+                                {c.name || cid}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-zinc-500">
+                          暂未加入跑团，当前配置下仅自己与认证教练/师傅可见。
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {(canovaCritiqueVisibility === "selected_clubs" || canovaCritiqueVisibility === "all_clubs") &&
+                    hideBiometrics && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
+                        💡 已联动开启“生理保密”：普通团友查看您的 Canova 评语时，仅展示训练结构与建议，心率（bpm）、HRV 与睡眠评分等具体数值将自动脱敏（认证教练与 1v1 师傅不受影响）。
+                      </div>
+                    )}
+                </div>
+
+                {/* Compact Platform Default Privacy Strip */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11px] text-zinc-400">
+                  <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                    🔒 <strong className="text-zinc-200">密文存储</strong>：实名、证件、手机号、生日 AES-256 加密
+                  </div>
+                  <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                    👁️ <strong className="text-zinc-200">名册脱敏</strong>：普通团友仅见张*、李*华与年龄组别
+                  </div>
+                  <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                    🛡️ <strong className="text-zinc-200">周岁保护</strong>：分析报告绝不暴露具体周岁数字
+                  </div>
+                </div>
+              </div>
+
+              {/* ── CARD: 大群认证 (Grand Org Membership Status Card) ── */}
           {userOrgs && userOrgs.length > 0 && (
             <div className="bg-[#121215] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -1007,7 +1653,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-white tracking-wide">
-                      大群体成员认证与审核状态
+                      大群认证
                     </h2>
                     <p className="text-xs text-zinc-400 mt-0.5">
                       您已加入的商学院大组织准入考核与认证资格（关系到下属跑团的浏览与活动参与权限）
@@ -1128,11 +1774,13 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           )}
 
-              {/* ── CARD 0.5: 跑者个人形象与昵称 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          {/* ── SECTION 2: 👤 实名信息与个人形象 ── */}
+          <div id="required-personal-fields" className="space-y-6 scroll-mt-24">
+            {/* ── CARD 0.5: 个人形象 ── */}
+            <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-center gap-2">
               <User className="w-5 h-5 text-amber-500" />
-              <h2 className="text-lg font-bold text-white tracking-wide">跑者基本资料与形象</h2>
+              <h2 className="text-lg font-bold text-white tracking-wide">个人形象</h2>
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -1156,7 +1804,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
               <div className="flex-1 w-full space-y-3">
                 <div>
-                  <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称 (Display Name)</label>
+                  <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">跑者昵称</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
@@ -1202,7 +1850,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
                 <div className="flex items-center gap-3">
                   <label className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 cursor-pointer transition">
-                    <span>📷 上传本地图片替换头像</span>
+                    <span>📷 更换头像</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1216,30 +1864,48 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           </div>
 
-              {/* ── CARD: 个人实名身份与敏感信息 (AES-256-GCM 密文存储) ── */}
+              {/* ── CARD: 实名信息 (AES-256-GCM 密文存储) ── */}
           <div
-            id="required-personal-fields"
             className={`bg-[#121215] border ${
               highlightPulse
                 ? "border-amber-400 ring-4 ring-amber-400/40 shadow-2xl shadow-amber-500/25 scale-[1.005]"
                 : "border-white/[0.08]"
-            } rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24 transition-all duration-700`}
+            } rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 transition-all duration-700`}
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-2xl bg-emerald-500/20 text-emerald-400">
                   <Lock className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white tracking-wide">个人实名身份与敏感信息</h2>
+                  <h2 className="text-lg font-bold text-white tracking-wide">实名信息</h2>
                   <p className="text-xs text-zinc-400 mt-0.5">
                     真实姓名、生理性别、出生日期、联系电话及证件号采用 AES-256-GCM 密文存储保护
                   </p>
                 </div>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
-                🔒 AES-256 高强度加密 · 非必要不暴露
-              </span>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={toggleAllPiiVisibility}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-zinc-200 transition flex items-center gap-1.5"
+                >
+                  {allPiiVisible ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-zinc-300" />
+                      <span>🙈 全部遮罩</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>👁️ 显示全部</span>
+                    </>
+                  )}
+                </button>
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  🔒 密文保护
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1247,7 +1913,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               <div>
                 <label className="text-xs text-zinc-400 flex items-center gap-1.5 mb-1.5">
                   <span>生理性别<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                  <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                  <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大群必填</span>
                 </label>
                 <select
                   value={gender}
@@ -1262,8 +1928,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
-                      <span>真实姓名 (实名认证)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                      <span>真实姓名<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大群必填</span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
                     </label>
                     <span className="text-[11px] text-zinc-500">{showRealName ? "明文展示" : "星号遮罩"}</span>
@@ -1287,12 +1953,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </div>
                 </div>
 
-                {/* 紧急联系手机 */}
+                {/* 联系手机 */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>联系手机 (Emergency Phone)</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">保密</span>
+                      <span>联系手机</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">加密存储</span>
                     </label>
                     <span className="text-[11px] text-zinc-500">{showPhone ? "明文展示" : "星号遮罩"}</span>
                   </div>
@@ -1320,8 +1986,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
-                      <span>出生日期 (Date of Birth)<span className="text-red-400 ml-0.5 font-bold">*</span></span>
-                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                      <span>出生日期<span className="text-red-400 ml-0.5 font-bold">*</span></span>
+                      <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大群必填</span>
                       <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">密文分级</span>
                     </label>
                     {age !== null && (
@@ -1365,12 +2031,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </p>
                 </div>
 
-                {/* 身份证号码 / 证件号 */}
+                {/* 证件号码 */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs text-zinc-400 flex items-center gap-1.5">
-                      <span>身份证号码 / 证件号 (选填)</span>
-                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">非必要不暴露</span>
+                      <span>证件号码</span>
+                      <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">仅己可见</span>
                     </label>
                     <span className="text-[11px] text-zinc-500">{showIdCard ? "明文展示" : "星号遮罩"}</span>
                   </div>
@@ -1380,7 +2046,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                       maxLength={18}
                       value={idCard}
                       onChange={(e) => setIdCard(e.target.value)}
-                      placeholder="用于赛事保险投保与参赛资格核验"
+                      placeholder="用于赛事保险投保与参赛资格核验（选填）"
                       className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
                     />
                     <button
@@ -1398,16 +2064,21 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 </div>
             </div>
           </div>
+          </div>
 
-              {/* ── CARD: 商学院项目与戈友认证 (Gobi & Business School Credentials) ── */}
+          {/* ── SECTION 3: 💓 生理指标、学院认证与赛事装备 ── */}
+          <div id="section-body-and-org" className="space-y-8 scroll-mt-24">
+            {renderPhysioMetricsCard(true)}
+
+              {/* ── CARD: 学院认证 (Gobi & Business School Credentials) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Award className="w-5 h-5 text-amber-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">商学院项目与戈友认证</h2>
+                <h2 className="text-lg font-bold text-white tracking-wide">学院认证</h2>
               </div>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 self-start sm:self-auto">
-                🏫 大组织审核资格 · 实时双向自动同步
+                🏫 自动同步
               </span>
             </div>
             <p className="text-xs text-zinc-400">
@@ -1415,17 +2086,17 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-              {/* 商学院项目与班级 */}
+              {/* 所属项目与班级届别 */}
               <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <span>商学院项目与班级<span className="text-red-400 ml-0.5">*</span></span>
-                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大组织必填项</span>
+                    <span>所属项目<span className="text-red-400 ml-0.5">*</span></span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">大群必填</span>
                   </label>
                 </div>
                 
                 <div>
-                  <span className="text-xs text-zinc-400 block mb-2">选择所属项目：</span>
+                  <span className="text-xs text-zinc-400 block mb-2">项目类别：</span>
                   <div className="flex flex-wrap gap-2">
                     {ORG_PROGRAM_OPTIONS.map((prog) => (
                       <button
@@ -1446,8 +2117,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
                 <div>
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="text-xs text-zinc-400">所在班级 / 届别 (自由输入)<span className="text-red-400 ml-0.5 font-bold">*</span>：</span>
-                    <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大组织必填项</span>
+                    <span className="text-xs text-zinc-400">班级届别<span className="text-red-400 ml-0.5 font-bold">*</span>：</span>
+                    <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">大群必填</span>
                   </div>
                   <input
                     type="text"
@@ -1458,7 +2129,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   />
                   {program && classDetail && (
                     <div className="mt-2 text-xs text-amber-300 flex items-center gap-1.5 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
-                      <span>名册显示组合：</span>
+                      <span>名册展示：</span>
                       <span className="font-bold">{program} {classDetail}</span>
                     </div>
                   )}
@@ -1469,10 +2140,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <span>戈壁经历 (戈赛经验)</span>
-                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">分组与荣誉铭牌</span>
+                    <span>戈壁经历</span>
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">分组铭牌</span>
                   </label>
-                  <span className="text-xs text-zinc-400">{gobiType === "new" ? "🌱 新戈跑者" : `🏅 ${gobiEdition} ${gobiGroup}`}</span>
+                  <span className="text-xs text-zinc-400">{gobiType === "new" ? "🌱 新戈" : `🏅 ${gobiEdition} ${gobiGroup}`}</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1502,7 +2173,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   >
                     <span className="text-xl">🏅</span>
                     <div>
-                      <div className="font-bold text-xs text-white">往届老戈友</div>
+                      <div className="font-bold text-xs text-white">老戈友</div>
                       <div className="text-[10px] text-zinc-400">戈1至戈21</div>
                     </div>
                   </button>
@@ -1511,7 +2182,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 {gobiType === "vet" && (
                   <div className="p-3.5 bg-black/40 border border-white/10 rounded-xl space-y-3">
                     <div>
-                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数 (戈1 ~ 戈21)：</span>
+                      <span className="text-xs text-zinc-400 block mb-1.5">参加届数：</span>
                       <select
                         value={gobiEdition}
                         onChange={(e) => setGobiEdition(e.target.value)}
@@ -1542,7 +2213,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                       </div>
                     </div>
                     <div className="text-[11px] text-amber-300 flex items-center gap-1.5 pt-1">
-                      <span>认证经历展示：</span>
+                      <span>认证铭牌：</span>
                       <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30">
                         🏅 {gobiEdition} {gobiGroup}
                       </span>
@@ -1553,15 +2224,15 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </div>
           </div>
 
-              {/* ── CARD: 赛事活动与装备保障 (Race Gear & Emergency) ── */}
+              {/* ── CARD: 赛事装备 (Race Gear & Emergency) ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Shield className="w-5 h-5 text-indigo-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">赛事活动与装备保障</h2>
+                <h2 className="text-lg font-bold text-white tracking-wide">赛事装备</h2>
               </div>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 self-start sm:self-auto">
-                🎽 物资发放 · 安全保险
+                🎽 物资保险
               </span>
             </div>
             <p className="text-xs text-zinc-400">
@@ -1569,10 +2240,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
-              {/* 紧急联系人及电话 */}
+              {/* 紧急联系 */}
               <div>
                 <label className="text-xs text-zinc-400 block mb-1.5">
-                  紧急联系人及电话
+                  紧急联系
                 </label>
                 <input
                   type="text"
@@ -1587,7 +2258,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               {/* 队服尺码 */}
               <div>
                 <label className="text-xs text-zinc-400 block mb-1.5">
-                  队服尺码 (Clothing Size)
+                  队服尺码
                 </label>
                 <select
                   value={clothingSize}
@@ -1605,7 +2276,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               {/* 跑鞋尺码 */}
               <div>
                 <label className="text-xs text-zinc-400 block mb-1.5">
-                  跑鞋尺码 (Shoe Size)
+                  跑鞋尺码
                 </label>
                 <input
                   type="text"
@@ -1638,7 +2309,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               </div>
             </div>
 
-            {/* 健康状况声明 */}
+            {/* 健康声明 */}
             <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-3 mt-2">
               <input
                 type="checkbox"
@@ -1648,351 +2319,77 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                 className="mt-1 w-4 h-4 rounded border-white/20 text-[#FC4C02] focus:ring-[#FC4C02] bg-[#18181c] cursor-pointer"
               />
               <label htmlFor="health-decl-check" className="text-xs text-zinc-300 leading-relaxed cursor-pointer select-none">
-                <span className="font-bold text-white block mb-0.5">健康状况与免责声明确认</span>
+                <span className="font-bold text-white block mb-0.5">健康声明</span>
                 本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
               </label>
             </div>
           </div>
+          </div>
 
-              {/* ── CARD 0: 运动手表数据直连 (Garmin & COROS) ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <h2 className="text-lg font-bold text-white tracking-wide">运动手表数据直连</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+            <p className="text-xs text-zinc-500">
+              上方隐私开关点选后即时生效；修改实名、生理参数或商学院/装备信息后请点击保存。
+            </p>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25 shrink-0"
+            >
+              <Save className="w-5 h-5" />
+              {saving ? "保存中..." : "💾 保存设定"}
+            </button>
+          </div>
 
-            {/* Garmin Row */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#0A84FF]/10 border border-[#0A84FF]/30 flex items-center justify-center text-[#0A84FF] shrink-0 font-bold text-xs">
-                  佳明
-                </div>
-                <div>
+          {/* ── SECTION 4: 🔐 手表授权与隐私清除 ── */}
+          <div id="section-data-lifecycle" className="space-y-6 scroll-mt-24 pt-2">
+            {renderWatchConnectionsCard(true)}
+
+            <div className="bg-[#121215] border border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-white">Garmin (佳明) 手表</h3>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
-                        garminConnected
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                          : "bg-zinc-800 text-zinc-400 border-white/5"
-                      }`}
-                    >
-                      {garminConnected ? "已连接 ✓" : "未连接"}
-                    </span>
+                    <Trash2 className="w-5 h-5 text-rose-400" />
+                    <h2 className="text-lg font-bold text-white tracking-wide">隐私清除</h2>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">
-                    {garminConnected
-                      ? `已绑定：${garminEmail} (${garminDomain}) · 自动同步跑步记录与生理健康数据`
-                      : "直连官方服务器，自动同步跑步记录、心率、夜间 HRV 与睡眠体能"}
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    若您不再需要参与赛事资格核验，可随时一键彻底擦除实名身份、证件号、生日、手机号、紧急联系人、商学院登记及手表授权令牌；历史运动记录将匿名化安全保留，且隐私开关自动锁定为最严格状态。
                   </p>
                 </div>
-              </div>
-
-              <div>
-                {garminConnected ? (
-                  <button
-                    type="button"
-                    onClick={handleUnbindGarmin}
-                    disabled={unbinding}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
-                  >
-                    {unbinding ? "正在解绑..." : "解除佳明绑定"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => { setModalBrand("garmin"); setGarminModalOpen(true); }}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-600 text-white transition active:scale-95 shadow-lg shadow-blue-500/20"
-                  >
-                    <Zap className="w-4 h-4" />
-                    绑定佳明账号
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* COROS Row */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 flex items-center justify-center text-[#FC4C02] shrink-0 font-bold text-xs">
-                  高驰
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-white">COROS (高驰) 手表</h3>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
-                        corosConnected
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                          : "bg-zinc-800 text-zinc-400 border-white/5"
-                      }`}
-                    >
-                      {corosConnected ? "已连接 ✓" : "未连接"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-1">
-                    {corosConnected
-                      ? `已绑定：${corosAccount} (${corosDomain}) · 自动同步跑步记录与训练负荷`
-                      : "直连高驰 Training Hub，自动同步跑步记录、心率区间与训练负荷"}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                {corosConnected ? (
-                  <button
-                    type="button"
-                    onClick={handleUnbindCoros}
-                    disabled={unbindingCoros}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-rose-400 hover:bg-rose-500/10 transition active:scale-95"
-                  >
-                    {unbindingCoros ? "正在解绑..." : "解除高驰绑定"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => { setModalBrand("coros"); setGarminModalOpen(true); }}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#FC4C02] hover:bg-orange-600 text-white transition active:scale-95 shadow-lg shadow-[#FC4C02]/20"
-                  >
-                    <Zap className="w-4 h-4" />
-                    绑定高驰账号
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowPurgeConfirmModal(true)}
+                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-xs font-bold text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 transition active:scale-95 shrink-0"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>🧹 清除隐私</span>
+                </button>
               </div>
             </div>
           </div>
-
-              {/* ── CARD 5: 个人隐私与数据安全保障 & 一键彻底清除 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-emerald-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">个人隐私与数据安全保障</h2>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 self-start sm:self-auto">
-                🔒 AES-256-GCM 高强度密文保护
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">🔒</span>
-                  <span>敏感隐私密文存储</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  真实姓名、身份证号、出生日期及手机号均在数据库底层采用 AES-256-GCM 密文存储，非必要不暴露，仅用于赛事保险投保与资格核验。
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">👁️</span>
-                  <span>大群体名册自动脱敏</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  在公开团队名册中，非管理员跑友仅可见脱敏姓名（如：张*、李*华）与年龄组别（如：大师组、壮年组），身份证号与手机号对普通成员完全隐蔽。
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center gap-2 text-white font-bold text-xs">
-                  <span className="text-base">🧹</span>
-                  <span>随时一键彻底清除</span>
-                </div>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  您可以随时一键彻底擦除真实姓名、证件号、生日、手机号及第三方手表账号密码密文。历史运动里程将以匿名跑者形式保留。
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>🗺️ 对非教练团友隐藏跑步 GPS 轨迹</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    开启后，跑团动态墙与分享页对普通成员隐藏起终点与详细街道轨迹（主教练诊断不受影响）
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={hideGpsRoute}
-                  onChange={(e) => setHideGpsRoute(e.target.checked)}
-                  className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
-                />
-              </label>
-
-              <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>💓 对非教练团友隐藏 HRV 与生理恢复</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    开启后，夜间 HRV、静息心率与睡眠恢复评分仅本人与跑团认证教练可见（与小程序实时同步）
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={hideBiometrics}
-                  onChange={(e) => setHideBiometrics(e.target.checked)}
-                  className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
-                />
-              </label>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>🎯 Canova 教练评语可见范围</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 mt-0.5">
-                    默认仅自己可见；选择向跑团或教练/师傅开放时，与网页版和微信小程序实时同步
-                  </p>
-                </div>
-                {savingVisibility && (
-                  <span className="text-[11px] text-[#FC4C02] font-medium">同步保存中...</span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {[
-                  {
-                    value: "self",
-                    title: "🔒 仅自己可见（默认）",
-                    desc: "仅本人可见 Canova 训练点评，对跑团、教练与师傅均隐藏",
-                  },
-                  {
-                    value: "coach_mentor",
-                    title: "👨‍🏫 仅认证教练与 1v1 师傅可见",
-                    desc: "本人、结对 1v1 师傅与所属跑团认证教练可见（不含团长/管理员）",
-                  },
-                  {
-                    value: "selected_clubs",
-                    title: "🏃 指定跑团可见",
-                    desc: "本人、认证教练/师傅，以及下方勾选跑团的成员可见",
-                  },
-                  {
-                    value: "all_clubs",
-                    title: "🌐 所有所在跑团可见",
-                    desc: "本人、认证教练/师傅，以及所有已加入跑团的成员可见",
-                  },
-                ].map((opt) => {
-                  const selected = canovaCritiqueVisibility === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      disabled={savingVisibility}
-                      onClick={() => persistCanovaVisibility(opt.value, canovaCritiqueClubIds)}
-                      className={`text-left p-3 rounded-xl border transition ${
-                        selected
-                          ? "bg-[#FC4C02]/15 border-[#FC4C02]/60 text-white"
-                          : "bg-white/[0.02] border-white/10 text-zinc-300 hover:border-white/25"
-                      }`}
-                    >
-                      <div className="text-xs font-bold flex items-center justify-between gap-2">
-                        <span>{opt.title}</span>
-                        {selected && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FC4C02] text-white font-semibold">
-                            当前
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">{opt.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {canovaCritiqueVisibility === "selected_clubs" && (
-                <div className="pt-2 border-t border-white/10 space-y-2">
-                  <div className="text-[11px] font-semibold text-zinc-300">
-                    选择允许查看评语的跑团（可多选）：
-                  </div>
-                  {joinedClubs.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {joinedClubs.map((c: any) => {
-                        const cid = String(c.id || "");
-                        const active = canovaCritiqueClubIds.includes(cid);
-                        return (
-                          <button
-                            key={cid}
-                            type="button"
-                            disabled={savingVisibility}
-                            onClick={() => {
-                              const nextIds = active
-                                ? canovaCritiqueClubIds.filter((x) => x !== cid)
-                                : [...canovaCritiqueClubIds, cid];
-                              persistCanovaVisibility("selected_clubs", nextIds);
-                            }}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                              active
-                                ? "bg-[#FC4C02]/20 border-[#FC4C02] text-orange-200"
-                                : "bg-white/[0.03] border-white/15 text-zinc-400 hover:border-white/30"
-                            }`}
-                          >
-                            {active ? "✓ " : "+ "}
-                            {c.name || cid}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-zinc-500">
-                      暂未加入跑团，当前配置下仅自己与认证教练/师傅可见。
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {(canovaCritiqueVisibility === "selected_clubs" || canovaCritiqueVisibility === "all_clubs") &&
-                hideBiometrics && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
-                    💡 已联动开启“隐藏 HRV 与生理恢复”：普通团友查看您的 Canova 评语时，仅展示训练结构与建议，心率（bpm）、HRV 与睡眠评分等具体数值将自动脱敏（认证教练与 1v1 师傅不受影响）。
-                  </div>
-                )}
-            </div>
-
-            <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <p className="text-xs text-zinc-500">
-                若您不再需要参与赛事资格审核，可随时一键清除所有个人实名与认证记录。
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowPurgeConfirmModal(true)}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition active:scale-95 shrink-0"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>🧹 一键清除所有个人隐私数据</span>
-              </button>
-            </div>
-          </div>
-
-                          <div className="flex justify-end pt-4">
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
-              >
-                <Save className="w-5 h-5" />
-                {saving ? "正在保存..." : "💾 保存个人资料与账号设置"}
-              </button>
-            </div>
             </div>
           )}
 
           {/* ══════════════════════════════════════════════════════════════════ */}
-          {/* TAB 2: 训练档案与赛事 (Training Metrics & Races)                  */}
+          {/* TAB 2: 手表连接 (Device Connections & Sync)                       */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {activeTab === "device" && (
+            <div className="space-y-8">
+              {renderWatchConnectionsCard(false)}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* TAB 3: 训练档案 (Training Metrics & Races)                        */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {activeTab === "training" && (
             <div className="space-y-8">
-              {/* ── CARD 2: 个人最佳成绩 (PB) - 从 Garmin 导入 ── */}
+              {/* ── CARD 2: 最佳成绩 (PB) - 从 Garmin 导入 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
                   <Award className="w-5 h-5 text-[#FC4C02]" />
-                  <h2 className="text-lg font-bold text-white tracking-wide">个人最佳成绩 (PB)</h2>
+                  <h2 className="text-lg font-bold text-white tracking-wide">最佳成绩 (PB)</h2>
                 </div>
                 <p className="text-xs text-zinc-400 mt-1">
                   格式: H:MM:SS 或 MM:SS · 例如 3:45:30 或 45:10 · 可手动修改导入值
@@ -2059,124 +2456,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           </div>
 
               {/* ── CARD 3: 运动体能与生理指标 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Heart className="w-5 h-5 text-rose-500" />
-                  <h2 className="text-lg font-bold text-white tracking-wide">运动体能与生理指标</h2>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Renato Canova 教练根据实际体能参数与 VO2Max 精准自适应训练配速与超量恢复窗口
-                </p>
-              </div>
+              {renderPhysioMetricsCard(false)}
 
-              <button
-                type="button"
-                onClick={handleSyncDeviceProfile}
-                disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 border border-white/10 text-white transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-[#FC4C02] ${syncingDeviceProfile ? "animate-spin" : ""}`} />
-                {syncingDeviceProfile ? "正在同步手表身体指标..." : "从手表同步指标"}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
-              {/* 最大摄氧量 VO2Max */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-zinc-400">最大摄氧量 (VO2Max)</label>
-                  {(garminConnected || corosConnected) && vo2max !== "" && Number(vo2max) > 0 ? (
-                    <span className="text-[11px] text-emerald-500 font-bold flex items-center gap-1" title="已直接采用手表 VO2Max 数据，不另作推算">
-                      ⌚ 手表实测直读
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleEstimateVo2max}
-                      disabled={estimatingVo2}
-                      className="text-[11px] text-[#FC4C02] hover:text-[#ff5d1a] font-bold flex items-center gap-1 transition active:scale-95"
-                      title="仅在无手表 VO2Max 数据时，基于 PB 成绩推算"
-                    >
-                      <span>⚡ 依据 PB 测算</span>
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={vo2max}
-                  onChange={(e) => setVo2max(e.target.value ? Number(e.target.value) : "")}
-                  placeholder="例如 54.0"
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 身高 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">身高 (cm)</label>
-                <input
-                  type="number"
-                  value={heightCm}
-                  onChange={(e) => setHeightCm(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 体重 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">体重 (kg)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={weightKg}
-                  onChange={(e) => setWeightKg(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 最大心率 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">最大心率 (Max HR bpm)</label>
-                <input
-                  type="number"
-                  value={maxHr}
-                  onChange={(e) => setMaxHr(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 静息心率 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">静息心率 (Resting HR bpm)</label>
-                <input
-                  type="number"
-                  value={restHr}
-                  onChange={(e) => setRestHr(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-
-              {/* 跑龄 */}
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1.5">跑龄 (年)</label>
-                <input
-                  type="number"
-                  value={yearsRunning}
-                  onChange={(e) => setYearsRunning(e.target.value ? Number(e.target.value) : "")}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                />
-              </div>
-            </div>
-          </div>
-
-              {/* ── CARD 4: 训练目标与跑量设置 ── */}
+              {/* ── CARD 4: 跑量目标 ── */}
           <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Target className="w-5 h-5 text-cyan-400" />
-                <h2 className="text-lg font-bold text-white tracking-wide">训练目标与跑量设置</h2>
+                <h2 className="text-lg font-bold text-white tracking-wide">跑量目标</h2>
               </div>
               <span
                 className={`text-xs px-3 py-1 rounded-full font-bold self-start sm:self-auto border ${
@@ -2189,12 +2476,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               </span>
             </div>
 
-            {/* ── 常规周跑量计划 (可单独设置与单独保存) ── */}
+            {/* ── 周跑量 ── */}
             <div className="bg-[#18181c] border border-emerald-500/20 rounded-2xl p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-base">🏃</span>
-                  <h3 className="text-sm font-bold text-white tracking-wide">常规周跑量计划 (每周目标)</h3>
+                  <h3 className="text-sm font-bold text-white tracking-wide">周跑量</h3>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs px-3 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -2206,7 +2493,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                     disabled={savingWeekly}
                     className="px-3 py-1 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition active:scale-95 disabled:opacity-50 shadow-md shadow-emerald-600/20"
                   >
-                    {savingWeekly ? "保存中..." : "单独保存周跑量"}
+                    {savingWeekly ? "保存中..." : "保存周量"}
                   </button>
                 </div>
               </div>
@@ -2347,7 +2634,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             )}
           </div>
 
-          {/* Tab 2 专属保存设置 (配置完生理指标与跑量目标后直接保存) */}
+          {/* Tab 3 专属保存设置 (配置完生理指标与跑量目标后直接保存) */}
           <div className="flex justify-end pt-2">
             <button
               type="submit"
@@ -2355,7 +2642,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-base font-bold bg-gradient-to-r from-[#FC4C02] to-[#ff7a45] text-white hover:brightness-110 transition active:scale-95 shadow-xl shadow-[#FC4C02]/25"
             >
               <Save className="w-5 h-5" />
-              {saving ? "正在保存..." : "🎯 保存训练目标与生理参数"}
+              {saving ? "保存中..." : "🎯 保存档案"}
             </button>
           </div>
 
@@ -3044,7 +3331,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               <div className="flex items-center gap-2.5">
                 <span className="text-2xl">🚨</span>
                 <h3 className="text-lg font-black text-rose-400">
-                  高危操作：确认清除个人隐私数据
+                  清除隐私
                 </h3>
               </div>
               <button
@@ -3078,15 +3365,19 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="text-rose-500 font-bold">✕</span>
-                    <span>紧急联系手机号、个人邮箱、个人简介</span>
+                    <span>联系手机号、紧急联系人、个人邮箱与个人简介</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="text-rose-500 font-bold">✕</span>
-                    <span>已绑定的 Garmin / 高驰手表授权密码与令牌</span>
+                    <span>商学院项目与班级届别登记、大群体花名册实名认证记录</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="text-rose-500 font-bold">✕</span>
-                    <span>各大跑团 / 大群体花名册中的实名认证登记</span>
+                    <span>已绑定的 Garmin / 高驰 / 华为 / 颂拓等第三方手表授权凭证</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-rose-500 font-bold">✕</span>
+                    <span>同时将 GPS 轨迹、HRV 生理与 Canova 评语自动锁定为“仅自己可见”</span>
                   </li>
                 </ul>
               </div>

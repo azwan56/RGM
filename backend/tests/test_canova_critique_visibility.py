@@ -495,3 +495,60 @@ def test_linked_biometrics_scrubbing_and_profile_api_roundtrip(isolated_db):
     with sqlite3.connect(ls_mod.DB_PATH) as conn:
         raw_db_journal = conn.execute("SELECT ai_journal FROM activities WHERE id = ?", (act_id,)).fetchone()[0]
     assert raw_db_journal == RICH_CRITIQUE
+
+
+def test_purge_privacy_resets_all_personal_fields_and_locks_visibility(isolated_db):
+    env = _seed_club_ecosystem("purge")
+    runner = env["runner"]
+
+    # Seed runner with full PII, org cohort, watch bindings, and open privacy settings
+    LocalStore.upsert_profile(runner, {
+        "display_name": "张三丰",
+        "real_name": "张三丰",
+        "id_card": "310101198801011234",
+        "phone": "13800138000",
+        "date_of_birth": "1988-01-01",
+        "emergency_contact": "李四 13900001111",
+        "program": "中文EMBA",
+        "class_detail": "23春",
+        "class_name": "中文EMBA 23春",
+        "garmin_connected": 1,
+        "garmin_email": "runner@garmin.test",
+        "coros_connected": 1,
+        "coros_account": "runner@coros.test",
+        "huawei_connected": 1,
+        "huawei_account": "hw@test",
+        "apple_watch_connected": 1,
+        "suunto_connected": 1,
+        "hide_gps_route": 0,
+        "hide_biometrics": 0,
+        "canova_critique_visibility": "all_clubs",
+        "canova_critique_club_ids": [env["club_a"]],
+    })
+
+    res = client.post(
+        f"/api/profile/{runner}/purge-privacy",
+        headers={"Authorization": f"Bearer {_make_jwt(runner)}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+
+    purged = LocalStore.get_profile(runner)
+    assert purged["real_name"] == ""
+    assert purged["id_card"] == ""
+    assert purged["phone"] == ""
+    assert purged["date_of_birth"] == ""
+    assert purged["emergency_contact"] == ""
+    assert purged["program"] == ""
+    assert purged["class_detail"] == ""
+    assert purged["class_name"] == ""
+    assert purged["garmin_connected"] == 0
+    assert purged["coros_connected"] == 0
+    assert purged["huawei_connected"] == 0
+    assert purged["apple_watch_connected"] == 0
+    assert purged["suunto_connected"] == 0
+    assert bool(purged["hide_gps_route"]) is True
+    assert bool(purged["hide_biometrics"]) is True
+    assert purged["canova_critique_visibility"] == "self"
+    assert LocalStore.parse_canova_critique_club_ids(purged.get("canova_critique_club_ids")) == []
+    assert purged["display_name"].startswith("跑者_")

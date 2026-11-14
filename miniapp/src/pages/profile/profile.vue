@@ -61,6 +61,13 @@
 
     <!-- ── 快捷入口：常用的低频功能统一放在顶部一行，避免沉到长页面底部 ── -->
     <view class="quick-grid">
+      <view class="qg-item" @click="openSection('personal')">
+        <view class="qg-icon-wrap">
+          <text class="qg-icon">🛡️</text>
+          <view v-if="personalNeedsAttention" class="qg-dot" />
+        </view>
+        <text class="qg-label">隐私设定</text>
+      </view>
       <view class="qg-item" @click="goToOnboarding(1)">
         <view class="qg-icon-wrap">
           <text class="qg-icon">🚀</text>
@@ -107,7 +114,7 @@
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">🏫</text>
-          <text class="card-title">大群认证状态</text>
+          <text class="card-title">大群认证</text>
         </view>
         <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
           2周实名核验制
@@ -204,20 +211,21 @@
 
     <!-- ── 功能菜单：原来平铺的长表单拆成 4 个子页面，按需进入 ── -->
     <view class="section-card profile-menu-card">
+      <view class="pm-item" @click="openSection('personal')">
+        <text class="pm-icon">🛡️</text>
+        <view class="pm-meta">
+          <text class="pm-title">隐私设定</text>
+        </view>
+        <text v-if="personalNeedsAttention" class="pm-status warn">待补齐</text>
+        <text v-else class="pm-status ok">{{ privacySummaryBadge }}</text>
+        <text class="pm-arrow">›</text>
+      </view>
       <view class="pm-item" @click="openSection('device')">
         <text class="pm-icon">⌚</text>
         <view class="pm-meta">
           <text class="pm-title">手表连接</text>
         </view>
         <text class="pm-status" :class="{ ok: garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected, warn: !garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected }">{{ deviceStatusText }}</text>
-        <text class="pm-arrow">›</text>
-      </view>
-      <view class="pm-item" @click="openSection('personal')">
-        <text class="pm-icon">👤</text>
-        <view class="pm-meta">
-          <text class="pm-title">个人资料</text>
-        </view>
-        <text v-if="personalNeedsAttention" class="pm-status warn">待补齐</text>
         <text class="pm-arrow">›</text>
       </view>
       <view class="pm-item" @click="openSection('training')">
@@ -227,10 +235,10 @@
         </view>
         <text class="pm-arrow">›</text>
       </view>
-      <view class="pm-item" @click="openSection('privacy')">
+      <view class="pm-item" @click="openSection('notifications')">
         <text class="pm-icon">🔔</text>
         <view class="pm-meta">
-          <text class="pm-title">通知与隐私</text>
+          <text class="pm-title">消息提醒</text>
         </view>
         <text class="pm-status" :class="{ ok: wechatSubscribeEnabled }">{{ wechatSubscribeEnabled ? '已开启' : '未开启' }}</text>
         <text class="pm-arrow">›</text>
@@ -238,7 +246,7 @@
       <view class="pm-item pm-item-last" @click="openSection('support')">
         <text class="pm-icon">💬</text>
         <view class="pm-meta">
-          <text class="pm-title">帮助与支持</text>
+          <text class="pm-title">帮助支持</text>
         </view>
         <text class="pm-status" :class="{ ok: hasSupportReply }">{{ hasSupportReply ? '已回复' : '在线' }}</text>
         <text class="pm-arrow">›</text>
@@ -288,14 +296,14 @@
     </view>
     </template>
 
-    <!-- 子页面：手表连接与同步 -->
+    <!-- 子页面：手表连接 -->
     <template v-if="activeSection === 'device'">
       <!-- ── CARD 2: Device Connection Status Card (Garmin · COROS · Apple Watch · HUAWEI · SUUNTO) ── -->
     <view id="device-connect-card" class="section-card" :class="{ 'highlight-pulse': isDeviceCardHighlighted }">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">⌚</text>
-          <text class="card-title">手表连接与同步</text>
+          <text class="card-title">手表连接</text>
         </view>
       </view>
 
@@ -459,540 +467,896 @@
 
     </template>
 
-    <!-- 子页面：个人资料与实名信息（实名与大群资料放一起，便于补齐必填项） -->
-    <template v-if="activeSection === 'personal'">
-      <!-- ── CARD: 个人实名身份与敏感信息 (AES-256 加密保护) ── -->
-    <view id="required-personal-fields" class="section-card section-card-runner-info" :class="{ 'highlight-pulse': isFieldHighlighted }">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🔒</text>
-          <text class="card-title">实名身份信息</text>
+    <!-- 子页面：隐私设定（统一查看、控制权限设定、实名信息、生理指标、组织装备与授权清除） -->
+    <template v-if="activeSection === 'personal' || activeSection === 'privacy'">
+      <!-- ── 顶部：📊 状态总览 ── -->
+      <view v-if="user" class="section-card">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">📊</text>
+            <text class="card-title">状态总览</text>
+          </view>
+          <text class="security-chip" style="background: rgba(16, 185, 129, 0.14); color: var(--rgm-green, #34d399); border-color: rgba(16, 185, 129, 0.35);">
+            实时同步
+          </text>
         </view>
-        <text class="security-chip">AES-256 加密存储</text>
-      </view>
 
-      <view class="form-grid-2">
-        <!-- 出生日期 & 动态年龄 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <view class="label-with-sec">
-              <text class="label">出生日期<text class="required-star"> *</text></text>
-              <text class="field-sec-tag req-tag">大群必填</text>
-              <text class="field-sec-tag">🔒 AES-256 加密存储</text>
-            </view>
-            <text v-if="displayAge !== null" class="age-badge-pill">
-              {{ displayAge }} 岁 · {{ profile?.date_of_birth ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
+        <view style="display: grid; grid-template-columns: 1fr 1fr; gap: 14rpx; margin-bottom: 16rpx;">
+          <view
+            @click="scrollToPrivacyAnchor('#required-personal-fields')"
+            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+          >
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">🔒 实名信息</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+              {{ mpPiiFilledCount }} / 5 已加密
             </text>
           </view>
-          <picker
-            mode="date"
-            :value="profile?.date_of_birth || '1990-01-01'"
-            start="1940-01-01"
-            :end="todayDateStr"
-            @change="onDateOfBirthChange"
-          >
-            <view class="picker-input-box">
-              <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
-                {{ profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)' }}
-              </text>
-              <text class="picker-arrow">📅</text>
-            </view>
-          </picker>
-        </view>
-
-        <!-- 真实姓名 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">真实姓名<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-            <text class="field-sec-tag">🔒 加密存储</text>
-          </view>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="戈友实名认证姓名"
-            :value="profile?.real_name || ''"
-            @input="onInputRealName"
-          />
-        </view>
-
-        <!-- 联系手机 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">联系手机</text>
-            <text class="field-sec-tag">🔒 加密存储</text>
-          </view>
-          <input
-            class="form-input"
-            type="number"
-            maxlength="11"
-            placeholder="紧急联络手机"
-            :value="profile?.phone || ''"
-            @input="onInputPhone"
-          />
-        </view>
-
-        <!-- 身份证号码 / 证件号 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">身份证号码 / 证件号 (选填)</text>
-            <text class="field-sec-tag">🔒 密文存储 · 仅本人可见</text>
-          </view>
-          <input
-            class="form-input"
-            type="text"
-            maxlength="18"
-            placeholder="用于赛事保险投保与参赛资格核验"
-            :value="profile?.id_card || ''"
-            @input="onInputIdCard"
-          />
-        </view>
-
-        <!-- 生理性别 -->
-        <view class="form-group">
-          <view class="label-with-tag">
-            <text class="label">生理性别<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <view class="gender-pill-group">
-            <view
-              class="gender-pill"
-              :class="{ active: (profile?.gender || 'male') === 'male' }"
-              @click="onGenderSelect('male')"
-            >
-              <text>♂ 男</text>
-            </view>
-            <view
-              class="gender-pill"
-              :class="{ active: profile?.gender === 'female' }"
-              @click="onGenderSelect('female')"
-            >
-              <text>♀ 女</text>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
-      <!-- ── 渐进式资料：未加入大群时折叠商学院 / 赛事装备资料，避免吓跑普通跑者 ── -->
-    <view v-if="!hasOrgs" class="section-card extra-fields-toggle" @click="showOrgExtraFields = !showOrgExtraFields">
-      <view class="eft-meta">
-        <text class="eft-title">🎓 商学院 / 赛事装备资料</text>
-      </view>
-      <text class="eft-arrow">{{ showOrgExtraFields ? '收起 ▴' : '展开 ▾' }}</text>
-    </view>
-    <view v-if="hasOrgs || showOrgExtraFields">
-      <!-- ── CARD: 商学院项目与戈友认证 ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🏫</text>
-          <text class="card-title">商学院与戈友认证</text>
-        </view>
-        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
-          大群自动同步
-        </text>
-      </view>
-
-      <view class="form-grid-2">
-        <!-- 所属项目 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">商学院项目<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <view class="program-pill-grid">
-            <view
-              v-for="prog in ORG_PROGRAM_OPTIONS"
-              :key="prog"
-              class="program-pill"
-              :class="{ active: profile?.program === prog }"
-              @click="onSelectProgram(prog)"
-            >
-              <text>{{ prog }}</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 班级 / 届别 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">所在班级 / 届别 (自由输入)<text class="required-star"> *</text></text>
-            <text class="field-sec-tag req-tag">大群必填</text>
-          </view>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如: 23春、21级、18班、2022秋"
-            :value="profile?.class_detail || ''"
-            @input="onInputClassDetail"
-          />
-          <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: var(--rgm-amber, #fbbf24);">
-            名册组合预览：{{ profile.program }} {{ profile.class_detail }}
-          </text>
-        </view>
-
-        <!-- 戈壁经历 -->
-        <view class="form-group full-width-group">
-          <view class="label-with-tag">
-            <text class="label">戈壁经历 (戈赛经验)</text>
-            <text class="field-sec-tag">{{ gobiType === 'new' ? '🌱 新戈' : `🏅 ${gobiEdition} ${gobiGroup}` }}</text>
-          </view>
-
-          <view class="gobi-type-selector">
-            <view
-              class="gobi-type-btn"
-              :class="{ active: gobiType === 'new' }"
-              @click="onSelectGobiType('new')"
-            >
-              <text class="gobi-icon">🌱</text>
-              <view class="gobi-info">
-                <text class="gobi-main-title">新戈跑者</text>
-              </view>
-            </view>
-            <view
-              class="gobi-type-btn"
-              :class="{ active: gobiType === 'vet' }"
-              @click="onSelectGobiType('vet')"
-            >
-              <text class="gobi-icon">🏅</text>
-              <view class="gobi-info">
-                <text class="gobi-main-title">往届老戈友</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 往届老戈友详情选择 -->
-          <view v-if="gobiType === 'vet'" class="gobi-vet-box">
-            <view class="vet-row">
-              <text class="vet-label">参加届数：</text>
-              <picker
-                mode="selector"
-                :range="GOBI_EDITIONS"
-                :value="GOBI_EDITIONS.indexOf(gobiEdition) >= 0 ? GOBI_EDITIONS.indexOf(gobiEdition) : 0"
-                @change="onGobiEditionChange"
-                class="vet-picker-flex"
-              >
-                <view class="picker-input-box">
-                  <text>{{ gobiEdition || '请选择届数' }}</text>
-                  <text class="picker-arrow">▼</text>
-                </view>
-              </picker>
-            </view>
-
-            <view class="vet-row" style="margin-top: 16rpx;">
-              <text class="vet-label">参赛组别：</text>
-              <view class="grp-pill-group">
-                <view
-                  v-for="grp in GOBI_GROUPS"
-                  :key="grp"
-                  class="grp-pill"
-                  :class="{ active: gobiGroup === grp }"
-                  @click="onSelectGobiGroup(grp)"
-                >
-                  <text>{{ grp }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
-      <!-- ── CARD: 赛事活动与装备保障 ── -->
-    <view class="section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🎽</text>
-          <text class="card-title">赛事与装备</text>
-        </view>
-        <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: var(--rgm-blue, #a5b4fc); border-color: rgba(99, 102, 241, 0.3);">
-          物资发放 · 保险
-        </text>
-      </view>
-
-      <view class="form-grid-2">
-        <!-- 紧急联系人及电话 -->
-        <view class="form-group full-width-group">
-          <text class="label">紧急联系人及电话</text>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如: 张三 13900001111"
-            :value="profile?.emergency_contact || ''"
-            @input="onInputEmergencyContact"
-          />
-        </view>
-
-        <!-- 队服尺码 -->
-        <view class="form-group">
-          <text class="label">队服尺码 (Clothing)</text>
-          <picker
-            mode="selector"
-            :range="CLOTHING_SIZES"
-            :value="CLOTHING_SIZES.indexOf(profile?.clothing_size) >= 0 ? CLOTHING_SIZES.indexOf(profile?.clothing_size) : 0"
-            @change="onClothingSizeChange"
-          >
-            <view class="picker-input-box">
-              <text :class="{ 'placeholder-text': !profile?.clothing_size }">
-                {{ profile?.clothing_size || '请选择尺码' }}
-              </text>
-              <text class="picker-arrow">▼</text>
-            </view>
-          </picker>
-        </view>
-
-        <!-- 跑鞋尺码 -->
-        <view class="form-group">
-          <text class="label">跑鞋尺码 (Shoe EUR)</text>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="例如 42 或 42.5"
-            :value="profile?.shoe_size || ''"
-            @input="onInputShoeSize"
-          />
-        </view>
-
-        <!-- 急救 / 医护资质认证 (选填 · 用于官兔评估加权) -->
-        <view class="form-group full-width-group">
-          <text class="label">🚑 急救 / 医护资质（选填 · 马拉松官兔优先项）</text>
-          <picker
-            mode="selector"
-            :range="FIRST_AID_CERT_LABELS"
-            :value="firstAidPickerIndex"
-            @change="onFirstAidCertChange"
-          >
-            <view class="picker-input-box">
-              <text :class="{ 'placeholder-text': !profile?.first_aid_cert_type }">
-                {{ FIRST_AID_CERT_LABELS[firstAidPickerIndex] || '暂未持有急救证书' }}
-              </text>
-              <text class="picker-arrow">▼</text>
-            </view>
-          </picker>
-        </view>
-
-        <!-- 健康状况声明 -->
-        <view class="form-group full-width-group">
           <view
-            class="health-decl-box"
-            :class="{ active: profile?.health_declaration !== false }"
-            @click="onToggleHealthDeclaration"
+            @click="scrollToPrivacyAnchor('#mp-privacy-controls')"
+            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
           >
-            <view class="health-checkbox">
-              <text class="check-mark">{{ profile?.health_declaration !== false ? '✓' : '' }}</text>
-            </view>
-            <view class="health-decl-texts">
-              <text class="health-title">健康状况与免责声明确认</text>
-              <text class="health-desc">
-                本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
-              </text>
-            </view>
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">🎯 评语可见</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: #34d399; display: block; margin-top: 6rpx;">
+              {{ mpCritiqueVisSummary }}
+            </text>
           </view>
-        </view>
-      </view>
-    </view>
-
-    </view>
-
-    </template>
-
-    <!-- 子页面：通知与隐私 -->
-    <template v-if="activeSection === 'privacy'">
-      <!-- ── CARD: 🔔 微信接收 Canova教练跑后点评推送 ── -->
-    <view class="section-card wechat-notif-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🔔</text>
-          <text class="card-title">教练点评推送</text>
-        </view>
-        <view class="notif-status-badge" :class="{ enabled: wechatSubscribeEnabled }">
-          <text class="status-dot" />
-          <text class="status-text">{{ wechatSubscribeEnabled ? '已开启提醒' : '未授权' }}</text>
-        </view>
-      </view>
-
-      <view class="wechat-notif-actions">
-        <button class="enable-subscribe-btn" @click="handleRequestSubscribe">
-          📲 开启微信提醒
-        </button>
-        <button class="test-subscribe-btn" :loading="testingPush" @click="handleTestWechatPush">
-          🧪 测试推送
-        </button>
-      </view>
-    </view>
-
-      <!-- ── CARD: 🔒 跑团训练与身体数据保密设定（仅对教练和师傅开放） ── -->
-    <view v-if="user" class="section-card privacy-guard-card" style="margin-bottom: 24rpx;">
-      <view class="card-title-row">
-        <view class="title-with-badge">
-          <text class="card-title">🔒 数据保密设置</text>
-          <text class="security-chip" style="background: rgba(16, 185, 129, 0.14); color: var(--rgm-green, #34d399); border-color: rgba(16, 185, 129, 0.35);">仅对教练与师傅开放</text>
-        </view>
-      </view>
-
-      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
-        <view style="flex: 1; padding-right: 20rpx;">
-          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-            🗺️ GPS 路线保密
-          </text>
-        </view>
-        <switch
-          :checked="!!profile?.hide_gps_route"
-          color="#10b981"
-          @change="(e: any) => handleToggleDataConfidentiality('hide_gps_route', !!e.detail.value)"
-        />
-      </view>
-
-      <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
-        <view style="flex: 1; padding-right: 20rpx;">
-          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-            💓 心率/HRV/睡眠数据保密
-          </text>
-        </view>
-        <switch
-          :checked="!!profile?.hide_biometrics"
-          color="#10b981"
-          @change="(e: any) => handleToggleDataConfidentiality('hide_biometrics', !!e.detail.value)"
-        />
-      </view>
-
-      <!-- 🎯 Canova 教练评语可见范围（4-tier selector） -->
-      <view style="padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
-        <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-          🎯 Canova 教练评语可见范围
-        </text>
-        <text style="font-size: 22rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-bottom: 16rpx; line-height: 1.45;">
-          默认仅自己可见；选择后将与网页版实时同步
-        </text>
-
-        <view style="display: flex; flex-direction: column; gap: 12rpx;">
           <view
-            v-for="opt in [
-              { value: 'self', label: '🔒 仅自己可见（默认）', desc: '仅本人可见，对跑团、教练与师傅均隐藏' },
-              { value: 'coach_mentor', label: '👨‍🏫 仅认证教练与 1v1 师傅可见', desc: '本人、结对师傅与跑团认证教练可见（不含团长/管理员）' },
-              { value: 'selected_clubs', label: '🏃 指定跑团可见', desc: '本人、认证教练/师傅，及所选跑团成员可见' },
-              { value: 'all_clubs', label: '🌐 所有所在跑团可见', desc: '本人、认证教练/师傅，及所有所在跑团成员可见' },
-            ]"
-            :key="opt.value"
-            @tap="handleSelectCritiqueVisibility(opt.value)"
-            :style="{
-              padding: '18rpx 20rpx',
-              borderRadius: '14rpx',
-              border: (profile?.canova_critique_visibility || 'self') === opt.value
-                ? '1px solid rgba(16, 185, 129, 0.65)'
-                : '1px solid rgba(255, 255, 255, 0.08)',
-              background: (profile?.canova_critique_visibility || 'self') === opt.value
-                ? 'rgba(16, 185, 129, 0.14)'
-                : 'rgba(255, 255, 255, 0.02)',
-            }"
+            @click="scrollToPrivacyAnchor('#mp-body-and-org')"
+            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
           >
-            <view style="display: flex; align-items: center; justify-content: space-between;">
-              <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">
-                {{ opt.label }}
-              </text>
-              <text
-                v-if="(profile?.canova_critique_visibility || 'self') === opt.value"
-                style="font-size: 20rpx; font-weight: 700; color: #10b981; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(16, 185, 129, 0.16);"
-              >
-                当前
-              </text>
-            </view>
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 6rpx; line-height: 1.4;">
-              {{ opt.desc }}
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">💓 生理指标</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+              {{ mpBodyFilledCount }} / 6 已填
+            </text>
+          </view>
+          <view
+            @click="scrollToPrivacyAnchor('#mp-data-lifecycle')"
+            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+          >
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">⌚ 手表授权</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+              {{ mpConnectedWatchCount }} 台已连接
             </text>
           </view>
         </view>
 
-        <view
-          v-if="(profile?.canova_critique_visibility || 'self') === 'selected_clubs'"
-          style="margin-top: 16rpx; padding-top: 16rpx; border-top: 1px solid rgba(255, 255, 255, 0.08);"
-        >
-          <text style="font-size: 22rpx; font-weight: 600; color: var(--rgm-text, #e2e8f0); display: block; margin-bottom: 12rpx;">
-            勾选允许查看评语的跑团（可多选）：
+        <view style="display: flex; flex-wrap: wrap; gap: 10rpx;">
+          <text
+            @click="scrollToPrivacyAnchor('#mp-privacy-controls')"
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
+          >🔒 权限设定</text>
+          <text
+            @click="scrollToPrivacyAnchor('#required-personal-fields')"
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
+          >👤 实名信息</text>
+          <text
+            @click="scrollToPrivacyAnchor('#mp-body-and-org')"
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
+          >💓 生理资料</text>
+          <text
+            @click="scrollToPrivacyAnchor('#mp-data-lifecycle')"
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
+          >🔐 授权清除</text>
+        </view>
+      </view>
+
+      <!-- ── SECTION 1: 🔒 权限设定（即时生效） ── -->
+      <view v-if="user" id="mp-privacy-controls" class="section-card privacy-guard-card" style="margin-bottom: 24rpx;">
+        <view class="card-title-row">
+          <view class="title-with-badge">
+            <text class="card-title">🔒 权限设定</text>
+            <text class="security-chip" style="background: rgba(16, 185, 129, 0.14); color: var(--rgm-green, #34d399); border-color: rgba(16, 185, 129, 0.35);">即时生效</text>
+          </view>
+        </view>
+
+        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
+          <view style="flex: 1; padding-right: 20rpx;">
+            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+              🗺️ 路线保密
+            </text>
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); line-height: 1.4;">
+              开启后，对非教练团友隐藏起终点与街道轨迹
+            </text>
+          </view>
+          <switch
+            :checked="!!profile?.hide_gps_route"
+            color="#10b981"
+            @change="(e: any) => handleToggleDataConfidentiality('hide_gps_route', !!e.detail.value)"
+          />
+        </view>
+
+        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
+          <view style="flex: 1; padding-right: 20rpx;">
+            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+              💓 生理保密
+            </text>
+            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); line-height: 1.4;">
+              开启后，仅本人与跑团认证教练/1v1 师傅可见生理恢复指标
+            </text>
+          </view>
+          <switch
+            :checked="!!profile?.hide_biometrics"
+            color="#10b981"
+            @change="(e: any) => handleToggleDataConfidentiality('hide_biometrics', !!e.detail.value)"
+          />
+        </view>
+
+        <!-- 🎯 评语可见（4-tier selector） -->
+        <view style="padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
+          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
+            🎯 评语可见
           </text>
-          <view v-if="userClubs.length > 0" style="display: flex; flex-wrap: wrap; gap: 12rpx;">
+          <text style="font-size: 22rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-bottom: 16rpx; line-height: 1.45;">
+            默认仅自己可见；选择后将与网页版实时同步
+          </text>
+
+          <view style="display: flex; flex-direction: column; gap: 12rpx;">
             <view
-              v-for="club in userClubs"
-              :key="club.id"
-              @tap="handleToggleCritiqueClub(String(club.id))"
+              v-for="opt in [
+                { value: 'self', label: '🔒 仅自己', desc: '默认设置：仅本人可见，对跑团、教练与师傅均隐藏' },
+                { value: 'coach_mentor', label: '👨‍🏫 教练师傅', desc: '本人、结对师傅与跑团认证教练可见（不含团长/管理员）' },
+                { value: 'selected_clubs', label: '🏃 指定跑团', desc: '本人、认证教练/师傅，及所选跑团成员可见' },
+                { value: 'all_clubs', label: '🌐 全部跑团', desc: '本人、认证教练/师傅，及所有所在跑团成员可见' },
+              ]"
+              :key="opt.value"
+              @tap="handleSelectCritiqueVisibility(opt.value)"
               :style="{
-                padding: '10rpx 20rpx',
-                borderRadius: '999rpx',
-                fontSize: '22rpx',
-                fontWeight: 600,
-                border: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                  ? '1px solid #10b981'
-                  : '1px solid rgba(255, 255, 255, 0.16)',
-                background: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                  ? 'rgba(16, 185, 129, 0.2)'
-                  : 'rgba(255, 255, 255, 0.04)',
-                color: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                  ? '#34d399'
-                  : 'var(--rgm-text-muted, #cbd5e1)',
+                padding: '18rpx 20rpx',
+                borderRadius: '14rpx',
+                border: (profile?.canova_critique_visibility || 'self') === opt.value
+                  ? '1px solid rgba(16, 185, 129, 0.65)'
+                  : '1px solid rgba(255, 255, 255, 0.08)',
+                background: (profile?.canova_critique_visibility || 'self') === opt.value
+                  ? 'rgba(16, 185, 129, 0.14)'
+                  : 'rgba(255, 255, 255, 0.02)',
               }"
             >
-              <text>{{ (profile?.canova_critique_club_ids || []).includes(String(club.id)) ? '✓ ' : '+ ' }}{{ club.name || club.id }}</text>
+              <view style="display: flex; align-items: center; justify-content: space-between;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">
+                  {{ opt.label }}
+                </text>
+                <text
+                  v-if="(profile?.canova_critique_visibility || 'self') === opt.value"
+                  style="font-size: 20rpx; font-weight: 700; color: #10b981; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(16, 185, 129, 0.16);"
+                >
+                  当前
+                </text>
+              </view>
+              <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 6rpx; line-height: 1.4;">
+                {{ opt.desc }}
+              </text>
             </view>
           </view>
-          <text v-else style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">
-            当前暂未加入跑团，保存后暂仅本人与认证教练/师傅可见。
-          </text>
+
+          <view
+            v-if="(profile?.canova_critique_visibility || 'self') === 'selected_clubs'"
+            style="margin-top: 16rpx; padding-top: 16rpx; border-top: 1px solid rgba(255, 255, 255, 0.08);"
+          >
+            <text style="font-size: 22rpx; font-weight: 600; color: var(--rgm-text, #e2e8f0); display: block; margin-bottom: 12rpx;">
+              选择跑团（可多选）：
+            </text>
+            <view v-if="userClubs.length > 0" style="display: flex; flex-wrap: wrap; gap: 12rpx;">
+              <view
+                v-for="club in userClubs"
+                :key="club.id"
+                @tap="handleToggleCritiqueClub(String(club.id))"
+                :style="{
+                  padding: '10rpx 20rpx',
+                  borderRadius: '999rpx',
+                  fontSize: '22rpx',
+                  fontWeight: 600,
+                  border: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                    ? '1px solid #10b981'
+                    : '1px solid rgba(255, 255, 255, 0.16)',
+                  background: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                    ? 'rgba(16, 185, 129, 0.2)'
+                    : 'rgba(255, 255, 255, 0.04)',
+                  color: (profile?.canova_critique_club_ids || []).includes(String(club.id))
+                    ? '#34d399'
+                    : 'var(--rgm-text-muted, #cbd5e1)',
+                }"
+              >
+                <text>{{ (profile?.canova_critique_club_ids || []).includes(String(club.id)) ? '✓ ' : '+ ' }}{{ club.name || club.id }}</text>
+              </view>
+            </view>
+            <text v-else style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">
+              当前暂未加入跑团，保存后暂仅本人与认证教练/师傅可见。
+            </text>
+          </view>
+
+          <view
+            v-if="((profile?.canova_critique_visibility === 'selected_clubs') || (profile?.canova_critique_visibility === 'all_clubs')) && profile?.hide_biometrics"
+            style="margin-top: 16rpx; padding: 14rpx 16rpx; border-radius: 12rpx; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35);"
+          >
+            <text style="font-size: 21rpx; color: #fbbf24; line-height: 1.45; display: block;">
+              💡 已开启生理保密：普通团友查看评语时，心率、HRV 与睡眠具体数值自动脱敏（教练与师傅不受影响）。
+            </text>
+          </view>
         </view>
 
+        <view class="privacy-statement-box" style="margin-top: 16rpx;">
+          <view class="privacy-rule-item">
+            <text class="privacy-rule-icon">🔒</text>
+            <view class="privacy-rule-content">
+              <text class="privacy-rule-title">密文存储</text>
+            </view>
+          </view>
+          <view class="privacy-rule-item">
+            <text class="privacy-rule-icon">👁️</text>
+            <view class="privacy-rule-content">
+              <text class="privacy-rule-title">名册脱敏</text>
+            </view>
+          </view>
+          <view class="privacy-rule-item">
+            <text class="privacy-rule-icon">🛡️</text>
+            <view class="privacy-rule-content">
+              <text class="privacy-rule-title">周岁保护</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- ── SECTION 2: 👤 实名信息与个人形象 (AES-256 加密保护) ── -->
+      <view id="required-personal-fields" class="section-card section-card-runner-info" :class="{ 'highlight-pulse': isFieldHighlighted }">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">🔒</text>
+            <text class="card-title">实名信息</text>
+          </view>
+          <view style="display: flex; align-items: center; gap: 10rpx;">
+            <text
+              @click="toggleMpAllPii"
+              style="font-size: 20rpx; font-weight: 700; padding: 6rpx 14rpx; border-radius: 999rpx; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); color: var(--rgm-text, #ffffff);"
+            >
+              {{ mpAllPiiVisible ? '🙈 全部遮罩' : '👁️ 显示全部' }}
+            </text>
+            <text class="security-chip">AES-256</text>
+          </view>
+        </view>
+
+        <!-- 个人形象条 -->
         <view
-          v-if="((profile?.canova_critique_visibility === 'selected_clubs') || (profile?.canova_critique_visibility === 'all_clubs')) && profile?.hide_biometrics"
-          style="margin-top: 16rpx; padding: 14rpx 16rpx; border-radius: 12rpx; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35);"
+          v-if="user"
+          @click="openEditProfileModal"
+          style="display: flex; align-items: center; justify-content: space-between; gap: 18rpx; padding: 16rpx 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 20rpx;"
         >
-          <text style="font-size: 21rpx; color: #fbbf24; line-height: 1.45; display: block;">
-            💡 已联动开启心率/HRV保密：普通团友查看您的 Canova 评语时，心率、HRV 与睡眠具体数值将自动脱敏（认证教练与师傅不受影响）。
-          </text>
+          <view style="display: flex; align-items: center; gap: 16rpx;">
+            <image
+              :src="profile?.avatar_url || user?.avatar_url || defaultAvatar"
+              mode="aspectFill"
+              style="width: 72rpx; height: 72rpx; border-radius: 999rpx; border: 1px solid rgba(255,255,255,0.15);"
+            />
+            <view>
+              <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                {{ profile?.display_name || user?.display_name || '微信跑者' }}
+              </text>
+              <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 2rpx;">
+                个人形象
+              </text>
+            </view>
+          </view>
+          <text style="font-size: 22rpx; font-weight: 700; color: #fc4c02;">✏️ 编辑 ›</text>
+        </view>
+
+        <view class="form-grid-2">
+          <!-- 出生日期 & 动态年龄 -->
+          <view class="form-group full-width-group">
+            <view class="label-with-tag">
+              <view class="label-with-sec">
+                <text class="label">出生日期<text class="required-star"> *</text></text>
+                <text class="field-sec-tag req-tag">大群必填</text>
+                <text class="field-sec-tag">🔒 AES-256</text>
+              </view>
+              <view style="display: flex; align-items: center; gap: 8rpx;">
+                <text
+                  v-if="profile?.date_of_birth && showDob"
+                  @click.stop="showDob = false"
+                  style="font-size: 20rpx; color: var(--rgm-text-muted, #94a3b8); padding: 4rpx 10rpx; border-radius: 8rpx; background: rgba(255,255,255,0.06);"
+                >🙈 遮罩</text>
+                <text v-if="displayAge !== null" class="age-badge-pill">
+                  {{ showDob ? `${displayAge} 岁 · ` : '' }}{{ profile?.date_of_birth && showDob ? profile.date_of_birth.substring(0, 4) + '年 · ' : '' }}{{ displayAge >= 50 ? '大师组' : displayAge >= 40 ? '壮年组' : displayAge >= 30 ? '中坚组' : '青年组' }}
+                </text>
+              </view>
+            </view>
+            <view
+              v-if="profile?.date_of_birth && !showDob"
+              class="picker-input-box"
+              @click="showDob = true"
+            >
+              <text>{{ maskDobPreview }}</text>
+              <text class="picker-arrow" style="font-size: 22rpx; color: #34d399;">👁️ 查看/修改</text>
+            </view>
+            <picker
+              v-else
+              mode="date"
+              :value="profile?.date_of_birth || '1990-01-01'"
+              start="1940-01-01"
+              :end="todayDateStr"
+              @change="onDateOfBirthChange"
+            >
+              <view class="picker-input-box">
+                <text :class="{ 'placeholder-text': !profile?.date_of_birth }">
+                  {{ profile?.date_of_birth || '请选择出生年月日 (YYYY-MM-DD)' }}
+                </text>
+                <text class="picker-arrow">📅</text>
+              </view>
+            </picker>
+          </view>
+
+          <!-- 真实姓名 -->
+          <view class="form-group">
+            <view class="label-with-tag">
+              <text class="label">真实姓名<text class="required-star"> *</text></text>
+              <text class="field-sec-tag req-tag">大群必填</text>
+              <text
+                v-if="profile?.real_name && showRealName"
+                @click.stop="showRealName = false"
+                class="field-sec-tag"
+              >🙈 遮罩</text>
+              <text v-else class="field-sec-tag">🔒 加密存储</text>
+            </view>
+            <view
+              v-if="profile?.real_name && !showRealName"
+              class="picker-input-box"
+              @click="showRealName = true"
+            >
+              <text>{{ maskNamePreview }}</text>
+              <text class="picker-arrow" style="font-size: 21rpx; color: #34d399;">👁️ 修改</text>
+            </view>
+            <input
+              v-else
+              class="form-input"
+              type="text"
+              placeholder="戈友实名认证姓名"
+              :value="profile?.real_name || ''"
+              @input="onInputRealName"
+            />
+          </view>
+
+          <!-- 联系手机 -->
+          <view class="form-group">
+            <view class="label-with-tag">
+              <text class="label">联系手机</text>
+              <text
+                v-if="profile?.phone && showPhone"
+                @click.stop="showPhone = false"
+                class="field-sec-tag"
+              >🙈 遮罩</text>
+              <text v-else class="field-sec-tag">🔒 加密存储</text>
+            </view>
+            <view
+              v-if="profile?.phone && !showPhone"
+              class="picker-input-box"
+              @click="showPhone = true"
+            >
+              <text>{{ maskPhonePreview }}</text>
+              <text class="picker-arrow" style="font-size: 21rpx; color: #34d399;">👁️ 修改</text>
+            </view>
+            <input
+              v-else
+              class="form-input"
+              type="number"
+              maxlength="11"
+              placeholder="紧急联络手机"
+              :value="profile?.phone || ''"
+              @input="onInputPhone"
+            />
+          </view>
+
+          <!-- 证件号码 -->
+          <view class="form-group full-width-group">
+            <view class="label-with-tag">
+              <text class="label">证件号码</text>
+              <text
+                v-if="profile?.id_card && showIdCard"
+                @click.stop="showIdCard = false"
+                class="field-sec-tag"
+              >🙈 遮罩</text>
+              <text v-else class="field-sec-tag">🔒 仅己可见</text>
+            </view>
+            <view
+              v-if="profile?.id_card && !showIdCard"
+              class="picker-input-box"
+              @click="showIdCard = true"
+            >
+              <text>{{ maskIdCardPreview }}</text>
+              <text class="picker-arrow" style="font-size: 22rpx; color: #34d399;">👁️ 查看/修改</text>
+            </view>
+            <input
+              v-else
+              class="form-input"
+              type="text"
+              maxlength="18"
+              placeholder="用于赛事保险投保与参赛资格核验（选填）"
+              :value="profile?.id_card || ''"
+              @input="onInputIdCard"
+            />
+          </view>
+
+          <!-- 生理性别 -->
+          <view class="form-group">
+            <view class="label-with-tag">
+              <text class="label">生理性别<text class="required-star"> *</text></text>
+              <text class="field-sec-tag req-tag">大群必填</text>
+            </view>
+            <view class="gender-pill-group">
+              <view
+                class="gender-pill"
+                :class="{ active: (profile?.gender || 'male') === 'male' }"
+                @click="onGenderSelect('male')"
+              >
+                <text>♂ 男</text>
+              </view>
+              <view
+                class="gender-pill"
+                :class="{ active: profile?.gender === 'female' }"
+                @click="onGenderSelect('female')"
+              >
+                <text>♀ 女</text>
+              </view>
+            </view>
+          </view>
         </view>
       </view>
-    </view>
 
-      <!-- ── CARD: 🛡️ 个人隐私与数据安全保障 ── -->
-    <view v-if="user" class="section-card privacy-guard-card">
-      <view class="card-title-row">
-        <view class="title-with-badge">
-          <text class="card-title">🛡️ 隐私与数据安全</text>
-          <text class="security-chip">AES-256 加密保护</text>
-        </view>
-      </view>
+      <!-- ── SECTION 3: 💓 生理指标、学院认证与赛事装备 ── -->
+      <view id="mp-body-and-org">
+        <view class="section-card">
+          <view class="card-title-row">
+            <view class="title-with-icon">
+              <text class="title-icon">💓</text>
+              <text class="card-title">生理指标</text>
+            </view>
+            <button
+              class="import-garmin-btn"
+              :loading="syncingDeviceProfile"
+              :disabled="syncingDeviceProfile || (!garminConnected && !corosConnected)"
+              @click="handleSyncDeviceProfile"
+            >
+              同步指标
+            </button>
+          </view>
 
-      <view class="privacy-statement-box">
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">🔒</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">敏感信息 AES-256 加密存储</text>
+          <view class="form-grid-2">
+            <!-- 最大摄氧量 VO2Max -->
+            <view class="form-group">
+              <view class="label-with-tag">
+                <text class="label">最大摄氧 (VO2Max)</text>
+                <text v-if="(garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected) && profile?.vo2max" class="estimate-pill-btn" style="color: #059669; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3);">⌚ 手表直读</text>
+                <text v-else class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ PB测算</text>
+              </view>
+              <input
+                class="form-input"
+                type="digit"
+                placeholder="例如 54.0"
+                :value="profile?.vo2max || ''"
+                @input="onInputVo2max"
+              />
+            </view>
+
+            <!-- 身高 -->
+            <view class="form-group">
+              <text class="label">身高 (cm)</text>
+              <input
+                class="form-input"
+                type="number"
+                placeholder="175"
+                :value="profile?.height || profile?.height_cm || ''"
+                @input="onInputHeight"
+              />
+            </view>
+
+            <!-- 体重 -->
+            <view class="form-group">
+              <text class="label">体重 (kg)</text>
+              <input
+                class="form-input"
+                type="digit"
+                placeholder="68.0"
+                :value="profile?.weight || profile?.weight_kg || ''"
+                @input="onInputWeight"
+              />
+            </view>
+
+            <!-- 最大心率 -->
+            <view class="form-group">
+              <text class="label">最大心率</text>
+              <input
+                class="form-input"
+                type="number"
+                placeholder="190"
+                :value="profile?.max_heart_rate || ''"
+                @input="onInputMaxHr"
+              />
+            </view>
+
+            <!-- 静息心率 -->
+            <view class="form-group">
+              <text class="label">静息心率</text>
+              <input
+                class="form-input"
+                type="number"
+                placeholder="56"
+                :value="profile?.resting_heart_rate || ''"
+                @input="onInputRestHr"
+              />
+            </view>
+
+            <!-- 跑龄 (年) -->
+            <view class="form-group full-width-group">
+              <text class="label">跑龄 (年)</text>
+              <input
+                class="form-input"
+                type="number"
+                placeholder="3"
+                :value="profile?.years_running || ''"
+                @input="onInputYearsRunning"
+              />
+            </view>
           </view>
         </view>
 
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">👁️</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">名册自动脱敏</text>
+        <!-- ── 渐进式资料：未加入大群时折叠组织装备，避免吓跑普通跑者 ── -->
+        <view v-if="!hasOrgs" class="section-card extra-fields-toggle" @click="showOrgExtraFields = !showOrgExtraFields">
+          <view class="eft-meta">
+            <text class="eft-title">🎓 组织装备</text>
           </view>
+          <text class="eft-arrow">{{ showOrgExtraFields ? '收起 ▴' : '展开 ▾' }}</text>
         </view>
+        <view v-if="hasOrgs || showOrgExtraFields">
+          <!-- ── CARD: 学院认证 ── -->
+          <view class="section-card">
+            <view class="card-title-row">
+              <view class="title-with-icon">
+                <text class="title-icon">🏫</text>
+                <text class="card-title">学院认证</text>
+              </view>
+              <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
+                自动同步
+              </text>
+            </view>
 
-        <view class="privacy-rule-item">
-          <text class="privacy-rule-icon">🧹</text>
-          <view class="privacy-rule-content">
-            <text class="privacy-rule-title">可随时清除个人隐私</text>
+            <view class="form-grid-2">
+              <!-- 所属项目 -->
+              <view class="form-group full-width-group">
+                <view class="label-with-tag">
+                  <text class="label">所属项目<text class="required-star"> *</text></text>
+                  <text class="field-sec-tag req-tag">大群必填</text>
+                </view>
+                <view class="program-pill-grid">
+                  <view
+                    v-for="prog in ORG_PROGRAM_OPTIONS"
+                    :key="prog"
+                    class="program-pill"
+                    :class="{ active: profile?.program === prog }"
+                    @click="onSelectProgram(prog)"
+                  >
+                    <text>{{ prog }}</text>
+                  </view>
+                </view>
+              </view>
+
+              <!-- 班级届别 -->
+              <view class="form-group full-width-group">
+                <view class="label-with-tag">
+                  <text class="label">班级届别<text class="required-star"> *</text></text>
+                  <text class="field-sec-tag req-tag">大群必填</text>
+                </view>
+                <input
+                  class="form-input"
+                  type="text"
+                  placeholder="例如: 23春、21级、18班、2022秋"
+                  :value="profile?.class_detail || ''"
+                  @input="onInputClassDetail"
+                />
+                <text v-if="profile?.program && profile?.class_detail" class="field-privacy-subtip" style="color: var(--rgm-amber, #fbbf24);">
+                  名册组合预览：{{ profile.program }} {{ profile.class_detail }}
+                </text>
+              </view>
+
+              <!-- 戈壁经历 -->
+              <view class="form-group full-width-group">
+                <view class="label-with-tag">
+                  <text class="label">戈壁经历</text>
+                  <text class="field-sec-tag">{{ gobiType === 'new' ? '🌱 新戈' : `🏅 ${gobiEdition} ${gobiGroup}` }}</text>
+                </view>
+
+                <view class="gobi-type-selector">
+                  <view
+                    class="gobi-type-btn"
+                    :class="{ active: gobiType === 'new' }"
+                    @click="onSelectGobiType('new')"
+                  >
+                    <text class="gobi-icon">🌱</text>
+                    <view class="gobi-info">
+                      <text class="gobi-main-title">新戈</text>
+                    </view>
+                  </view>
+                  <view
+                    class="gobi-type-btn"
+                    :class="{ active: gobiType === 'vet' }"
+                    @click="onSelectGobiType('vet')"
+                  >
+                    <text class="gobi-icon">🏅</text>
+                    <view class="gobi-info">
+                      <text class="gobi-main-title">老戈友</text>
+                    </view>
+                  </view>
+                </view>
+
+                <!-- 往届老戈友详情选择 -->
+                <view v-if="gobiType === 'vet'" class="gobi-vet-box">
+                  <view class="vet-row">
+                    <text class="vet-label">参加届数：</text>
+                    <picker
+                      mode="selector"
+                      :range="GOBI_EDITIONS"
+                      :value="GOBI_EDITIONS.indexOf(gobiEdition) >= 0 ? GOBI_EDITIONS.indexOf(gobiEdition) : 0"
+                      @change="onGobiEditionChange"
+                      class="vet-picker-flex"
+                    >
+                      <view class="picker-input-box">
+                        <text>{{ gobiEdition || '请选择届数' }}</text>
+                        <text class="picker-arrow">▼</text>
+                      </view>
+                    </picker>
+                  </view>
+
+                  <view class="vet-row" style="margin-top: 16rpx;">
+                    <text class="vet-label">参赛组别：</text>
+                    <view class="grp-pill-group">
+                      <view
+                        v-for="grp in GOBI_GROUPS"
+                        :key="grp"
+                        class="grp-pill"
+                        :class="{ active: gobiGroup === grp }"
+                        @click="onSelectGobiGroup(grp)"
+                      >
+                        <text>{{ grp }}</text>
+                      </view>
+                    </view>
+                  </view>
+                </view>
+              </view>
+            </view>
+          </view>
+
+          <!-- ── CARD: 赛事装备 ── -->
+          <view class="section-card">
+            <view class="card-title-row">
+              <view class="title-with-icon">
+                <text class="title-icon">🎽</text>
+                <text class="card-title">赛事装备</text>
+              </view>
+              <text class="security-chip" style="background: rgba(99, 102, 241, 0.15); color: var(--rgm-blue, #a5b4fc); border-color: rgba(99, 102, 241, 0.3);">
+                物资保险
+              </text>
+            </view>
+
+            <view class="form-grid-2">
+              <!-- 紧急联系 -->
+              <view class="form-group full-width-group">
+                <text class="label">紧急联系</text>
+                <input
+                  class="form-input"
+                  type="text"
+                  placeholder="例如: 张三 13900001111"
+                  :value="profile?.emergency_contact || ''"
+                  @input="onInputEmergencyContact"
+                />
+              </view>
+
+              <!-- 队服尺码 -->
+              <view class="form-group">
+                <text class="label">队服尺码</text>
+                <picker
+                  mode="selector"
+                  :range="CLOTHING_SIZES"
+                  :value="CLOTHING_SIZES.indexOf(profile?.clothing_size) >= 0 ? CLOTHING_SIZES.indexOf(profile?.clothing_size) : 0"
+                  @change="onClothingSizeChange"
+                >
+                  <view class="picker-input-box">
+                    <text :class="{ 'placeholder-text': !profile?.clothing_size }">
+                      {{ profile?.clothing_size || '请选择尺码' }}
+                    </text>
+                    <text class="picker-arrow">▼</text>
+                  </view>
+                </picker>
+              </view>
+
+              <!-- 跑鞋尺码 -->
+              <view class="form-group">
+                <text class="label">跑鞋尺码</text>
+                <input
+                  class="form-input"
+                  type="text"
+                  placeholder="例如 42 或 42.5"
+                  :value="profile?.shoe_size || ''"
+                  @input="onInputShoeSize"
+                />
+              </view>
+
+              <!-- 急救 / 医护资质认证 (选填 · 用于官兔评估加权) -->
+              <view class="form-group full-width-group">
+                <text class="label">🚑 急救 / 医护资质（选填 · 马拉松官兔优先项）</text>
+                <picker
+                  mode="selector"
+                  :range="FIRST_AID_CERT_LABELS"
+                  :value="firstAidPickerIndex"
+                  @change="onFirstAidCertChange"
+                >
+                  <view class="picker-input-box">
+                    <text :class="{ 'placeholder-text': !profile?.first_aid_cert_type }">
+                      {{ FIRST_AID_CERT_LABELS[firstAidPickerIndex] || '暂未持有急救证书' }}
+                    </text>
+                    <text class="picker-arrow">▼</text>
+                  </view>
+                </picker>
+              </view>
+
+              <!-- 健康声明 -->
+              <view class="form-group full-width-group">
+                <view
+                  class="health-decl-box"
+                  :class="{ active: profile?.health_declaration !== false }"
+                  @click="onToggleHealthDeclaration"
+                >
+                  <view class="health-checkbox">
+                    <text class="check-mark">{{ profile?.health_declaration !== false ? '✓' : '' }}</text>
+                  </view>
+                  <view class="health-decl-texts">
+                    <text class="health-title">健康声明</text>
+                    <text class="health-desc">
+                      本人身体健康，无高血压、心脑血管疾病、糖尿病或其他不适宜参加长距离剧烈耐力跑之疾病，具备参加跑步训练及马拉松、戈壁越野拉练的身体条件。自愿遵从教练团队安全指引与急救规范。
+                    </text>
+                  </view>
+                </view>
+              </view>
+            </view>
           </view>
         </view>
       </view>
 
-      <view class="privacy-actions-row">
-        <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
-          🧹 清除个人隐私数据
+      <!-- Section 2 & 3 保存按钮 -->
+      <view v-if="user" class="save-box">
+        <button class="save-btn" :loading="saving" @click="handleSaveAll">
+          💾 保存设定
         </button>
       </view>
-    </view>
 
+      <!-- ── SECTION 4: 🔐 手表授权与隐私清除 ── -->
+      <view v-if="user" id="mp-data-lifecycle">
+        <view class="section-card">
+          <view class="card-title-row">
+            <view class="title-with-icon">
+              <text class="title-icon">⌚</text>
+              <text class="card-title">手表授权</text>
+            </view>
+            <text
+              @click="openSection('device')"
+              style="font-size: 22rpx; font-weight: 700; color: #fc4c02;"
+            >完整管理 ›</text>
+          </view>
+
+          <view style="display: flex; flex-direction: column; gap: 14rpx;">
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+              <view style="flex: 1; padding-right: 12rpx;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                  佳明手表
+                </text>
+                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                  {{ garminConnected ? `已连接 ✓ · ${garminEmail || ''}` : '未连接' }}
+                </text>
+              </view>
+              <button
+                v-if="garminConnected"
+                class="unbind-btn"
+                style="margin: 0; padding: 0 22rpx; height: 60rpx; line-height: 60rpx; font-size: 22rpx;"
+                :loading="unbinding"
+                @click="handleUnbindGarmin"
+              >解除绑定</button>
+              <text
+                v-else
+                @click="openSection('device')"
+                style="font-size: 22rpx; font-weight: 700; color: #60a5fa;"
+              >去连接 ›</text>
+            </view>
+
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+              <view style="flex: 1; padding-right: 12rpx;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                  高驰手表
+                </text>
+                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                  {{ corosConnected ? `已连接 ✓ · ${corosAccount || ''}` : '未连接' }}
+                </text>
+              </view>
+              <button
+                v-if="corosConnected"
+                class="unbind-btn"
+                style="margin: 0; padding: 0 22rpx; height: 60rpx; line-height: 60rpx; font-size: 22rpx;"
+                :loading="unbindingCoros"
+                @click="handleUnbindCoros"
+              >解除绑定</button>
+              <text
+                v-else
+                @click="openSection('device')"
+                style="font-size: 22rpx; font-weight: 700; color: #fc4c02;"
+              >去连接 ›</text>
+            </view>
+
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+              <view style="flex: 1; padding-right: 12rpx;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                  其他手表
+                </text>
+                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                  {{ (appleWatchConnected || huaweiConnected || suuntoConnected) ? '已连接 ✓ · 苹果/华为/颂拓导入已激活' : '苹果 / 华为 / 颂拓 · 未连接' }}
+                </text>
+              </view>
+              <button
+                v-if="appleWatchConnected || huaweiConnected || suuntoConnected"
+                class="unbind-btn"
+                style="margin: 0; padding: 0 22rpx; height: 60rpx; line-height: 60rpx; font-size: 22rpx;"
+                :loading="unbindingAppleWatch || unbindingHuawei || unbindingSuunto"
+                @click="handleUnbindHealthWatch(activeHealthWatchBrand)"
+              >解除绑定</button>
+              <text
+                v-else
+                @click="openSection('device')"
+                style="font-size: 22rpx; font-weight: 700; color: var(--rgm-text-muted, #94a3b8);"
+              >去连接 ›</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 🛡️ 隐私清除（高危操作） -->
+        <view class="section-card privacy-guard-card">
+          <view class="card-title-row">
+            <view class="title-with-badge">
+              <text class="card-title">🛡️ 隐私清除</text>
+              <text class="security-chip" style="background: rgba(244, 63, 94, 0.14); color: #fda4af; border-color: rgba(244, 63, 94, 0.35);">高危操作</text>
+            </view>
+          </view>
+          <text style="font-size: 22rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-bottom: 18rpx; line-height: 1.5;">
+            可随时一键彻底清除实名姓名、证件号、生日、手机号、紧急联系人、商学院登记及手表授权凭证；历史跑步记录将以匿名跑者保留，且自动锁定所有隐私为仅自己可见。
+          </text>
+          <view class="privacy-actions-row">
+            <button class="purge-privacy-btn" :loading="purgingPrivacy" @click="handleConfirmPurgePrivacy">
+              🧹 清除隐私
+            </button>
+          </view>
+        </view>
+      </view>
     </template>
 
-    <!-- 子页面：帮助与技术支持 -->
+    <!-- 子页面：消息提醒 -->
+    <template v-if="activeSection === 'notifications'">
+      <!-- ── CARD: 🔔 点评推送 ── -->
+      <view class="section-card wechat-notif-card">
+        <view class="card-title-row">
+          <view class="title-with-icon">
+            <text class="title-icon">🔔</text>
+            <text class="card-title">点评推送</text>
+          </view>
+          <view class="notif-status-badge" :class="{ enabled: wechatSubscribeEnabled }">
+            <text class="status-dot" />
+            <text class="status-text">{{ wechatSubscribeEnabled ? '已开启' : '未授权' }}</text>
+          </view>
+        </view>
+
+        <view class="wechat-notif-actions">
+          <button class="enable-subscribe-btn" @click="handleRequestSubscribe">
+            📲 开启提醒
+          </button>
+          <button class="test-subscribe-btn" :loading="testingPush" @click="handleTestWechatPush">
+            🧪 测试推送
+          </button>
+        </view>
+      </view>
+    </template>
+
+    <!-- 子页面：帮助支持 -->
     <template v-if="activeSection === 'support'">
       <!-- 1. 微信一对一在线客服卡片 -->
       <view class="section-card support-card">
@@ -1075,7 +1439,7 @@
         <view class="card-title-row">
           <view class="title-with-icon">
             <text class="title-icon">📋</text>
-            <text class="card-title">我的反馈记录 ({{ mySupportTickets.length }})</text>
+            <text class="card-title">反馈记录 ({{ mySupportTickets.length }})</text>
           </view>
         </view>
 
@@ -1099,28 +1463,17 @@
       </view>
     </template>
 
-    <!-- 子页面「个人资料」专属保存按钮 -->
-    <template v-if="activeSection === 'personal'">
-          <!-- Tab 1 专属保存设置 -->
-    <view v-if="user" class="save-box">
-      <button class="save-btn" :loading="saving" @click="handleSaveAll">
-        💾 保存个人资料
-      </button>
-    </view>
-
-    </template>
-
     <!-- ══════════════════════════════════════════════════════════════ -->
-    <!-- TAB 2: 训练档案与赛事 (Training Metrics & Races)              -->
+    <!-- TAB 2: 训练档案 (Training Metrics & Races)                     -->
     <!-- ══════════════════════════════════════════════════════════════ -->
-    <!-- 子页面：训练档案与赛事 -->
+    <!-- 子页面：训练档案 -->
     <template v-if="activeSection === 'training'">
-      <!-- ── CARD 2: 个人最佳成绩 (PB) ── -->
+      <!-- ── CARD 2: 最佳成绩 (PB) ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
           <text class="title-icon">⚡</text>
-          <text class="card-title">个人最佳成绩 (PB)</text>
+          <text class="card-title">最佳成绩 (PB)</text>
         </view>
         <button
           class="import-garmin-btn"
@@ -1152,7 +1505,7 @@
       </view>
     </view>
 
-      <!-- ── CARD 3: 运动体能与生理指标 ── -->
+      <!-- ── CARD 3: 生理指标 ── -->
     <view class="section-card">
       <view class="card-title-row">
         <view class="title-with-icon">
@@ -1165,7 +1518,7 @@
           :disabled="syncingDeviceProfile || (!garminConnected && !corosConnected)"
           @click="handleSyncDeviceProfile"
         >
-          从手表同步指标
+          同步指标
         </button>
       </view>
 
@@ -1173,9 +1526,9 @@
         <!-- 最大摄氧量 VO2Max -->
         <view class="form-group">
           <view class="label-with-tag">
-            <text class="label">最大摄氧量 (VO2Max)</text>
-            <text v-if="(garminConnected || corosConnected || appleConnected || huaweiConnected) && profile?.vo2max" class="estimate-pill-btn" style="color: #059669; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3);">⌚ 手表实测直读</text>
-            <text v-else class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ 依据 PB 测算</text>
+            <text class="label">最大摄氧 (VO2Max)</text>
+            <text v-if="(garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected) && profile?.vo2max" class="estimate-pill-btn" style="color: #059669; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3);">⌚ 手表直读</text>
+            <text v-else class="estimate-pill-btn" @click="handleEstimateVo2max">⚡ PB测算</text>
           </view>
           <input
             class="form-input"
@@ -1212,7 +1565,7 @@
 
         <!-- 最大心率 -->
         <view class="form-group">
-          <text class="label">最大心率 (Max HR)</text>
+          <text class="label">最大心率</text>
           <input
             class="form-input"
             type="number"
@@ -1224,7 +1577,7 @@
 
         <!-- 静息心率 -->
         <view class="form-group">
-          <text class="label">静息心率 (Rest HR)</text>
+          <text class="label">静息心率</text>
           <input
             class="form-input"
             type="number"
@@ -2849,7 +3202,7 @@
       <view class="modal-content purge-modal-content" @click.stop>
         <view class="modal-header purge-modal-header">
           <view class="title-with-pill">
-            <text class="modal-title text-red">⚠️ 彻底清除个人隐私数据？</text>
+            <text class="modal-title text-red">⚠️ 清除隐私</text>
           </view>
           <text class="close-btn" @click="showPurgeConfirmModal = false">✕</text>
         </view>
@@ -2873,15 +3226,19 @@
             </view>
             <view class="purge-detail-item red-item">
               <text class="purge-dot red-dot">✕</text>
-              <text class="purge-item-text">紧急联系手机号、个人邮箱、简介与头像</text>
+              <text class="purge-item-text">联系手机号、紧急联系人、个人邮箱、简介与头像</text>
             </view>
             <view class="purge-detail-item red-item">
               <text class="purge-dot red-dot">✕</text>
-              <text class="purge-item-text">已绑定的 Garmin / 高驰手表授权密码与令牌</text>
+              <text class="purge-item-text">商学院项目与班级届别登记、大群花名册实名认证记录</text>
             </view>
             <view class="purge-detail-item red-item">
               <text class="purge-dot red-dot">✕</text>
-              <text class="purge-item-text">各大跑团/大群花名册中的实名认证登记</text>
+              <text class="purge-item-text">已绑定的 Garmin / 高驰 / 华为 / 颂拓等第三方手表授权凭证</text>
+            </view>
+            <view class="purge-detail-item red-item">
+              <text class="purge-dot red-dot">✕</text>
+              <text class="purge-item-text">同时将 GPS 轨迹、HRV 生理与 Canova 评语自动锁定为“仅自己可见”</text>
             </view>
 
             <view class="purge-divider"></view>
@@ -3042,14 +3399,15 @@ const showIdCard = ref(false);
 const showPurgeConfirmModal = ref(false);
 
 // 「我的」页拆分为首页 + 子页面（页内切换，共用同一份状态与保存逻辑，弹窗不受影响）
-type ProfileSection = "" | "device" | "personal" | "training" | "privacy" | "support";
+type ProfileSection = "" | "device" | "personal" | "training" | "privacy" | "notifications" | "support";
 const activeSection = ref<ProfileSection>("");
 const SECTION_TITLES: Record<string, string> = {
-  device: "手表连接与同步",
-  personal: "个人资料与实名信息",
-  training: "训练档案与赛事",
-  privacy: "通知与隐私",
-  support: "帮助与技术支持",
+  device: "手表连接",
+  personal: "隐私设定",
+  privacy: "隐私设定",
+  training: "训练档案",
+  notifications: "消息提醒",
+  support: "帮助支持",
 };
 const activeSectionTitle = computed(() => SECTION_TITLES[activeSection.value] || "");
 const activeHealthWatchBrand = computed<"apple_watch" | "huawei" | "suunto">(() => {
@@ -3070,6 +3428,97 @@ const deviceStatusText = computed(() => {
 const personalNeedsAttention = computed(() =>
   (userOrgs.value || []).some((o: any) => o.status !== "confirmed" && o.status !== "pending")
 );
+
+const mpAllPiiVisible = computed(
+  () => showDob.value && showRealName.value && showPhone.value && showIdCard.value
+);
+function toggleMpAllPii() {
+  const next = !mpAllPiiVisible.value;
+  showDob.value = next;
+  showRealName.value = next;
+  showPhone.value = next;
+  showIdCard.value = next;
+}
+const maskNamePreview = computed(() => {
+  const v = String(profile.value?.real_name || "").trim();
+  if (!v) return "未填写";
+  if (v.length === 1) return "*";
+  if (v.length === 2) return v[0] + "*";
+  return v[0] + "*".repeat(v.length - 2) + v[v.length - 1];
+});
+const maskPhonePreview = computed(() => {
+  const v = String(profile.value?.phone || "").trim();
+  if (!v) return "未填写";
+  return v.length >= 7 ? v.slice(0, 3) + "****" + v.slice(-4) : "***" + v.slice(-2);
+});
+const maskIdCardPreview = computed(() => {
+  const v = String(profile.value?.id_card || "").trim();
+  if (!v) return "未填写";
+  return v.length >= 8 ? v.slice(0, 3) + "***********" + v.slice(-4) : "******" + v.slice(-2);
+});
+const maskDobPreview = computed(() => {
+  const v = String(profile.value?.date_of_birth || "").trim();
+  if (!v) return "未填写";
+  return v.length >= 4 ? v.slice(0, 4) + "-**-**" : "****-**-**";
+});
+const mpPiiFilledCount = computed(() => {
+  const p = profile.value || {};
+  return [p.real_name, p.gender, p.date_of_birth, p.phone, p.id_card].filter(
+    (x) => String(x || "").trim() !== ""
+  ).length;
+});
+const mpBodyFilledCount = computed(() => {
+  const p = profile.value || {};
+  return [
+    p.vo2max,
+    p.height || p.height_cm,
+    p.weight || p.weight_kg,
+    p.max_heart_rate,
+    p.resting_heart_rate,
+    p.years_running,
+  ].filter((x) => x !== undefined && x !== null && String(x).trim() !== "").length;
+});
+const mpConnectedWatchCount = computed(() =>
+  [
+    garminConnected.value,
+    corosConnected.value,
+    appleWatchConnected.value,
+    huaweiConnected.value,
+    suuntoConnected.value,
+  ].filter(Boolean).length
+);
+const mpCritiqueVisSummary = computed(() => {
+  const vis = profile.value?.canova_critique_visibility || "self";
+  if (vis === "coach_mentor") return "教练师傅";
+  if (vis === "selected_clubs") return "指定跑团";
+  if (vis === "all_clubs") return "全部跑团";
+  return "仅自己";
+});
+const privacySummaryBadge = computed(() => {
+  const vis = profile.value?.canova_critique_visibility || "self";
+  return vis === "self" ? "严格保护" : mpCritiqueVisSummary.value;
+});
+function scrollToPrivacyAnchor(selector: string) {
+  setTimeout(() => {
+    try {
+      uni.createSelectorQuery()
+        .selectViewport().scrollOffset()
+        .select(selector).boundingClientRect()
+        .exec((res: any) => {
+          const scrollInfo = res?.[0];
+          const rect = res?.[1];
+          if (rect && scrollInfo) {
+            const targetTop = Math.max(0, scrollInfo.scrollTop + rect.top - 16);
+            uni.pageScrollTo({ scrollTop: targetTop, duration: 350 });
+          } else {
+            uni.pageScrollTo({ selector, duration: 350 });
+          }
+        });
+    } catch {
+      uni.pageScrollTo({ selector, duration: 350 });
+    }
+  }, 60);
+}
 
 // ── 帮助与技术支持 (Support & Feedback) 状态 ──
 const SUPPORT_CATEGORIES = [
@@ -3190,8 +3639,9 @@ function openSection(key: ProfileSection) {
     openAuthModal();
     return;
   }
-  activeSection.value = key;
-  if (key === "support") {
+  const target: ProfileSection = key === "privacy" ? "personal" : key;
+  activeSection.value = target;
+  if (target === "support") {
     loadMySupportTickets();
   }
   uni.pageScrollTo({ scrollTop: 0, duration: 0 });
@@ -5301,9 +5751,28 @@ async function executePurgePrivacy() {
             profile.value.id_card = "";
             profile.value.phone = "";
             profile.value.date_of_birth = "";
+            profile.value.emergency_contact = "";
+            profile.value.program = "";
+            profile.value.class_detail = "";
+            profile.value.hide_gps_route = true;
+            profile.value.hide_biometrics = true;
+            profile.value.canova_critique_visibility = "self";
+            profile.value.canova_critique_club_ids = [];
             profile.value.garmin_connected = false;
             profile.value.coros_connected = false;
+            profile.value.apple_watch_connected = false;
+            profile.value.huawei_connected = false;
+            profile.value.suunto_connected = false;
           }
+          garminConnected.value = false;
+          garminEmail.value = "";
+          corosConnected.value = false;
+          corosAccount.value = "";
+          appleWatchConnected.value = false;
+          huaweiConnected.value = false;
+          huaweiAccount.value = "";
+          suuntoConnected.value = false;
+          suuntoAccount.value = "";
         }
         loadProfileData();
       }
@@ -5715,6 +6184,9 @@ onShow(() => {
     setTimeout(() => {
       loadMySupportTickets();
     }, 300);
+  } else if (uni.getStorageSync("auto_open_privacy")) {
+    uni.removeStorageSync("auto_open_privacy");
+    activeSection.value = "personal";
   } else if (uni.getStorageSync("auto_scroll_to_required_fields")) {
     uni.removeStorageSync("auto_scroll_to_required_fields");
     activeSection.value = "personal";

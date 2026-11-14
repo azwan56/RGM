@@ -153,7 +153,7 @@ export default function ManualPage() {
                 <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20">双分区支持</span>
               </div>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                在【我的】→【👤 个人资料与账号】中找到“运动手表数据直连”，点击【绑定佳明账号】：
+                在【我的】→【⌚ 手表连接】中点击【绑定佳明】（也可在【🛡️ 隐私设定】底部查看手表授权）：
               </p>
               <ul className="text-xs text-zinc-400 space-y-1.5 list-disc list-inside">
                 <li><strong className="text-white">分区选择</strong>：国内购买行货选“中国区 (garmin.cn)”；海外账号选“国际区 (garmin.com)”。</li>
@@ -170,7 +170,7 @@ export default function ManualPage() {
                 <span className="text-[10px] bg-orange-500/10 text-orange-400 px-2 py-0.5 rounded-full border border-orange-500/20">秒级同步</span>
               </div>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                点击【绑定高驰账号】，输入 COROS App 注册的账号手机/邮箱与密码：
+                点击【绑定高驰】，输入 COROS App 注册的账号手机/邮箱与密码：
               </p>
               <ul className="text-xs text-zinc-400 space-y-1.5 list-disc list-inside">
                 <li>绑定成功后，手表每次跑步完成将自动同步至个人运动记录。</li>
@@ -183,7 +183,7 @@ export default function ManualPage() {
             <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-200/90 leading-relaxed">
               <strong className="text-amber-300 font-bold block mb-0.5">⚡ 一键导入个人历史最好成绩 (PB)：</strong>
-              绑定佳明后，请切换到【🏃 训练档案与赛事】标签页，在 PB 卡片点击<strong>【⚡ 从 Garmin 一键导入】</strong>，系统会自动抓取您历史上全马、半马、10公里、5公里的最快真实比赛/训练记录，无需手动反复输入！
+              绑定佳明后，请切换到【🏃 训练档案】标签页，在 PB 卡片点击<strong>【⚡ 从 Garmin 一键导入】</strong>，系统会自动抓取您历史上全马、半马、10公里、5公里的最快真实比赛/训练记录，无需手动反复输入！
             </div>
           </div>
         </section>
@@ -277,7 +277,7 @@ export default function ManualPage() {
               </table>
             </div>
             <p className="text-[11px] text-zinc-500">
-              * 填毕后点击底部“💾 保存个人资料与账号设置”生效。若超期被暂停，补齐并保存后联系大群管理员点击【确认转正】即可瞬间恢复！
+              * 填毕后点击【🛡️ 隐私设定】中的“💾 保存设定”生效。若超期被暂停，补齐并保存后联系大群管理员点击【确认转正】即可瞬间恢复！
             </p>
           </div>
         </section>
@@ -296,13 +296,13 @@ export default function ManualPage() {
 
           <div className="space-y-4">
             <p className="text-xs text-zinc-400 leading-relaxed">
-              在【我的】页面切换至 **【🏃 训练档案与赛事】** 标签页：
+              在【我的】页面切换至 **【🏃 训练档案】** 标签页（或在【🛡️ 隐私设定】中直接编辑）：
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                 <span className="text-base font-bold text-white block">1. VO2Max (最大摄氧量)</span>
                 <p className="text-xs text-zinc-400 leading-relaxed">
-                  可点击右上角 <strong className="text-[#FC4C02]">【⚡ 依据 PB 测算】</strong>，系统基于丹尼尔斯 VDOT 曲线自动推算您的摄氧量天花板；亦可点击【从手表同步指标】抓取佳明/高驰测算值。
+                  可点击右上角 <strong className="text-[#FC4C02]">【⚡ PB测算】</strong>，系统基于丹尼尔斯 VDOT 曲线自动推算您的摄氧量天花板；亦可点击【同步指标】抓取佳明/高驰测算值。
                 </p>
               </div>
 
@@ -342,7 +342,7 @@ export default function ManualPage() {
                 <span>2026 年度跑量与 12 个月阶梯规划</span>
               </h3>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                在【🏃 训练档案与赛事】标签页中，您可灵活选择两种跑量规划模式：
+                在【🏃 训练档案】标签页中，您可灵活选择两种跑量规划模式：
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 text-xs text-zinc-300">
@@ -394,7 +394,7 @@ export default function ManualPage() {
             <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
               <h4 className="text-sm font-bold text-white">Q1: 为什么提示“跑团访问权限已暂停”？</h4>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                解答：这说明您加入的跑团隶属于“复旦戈”大群，而您的大群 14 天临时访问期已到期，但个人实名资料中尚有标 * 必填项未填全，或管理员尚未确认。请进入【我的】→【👤 个人资料与账号】补齐并保存，之后联系大群管理员（或领队）点击【确认转正】即可即刻解冻恢复！
+                解答：这说明您加入的跑团隶属于“复旦戈”大群，而您的大群 14 天临时访问期已到期，但个人实名资料中尚有标 * 必填项未填全，或管理员尚未确认。请进入【我的】→【🛡️ 隐私设定】补齐并保存，之后联系大群管理员（或领队）点击【确认转正】即可即刻解冻恢复！
               </p>
             </div>
 

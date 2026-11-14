@@ -431,16 +431,16 @@
         </view>
       </view>
 
-      <!-- ── Part B: 🔒 数据保密与隐私开放权限（仅对教练和师傅开放） ── -->
+      <!-- ── Part B: 🔒 权限设定（仅对教练和师傅开放） ── -->
       <view class="privacy-settings-card">
         <view class="psc-header">
-          <text class="psc-title">🔒 数据保密设置</text>
-          <text class="psc-badge">仅对教练和师傅开放</text>
+          <text class="psc-title">🔒 权限设定</text>
+          <text class="psc-badge">教练师傅</text>
         </view>
 
         <view class="privacy-toggle-row" @click="profileForm.hide_gps_route = !profileForm.hide_gps_route">
           <view class="ptr-left">
-            <text class="ptr-title">🗺️ GPS 路线保密</text>
+            <text class="ptr-title">🗺️ 路线保密</text>
           </view>
           <switch
             :checked="profileForm.hide_gps_route"
@@ -452,7 +452,7 @@
 
         <view class="privacy-toggle-row" style="border-top: 1rpx solid rgba(255,255,255,0.08); padding-top: 20rpx; margin-top: 16rpx;" @click="profileForm.hide_biometrics = !profileForm.hide_biometrics">
           <view class="ptr-left">
-            <text class="ptr-title">💓 心率 / HRV / 睡眠数据保密</text>
+            <text class="ptr-title">💓 生理保密</text>
           </view>
           <switch
             :checked="profileForm.hide_biometrics"
@@ -460,6 +460,16 @@
             @change="(e: any) => profileForm.hide_biometrics = Boolean(e.detail.value)"
             @click.stop
           />
+        </view>
+
+        <view style="border-top: 1rpx solid rgba(255,255,255,0.08); padding-top: 20rpx; margin-top: 16rpx; display: flex; flex-direction: column; gap: 6rpx;">
+          <view style="display: flex; align-items: center; justify-content: space-between; gap: 12rpx;">
+            <text class="ptr-title">🎯 评语可见</text>
+            <text style="font-size: 22rpx; font-weight: 700; color: #34D399; background: rgba(16,185,129,0.12); border: 1rpx solid rgba(16,185,129,0.28); border-radius: 999rpx; padding: 4rpx 14rpx;">🔒 仅自己</text>
+          </view>
+          <text style="font-size: 22rpx; color: rgba(255,255,255,0.58); line-height: 1.45;">
+            引导完成后，可随时在「我的 → 🛡️ 隐私设定」按需向教练师傅或跑团开放。
+          </text>
         </view>
       </view>
 

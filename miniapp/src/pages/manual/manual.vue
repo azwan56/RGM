@@ -83,7 +83,7 @@
         <view class="highlight-tip-box">
           <text class="highlight-tip-title">⚡ 一键导入历史个人最好成绩 (PB)：</text>
           <text class="highlight-tip-desc">
-            绑定手表后，在【我的】→【训练档案与赛事】点击“个人最佳成绩 (PB)”右上角的【从手表一键导入】，系统将自动抓取 5K/10K/半马/全马最快记录！
+            绑定手表后，在【我的】→【训练档案】点击“最佳成绩 (PB)”右上角的【从手表一键导入】，系统将自动抓取 5K/10K/半马/全马最快记录！
           </text>
         </view>
       </view>
@@ -162,7 +162,7 @@
 
         <view class="tip-footer-note">
           <text class="tip-footer-txt">
-            填毕后务必点击底部的【💾 保存个人资料与账号设置】。若超期被暂停，补齐保存后联系大群管理员（或领队）点击【确认转正】即可即刻解冻恢复！
+            进入【我的】→【🛡️ 隐私设定】补齐后，务必点击底部的【💾 保存设定】。若超期被暂停，补齐保存后联系大群管理员（或领队）点击【确认转正】即可即刻解冻恢复！
           </text>
         </view>
       </view>
@@ -179,9 +179,9 @@
 
       <view class="step-content-box">
         <view class="item-block">
-          <text class="item-title">💓 核心指标设定（在【训练档案与赛事】标签中）：</text>
+          <text class="item-title">💓 核心指标设定（在【训练档案】或【隐私设定】中）：</text>
           <text class="item-desc">
-            1. 最大摄氧量 (VO2Max)：点击【⚡ 依据 PB 测算】，基于丹尼尔斯 VDOT 算法自动推算；亦可点击【从手表同步指标】抓取手表测算值。
+            1. 最大摄氧量 (VO2Max)：点击【⚡ PB测算】，基于丹尼尔斯 VDOT 算法自动推算；亦可点击【同步指标】抓取手表测算值。
           </text>
           <text class="item-desc">
             2. 静息心率与最大心率：设定清晨静息心率与极限心率，用于精准预警过度疲劳与心脏负荷。
