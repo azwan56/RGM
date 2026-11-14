@@ -25,6 +25,7 @@ from utils.encryption import decrypt_string
 from utils.garmin_adapter import GarminAdapter
 from utils.security import is_safe_external_url
 from utils.coros_adapter import CorosAdapter
+from utils.captain_cheer import enrich_activities_with_captain_cheer, generate_activity_captain_cheer
 
 logger = logging.getLogger("router_miniapp")
 router = APIRouter()
@@ -102,6 +103,10 @@ def get_miniapp_dashboard_data(
         # 4. Current Month Activities (All activities for current month)
         today = LocalStore.get_beijing_today()
         month_acts = LocalStore.get_month_activities(eff_uid, today.year, today.month)
+        try:
+            enrich_activities_with_captain_cheer(month_acts)
+        except Exception as cc_ex:
+            logger.warning(f"[miniapp] Dashboard month captain cheer skipped: {cc_ex}")
         formatted_month_acts = []
         for a in month_acts:
             dist_m = float(a.get("distance_meters") or 0)
@@ -138,6 +143,8 @@ def get_miniapp_dashboard_data(
                 "exclude_mode": a.get("exclude_mode") or "normal",
                 "ai_journal": filtered_journal,
                 "is_critique_hidden": j_hidden,
+                "captain_cheer": a.get("captain_cheer"),
+                "captain_cheer_meta": a.get("captain_cheer_meta"),
                 "has_gps_track": has_gps,
                 "map_image_url": a.get("map_image_url")
             })
@@ -146,9 +153,12 @@ def get_miniapp_dashboard_data(
         local_acts = LocalStore.get_recent_activities(eff_uid, limit=100)
         fallback_recent = []
         if not formatted_month_acts:
-            for a in local_acts[:10]:
-                if (a.get("exclude_mode") or "normal") == "excluded":
-                    continue
+            fallback_src = [a for a in local_acts[:10] if (a.get("exclude_mode") or "normal") != "excluded"]
+            try:
+                enrich_activities_with_captain_cheer(fallback_src)
+            except Exception as cc_ex:
+                logger.warning(f"[miniapp] Dashboard fallback captain cheer skipped: {cc_ex}")
+            for a in fallback_src:
                 dist_m = float(a.get("distance_meters") or 0)
                 dist_km = round(dist_m / 1000.0, 2)
                 has_gps = bool(
@@ -183,6 +193,8 @@ def get_miniapp_dashboard_data(
                     "exclude_mode": a.get("exclude_mode") or "normal",
                     "ai_journal": filtered_journal,
                     "is_critique_hidden": j_hidden,
+                    "captain_cheer": a.get("captain_cheer"),
+                    "captain_cheer_meta": a.get("captain_cheer_meta"),
                     "has_gps_track": has_gps,
                     "map_image_url": a.get("map_image_url")
                 })
@@ -562,6 +574,10 @@ def get_miniapp_activities(
         and not LocalStore.can_view_confidential_runner_data(resolved_viewer, canon_uid)
     )
     acts = LocalStore.get_recent_activities(eff_uid, limit=limit)
+    try:
+        enrich_activities_with_captain_cheer(acts)
+    except Exception as cc_ex:
+        logger.warning(f"[miniapp] Recent activities captain cheer skipped: {cc_ex}")
     formatted = []
     for a in acts:
         dist_m = float(a.get("distance_meters") or 0)
@@ -597,6 +613,8 @@ def get_miniapp_activities(
             "exclude_mode": a.get("exclude_mode") or "normal",
             "ai_journal": filtered_j,
             "is_critique_hidden": j_hidden,
+            "captain_cheer": a.get("captain_cheer"),
+            "captain_cheer_meta": a.get("captain_cheer_meta"),
             "has_gps_track": has_gps,
             "map_image_url": a.get("map_image_url")
         })
@@ -640,6 +658,10 @@ def get_user_month_activities(
     target_month = month or today.month
 
     acts = LocalStore.get_month_activities(eff_uid, target_year, target_month)
+    try:
+        enrich_activities_with_captain_cheer(acts)
+    except Exception as cc_ex:
+        logger.warning(f"[miniapp] Month activities captain cheer skipped: {cc_ex}")
     formatted = []
     total_meters = 0.0
     for a in acts:
@@ -680,6 +702,8 @@ def get_user_month_activities(
             "exclude_mode": a.get("exclude_mode") or "normal",
             "ai_journal": filtered_j,
             "is_critique_hidden": j_hidden,
+            "captain_cheer": a.get("captain_cheer"),
+            "captain_cheer_meta": a.get("captain_cheer_meta"),
             "has_gps_track": has_gps,
             "map_image_url": a.get("map_image_url")
         })
@@ -699,7 +723,8 @@ def get_activity_track(
     act_id: str,
     request: Request = None,
     uid: Optional[str] = Query(None, description="Viewer user ID"),
-    viewer_uid: Optional[str] = Query(None, description="Viewer user ID alias")
+    viewer_uid: Optional[str] = Query(None, description="Viewer user ID alias"),
+    club_id: Optional[str] = Query(None, description="Optional club ID context"),
 ) -> Dict[str, Any]:
     """
     Returns GPS track polyline coordinates (GCJ-02), bounds, elevation profile, and structured
@@ -869,6 +894,9 @@ def get_activity_track(
                         segment_analysis_out["updated_ai_journal"]
                     )
 
+        eff_club_id = str(club_id).strip() if isinstance(club_id, str) and club_id.strip() else None
+        captain_cheer, captain_cheer_meta = generate_activity_captain_cheer(track_row, club_id=eff_club_id)
+
         dist_m = float(track_row.get("distance_meters") or 0)
         act_payload = {
             "id": track_row["id"],
@@ -883,6 +911,8 @@ def get_activity_track(
             "average_heartrate": None if is_bio_hidden else track_row.get("average_heartrate"),
             "ai_journal": ai_journal_out,
             "is_critique_hidden": is_critique_hidden,
+            "captain_cheer": captain_cheer,
+            "captain_cheer_meta": captain_cheer_meta,
         }
 
         if is_gps_hidden:
@@ -892,6 +922,8 @@ def get_activity_track(
                 "is_biometrics_hidden": is_bio_hidden,
                 "is_segment_hidden": is_segment_hidden,
                 "is_critique_hidden": is_critique_hidden,
+                "captain_cheer": captain_cheer,
+                "captain_cheer_meta": captain_cheer_meta,
                 "has_track": False,
                 "track": None,
                 "has_segment_analysis": False,
@@ -934,6 +966,8 @@ def get_activity_track(
             "is_biometrics_hidden": is_bio_hidden,
             "is_segment_hidden": is_segment_hidden,
             "is_critique_hidden": is_critique_hidden,
+            "captain_cheer": captain_cheer,
+            "captain_cheer_meta": captain_cheer_meta,
             "activity": act_payload,
             "has_track": has_gps_points,
             "track": public_track,
@@ -1861,6 +1895,33 @@ def get_personal_share_card_data(
         commentary_exec = ""
         commentary_options = []
 
+    # Generate public Club Captain Cheer (independent of Canova visibility; None for unaffiliated solo runners)
+    captain_cheer = None
+    captain_cheer_meta = None
+    sc_club_id = str(club_id).strip() if isinstance(club_id, str) and club_id.strip() else None
+    if actual_data.get("has_activity"):
+        try:
+            src_act_for_cheer = (
+                dict(selected_act)
+                if selected_act
+                else {
+                    "id": str(actual_data.get("id") or f"race_{eff_uid}_{eff_date}"),
+                    "user_id": eff_uid,
+                    "name": actual_data.get("name") or "完赛纪念",
+                    "sport_type": "Run",
+                    "start_time": actual_data.get("date") or eff_date,
+                    "distance_meters": float(actual_data.get("distance_km") or 0.0) * 1000.0,
+                    "moving_time_seconds": int(actual_data.get("moving_time_seconds") or 0),
+                    "elevation_gain_meters": float(actual_data.get("elevation_gain_meters") or 0.0),
+                    "exclude_mode": "normal",
+                }
+            )
+            captain_cheer, captain_cheer_meta = generate_activity_captain_cheer(
+                src_act_for_cheer, club_id=sc_club_id
+            )
+        except Exception as cc_ex:
+            logger.warning(f"[miniapp] Share card captain cheer skipped: {cc_ex}")
+
     # 5. Resolve User's Primary Club & Generate Official WeChat Invite QR Code (wxacode)
     user_clubs = LocalStore.get_user_clubs(eff_uid)
     target_club = None
@@ -1975,6 +2036,8 @@ def get_personal_share_card_data(
         "commentary_options": commentary_options,
         "is_critique_hidden": is_critique_hidden,
         "is_biometrics_hidden": is_bio_hidden,
+        "captain_cheer": captain_cheer,
+        "captain_cheer_meta": captain_cheer_meta,
         "recent_runs": recent_selector,
         "completed_races": races_selector,
         "default_photo_base64": default_photo_b64,

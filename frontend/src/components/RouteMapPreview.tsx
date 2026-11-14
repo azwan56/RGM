@@ -14,6 +14,15 @@ interface RouteMapPreviewProps {
   avgPace?: string;
   eagerFetch?: boolean;
   isSegmentHiddenHint?: boolean;
+  clubId?: string;
+  captainCheer?: string | null;
+  captainCheerMeta?: {
+    club_id?: string;
+    club_name?: string;
+    captain_name?: string;
+    captain_title?: string;
+    scenario?: string;
+  } | null;
 }
 
 function resolveClientViewerUid(): string {
@@ -39,6 +48,9 @@ export default function RouteMapPreview({
   avgPace,
   eagerFetch = false,
   isSegmentHiddenHint = false,
+  clubId,
+  captainCheer,
+  captainCheerMeta,
 }: RouteMapPreviewProps) {
   const [activeTab, setActiveTab] = useState<"map" | "segments" | "elevation">("map");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,6 +58,8 @@ export default function RouteMapPreview({
   const [segmentAnalysis, setSegmentAnalysis] = useState<any>(null);
   const [isSegmentHidden, setIsSegmentHidden] = useState<boolean>(Boolean(isSegmentHiddenHint));
   const [segmentHiddenMessage, setSegmentHiddenMessage] = useState<string>("");
+  const [fetchedCaptainCheer, setFetchedCaptainCheer] = useState<string | null>(null);
+  const [fetchedCaptainMeta, setFetchedCaptainMeta] = useState<any>(null);
   const [hasFetchedDetail, setHasFetchedDetail] = useState(false);
   const [isLoadingTrack, setIsLoadingTrack] = useState(false);
 
@@ -67,7 +81,11 @@ export default function RouteMapPreview({
     setIsLoadingTrack(true);
     try {
       const viewerUid = resolveClientViewerUid();
-      const q = viewerUid ? `?viewer_uid=${encodeURIComponent(viewerUid)}` : "";
+      const params = new URLSearchParams();
+      if (viewerUid) params.set("viewer_uid", viewerUid);
+      if (clubId) params.set("club_id", clubId);
+      const qs = params.toString();
+      const q = qs ? `?${qs}` : "";
       const res = await apiClient.get(`/api/miniapp/activities/${activityId}/track${q}`);
       if (res.data?.success) {
         if (res.data?.track?.points?.length > 1) {
@@ -75,6 +93,10 @@ export default function RouteMapPreview({
         }
         setIsSegmentHidden(Boolean(res.data?.is_segment_hidden));
         setSegmentHiddenMessage(res.data?.segment_hidden_message || res.data?.message || "");
+        if (res.data?.captain_cheer !== undefined) {
+          setFetchedCaptainCheer(res.data.captain_cheer);
+          setFetchedCaptainMeta(res.data.captain_cheer_meta || null);
+        }
         if (res.data?.segment_analysis) {
           setSegmentAnalysis(res.data.segment_analysis);
           const hasPts = (res.data?.track?.points?.length || track?.points?.length || 0) > 1;
@@ -89,7 +111,7 @@ export default function RouteMapPreview({
       setHasFetchedDetail(true);
       setIsLoadingTrack(false);
     }
-  }, [activityId, isLoadingTrack, hasFetchedDetail, track, mapImageUrl]);
+  }, [activityId, isLoadingTrack, hasFetchedDetail, track, mapImageUrl, clubId]);
 
   // Eagerly fetch when explicitly expanded on personal dashboard
   useEffect(() => {
@@ -780,6 +802,23 @@ export default function RouteMapPreview({
               <div className="rounded-2xl overflow-hidden border border-white/10 bg-[#121216] p-5">
                 {renderSegmentDiagnosisBlock(false)}
               </div>
+
+              {/* Public Club Captain Cheer */}
+              {(fetchedCaptainCheer ?? captainCheer) && (
+                <div className="rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-950/30 via-[#221c15] to-orange-950/25 p-4 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-xs font-bold text-amber-300">
+                    <span>
+                      📣 {(fetchedCaptainMeta ?? captainCheerMeta)?.captain_title || "团长加油"}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                      全员可见
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-100/90 leading-relaxed">
+                    {fetchedCaptainCheer ?? captainCheer}
+                  </p>
+                </div>
+              )}
 
               {/* Elevation Section */}
               {elevationProfile && elevationProfile.length > 1 && (

@@ -109,12 +109,27 @@ export default function PersonalShareCardModal({
               setSelectedActId(data.actual_data.id);
             }
           }
-          const opts: Array<{ key: string; label: string; text: string }> = data.commentary_options || [];
+          const baseOpts: Array<{ key: string; label: string; text: string }> = data.commentary_options || [];
+          const opts = data.captain_cheer
+            ? [
+                ...baseOpts,
+                {
+                  key: "captain",
+                  label: "📣 团长加油",
+                  text: data.captain_cheer,
+                },
+              ]
+            : baseOpts;
           setCommentaryOptions(opts);
-          const defaultKey = showDailyPlan ? "exec" : "phys";
-          const matchedOpt = opts.find((o) => o.key === defaultKey) || opts[0];
-          setActiveCommKey(matchedOpt?.key || "exec");
-          setCustomCommentary(matchedOpt?.text || data.canova_commentary || "");
+          if (data.is_critique_hidden && data.captain_cheer) {
+            setActiveCommKey("captain");
+            setCustomCommentary(data.captain_cheer);
+          } else {
+            const defaultKey = showDailyPlan ? "exec" : "phys";
+            const matchedOpt = opts.find((o) => o.key === defaultKey) || opts[0];
+            setActiveCommKey(matchedOpt?.key || "exec");
+            setCustomCommentary(matchedOpt?.text || data.canova_commentary || "");
+          }
         }
       } catch (e) {
         console.error("Failed to fetch personal share card data:", e);
@@ -863,9 +878,11 @@ export default function PersonalShareCardModal({
       });
       ctx.restore();
 
-      // Section 4: Canova Commentary
+      // Section 4: Commentary (Canova Coach or Club Captain Cheer)
       const cY = showDailyPlan ? 956 : 932;
       const cH = showDailyPlan ? 254 : 276;
+      const isCaptainMode =
+        activeCommKey === "captain" || (Boolean(d.is_critique_hidden) && Boolean(d.captain_cheer));
       ctx.save();
       drawRoundRect(
         ctx,
@@ -874,19 +891,27 @@ export default function PersonalShareCardModal({
         pW,
         cH,
         20,
-        isLight ? "#F8FAFC" : "#171426",
-        isLight ? "#E2E8F0" : "rgba(191,90,242,0.45)",
+        isLight ? "#F8FAFC" : isCaptainMode ? "#1f1912" : "#171426",
+        isLight ? "#E2E8F0" : isCaptainMode ? "rgba(245,158,11,0.45)" : "rgba(191,90,242,0.45)",
         1.5
       );
       ctx.clip();
       if (isLight) {
-        drawRoundRect(ctx, pX, cY + 20, 6, cH - 40, 3, "#FC4C02");
+        drawRoundRect(ctx, pX, cY + 20, 6, cH - 40, 3, isCaptainMode ? "#f59e0b" : "#FC4C02");
       }
       ctx.font = "bold 22px sans-serif";
-      ctx.fillStyle = isLight ? "#0F172A" : "#c084fc";
-      ctx.fillText(isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评", pX + 24, cY + 40);
+      ctx.fillStyle = isLight ? "#0F172A" : isCaptainMode ? "#fbbf24" : "#c084fc";
+      const captainHeader = d.captain_cheer_meta?.captain_title
+        ? `📣 ${d.captain_cheer_meta.captain_title}`
+        : "📣 跑团团长加油";
+      const coachHeader = isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评";
+      ctx.fillText(isCaptainMode ? captainHeader : coachHeader, pX + 24, cY + 40);
 
-      const cardQuote = (customCommentary || d.canova_commentary || "").trim();
+      const fallbackQuote =
+        activeCommKey === "captain"
+          ? d.captain_cheer || ""
+          : d.canova_commentary || (d.is_critique_hidden ? d.captain_cheer || "" : "");
+      const cardQuote = (customCommentary || fallbackQuote).trim();
       if (cardQuote) {
         ctx.font = "18px sans-serif";
         ctx.fillStyle = isLight ? "#334155" : "#e4e4e7";
@@ -974,6 +999,7 @@ export default function PersonalShareCardModal({
     overlayMode,
     trackPosition,
     showDailyPlan,
+    activeCommKey,
     customCommentary,
     isLightTheme,
   ]);
@@ -1274,11 +1300,15 @@ export default function PersonalShareCardModal({
               </div>
             )}
 
-            {/* Canova Commentary */}
+            {/* Canova / Captain Commentary */}
             <div className="bg-[#181c28] border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-[#FC4C02]" />
-                <span>4. Canova 教练点评</span>
+                <span>
+                  {activeCommKey === "captain" || (shareData?.is_critique_hidden && shareData?.captain_cheer)
+                    ? "4. 团长加油寄语"
+                    : "4. Canova 教练点评"}
+                </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {commentaryOptions.map((opt) => (

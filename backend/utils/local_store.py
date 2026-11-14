@@ -9670,6 +9670,13 @@ class LocalStore:
             except Exception as u_ex:
                 logger.warning(f"Batch critique update skipped: {u_ex}")
 
+        try:
+            from utils.captain_cheer import enrich_activities_with_captain_cheer
+
+            enrich_activities_with_captain_cheer(enriched, club_id=club_id, db_path=DB_PATH)
+        except Exception as cc_ex:
+            logger.warning(f"Batch captain cheer enrichment in _enrich_club_feed_rows skipped: {cc_ex}")
+
         return enriched
 
     @staticmethod
@@ -18510,6 +18517,12 @@ class LocalStore:
 
         # Fetch recent 15 running activities (critique filtered by runner's canova_critique_visibility)
         raw_acts = LocalStore.get_recent_activities(s_uid, limit=15) or []
+        try:
+            from utils.captain_cheer import enrich_activities_with_captain_cheer
+
+            enrich_activities_with_captain_cheer(raw_acts, club_id=None, db_path=DB_PATH)
+        except Exception as cc_ex:
+            logger.warning(f"Batch captain cheer enrichment in get_mentee_full_detail skipped: {cc_ex}")
         recent_activities = []
         crit_cache: Dict[str, Dict[str, Any]] = {}
         for a in raw_acts:
@@ -18538,6 +18551,8 @@ class LocalStore:
                 "trimp": a.get("trimp"),
                 "ai_journal": filtered_journal or "",
                 "is_critique_hidden": is_critique_hidden,
+                "captain_cheer": a.get("captain_cheer"),
+                "captain_cheer_meta": a.get("captain_cheer_meta"),
                 "has_gps_track": has_gps,
                 "map_image_url": a.get("map_image_url"),
             })

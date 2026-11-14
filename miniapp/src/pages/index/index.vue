@@ -555,6 +555,11 @@
             </view>
           </view>
 
+          <view v-if="act.captain_cheer" class="act-captain-cheer">
+            <text class="act-cap-title">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}：</text>
+            <text class="act-cap-text">{{ act.captain_cheer }}</text>
+          </view>
+
           <!-- GPS Track & Moments Share Card Action Row -->
           <view class="act-track-row act-dual-actions">
             <view
@@ -5788,6 +5793,25 @@ onPullDownRefresh(async () => {
 
 .text-amber {
   color: var(--rgm-amber, #ffd60a);
+}
+
+.act-captain-cheer {
+  margin-top: 14rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 14rpx;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1rpx solid rgba(245, 158, 11, 0.25);
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.act-cap-title {
+  font-weight: bold;
+  color: #f59e0b;
+}
+
+.act-cap-text {
+  color: var(--rgm-text, #e4e4e7);
 }
 
 .act-track-row {

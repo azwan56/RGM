@@ -428,6 +428,18 @@
               </text>
             </view>
 
+            <!-- Public Club Captain Cheer Bubble -->
+            <view v-if="act.captain_cheer" class="coach-bubble captain-bubble">
+              <view class="coach-badge-row">
+                <view class="coach-badge-left">
+                  <text class="coach-robot-icon">📣</text>
+                  <text class="coach-badge-title captain-title">{{ act.captain_cheer_meta?.captain_title || "团长加油" }}</text>
+                </view>
+                <text class="ai-comment-tip">全员可见</text>
+              </view>
+              <text class="coach-comment-text">{{ act.captain_cheer }}</text>
+            </view>
+
             <!-- Social Actions (Like & Comment buttons) -->
             <view class="social-bar">
               <view
@@ -3007,6 +3019,15 @@ onShareTimeline(() => {
   border-radius: 16rpx;
   padding: 16rpx 20rpx;
   margin-bottom: 16rpx;
+}
+
+.captain-bubble {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.captain-title {
+  color: #f59e0b;
 }
 
 .coach-badge-row {

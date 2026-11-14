@@ -507,6 +507,10 @@
               <text class="cwb-fcc-label">🧬 生理复盘：</text>
               <text class="cwb-fcc-text">{{ formatAiJournal(act.ai_journal) }}</text>
             </view>
+            <view v-if="act.captain_cheer" class="cwb-fc-canova cwb-fc-captain">
+              <text class="cwb-fcc-label cwb-fcc-cap-label">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}：</text>
+              <text class="cwb-fcc-text">{{ act.captain_cheer }}</text>
+            </view>
 
             <!-- Existing Comments -->
             <view v-if="act.comments && act.comments.length > 0" class="cwb-fc-comments">
@@ -4111,6 +4115,15 @@ onBeforeUnmount(() => {
   border-radius: 16rpx;
   background: rgba(191, 90, 242, 0.1);
   border: 1rpx solid rgba(191, 90, 242, 0.28);
+}
+
+.cwb-fc-captain {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.cwb-fcc-cap-label {
+  color: #f59e0b;
 }
 
 .cwb-fcc-label {

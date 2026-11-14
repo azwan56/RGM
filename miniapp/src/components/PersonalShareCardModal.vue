@@ -224,7 +224,13 @@
           <!-- Canova Commentary Switcher -->
           <view class="psc-control-group">
             <view class="psc-label-between">
-              <text class="psc-ctrl-label">👨‍🏫 Canova 点评：</text>
+              <text class="psc-ctrl-label">
+                {{
+                  activeCommentaryKey === "captain" || (shareData?.is_critique_hidden && shareData?.captain_cheer)
+                    ? "📣 团长加油："
+                    : "👨‍🏫 Canova 点评："
+                }}
+              </text>
               <text class="psc-edit-toggle" @click="showCustomEdit = !showCustomEdit">
                 {{ showCustomEdit ? "收起编辑 ▴" : "✍️ 微调文字" }}
               </text>
@@ -653,12 +659,20 @@ async function fetchShareCardData(actId?: string, dateStr?: string, rId?: string
         }
       }
 
-      const opts = res.commentary_options || [];
+      const baseOpts = res.commentary_options || [];
+      const opts = res.captain_cheer
+        ? [...baseOpts, { key: "captain", label: "📣 团长加油", text: res.captain_cheer }]
+        : baseOpts;
       commentaryOptions.value = opts;
-      const defaultKey = showDailyPlan.value ? "exec" : "phys";
-      const matchedOpt = opts.find((o: any) => o.key === defaultKey) || opts[0];
-      activeCommentaryKey.value = matchedOpt?.key || "exec";
-      customCommentary.value = matchedOpt?.text || res.canova_commentary || "";
+      if (res.is_critique_hidden && res.captain_cheer) {
+        activeCommentaryKey.value = "captain";
+        customCommentary.value = res.captain_cheer;
+      } else {
+        const defaultKey = showDailyPlan.value ? "exec" : "phys";
+        const matchedOpt = opts.find((o: any) => o.key === defaultKey) || opts[0];
+        activeCommentaryKey.value = matchedOpt?.key || "exec";
+        customCommentary.value = matchedOpt?.text || res.canova_commentary || "";
+      }
       loading.value = false;
       await nextTick();
       setTimeout(() => {
@@ -1597,6 +1611,8 @@ async function renderPosterCanvas() {
 
     // ── SECTION 4: Canova Coach's Commentary (👨‍🏫 Canova 教练点评) ──
     const cY = showDailyPlan.value ? 956 : 932;
+    const isCaptainMode =
+      activeCommentaryKey.value === "captain" || (Boolean(d.is_critique_hidden) && Boolean(d.captain_cheer));
     const cH = showDailyPlan.value ? 254 : 276;
     ctx.save();
     drawRoundedRect(
@@ -1606,13 +1622,17 @@ async function renderPosterCanvas() {
       pW,
       cH,
       20,
-      isLight ? "#F8FAFC" : "#171426",
-      isLight ? "#E2E8F0" : "rgba(191, 90, 242, 0.45)",
+      isLight ? "#F8FAFC" : isCaptainMode ? "#1f1912" : "#171426",
+      isLight ? "#E2E8F0" : isCaptainMode ? "rgba(245, 158, 11, 0.45)" : "rgba(191, 90, 242, 0.45)",
       1.5
     );
     ctx.clip();
 
-    const verdictText = String(d.verdict_badge || (isRace ? "荣耀完赛 · 科学兑现" : "科学耐力周期复盘")).slice(0, 12);
+    const verdictText = String(
+      isCaptainMode
+        ? d.captain_cheer_meta?.club_name || "跑团全员鼓励"
+        : d.verdict_badge || (isRace ? "荣耀完赛 · 科学兑现" : "科学耐力周期复盘")
+    ).slice(0, 12);
     const verdictLeftX = drawRightAlignedPill(
       ctx,
       pX + pW - 18,
@@ -1620,16 +1640,19 @@ async function renderPosterCanvas() {
       32,
       verdictText,
       14,
-      isLight ? "#FFF5EE" : "rgba(192, 132, 252, 0.15)",
-      isLight ? "rgba(252, 76, 2, 0.30)" : "rgba(192, 132, 252, 0.35)",
-      isLight ? "#C23800" : "#e9d5ff",
+      isLight ? "#FFF5EE" : isCaptainMode ? "rgba(245, 158, 11, 0.16)" : "rgba(192, 132, 252, 0.15)",
+      isLight ? "rgba(252, 76, 2, 0.30)" : isCaptainMode ? "rgba(245, 158, 11, 0.35)" : "rgba(192, 132, 252, 0.35)",
+      isLight ? "#C23800" : isCaptainMode ? "#fde68a" : "#e9d5ff",
       148
     );
 
-    ctx.setFillStyle(isLight ? "#0F172A" : "#c084fc");
+    ctx.setFillStyle(isLight ? "#0F172A" : isCaptainMode ? "#fbbf24" : "#c084fc");
+    const captainTitleText = d.captain_cheer_meta?.captain_title
+      ? `📣 ${d.captain_cheer_meta.captain_title}`
+      : "📣 跑团团长加油";
     drawFittedText(
       ctx,
-      isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评",
+      isCaptainMode ? captainTitleText : isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评",
       pX + 24,
       cY + 40,
       verdictLeftX - (pX + 24) - 14,
@@ -1637,7 +1660,11 @@ async function renderPosterCanvas() {
       16
     );
 
-    const finalCommentary = (customCommentary.value || d.canova_commentary || "").trim();
+    const fallbackQuote =
+      activeCommentaryKey.value === "captain"
+        ? d.captain_cheer || ""
+        : d.canova_commentary || (d.is_critique_hidden ? d.captain_cheer || "" : "");
+    const finalCommentary = (customCommentary.value || fallbackQuote).trim();
     if (finalCommentary) {
       ctx.setFillStyle(isLight ? "#334155" : "#e4e4e7");
       drawWrappedText(ctx, `“${finalCommentary}”`, pX + 24, cY + 80, pW - 52, 33, showDailyPlan.value ? 5 : 6, 18);

@@ -358,6 +358,18 @@
             <text class="critique-content">{{ coachCritique }}</text>
           </view>
 
+          <!-- Public Club Captain Cheer Card -->
+          <view v-if="captainCheer" class="coach-critique-card captain-critique-card">
+            <view class="critique-header">
+              <view class="critique-header-left">
+                <text class="critique-robot">📣</text>
+                <text class="critique-title captain-critique-title">{{ captainCheerTitle }}</text>
+              </view>
+              <text class="critique-compliance-tip">全员可见</text>
+            </view>
+            <text class="critique-content">{{ captainCheer }}</text>
+          </view>
+
           <!-- Workout Key Metrics Detail Grid -->
           <view class="workout-details-card">
             <view class="card-mini-title">📊 训练数据</view>
@@ -499,6 +511,15 @@ const coachCritique = computed(() => {
     } catch (_) {}
   }
   return str;
+});
+
+const captainCheer = computed(() => {
+  return String(activityData.value?.captain_cheer ?? props.initialActivity?.captain_cheer ?? "").trim();
+});
+
+const captainCheerTitle = computed(() => {
+  const meta = activityData.value?.captain_cheer_meta ?? props.initialActivity?.captain_cheer_meta;
+  return meta?.captain_title || "团长加油";
 });
 
 const hasElevationProfile = computed(() => {
@@ -882,10 +903,19 @@ async function loadTrack() {
 
   try {
     const storedUser = getStoredUser();
-    const viewerQ = storedUser?.id ? `?viewer_uid=${encodeURIComponent(storedUser.id)}` : "";
+    const clubCid = props.initialActivity?.captain_cheer_meta?.club_id || "";
+    const qsParts: string[] = [];
+    if (storedUser?.id) qsParts.push(`viewer_uid=${encodeURIComponent(storedUser.id)}`);
+    if (clubCid) qsParts.push(`club_id=${encodeURIComponent(clubCid)}`);
+    const viewerQ = qsParts.length ? `?${qsParts.join("&")}` : "";
     const res = await request(`/api/miniapp/activities/${actId}/track${viewerQ}`);
     if (res && res.success) {
-      activityData.value = res.activity || activityData.value;
+      activityData.value = {
+        ...(res.activity || activityData.value || {}),
+        ...(res.captain_cheer !== undefined
+          ? { captain_cheer: res.captain_cheer, captain_cheer_meta: res.captain_cheer_meta }
+          : {}),
+      };
       mapImageUrl.value = res.map_image_url || mapImageUrl.value;
       isSegmentHidden.value = Boolean(res.is_segment_hidden);
       isCritiqueHidden.value = Boolean(res.is_critique_hidden ?? res.activity?.is_critique_hidden);
@@ -1403,6 +1433,15 @@ function handleClose() {
   border-radius: 14px;
   padding: 12px 14px;
   margin-bottom: 12px;
+}
+
+.captain-critique-card {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.captain-critique-title {
+  color: #f59e0b;
 }
 
 .critique-header {

@@ -3451,6 +3451,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           elevationGain={act.elevation_gain_meters || act.total_elevation_gain}
                           avgPace={act.avg_pace_str}
                           isSegmentHiddenHint={Boolean(act.is_segment_hidden)}
+                          clubId={currentClub?.id}
+                          captainCheer={act.captain_cheer}
+                          captainCheerMeta={act.captain_cheer_meta}
                         />
                       )}
 
@@ -3466,6 +3469,24 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           </div>
                           <p className="text-xs text-zinc-300 leading-relaxed font-sans">
                             {act.ai_journal || "正在基于 Canova 耐力生理模型生成点评..."}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Public Club Captain Cheer Bubble */}
+                      {act.captain_cheer && (
+                        <div className="bg-gradient-to-r from-amber-950/30 via-[#221c15] to-orange-950/25 border border-amber-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
+                          <div className="flex items-center justify-between gap-2 font-bold text-amber-300 mb-1.5">
+                            <span className="flex items-center gap-1.5">
+                              <span>📣</span>
+                              <span>{act.captain_cheer_meta?.captain_title || "团长加油"}</span>
+                            </span>
+                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              全员可见
+                            </span>
+                          </div>
+                          <p className="text-xs text-amber-100/90 leading-relaxed font-sans">
+                            {act.captain_cheer}
                           </p>
                         </div>
                       )}

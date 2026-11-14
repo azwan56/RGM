@@ -78,6 +78,15 @@
           </view>
           <text class="journal-text">{{ act.ai_journal?.evaluation || act.ai_journal }}</text>
         </view>
+
+        <!-- Public Club Captain Cheer -->
+        <view v-if="act.captain_cheer" class="journal-preview captain-journal-preview">
+          <view class="journal-tag-box">
+            <text class="journal-tag captain-journal-tag">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}</text>
+            <text class="journal-compliance">全员可见</text>
+          </view>
+          <text class="journal-text">{{ act.captain_cheer }}</text>
+        </view>
       </view>
     </view>
 
@@ -422,6 +431,25 @@ onShareTimeline(() => {
   font-size: 22rpx;
   color: var(--rgm-text, #e5e5ea);
   line-height: 1.4;
+}
+
+.captain-journal-preview {
+  flex-direction: column;
+  gap: 6rpx;
+  background-color: rgba(245, 158, 11, 0.08);
+  border: 1rpx solid rgba(245, 158, 11, 0.22);
+}
+
+.captain-journal-preview .journal-tag-box {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.captain-journal-tag {
+  color: #f59e0b;
+  white-space: normal;
 }
 
 .empty-state {

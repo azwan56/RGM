@@ -1965,6 +1965,15 @@ export default function DashboardPage() {
                           </div>
                         )}
 
+                        {mode !== "excluded" && act.captain_cheer && (
+                          <div className="bg-[#1b1812] border-l-[3px] border-l-amber-400 rounded-r-xl px-3.5 py-2.5 text-xs text-amber-100/90 leading-relaxed">
+                            <strong className="font-bold text-amber-300">
+                              📣 {act.captain_cheer_meta?.captain_title || "团长加油"}：
+                            </strong>
+                            {act.captain_cheer}
+                          </div>
+                        )}
+
                         {expandedTrackId === act.id && (
                           <div className="pt-2 animate-in fade-in duration-200">
                             <RouteMapPreview
@@ -1976,6 +1985,8 @@ export default function DashboardPage() {
                               elevationGain={act.elevation_gain_meters}
                               avgPace={act.avg_pace_str}
                               eagerFetch={true}
+                              captainCheer={act.captain_cheer}
+                              captainCheerMeta={act.captain_cheer_meta}
                             />
                           </div>
                         )}
