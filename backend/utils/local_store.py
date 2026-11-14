@@ -2279,6 +2279,25 @@ class LocalStore:
         return planned_day, preset_race
 
     @staticmethod
+    def build_canova_holistic_context(
+        uid: Optional[str],
+        activity: Dict[str, Any],
+        profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Builds a single-pass read-only Canova holistic context (load, recovery, plan, race) anchored to activity date."""
+        from utils.canova_holistic_critique import build_canova_holistic_context as _build_ctx
+
+        canonical_uid = LocalStore.resolve_user_id(uid) if uid else ""
+        if profile is None and canonical_uid:
+            profile = LocalStore.get_profile(canonical_uid)
+        return _build_ctx(
+            db_path=DB_PATH,
+            uid=canonical_uid or uid,
+            activity=activity,
+            profile=profile,
+        )
+
+    @staticmethod
     def compute_and_cache_segment_analysis(
         activity_id: str,
         track_override: Optional[Dict[str, Any]] = None,
@@ -2288,6 +2307,8 @@ class LocalStore:
         Computes structured workout/preset-race segmentation & diagnosis for activity_id,
         persists segment_analysis_json (and updated ai_journal) in activities table, and returns it.
         """
+        from utils.canova_holistic_critique import CANOVA_CRITIQUE_SCHEMA_VERSION
+
         act_row = LocalStore.get_activity_gps_track(activity_id)
         if not act_row:
             return None
@@ -2296,11 +2317,11 @@ class LocalStore:
 
         existing_seg = act_row.get("segment_analysis_json")
         if isinstance(existing_seg, dict) and existing_seg.get("mode") and not force:
-            # Recompute if legacy cache predates schema_version 3 (trail/pause interval guard + discrepancy filter),
+            # Recompute if legacy cache predates CANOVA_CRITIQUE_SCHEMA_VERSION (holistic v4 upgrade + trail/pause guard),
             # or if track_override brings newly fetched granular splits where previously none existed.
             needs_schema_upgrade = (
                 existing_seg.get("mode") in ("planned_workout", "free_workout")
-                and existing_seg.get("schema_version") != 3
+                and existing_seg.get("schema_version") != CANOVA_CRITIQUE_SCHEMA_VERSION
             )
             has_new_splits = bool(
                 not existing_seg.get("has_granular_splits")
@@ -2329,7 +2350,14 @@ class LocalStore:
             act_row.get("gps_track_data") if isinstance(act_row.get("gps_track_data"), dict) else None
         )
 
-        from utils.workout_segmentation import analyze_activity_segments, parse_pace_str_to_sec
+        from utils.workout_segmentation import analyze_activity_segments
+        from utils.canova_holistic_critique import synthesize_canova_holistic_critique
+
+        holistic_ctx = (
+            LocalStore.build_canova_holistic_context(canonical_uid, act_row, profile=profile)
+            if canonical_uid
+            else {}
+        )
 
         seg_result = analyze_activity_segments(
             activity=act_row,
@@ -2339,47 +2367,22 @@ class LocalStore:
             max_hr=max_hr,
             aerobic_ceiling=aerobic_ceiling,
             threshold_ceiling=threshold_ceiling,
+            holistic_ctx=holistic_ctx,
         )
 
         # Build harmonized ai_journal critique for Club Feed & summary cards
         concise_base = str(seg_result.get("concise_critique") or "").strip()
         new_journal = concise_base
-        if concise_base and seg_result.get("mode") != "race" and canonical_uid:
+        if concise_base and seg_result.get("mode") != "race":
             try:
-                v_meta = LocalStore.resolve_verified_runner_profile_and_pbs(
-                    canonical_uid, profile=profile, query_activities=False
+                new_journal = synthesize_canova_holistic_critique(
+                    activity=act_row,
+                    profile=profile,
+                    holistic_ctx=holistic_ctx,
+                    seg_result=seg_result,
                 )
-                m_pb = v_meta.get("verified_mp_sec")
-                h_pb = v_meta.get("verified_hp_sec")
-                raw_years = profile.get("years_running")
-                years = float(raw_years) if raw_years is not None else 1.0
-                is_elite = bool(
-                    (m_pb and m_pb <= 3 * 3600 + 5 * 60)
-                    or (h_pb and h_pb <= 85 * 60 and (not m_pb or m_pb <= 3 * 3600 + 15 * 60))
-                )
-                is_beginner = (years <= 2 or (m_pb and m_pb > 4 * 3600) or (not m_pb and not h_pb)) and not is_elite
-                if is_elite:
-                    if "【精英专项进阶】" not in concise_base:
-                        new_journal = f"{concise_base} ⚡【精英专项进阶】专项指标达成，紧扣配速收敛。"
-                else:
-                    p_str = str(act_row.get("avg_pace_str") or "5:30/km").replace("/km", "").strip() + "/km"
-                    p_sec = parse_pace_str_to_sec(p_str) or 330
-                    enc = LocalStore._build_runner_progress_encouragement(
-                        activity=act_row,
-                        dist_km=dist_km,
-                        pace_str=p_str,
-                        pace_seconds=p_sec,
-                        avg_hr=act_row.get("average_heartrate"),
-                        aerobic_ceiling=aerobic_ceiling,
-                        is_beginner=is_beginner,
-                    )
-                    if "💡" in concise_base:
-                        head, tail = concise_base.split("💡", 1)
-                        new_journal = f"{head.strip()}{enc} 💡 {tail.strip()}"
-                    else:
-                        new_journal = f"{concise_base}{enc}"
             except Exception as je:
-                logger.debug(f"Progress encouragement merge skipped: {je}")
+                logger.debug(f"Holistic segment critique merge skipped: {je}")
 
         try:
             seg_json_str = json.dumps(seg_result, ensure_ascii=False)
@@ -8688,97 +8691,23 @@ class LocalStore:
             threshold_ceiling=threshold_ceiling,
         )
 
-        # ── 2. Build Concrete Progress Encouragement for Beginner / Intermediate Runners (Distance, Pace, HR) ──
-        tier_encourage = ""
-        if is_elite:
-            tier_encourage = " ⚡【精英专项进阶】专项指标达成，紧扣配速收敛。"
-        else:
-            tier_encourage = LocalStore._build_runner_progress_encouragement(
-                activity=activity,
-                dist_km=dist_km,
-                pace_str=clean_pace_display,
-                pace_seconds=pace_seconds,
-                avg_hr=avg_hr,
-                aerobic_ceiling=aerobic_ceiling,
-                is_beginner=is_beginner,
-            )
+        # ── 2. Build Holistic Multi-Lens Canova Critique (Workout + Load/Recovery + Forward Plan/Race) ──
+        from utils.canova_holistic_critique import synthesize_canova_holistic_critique
 
-        hr_brief = f"，均心 {int(round(float(avg_hr)))}bpm" if avg_hr else ""
-
-        # Check for Trail / Mountain running
-        is_trail = elev_gain >= 200 or "越野" in act_name or "山" in act_name or "trail" in act_name.lower()
-        if is_trail:
-            if elev_gain >= 500 or dist_km >= 20:
-                workout_type = "山地专项耐力"
-                analysis = f"{dist_km}km（爬升 +{int(elev_gain)}m{hr_brief}），深度强化股四头肌离心抗疲劳与爬坡能力。"
-                advice = f"注意下肢拉伸与蛋白补充{age_advice}。"
-            else:
-                workout_type = "山地有氧跑"
-                analysis = f"{dist_km}km（爬升 +{int(elev_gain)}m，{clean_pace_display}），有效激活踝膝稳定与核心平衡。"
-                advice = f"注意下坡缓震与小腿放松{age_advice}。"
-            base_text = f"【{workout_type}】{plan_exec_block}" if plan_exec_block else f"【{workout_type}】{analysis}"
-            return f"{base_text}{tier_encourage} 💡 {advice}"
-
-        is_name_interval = bool(
-            re.search(
-                r"(\d+\s*[*xX×]\s*\d+|\d+\s*(?:m|米|km|k)\s*[*xX×+]|\b(?:1st|2nd|3rd|\d+th)\b|间歇|变速|法特莱克)",
-                act_name,
-                re.I,
-            )
+        act_for_critique = dict(activity)
+        if not act_for_critique.get("avg_pace_str"):
+            act_for_critique["avg_pace_str"] = clean_pace_display
+        holistic_ctx = LocalStore.build_canova_holistic_context(
+            act_for_critique.get("user_id"),
+            act_for_critique,
+            profile=profile,
         )
-        if not plan_exec_block and dist_km < 5.0 and "热身" in act_name:
-            workout_type = "热身激活跑"
-            analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，循序唤醒心肺与肌肉弹性，为后续主课做好准备。"
-            advice = "热身充分后即可切入主课强度。"
-        elif not plan_exec_block and dist_km < 5.0 and "冷身" in act_name:
-            workout_type = "冷身排酸跑"
-            analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，平缓回落心率，促进乳酸代谢与神经放松。"
-            advice = "跑后做好静态拉伸与补水。"
-        elif not plan_exec_block and is_name_interval:
-            workout_type = "间歇专项刺激"
-            analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，有效刺激最大摄氧量、步频神经募集与抗乳酸能力。"
-            advice = f"注意组间恢复与课后深度泡沫轴放松{age_advice}。"
-        elif not plan_exec_block and (
-            any(k in act_name for k in ("速耐", "节奏", "门槛", "乳酸"))
-            or (dist_km >= 3.0 and avg_hr and avg_hr >= threshold_ceiling)
-        ):
-            workout_type = "混氧门槛突破" if (avg_hr and avg_hr >= threshold_ceiling) else "专项节奏进阶"
-            analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，有效推高乳酸清除速率与专项定速巡航能力。"
-            advice = f"未来48h以轻松慢跑恢复为主{age_advice}。"
-        elif dist_km >= 20:
-            if avg_hr and avg_hr < aerobic_ceiling:
-                workout_type = "长距离有氧耐力"
-                analysis = f"{dist_km}km @ {clean_pace_display}（均心 {int(avg_hr)}bpm < 有氧上限 {int(aerobic_ceiling)}bpm），后程耐力扎实。"
-                advice = f"明日建议休整或慢跑排酸{age_advice}。"
-            else:
-                workout_type = "马拉松专项耐力"
-                analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，高质量提升后程抗掉速韧性。"
-                advice = f"及时补充碳水电解质，隔天再上强度{age_advice}。"
-        elif dist_km >= 12:
-            if avg_hr and avg_hr >= threshold_ceiling:
-                workout_type = "混氧门槛突破"
-                analysis = f"{dist_km}km @ {clean_pace_display}（均心 {int(avg_hr)}bpm 达门槛区），有效推高乳酸清除速率。"
-                advice = f"未来48h以轻松慢跑恢复为主{age_advice}。"
-            else:
-                workout_type = "稳态有氧进阶"
-                analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，心率漂移可控，步频节奏稳健。"
-                advice = f"课后做好腘绳肌与小腿拉伸{age_advice}。"
-        elif dist_km >= 6:
-            if avg_hr and avg_hr < recovery_ceiling:
-                workout_type = "低心率恢复跑"
-                analysis = f"{dist_km}km @ {clean_pace_display}（均心 {int(avg_hr)}bpm），轻松排酸且无额外神经疲劳。"
-                advice = "恢复到位，下堂主课可按计划推进。"
-            else:
-                workout_type = "基础有氧跑"
-                analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，平稳巩固有氧底座。"
-                advice = f"课后适度拉伸放松{age_advice}。"
-        else:
-            workout_type = "短程激活跑"
-            analysis = f"{dist_km}km @ {clean_pace_display}{hr_brief}，步频轻快，适合神经唤醒或排酸。"
-            advice = "跑后做好动态拉伸。"
-
-        base_text = f"【{workout_type}】{plan_exec_block}" if plan_exec_block else f"【{workout_type}】{analysis}"
-        return f"{base_text}{tier_encourage} 💡 {advice}"
+        return synthesize_canova_holistic_critique(
+            activity=act_for_critique,
+            profile=profile,
+            holistic_ctx=holistic_ctx,
+            plan_exec_block=plan_exec_block,
+        )
 
     @staticmethod
     def _evaluate_plan_workout_execution(
@@ -9402,6 +9331,15 @@ class LocalStore:
         stripped = ai_journal.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             return False
+        cross_prefixes = (
+            "【交叉训练",
+            "【户外徒步",
+            "【日常健走",
+            "【力量与体能强化",
+            "【交叉运动",
+        )
+        if stripped.startswith(cross_prefixes) or "🏆【赛事复盘" in ai_journal:
+            return False
         if "📋【课表核对】" in ai_journal or "跑量缩减·达成率" in ai_journal:
             return True
         if "📋【" in ai_journal:
@@ -9433,9 +9371,24 @@ class LocalStore:
                     seg_kms = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)k\(\d{1,2}:\d{2}\)", ai_journal)]
                     if seg_kms and sum(seg_kms) < act_km * 0.85:
                         return True
-        if not strict_format_upgrade:
+        # Already v4 holistic format (has 💡 + ⚡ context clauses and no v3 elite boilerplate)
+        if "💡" in ai_journal and "⚡" in ai_journal[2:] and "⚡【精英专项进阶】" not in ai_journal:
             return False
-        if any(tag in ai_journal for tag in ("分段表现：", "🏆【赛事复盘", "📋【课表")):
+        # Upgrade v2/v3 boilerplate critiques (even when strict_format_upgrade=False) while keeping custom plain text untouched
+        v2_v3_boilerplate_markers = (
+            "，进步扎实！",
+            "分段节奏清晰，跑后做好小腿与臀中肌放松拉伸",
+            "越野跑中遇爬升路段主动切换徒步（Power Hiking）节能、下坡注意小步高频缓震",
+            "主课分段配速与生理负荷控制理想，课后做好拉伸与碳水补充",
+            "⚡【精英专项进阶】",
+        )
+        if any(m in ai_journal for m in v2_v3_boilerplate_markers):
+            return True
+        if "核心段心率解耦率" in ai_journal and "⚡" not in ai_journal[2:]:
+            return True
+        if ("分段表现：" in ai_journal or ("【" in ai_journal and "💡" in ai_journal)) and "⚡" not in ai_journal[2:]:
+            return True
+        if not strict_format_upgrade:
             return False
         # Refresh legacy critiques or verbose v1 critiques so feed displays the streamlined format
         verbose_markers = (

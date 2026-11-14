@@ -9,6 +9,7 @@ import hashlib
 import calendar
 import ipaddress
 import logging
+import re
 import time
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Optional
@@ -1629,15 +1630,91 @@ def get_personal_share_card_data(
                     f"（配速 {act_pace}{hr_clause}{elev_clause}）。{phys_verdict}"
                 )
 
+            try:
+                holistic_ctx = LocalStore.build_canova_holistic_context(
+                    eff_uid,
+                    selected_act or actual_data,
+                    profile=profile,
+                )
+            except Exception as h_err:
+                logger.warning(f"[miniapp] Holistic context eval fallback for {eff_uid}: {h_err}")
+                holistic_ctx = {}
+
+            bio_visible = (act_hr is not None) or not bool((profile or {}).get("hide_biometrics"))
+
+            phys_extras: List[str] = []
+            h_load = (holistic_ctx or {}).get("load") or {}
+            h_rec = (holistic_ctx or {}).get("recovery") or {}
+            h_plan = (holistic_ctx or {}).get("plan") or {}
+            h_race = (holistic_ctx or {}).get("race")
+
+            wk_runs = int((holistic_ctx or {}).get("week_runs_count") or 0)
+            wk_km = float((holistic_ctx or {}).get("week_km") or 0.0)
+            wk_tgt = (holistic_ctx or {}).get("weekly_target_km")
+            if wk_runs >= 1:
+                if wk_tgt and wk_tgt > 0:
+                    phys_extras.append(f"本周{wk_runs}练累计{wk_km:g}/{int(round(float(wk_tgt)))}km")
+                else:
+                    phys_extras.append(f"本周{wk_runs}练累计{wk_km:g}km")
+            if h_load.get("has_load_history"):
+                tsb_i = int(round(float(h_load.get("tsb_post") or 0.0)))
+                ctl_i = int(round(float(h_load.get("ctl") or 0.0)))
+                phys_extras.append(f"CTL {ctl_i} / TSB {tsb_i:+d}")
+            if bio_visible and h_rec.get("overnight_available"):
+                r_bits: List[str] = []
+                if h_rec.get("sleep_hours") is not None:
+                    r_bits.append(f"睡眠{h_rec['sleep_hours']}h")
+                if h_rec.get("hrv_ms") is not None:
+                    r_bits.append(f"HRV {h_rec['hrv_ms']}ms")
+                elif h_rec.get("rhr_bpm") is not None:
+                    r_bits.append(f"静息{h_rec['rhr_bpm']}bpm")
+                if r_bits:
+                    phys_extras.append("·".join(r_bits))
+            tmr_w = h_plan.get("tomorrow_workout")
+            nxt_k = h_plan.get("next_key_workout")
+            if tmr_w and not tmr_w.get("is_rest"):
+                phys_extras.append(tmr_w["phrase"])
+            elif nxt_k:
+                phys_extras.append(nxt_k["phrase"])
+            elif h_race and h_race.get("days_left"):
+                r_label = h_race.get("short_name") or h_race.get("name") or "目标赛"
+                phys_extras.append(f"距{r_label} D-{h_race['days_left']}")
+            extra_phys_sentence = f"（{'；'.join(phys_extras)}）。" if phys_extras else ""
+
             commentary_phys = (
                 f"从 Canova 专项耐力视角审视：本次 {act_km}km 训练（配速 {act_pace}{hr_clause}）"
                 f"{'结合 +' + str(int(act_elev)) + 'm 地形起伏，显著强化了臀腿离心力量与抗衰减能力。' if act_elev >= 20 else '节奏控制克制精准，在极低机械压力下完成了高质量有氧刺激。'}"
-                f"建议跑后 30 分钟内补充碳水与电解质，保障超量恢复。"
-            )
+                f"{extra_phys_sentence}建议跑后 30 分钟内补充碳水与电解质，保障超量恢复。"
+            ).replace("休整日", "跑休")
+
             act_journal_txt = _extract_journal_text((selected_act or {}).get("ai_journal"))
+            if (
+                selected_act
+                and bio_visible
+                and LocalStore._needs_canova_critique_refresh(
+                    selected_act.get("ai_journal"),
+                    selected_act,
+                    strict_format_upgrade=False,
+                )
+            ):
+                try:
+                    fresh_txt = LocalStore.generate_canova_critique(selected_act, profile)
+                    if fresh_txt:
+                        act_journal_txt = fresh_txt
+                except Exception:
+                    pass
             plan_notes_txt = "" if large_discrepancy else _extract_journal_text(day_plan.get("coach_notes"))
             raw_journal = _clean_ai_terms(act_journal_txt or plan_notes_txt)
-            commentary_journal = raw_journal if len(raw_journal) >= 15 else commentary_exec
+            if not bio_visible and raw_journal:
+                raw_journal = re.sub(
+                    r"[，,、]?\s*(?:平均心率|均心(?:下降\d+bpm)?|静息(?:心率)?)\s*(?:稳控)?\s*\d+\s*bpm",
+                    "",
+                    raw_journal,
+                )
+                raw_journal = re.sub(r"[，,、]?\s*\d+\s*bpm", "", raw_journal)
+                raw_journal = re.sub(r"[，,、]?\s*HRV\s*\d+\s*ms(?:\([^)]*\))?", "", raw_journal)
+                raw_journal = re.sub(r"[（(]\s*[)）]", "", raw_journal)
+            commentary_journal = raw_journal.replace("休整日", "跑休") if len(raw_journal) >= 15 else commentary_exec
         else:
             commentary_exec = (
                 f"今日计划课目为【{plan_title_short} · {plan_km}km】，目标配速 {day_plan['target_pace']}，"

@@ -20,6 +20,11 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.canova_holistic_critique import (
+    CANOVA_CRITIQUE_SCHEMA_VERSION,
+    build_segmented_coach_advice,
+)
+
 
 def fmt_pace_sec(sec_val: Optional[float], with_unit: bool = True) -> str:
     if sec_val is None or sec_val <= 0:
@@ -1304,6 +1309,7 @@ def analyze_activity_segments(
     max_hr: float = 185.0,
     aerobic_ceiling: float = 152.0,
     threshold_ceiling: float = 168.0,
+    holistic_ctx: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Master entry point for segmenting an opened/synced running activity and generating:
@@ -1595,17 +1601,23 @@ def analyze_activity_segments(
             + (f"，{hr_status}" if hr_status else "")
         )
         venue_tag = "🏟️ 田径场 · " if is_track else ""
+        plan_advice_str = build_segmented_coach_advice(
+            activity=activity,
+            holistic_ctx=holistic_ctx,
+            base_split_advice=" ".join(advice_parts),
+            mode="planned_workout",
+        )
         concise_critique = f"📋【{venue_tag}课表分段比对 · 《{plan_title}》】{verdict_line}。💡 {advice_parts[0]}"
 
         return {
             "mode": "planned_workout",
-            "schema_version": 3,
+            "schema_version": CANOVA_CRITIQUE_SCHEMA_VERSION,
             "mode_label": "📋 课表分段达成比对",
             "is_track_run": is_track,
             "has_granular_splits": len(primary_laps) >= 2,
             "summary_title": f"对比课表《{plan_title}》",
             "summary_verdict": verdict_line,
-            "coach_advice": " ".join(advice_parts),
+            "coach_advice": plan_advice_str,
             "phases": phases,
             "plan_comparison": plan_comp,
             "race_diagnosis": None,
@@ -1703,17 +1715,23 @@ def analyze_activity_segments(
         advice_free = "分段节奏清晰，跑后做好小腿与臀中肌放松拉伸。"
 
     venue_tag = "🏟️ 田径场 · " if (is_track and not is_trail) else ""
-    concise_critique = f"⚡【{venue_tag}{archetype}】分段表现：{structure_line}。💡 {advice_free}"
+    free_advice_str = build_segmented_coach_advice(
+        activity=activity,
+        holistic_ctx=holistic_ctx,
+        base_split_advice=advice_free,
+        mode="free_workout",
+    )
+    concise_critique = f"【{venue_tag}{archetype}】分段表现：{structure_line}。💡 {advice_free}"
 
     return {
         "mode": "free_workout",
-        "schema_version": 3,
+        "schema_version": CANOVA_CRITIQUE_SCHEMA_VERSION,
         "mode_label": "⚡ 智能训练分段复盘",
         "is_track_run": bool(is_track and not is_trail),
         "has_granular_splits": len(primary_laps) >= 2,
         "summary_title": f"{venue_tag}{archetype}",
         "summary_verdict": structure_line,
-        "coach_advice": advice_free,
+        "coach_advice": free_advice_str,
         "phases": phases,
         "plan_comparison": None,
         "race_diagnosis": None,
