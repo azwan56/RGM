@@ -16,12 +16,15 @@ import {
   Trophy,
   Send,
   Calendar,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 interface ClubPulsePanelProps {
   uid: string;
   clubId?: string | null;
   isLeader?: boolean;
+  defaultCollapsed?: boolean;
   onClubJoined?: () => void;
 }
 
@@ -36,6 +39,7 @@ export default function ClubPulsePanel({
   uid,
   clubId,
   isLeader = false,
+  defaultCollapsed = true,
   onClubJoined,
 }: ClubPulsePanelProps) {
   const { showToast } = useUiFeedback();
@@ -43,6 +47,7 @@ export default function ClubPulsePanel({
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
   const [broadcastCollapsed, setBroadcastCollapsed] = useState(false);
+  const [pulseCollapsed, setPulseCollapsed] = useState(defaultCollapsed);
 
   // Composer modal (Leader/Coach broadcast)
   const [showComposer, setShowComposer] = useState(false);
@@ -295,40 +300,71 @@ export default function ClubPulsePanel({
         </div>
       )}
 
-      {/* 3) Social Pulse & Buddy Live Rings Bento Card */}
-      <div className="rgm-bento-card p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-base">⚡</span>
-            <div>
-              <h3 className="text-sm font-black text-[var(--rgm-text)]">
-                同频跑搭子与跑团社交脉搏
-              </h3>
-              <p className="text-[11px] text-[var(--rgm-text-2)]">
+      {/* 3) Social Pulse & Buddy Live Rings Bento Card (Collapsible, default collapsed) */}
+      <div className={`rgm-bento-card transition-all ${pulseCollapsed ? "px-5 py-3.5" : "p-5 space-y-4"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <button
+            type="button"
+            onClick={() => setPulseCollapsed((prev) => !prev)}
+            className="flex items-center gap-2.5 text-left min-w-0 flex-1 cursor-pointer group"
+          >
+            <span className="text-base shrink-0">⚡</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-black text-[var(--rgm-text)] group-hover:text-[#FC4C02] transition">
+                  同频搭子与跑团社交脉搏
+                </h3>
+                {!loading && (buddyRings.length > 0 || pulseItems.length > 0) && (
+                  <span className="px-2 py-0.5 rounded-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[10px] font-bold text-[var(--rgm-text-2)] tabular-nums">
+                    {buddyRings.length} 位同频跑友 · {pulseItems.length} 条动态
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-[var(--rgm-text-2)] truncate">
                 {pkSummary?.summary_text || "关注同频跑友 · 互关解锁每周跑量 PK"}
               </p>
             </div>
-          </div>
+          </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <Link
               href="/dashboard/discover"
-              className="px-3 py-1.5 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/30 text-xs font-bold text-[#FC4C02] flex items-center gap-1 hover:opacity-90"
+              className="px-3 py-1.5 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/30 text-xs font-bold text-[#FC4C02] flex items-center gap-1 hover:opacity-90 whitespace-nowrap"
             >
               <Compass className="w-3.5 h-3.5" />
               六维寻搭子
             </Link>
             <Link
               href="/dashboard/plaza"
-              className="px-3 py-1.5 rounded-xl border border-[var(--rgm-border)] bg-[var(--rgm-card-2)] text-xs font-bold text-[var(--rgm-text)] flex items-center gap-1 hover:border-[#FC4C02]/40"
+              className="px-3 py-1.5 rounded-xl border border-[var(--rgm-border)] bg-[var(--rgm-card-2)] text-xs font-bold text-[var(--rgm-text)] flex items-center gap-1 hover:border-[#FC4C02]/40 whitespace-nowrap"
             >
               <Award className="w-3.5 h-3.5 text-amber-500" />
               选团与名帅展厅
             </Link>
+            <button
+              type="button"
+              onClick={() => setPulseCollapsed((prev) => !prev)}
+              aria-expanded={!pulseCollapsed}
+              className="px-3 py-1.5 rounded-xl border border-[var(--rgm-border)] bg-[var(--rgm-card-2)] text-xs font-bold text-[var(--rgm-text)] flex items-center gap-1 hover:border-[#FC4C02]/45 cursor-pointer whitespace-nowrap"
+            >
+              {pulseCollapsed ? (
+                <>
+                  <span>展开</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--rgm-text-2)]" />
+                </>
+              ) : (
+                <>
+                  <span>收起</span>
+                  <ChevronUp className="w-3.5 h-3.5 text-[var(--rgm-text-2)]" />
+                </>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* Buddy Live Rings Row */}
+        {!pulseCollapsed && (
+          <>
+            {/* Buddy Live Rings Row */}
         {buddyRings.length > 0 && (
           <div className="flex items-center gap-3 overflow-x-auto pb-1">
             {buddyRings.map((b: any) => {
@@ -524,6 +560,8 @@ export default function ClubPulsePanel({
               return null;
             })}
           </div>
+        )}
+          </>
         )}
       </div>
 
