@@ -137,54 +137,6 @@
         </view>
       </view>
 
-      <!-- 模块 1.5 · 跑搭子同频环 & 跑团社交脉搏 (M11.1) -->
-      <view id="rgm-mod-feed" class="rgm-card h3-pulse-card" :style="{ order: getModuleOrder('feed') }">
-        <view class="h3-pulse-head">
-          <view>
-            <text class="h3-pulse-title">⚡ 跑搭子与跑团脉搏</text>
-            <text class="h3-pulse-sub">{{ homeSocialPulse?.weekly_pk_summary?.summary_text || '关注同频跑友解锁周跑量 PK' }}</text>
-          </view>
-          <view class="h3-pulse-links">
-            <text class="h3-pulse-link" @click="goSubpage('/pages/discover/discover')">寻搭子</text>
-            <text class="h3-pulse-link is-alt" @click="goSubpage('/pages/showcase/showcase')">选团展厅</text>
-          </view>
-        </view>
-
-        <scroll-view v-if="homeSocialPulse?.buddy_live_rings?.length" scroll-x class="h3-rings-row">
-          <view
-            v-for="b in homeSocialPulse.buddy_live_rings.slice(0, 8)"
-            :key="b.user_id"
-            class="h3-ring-item"
-            @click="goSubpage('/pages/discover/discover')"
-          >
-            <view class="h3-ring-circle" :class="{ active: b.ran_today }">
-              <text class="h3-ring-init">{{ String(b.display_name || '跑').slice(0, 1) }}</text>
-            </view>
-            <text class="h3-ring-name">{{ b.display_name }}</text>
-            <text class="h3-ring-km">{{ b.week_km }}k</text>
-          </view>
-        </scroll-view>
-
-        <view
-          v-for="it in (homeSocialPulse?.pulse_items || []).slice(0, 2)"
-          :key="it.item_id"
-          class="h3-pulse-item"
-        >
-          <template v-if="it.kind === 'newcomer_icebreaker'">
-            <view class="h3-pi-row">
-              <text class="h3-pi-txt">👋 {{ it.display_name }}（{{ it.age_group }} · {{ it.vdot_band }}）</text>
-              <text class="h3-pi-btn" @click="quickCheer('newcomer', it.item_id, it.user_id, 'welcome_pat')">拍肩欢迎</text>
-            </view>
-          </template>
-          <template v-else-if="it.kind === 'activity_checkin' && it.activity">
-            <view class="h3-pi-row">
-              <text class="h3-pi-txt">🏃 {{ it.activity.display_name }} · {{ it.activity.distance_km }}km ({{ it.activity.avg_pace_str || '--' }})</text>
-              <text class="h3-pi-btn" @click="quickCheer('activity', it.activity.id, it.activity.user_id, 'steady_aerobic')">👏 有氧稳</text>
-            </view>
-          </template>
-        </view>
-      </view>
-
       <!-- 模块 2 · 自适应今日课表卡（有约跑时自动收窄为单行，日常态大字展开） -->
       <view id="rgm-mod-today" :style="{ order: getModuleOrder('today') }">
         <template v-if="dashboardData?.today_workout">
@@ -400,6 +352,54 @@
             </view>
           </view>
           <text class="h3-th-more">{{ isDeviceConnected ? '同步 ›' : '绑表 ›' }}</text>
+        </view>
+      </view>
+
+      <!-- 模块 6 · 跑搭子同频环 & 跑团社交脉搏（置于底部，保持首屏训练聚焦） -->
+      <view id="rgm-mod-feed" class="rgm-card h3-pulse-card" :style="{ order: getModuleOrder('feed') }">
+        <view class="h3-pulse-head">
+          <view>
+            <text class="h3-pulse-title">⚡ 跑搭子与跑团脉搏</text>
+            <text class="h3-pulse-sub">{{ homeSocialPulse?.weekly_pk_summary?.summary_text || '关注同频跑友解锁周跑量 PK' }}</text>
+          </view>
+          <view class="h3-pulse-links">
+            <text class="h3-pulse-link" @click="goSubpage('/pages/discover/discover')">寻搭子</text>
+            <text class="h3-pulse-link is-alt" @click="goSubpage('/pages/showcase/showcase')">选团展厅</text>
+          </view>
+        </view>
+
+        <scroll-view v-if="homeSocialPulse?.buddy_live_rings?.length" scroll-x class="h3-rings-row">
+          <view
+            v-for="b in homeSocialPulse.buddy_live_rings.slice(0, 8)"
+            :key="b.user_id"
+            class="h3-ring-item"
+            @click="goSubpage('/pages/discover/discover')"
+          >
+            <view class="h3-ring-circle" :class="{ active: b.ran_today }">
+              <text class="h3-ring-init">{{ String(b.display_name || '跑').slice(0, 1) }}</text>
+            </view>
+            <text class="h3-ring-name">{{ b.display_name }}</text>
+            <text class="h3-ring-km">{{ b.week_km }}k</text>
+          </view>
+        </scroll-view>
+
+        <view
+          v-for="it in (homeSocialPulse?.pulse_items || []).slice(0, 2)"
+          :key="it.item_id"
+          class="h3-pulse-item"
+        >
+          <template v-if="it.kind === 'newcomer_icebreaker'">
+            <view class="h3-pi-row">
+              <text class="h3-pi-txt">👋 {{ it.display_name }}（{{ it.age_group }} · {{ it.vdot_band }}）</text>
+              <text class="h3-pi-btn" @click="quickCheer('newcomer', it.item_id, it.user_id, 'welcome_pat')">拍肩欢迎</text>
+            </view>
+          </template>
+          <template v-else-if="it.kind === 'activity_checkin' && it.activity">
+            <view class="h3-pi-row">
+              <text class="h3-pi-txt">🏃 {{ it.activity.display_name }} · {{ it.activity.distance_km }}km ({{ it.activity.avg_pace_str || '--' }})</text>
+              <text class="h3-pi-btn" @click="quickCheer('activity', it.activity.id, it.activity.user_id, 'steady_aerobic')">👏 有氧稳</text>
+            </view>
+          </template>
         </view>
       </view>
     </view>
@@ -1869,19 +1869,20 @@ const goalSheetDefaultTab = ref<'week' | 'month'>('week');
 
 // ── ↕️ 首页板块自定义显示次序 + 周/月完成度饼图样式 ──
 type HomeModuleKey = 'nextrun' | 'feed' | 'today' | 'goal' | 'status' | 'recent' | 'yearly';
-const HOME_MODULE_STORAGE_KEY = 'rgm_home_module_order_v1';
+const HOME_MODULE_LEGACY_STORAGE_KEY = 'rgm_home_module_order_v1';
+const HOME_MODULE_STORAGE_KEY = 'rgm_home_module_order_v2';
 const DEFAULT_HOME_MODULE_ORDER: HomeModuleKey[] = [
   'nextrun',
-  'feed',
   'today',
   'goal',
   'status',
   'recent',
+  'feed',
   'yearly',
 ];
 const HOME_MODULE_META: Record<HomeModuleKey, { icon: string; title: string; desc: string }> = {
   nextrun: { icon: '🏃', title: '我的下一场约跑', desc: '已报名且未结束的跑团约跑活动提醒' },
-  feed: { icon: '🔥', title: '跑团打卡动态', desc: '跑友最新打卡与教练点评快捷入口' },
+  feed: { icon: '⚡', title: '跑搭子与跑团脉搏', desc: '同频跑搭子周PK、新人破冰与跑团动态' },
   today: { icon: '📅', title: '今日训练课表', desc: '今日教练训练安排、一键打卡与感受照片记录' },
   goal: { icon: '🎯', title: '周/月目标完成度', desc: '周/月同屏完成度饼图、7日打卡条与同步分享' },
   status: { icon: '🔋', title: '生理状态与跑力诊断', desc: '电量/睡眠、HRV、静息心率与 VDOT' },
@@ -1912,10 +1913,23 @@ function sanitizeModuleOrder(raw: unknown): HomeModuleKey[] {
 const homeModuleOrder = ref<HomeModuleKey[]>(
   (() => {
     try {
-      const saved = uni.getStorageSync(HOME_MODULE_STORAGE_KEY);
-      if (saved) {
-        const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
+      const savedV2 = uni.getStorageSync(HOME_MODULE_STORAGE_KEY);
+      if (savedV2) {
+        const parsed = typeof savedV2 === "string" ? JSON.parse(savedV2) : savedV2;
         return sanitizeModuleOrder(parsed);
+      }
+      const savedV1 = uni.getStorageSync(HOME_MODULE_LEGACY_STORAGE_KEY);
+      if (savedV1) {
+        const parsed = typeof savedV1 === "string" ? JSON.parse(savedV1) : savedV1;
+        const cleanV1 = sanitizeModuleOrder(parsed).filter((k) => k !== "feed");
+        const recentIdx = cleanV1.indexOf("recent");
+        if (recentIdx >= 0) {
+          cleanV1.splice(recentIdx + 1, 0, "feed");
+        } else {
+          cleanV1.push("feed");
+        }
+        uni.setStorageSync(HOME_MODULE_STORAGE_KEY, JSON.stringify(cleanV1));
+        return cleanV1;
       }
     } catch (_) {}
     return [...DEFAULT_HOME_MODULE_ORDER];
@@ -8774,7 +8788,7 @@ function goToInviteLanding(tok: string) {
 .h3-bcast-ack { font-size: 20rpx; padding: 4rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); font-weight: 800; flex-shrink: 0; }
 .h3-bcast-ack.acked { background: var(--rgm-green-tint); color: var(--rgm-green); }
 .h3-bcast-body { display: block; font-size: 21rpx; color: var(--rgm-text-2); margin-top: 10rpx; line-height: 1.45; }
-.h3-pulse-card { padding: 24rpx; margin-bottom: 20rpx; }
+.h3-pulse-card { padding: 24rpx; margin-bottom: 0; }
 .h3-pulse-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12rpx; }
 .h3-pulse-title { font-size: 28rpx; font-weight: 900; color: var(--rgm-text); display: block; }
 .h3-pulse-sub { font-size: 20rpx; color: var(--rgm-text-2); display: block; margin-top: 4rpx; }
