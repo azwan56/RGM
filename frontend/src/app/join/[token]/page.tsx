@@ -37,7 +37,11 @@ export default function TargetedInviteJoinPage({
         const res = await apiClient.get(`/api/community/invites/${encodeURIComponent(token)}${q}`);
         if (active) setPreview(res.data);
       } catch (e: any) {
-        if (active) setErrorMsg(e?.message || "特邀函链接无效或已过期");
+        if (active) {
+          setErrorMsg(
+            e?.response?.data?.detail || "特邀函链接无效或已失效，请联系跑团团长重新发起邀约"
+          );
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -75,7 +79,7 @@ export default function TargetedInviteJoinPage({
         router.push("/dashboard");
       }
     } catch (e: any) {
-      showToast("操作失败：" + (e?.message || ""), "error");
+      showToast("操作失败：" + (e?.response?.data?.detail || e?.message || ""), "error");
     } finally {
       setSubmitting(false);
     }

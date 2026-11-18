@@ -143,11 +143,12 @@ const _dedupGet = function deduplicatedGet<T = any, R = AxiosResponse<T>, D = an
   }
   const reqPromise = _rawGet(url, config) as unknown as Promise<R>;
   _inflightGets.set(dedupKey, reqPromise);
-  reqPromise.finally(() => {
+  const clearInflight = () => {
     if (_inflightGets.get(dedupKey) === reqPromise) {
       _inflightGets.delete(dedupKey);
     }
-  });
+  };
+  reqPromise.then(clearInflight, clearInflight);
   return reqPromise;
 };
 

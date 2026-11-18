@@ -56,7 +56,7 @@ export function ClubShowcaseDetail({
       const res = await apiClient.get(`/api/community/showcase/clubs/${encodeURIComponent(clubId)}?${q.toString()}`);
       setData(res.data);
     } catch (e: any) {
-      showToast("加载跑团宣传页失败：" + (e?.message || ""), "error");
+      showToast("加载跑团宣传页失败：" + (e?.response?.data?.detail || e?.message || ""), "error");
     } finally {
       setLoading(false);
     }
@@ -82,7 +82,7 @@ export function ClubShowcaseDetail({
       loadDetail();
       onJoinedClub?.();
     } catch (e: any) {
-      showToast("加入提示：" + (e?.message || "需凭邀请码加入"), "error");
+      showToast("加入提示：" + (e?.response?.data?.detail || e?.message || "需凭邀请码加入"), "error");
     }
   }
 
@@ -588,11 +588,11 @@ export function ShowcasePlazaView({
               跑团无排他限制，可通过合练实拍、手表核验全团战绩与主教练资历自由比较挑选适合自己的跑团
             </p>
           </div>
-          <div className="inline-flex p-1 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]">
+          <div className="inline-flex shrink-0 p-1 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]">
             <button
               type="button"
               onClick={() => setTab("clubs")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 ${
                 tab === "clubs" ? "bg-[#FC4C02] text-white" : "text-[var(--rgm-text-2)]"
               }`}
             >
@@ -601,7 +601,7 @@ export function ShowcasePlazaView({
             <button
               type="button"
               onClick={() => setTab("coaches")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 ${
                 tab === "coaches" ? "bg-[#FC4C02] text-white" : "text-[var(--rgm-text-2)]"
               }`}
             >
