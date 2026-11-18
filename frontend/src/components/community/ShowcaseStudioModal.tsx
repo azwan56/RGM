@@ -64,6 +64,14 @@ export default function ShowcaseStudioModal({
     apiClient
       .get(url)
       .then((res: any) => {
+        if (res.data?.can_edit === false) {
+          showToast(
+            mode === "club" ? "仅本跑团主理人/团长可编辑跑团宣传主页" : "仅教练/团长本人可编辑个人风采主页",
+            "error"
+          );
+          onClose();
+          return;
+        }
         setPhotos(res.data?.photos || []);
         if (mode === "club") {
           const sc = res.data?.showcase || {};

@@ -275,10 +275,17 @@ async function openCoachDetail(cuid: string) {
 
 async function openClubStudio(cid: string) {
   const u = getStoredUser();
-  targetOwnerId.value = cid;
-  viewMode.value = "studio";
   const q = u?.id ? `?viewer_uid=${encodeURIComponent(u.id)}` : "";
   const res: any = await request(`/api/community/showcase/clubs/${encodeURIComponent(cid)}${q}`);
+  if (!res?.can_edit) {
+    uni.showToast({ title: "仅本跑团主理人/团长可编辑", icon: "none" });
+    clubDetail.value = res || null;
+    coachDetail.value = null;
+    viewMode.value = "plaza";
+    return;
+  }
+  targetOwnerId.value = cid;
+  viewMode.value = "studio";
   clubSlogan.value = res?.showcase?.slogan || "";
   clubLandmarks.value = (res?.showcase?.home_landmarks || []).join("、");
   clubSchedule.value = res?.showcase?.schedule_summary || "";
@@ -286,9 +293,18 @@ async function openClubStudio(cid: string) {
 }
 
 async function openCoachStudio(cuid: string) {
+  const u = getStoredUser();
+  const q = u?.id ? `?viewer_uid=${encodeURIComponent(u.id)}` : "";
+  const res: any = await request(`/api/community/showcase/coaches/${encodeURIComponent(cuid)}${q}`);
+  if (!res?.can_edit) {
+    uni.showToast({ title: "仅教练/团长本人可编辑", icon: "none" });
+    coachDetail.value = res || null;
+    clubDetail.value = null;
+    viewMode.value = "plaza";
+    return;
+  }
   targetOwnerId.value = cuid;
   viewMode.value = "coach_studio";
-  const res: any = await request(`/api/community/showcase/coaches/${encodeURIComponent(cuid)}?viewer_uid=${encodeURIComponent(cuid)}`);
   coachHeadline.value = res?.resume?.headline || "";
   coachCerts.value = (res?.resume?.certifications || []).map((c: any) => c.title || c).join("、");
   coachStory.value = res?.resume?.bio_story || "";

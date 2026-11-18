@@ -21297,6 +21297,53 @@ class LocalStore:
         return brands
 
     @staticmethod
+    def _is_club_owner_strict_raw(cursor, club_id: str, user_id: str) -> bool:
+        """Returns True ONLY if user_id is the club's owner (主理人/团长), excluding coaches, members, and super_admins."""
+        if not user_id or not club_id:
+            return False
+        canonical = LocalStore.resolve_user_id(user_id)
+        cursor.execute("SELECT owner_id FROM clubs WHERE id = ?", (club_id,))
+        crow = cursor.fetchone()
+        if crow and crow[0] and LocalStore.resolve_user_id(str(crow[0])) == canonical:
+            return True
+        cursor.execute(
+            """
+            SELECT 1 FROM club_memberships
+            WHERE club_id = ? AND user_id IN (?, ?) AND status = 'active'
+              AND role = 'owner'
+            LIMIT 1
+            """,
+            (club_id, canonical, user_id),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _has_coach_or_owner_role_raw(cursor, canonical_uid: str) -> bool:
+        """Returns True ONLY if canonical_uid holds an owner or coach role in DB (no super_admin bypass)."""
+        if not canonical_uid:
+            return False
+        cursor.execute(
+            """
+            SELECT 1 FROM clubs
+            WHERE owner_id = ? AND COALESCE(status, 'active') != 'deleted'
+            UNION ALL
+            SELECT 1 FROM club_memberships m
+            JOIN clubs c ON m.club_id = c.id
+            WHERE m.user_id = ? AND m.status = 'active'
+              AND m.role IN ('owner', 'coach')
+              AND COALESCE(c.status, 'active') != 'deleted'
+            UNION ALL
+            SELECT 1 FROM organizations WHERE owner_id = ?
+            UNION ALL
+            SELECT 1 FROM organization_members
+            WHERE user_id = ? AND role IN ('owner', 'coach')
+            LIMIT 1
+            """,
+            (canonical_uid, canonical_uid, canonical_uid, canonical_uid),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
     def _is_club_leader_raw(cursor, club_id: str, user_id: str) -> bool:
         """Returns True if user_id is super_admin, club owner, or active owner/coach/admin of club_id."""
         if not user_id or not club_id:
@@ -22958,7 +23005,7 @@ class LocalStore:
                 (club_id,),
             )
             pacer_race_cnt = int((cursor.fetchone() or [0])[0] or 0)
-            can_edit = LocalStore._is_club_leader_raw(cursor, club_id, canonical_viewer) if canonical_viewer else False
+            can_edit = LocalStore._is_club_owner_strict_raw(cursor, club_id, canonical_viewer) if canonical_viewer else False
 
         ev_res = LocalStore.get_club_events(club_id, user_id=canonical_viewer)
         ev_list = (ev_res.get("upcoming") or ev_res.get("events") or []) if isinstance(ev_res, dict) else (ev_res or [])
@@ -23024,8 +23071,8 @@ class LocalStore:
         now_iso = get_beijing_iso()
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_op):
-                raise PermissionError("仅跑团团长、教练或管理员可编辑跑团宣传主页")
+            if not LocalStore._is_club_owner_strict_raw(cursor, club_id, canonical_op):
+                raise PermissionError("仅本跑团主理人/团长可编辑跑团宣传主页")
             cursor.execute("SELECT * FROM club_showcase_profiles WHERE club_id = ?", (club_id,))
             ex = cursor.fetchone()
             slogan = str(data.get("slogan") if data.get("slogan") is not None else (ex[1] if ex else "")).strip()[:120]
@@ -23162,12 +23209,13 @@ class LocalStore:
                 (canonical_coach,),
             )
             active_mentees = int((cursor.fetchone() or [0])[0] or 0)
+            coach_has_role = bool(coached_clubs) or LocalStore._has_coach_or_owner_role_raw(cursor, canonical_coach)
 
         pb_meta = LocalStore.resolve_verified_runner_profile_and_pbs(canonical_coach, profile=prof, query_activities=True)
         watch_brands = LocalStore._extract_watch_brands(prof)
         total_coached_runners = sum(int(c.get("member_cnt") or 0) for c in coached_clubs)
         can_edit = bool(
-            canonical_viewer and (canonical_viewer == canonical_coach or LocalStore.is_super_admin(canonical_viewer))
+            canonical_viewer and canonical_viewer == canonical_coach and coach_has_role
         )
         return {
             "coach_profile": {
@@ -23225,17 +23273,17 @@ class LocalStore:
         operator_uid: str,
         data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Creates or updates a coach/captain public resume (self or super_admin only)."""
+        """Creates or updates a coach/captain public resume (coach self only)."""
         canonical_coach = LocalStore.resolve_user_id(coach_uid)
         canonical_op = LocalStore.resolve_user_id(operator_uid)
-        if canonical_op != canonical_coach and not LocalStore.is_super_admin(canonical_op):
-            raise PermissionError("仅本人或超级管理员可编辑该教练/团长风采主页")
-        if not LocalStore.is_user_coach_or_owner(canonical_coach) and not LocalStore.is_super_admin(canonical_op):
-            raise PermissionError("仅跑团团长或认证教练可开通名帅宣传主页")
+        if canonical_op != canonical_coach:
+            raise PermissionError("仅教练/团长本人可编辑该个人风采主页")
 
         now_iso = get_beijing_iso()
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            if not LocalStore._has_coach_or_owner_role_raw(cursor, canonical_coach):
+                raise PermissionError("仅跑团主理人/团长或认证教练可开通并编辑名帅宣传主页")
             cursor.execute("SELECT * FROM coach_public_resumes WHERE user_id = ?", (canonical_coach,))
             ex = cursor.fetchone()
             headline = str(data.get("headline") if data.get("headline") is not None else (ex[1] if ex else "")).strip()[:100]
@@ -23298,11 +23346,11 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             if otype == "club":
-                if not LocalStore._is_club_leader_raw(cursor, oid, canonical_up):
-                    raise PermissionError("仅跑团团长或教练可上传跑团相册大片")
+                if not LocalStore._is_club_owner_strict_raw(cursor, oid, canonical_up):
+                    raise PermissionError("仅本跑团主理人/团长可上传跑团相册大片")
             else:
-                if canonical_up != oid and not LocalStore.is_super_admin(canonical_up):
-                    raise PermissionError("仅本人或超级管理员可上传教练履历照片")
+                if canonical_up != oid or not LocalStore._has_coach_or_owner_role_raw(cursor, oid):
+                    raise PermissionError("仅教练/团长本人可上传个人履历照片")
 
             cursor.execute(
                 "SELECT COUNT(*) FROM showcase_photos WHERE owner_type = ? AND owner_id = ?",
@@ -23365,11 +23413,11 @@ class LocalStore:
                 raise ValueError("照片不存在")
             p = dict(prow)
             if p["owner_type"] == "club":
-                if not LocalStore._is_club_leader_raw(cursor, p["owner_id"], canonical_op):
-                    raise PermissionError("无权编辑该跑团照片")
+                if not LocalStore._is_club_owner_strict_raw(cursor, p["owner_id"], canonical_op):
+                    raise PermissionError("仅本跑团主理人/团长可编辑该跑团照片")
             else:
-                if canonical_op != p["owner_id"] and not LocalStore.is_super_admin(canonical_op):
-                    raise PermissionError("无权编辑该教练照片")
+                if canonical_op != p["owner_id"] or not LocalStore._has_coach_or_owner_role_raw(cursor, p["owner_id"]):
+                    raise PermissionError("仅教练/团长本人可编辑该个人照片")
 
             cat = str(data.get("category") or p["category"]).strip().lower()
             if cat not in ("group_run", "race_highlight", "certificate", "team_event"):
@@ -23414,11 +23462,11 @@ class LocalStore:
                 raise ValueError("照片不存在")
             p = dict(prow)
             if p["owner_type"] == "club":
-                if not LocalStore._is_club_leader_raw(cursor, p["owner_id"], canonical_op):
-                    raise PermissionError("无权删除该跑团照片")
+                if not LocalStore._is_club_owner_strict_raw(cursor, p["owner_id"], canonical_op):
+                    raise PermissionError("仅本跑团主理人/团长可删除该跑团照片")
             else:
-                if canonical_op != p["owner_id"] and not LocalStore.is_super_admin(canonical_op):
-                    raise PermissionError("无权删除该教练照片")
+                if canonical_op != p["owner_id"] or not LocalStore._has_coach_or_owner_role_raw(cursor, p["owner_id"]):
+                    raise PermissionError("仅教练/团长本人可删除该个人照片")
             cursor.execute("DELETE FROM showcase_photos WHERE id = ?", (photo_id,))
             conn.commit()
         return {"deleted": True, "id": photo_id, "owner_type": p["owner_type"], "owner_id": p["owner_id"]}

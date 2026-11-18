@@ -322,6 +322,86 @@ def test_phase3_showcase_plaza_club_coach_and_photo_upload(isolated_env):
     assert any(x["club_id"] == "club_b" and x["photo_count"] == 1 for x in plaza.json()["clubs"])
     assert any(x["user_id"] == "u_coach_b" and x["watch_verified"] for x in plaza.json()["coaches"])
 
+    # Strict ownership permission checks:
+    # Seed a non-owner coach in club_b and ensure super_admin (u_df65d9a588c9) + coach + other club owner CANNOT edit club_b or u_coach_b
+    LocalStore.upsert_profile("u_coach_sub", {"display_name": "分团教练非团长", "city": "上海"})
+    LocalStore.upsert_profile("u_df65d9a588c9", {"display_name": "平台超管", "city": "上海"})
+    with sqlite3.connect(isolated_env["db_file"]) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent) VALUES ('cm_sub_b', 'club_b', 'u_coach_sub', 'coach', 'active', '2026-11-01T00:00:00Z', 1)"
+        )
+        conn.commit()
+
+    # Only club_b owner (u_coach_b) gets can_edit=True on club_b showcase
+    assert c.get("/api/community/showcase/clubs/club_b?viewer_uid=u_coach_b", headers=_headers("u_coach_b")).json()["can_edit"] is True
+    for unauthorized_uid in ("u_coach_sub", "u_captain", "u_newcomer", "u_df65d9a588c9"):
+        detail_u = c.get(f"/api/community/showcase/clubs/club_b?viewer_uid={unauthorized_uid}", headers=_headers(unauthorized_uid))
+        assert detail_u.status_code == 200
+        assert detail_u.json()["can_edit"] is False
+        assert c.put(
+            "/api/community/showcase/clubs/club_b",
+            headers=_headers(unauthorized_uid),
+            json={"operator_uid": unauthorized_uid, "slogan": "越权篡改"},
+        ).status_code == 403
+        assert c.post(
+            "/api/community/showcase/photos/upload-base64",
+            headers=_headers(unauthorized_uid),
+            json={"uploader_uid": unauthorized_uid, "owner_type": "club", "owner_id": "club_b", "category": "group_run", "image_base64": b64_png, "ext": ".png"},
+        ).status_code == 403
+        assert c.patch(
+            f"/api/community/showcase/photos/{photo_obj['id']}",
+            headers=_headers(unauthorized_uid),
+            json={"operator_uid": unauthorized_uid, "caption": "越权改图"},
+        ).status_code == 403
+        assert c.delete(
+            f"/api/community/showcase/photos/{photo_obj['id']}?operator_uid={unauthorized_uid}",
+            headers=_headers(unauthorized_uid),
+        ).status_code == 403
+
+    # Identity spoofing in JSON body with mismatched JWT must fail with 403
+    assert c.put(
+        "/api/community/showcase/clubs/club_b",
+        headers=_headers("u_coach_sub"),
+        json={"operator_uid": "u_coach_b", "slogan": "冒充团长UID"},
+    ).status_code == 403
+
+    # Coach showcase & coach photo wall: ONLY u_coach_b himself/herself can edit
+    c_ph = c.post(
+        "/api/community/showcase/photos/upload-base64",
+        headers=_headers("u_coach_b"),
+        json={"uploader_uid": "u_coach_b", "owner_type": "coach", "owner_id": "u_coach_b", "category": "certificate", "image_base64": b64_png, "ext": ".png"},
+    )
+    assert c_ph.status_code == 200
+    coach_photo_id = c_ph.json()["photo"]["id"]
+    isolated_env["created_files"].append(os.path.basename(c_ph.json()["photo"]["photo_url"]))
+
+    assert c.get("/api/community/showcase/coaches/u_coach_b?viewer_uid=u_coach_b", headers=_headers("u_coach_b")).json()["can_edit"] is True
+    for bad_coach_editor in ("u_coach_sub", "u_captain", "u_newcomer", "u_df65d9a588c9"):
+        c_det = c.get(f"/api/community/showcase/coaches/u_coach_b?viewer_uid={bad_coach_editor}", headers=_headers(bad_coach_editor))
+        assert c_det.status_code == 200
+        assert c_det.json()["can_edit"] is False
+        assert c.put(
+            "/api/community/showcase/coaches/u_coach_b",
+            headers=_headers(bad_coach_editor),
+            json={"operator_uid": bad_coach_editor, "headline": "越权修改教练履历"},
+        ).status_code == 403
+        assert c.post(
+            "/api/community/showcase/photos/upload-base64",
+            headers=_headers(bad_coach_editor),
+            json={"uploader_uid": bad_coach_editor, "owner_type": "coach", "owner_id": "u_coach_b", "category": "certificate", "image_base64": b64_png, "ext": ".png"},
+        ).status_code == 403
+        assert c.delete(
+            f"/api/community/showcase/photos/{coach_photo_id}?operator_uid={bad_coach_editor}",
+            headers=_headers(bad_coach_editor),
+        ).status_code == 403
+
+    # Regular member (not coach or owner anywhere) cannot open/edit own coach resume
+    assert c.put(
+        "/api/community/showcase/coaches/u_newcomer",
+        headers=_headers("u_newcomer"),
+        json={"operator_uid": "u_newcomer", "headline": "普通队员自封名帅"},
+    ).status_code == 403
+
 
 def test_phase4_non_exclusive_targeted_recruit_invite_and_funnel(isolated_env):
     c = isolated_env["client"]

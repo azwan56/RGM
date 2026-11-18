@@ -3977,13 +3977,15 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   >
                     预览对外主页 ›
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowcaseStudioMode("club")}
-                    className="px-4 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-500 text-white text-xs font-black cursor-pointer"
-                  >
-                    🎨 装修宣传页 & 传图
-                  </button>
+                  {(currentRole === "owner" || (Boolean(user?.id) && currentClub?.owner_id === user?.id)) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowcaseStudioMode("club")}
+                      className="px-4 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-500 text-white text-xs font-black cursor-pointer"
+                    >
+                      🎨 装修宣传页 & 传图
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -4634,13 +4636,15 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 <span className="text-[11px] text-zinc-400">
                   当前主控跑团：{currentClub?.name || "跑团"} · {sortedCoachStudents.length} 位学员
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setShowcaseStudioMode("coach")}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 text-xs font-bold cursor-pointer"
-                >
-                  🏅 编辑我的教练资历与相册
-                </button>
+                {(currentRole === "owner" || currentRole === "coach") && (
+                  <button
+                    type="button"
+                    onClick={() => setShowcaseStudioMode("coach")}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 text-xs font-bold cursor-pointer"
+                  >
+                    🏅 编辑我的教练资历与相册
+                  </button>
+                )}
               </div>
             </div>
 

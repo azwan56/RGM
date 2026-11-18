@@ -468,7 +468,7 @@
           <text class="arrow-right">›</text>
         </view>
 
-        <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev" class="owner-tool-item" @click="goToSubpage(`/pages/showcase/showcase?mode=studio&club_id=${encodeURIComponent(currentClub?.id || '')}`)">
+        <view v-if="isStrictClubOwner && !currentClub?.is_virtual_unaffiliated" class="owner-tool-item" @click="goToSubpage(`/pages/showcase/showcase?mode=studio&club_id=${encodeURIComponent(currentClub?.id || '')}`)">
           <view class="tool-icon-box bg-green">
             <text class="tool-icon">🖼️</text>
           </view>
@@ -6354,6 +6354,14 @@ const isOwnerOrDev = computed(() => {
     currentRole.value === "owner" ||
     currentClub.value.owner_id === user.value.id ||
     isSuperAdmin.value
+  );
+});
+
+const isStrictClubOwner = computed(() => {
+  if (!user.value || !currentClub.value) return false;
+  return (
+    currentRole.value === "owner" ||
+    (Boolean(currentClub.value.owner_id) && currentClub.value.owner_id === user.value.id)
   );
 });
 

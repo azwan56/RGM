@@ -7,6 +7,7 @@ import time
 import hashlib
 import base64
 
+from config import settings
 from utils.local_store import LocalStore
 from utils.security import validate_uploaded_image_bytes
 
@@ -14,12 +15,30 @@ logger = logging.getLogger("router_community")
 router = APIRouter()
 
 
-def _extract_uid(explicit_uid: Optional[str], request: Optional[Request], required: bool = True) -> str:
-    uid = (
-        (explicit_uid or "").strip()
-        or (request.headers.get("x-user-id", "").strip() if request else "")
-        or (str(getattr(getattr(request, "state", None), "user_id", "") or "").strip() if request else "")
+def _extract_uid(
+    explicit_uid: Optional[str],
+    request: Optional[Request],
+    required: bool = True,
+    strict_match_auth: bool = False,
+) -> str:
+    state_uid = (
+        str(getattr(getattr(request, "state", None), "user_id", "") or "").strip()
+        if request
+        else ""
     )
+    req_explicit = (explicit_uid or "").strip()
+    header_uid = request.headers.get("x-user-id", "").strip() if request else ""
+    if state_uid:
+        canon_state = LocalStore.resolve_user_id(state_uid)
+        for candidate in (req_explicit, header_uid):
+            if candidate and LocalStore.resolve_user_id(candidate) != canon_state:
+                raise HTTPException(
+                    status_code=403, detail="安全拦截：操作身份与当前登录账号不一致"
+                )
+        return state_uid
+    if strict_match_auth and settings.ENVIRONMENT.lower() == "production":
+        raise HTTPException(status_code=401, detail="缺少有效登录认证令牌，请重新登录后操作")
+    uid = req_explicit or header_uid
     if required and not uid:
         raise HTTPException(status_code=401, detail="缺少用户身份标识，请先登录")
     return uid
@@ -44,6 +63,16 @@ def _save_showcase_image_bytes(owner_type: str, owner_id: str, img_bytes: bytes,
     with open(filepath, "wb") as f:
         f.write(img_bytes)
     return filename
+
+
+def _cleanup_showcase_photo_file(filename: str) -> None:
+    try:
+        photos_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "showcase_photos")
+        p = os.path.join(photos_dir, filename)
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
 
 
 # ── Pydantic Schemas ──
@@ -341,7 +370,7 @@ def get_club_showcase(
 
 @router.put("/showcase/clubs/{club_id}")
 def upsert_club_showcase(club_id: str, req: ClubShowcaseUpsertRequest, request: Request):
-    uid = _extract_uid(req.operator_uid, request)
+    uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         detail = LocalStore.upsert_club_showcase_profile(club_id, uid, payload)
@@ -363,7 +392,7 @@ def get_coach_showcase(coach_uid: str, request: Request, viewer_uid: Optional[st
 
 @router.put("/showcase/coaches/{coach_uid}")
 def upsert_coach_showcase(coach_uid: str, req: CoachResumeUpsertRequest, request: Request):
-    uid = _extract_uid(req.operator_uid, request)
+    uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         detail = LocalStore.upsert_coach_public_resume(coach_uid, uid, payload)
@@ -385,7 +414,7 @@ async def upload_showcase_photo_multipart(
     caption: str = Form(""),
     is_cover: bool = Form(False),
 ):
-    uid = _extract_uid(uploader_uid, request)
+    uid = _extract_uid(uploader_uid, request, strict_match_auth=True)
     contents = await file.read()
     filename = _save_showcase_image_bytes(owner_type, owner_id, contents, file.filename or "showcase.jpg")
     photo_url = _build_showcase_photo_url(request, filename)
@@ -401,14 +430,16 @@ async def upload_showcase_photo_multipart(
         )
         return {"success": True, "photo": photo}
     except PermissionError as e:
+        _cleanup_showcase_photo_file(filename)
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
+        _cleanup_showcase_photo_file(filename)
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/showcase/photos/upload-base64")
 def upload_showcase_photo_base64(req: ShowcasePhotoBase64Request, request: Request):
-    uid = _extract_uid(req.uploader_uid or req.operator_uid, request)
+    uid = _extract_uid(req.uploader_uid or req.operator_uid, request, strict_match_auth=True)
     raw_ext = (req.ext or ".jpg").lower()
     if not raw_ext.startswith("."):
         raw_ext = f".{raw_ext}"
@@ -434,14 +465,16 @@ def upload_showcase_photo_base64(req: ShowcasePhotoBase64Request, request: Reque
         )
         return {"success": True, "photo": photo}
     except PermissionError as e:
+        _cleanup_showcase_photo_file(filename)
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
+        _cleanup_showcase_photo_file(filename)
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.patch("/showcase/photos/{photo_id}")
 def update_showcase_photo_endpoint(photo_id: str, req: ShowcasePhotoUpdateRequest, request: Request):
-    uid = _extract_uid(req.operator_uid, request)
+    uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         photo = LocalStore.update_showcase_photo(photo_id, uid, payload)
@@ -454,7 +487,7 @@ def update_showcase_photo_endpoint(photo_id: str, req: ShowcasePhotoUpdateReques
 
 @router.delete("/showcase/photos/{photo_id}")
 def delete_showcase_photo_endpoint(photo_id: str, request: Request, operator_uid: Optional[str] = Query(None)):
-    uid = _extract_uid(operator_uid, request)
+    uid = _extract_uid(operator_uid, request, strict_match_auth=True)
     try:
         res = LocalStore.delete_showcase_photo(photo_id, uid)
         return {"success": True, **res}
