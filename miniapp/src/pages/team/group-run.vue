@@ -1,9 +1,10 @@
 <template>
-  <view style="min-height: 100vh; background-color: var(--rgm-bg, #0b0b0e);" />
+  <view :class="themeClass" style="min-height: 100vh; background-color: var(--rgm-bg, #0b0b0e);" />
 </template>
 
 <script setup lang="ts">
 import { onLoad } from "@dcloudio/uni-app";
+import { themeClass } from "../../utils/theme";
 
 onLoad((options?: Record<string, any>) => {
   const qs = options

@@ -257,13 +257,30 @@ export default function UiFeedbackProvider({ children }: { children: React.React
                 : t.variant === "warning"
                 ? "border-amber-500/45"
                 : "border-[#FC4C02]/40";
+            const accentBar =
+              t.variant === "success"
+                ? "bg-emerald-500"
+                : t.variant === "error"
+                ? "bg-rose-500"
+                : t.variant === "warning"
+                ? "bg-amber-500"
+                : "bg-[#FC4C02]";
+            const badgeText =
+              t.variant === "success"
+                ? "成功"
+                : t.variant === "error"
+                ? "错误"
+                : t.variant === "warning"
+                ? "提醒"
+                : "信息";
             return (
               <div
                 key={t.id}
                 role="status"
-                className={`pointer-events-auto flex items-start gap-3 px-4 py-3.5 rounded-2xl bg-[var(--rgm-card)] border ${borderTone} text-[var(--rgm-text)] shadow-2xl backdrop-blur-xl transition-all duration-200`}
+                className={`pointer-events-auto relative overflow-hidden flex items-start gap-3 pl-5 pr-4 py-3.5 rounded-2xl bg-[var(--rgm-card)] border ${borderTone} text-[var(--rgm-text)] shadow-2xl backdrop-blur-xl transition-all duration-200`}
               >
-                <div className="mt-0.5 shrink-0">
+                <span className={`absolute inset-y-0 left-0 w-1 ${accentBar}`} />
+                <div className="mt-0.5 shrink-0 flex flex-col items-center gap-1">
                   {t.variant === "success" ? (
                     <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                   ) : t.variant === "error" ? (
@@ -274,8 +291,13 @@ export default function UiFeedbackProvider({ children }: { children: React.React
                     <Info className="w-5 h-5 text-[#FC4C02]" />
                   )}
                 </div>
-                <div className="flex-1 text-xs sm:text-sm font-medium leading-relaxed whitespace-pre-line break-words">
-                  {t.message}
+                <div className="flex-1 min-w-0 space-y-0.5">
+                  <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)]">
+                    {badgeText}
+                  </span>
+                  <div className="text-xs sm:text-sm font-medium leading-relaxed whitespace-pre-line break-words">
+                    {t.message}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -334,6 +356,7 @@ export default function UiFeedbackProvider({ children }: { children: React.React
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
+                autoFocus={activeConfirm.options.danger}
                 onClick={() => settleActiveConfirm(false)}
                 className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-[var(--rgm-card-2)] hover:opacity-90 border border-[var(--rgm-border)] text-[var(--rgm-text-2)] transition cursor-pointer"
               >
@@ -341,7 +364,7 @@ export default function UiFeedbackProvider({ children }: { children: React.React
               </button>
               <button
                 type="button"
-                autoFocus
+                autoFocus={!activeConfirm.options.danger}
                 onClick={() => settleActiveConfirm(true)}
                 className={`px-5 py-2 rounded-xl text-xs sm:text-sm font-bold text-white shadow-lg transition cursor-pointer ${
                   activeConfirm.options.danger

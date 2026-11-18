@@ -1,7 +1,8 @@
 <template>
   <view class="activities-page" :class="themeClass">
-    <view class="page-header">
-      <text class="title">跑步记录与教练点评</text>
+    <view class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+      <text class="title">跑步记录与复盘</text>
+      <text v-if="activities.length" style="font-size:22rpx;color:var(--rgm-ink-3);font-weight:700;">共 {{ activities.length }} 次</text>
     </view>
 
     <!-- Activity list -->
@@ -9,7 +10,7 @@
       <view
         v-for="act in activities"
         :key="act.id"
-        class="activity-card"
+        class="rgm-card activity-card a3-card"
         :class="{ 'is-excluded-card': act.exclude_mode === 'excluded' }"
         @click="openDetail(act)"
       >
@@ -17,13 +18,13 @@
           <view class="card-name-wrap">
             <text class="act-name">{{ act.name }}</text>
             <text v-if="act.workout_effective_vdot && (!act.exclude_mode || act.exclude_mode === 'normal')" class="vdot-eff-pill">
-              ⚡ 等效VDOT {{ act.workout_effective_vdot }}
+              VDOT {{ act.workout_effective_vdot }}
             </text>
             <text v-else-if="act.exclude_mode === 'ignore_vdot'" class="mode-status-pill warn">
-              🤝 陪跑不计VDOT
+              陪跑不计VDOT
             </text>
             <text v-else-if="act.exclude_mode === 'excluded'" class="mode-status-pill muted">
-              🚫 已忽略重复/异常
+              已忽略异常
             </text>
           </view>
           <text class="act-date">{{ formatDateTime(act.start_time) }}</text>
@@ -32,7 +33,7 @@
         <view class="stats-row">
           <view class="stat">
             <text class="num primary">{{ act.distance_km || (act.distance_meters ? (act.distance_meters / 1000).toFixed(2) : '0.00') }}</text>
-            <text class="sub">公里</text>
+            <text class="sub">km</text>
           </view>
           <view class="stat">
             <text class="num">{{ act.avg_pace_str || '—' }}</text>
@@ -50,39 +51,39 @@
 
         <!-- GPS Track, Moments Share Card & Exclude Mode Pills -->
         <view class="track-badge-row">
-          <text
+          <view
             v-if="act.has_gps_track || act.map_image_url || act.id?.startsWith('garmin_') || act.id?.startsWith('coros_')"
-            class="track-pill"
+            class="track-pill a3-pill"
           >
-            🗺️ 轨迹与分段复盘 ›
-          </text>
-          <text
-            class="share-card-pill"
+            <RgmIcon name="compass" :size="22" color="blue" />
+            <text>轨迹分段 ›</text>
+          </view>
+          <view
+            class="share-card-pill a3-pill"
             @click.stop="openPersonalShareCard(act.id)"
           >
-            📸 朋友圈分享卡
-          </text>
-          <text
-            class="exclude-mode-pill"
+            <RgmIcon name="share" :size="22" color="brand" />
+            <text>分享海报</text>
+          </view>
+          <view
+            class="exclude-mode-pill a3-pill"
             @click.stop="openExcludeModeMenu(act)"
           >
-            ⚙️ {{ getExcludeModeShortLabel(act.exclude_mode) }}
-          </text>
+            <RgmIcon name="sliders" :size="22" color="muted" />
+            <text>{{ getExcludeModeShortLabel(act.exclude_mode) }}</text>
+          </view>
         </view>
 
-        <!-- Coach Journal preview tag if available -->
-        <view v-if="act.ai_journal?.evaluation || (typeof act.ai_journal === 'string' && act.ai_journal)" class="journal-preview">
-          <view class="journal-tag-box">
-            <text class="journal-tag">教练点评</text>
-            <text class="journal-compliance">仅供参考</text>
-          </view>
+        <!-- Coach Journal preview -->
+        <view v-if="act.ai_journal?.evaluation || (typeof act.ai_journal === 'string' && act.ai_journal)" class="rgm-coach-box a3-coach-box">
+          <text class="a3-coach-lbl">教练点评</text>
           <text class="journal-text">{{ act.ai_journal?.evaluation || act.ai_journal }}</text>
         </view>
 
         <!-- Public Club Captain Cheer -->
         <view v-if="act.captain_cheer" class="journal-preview captain-journal-preview">
           <view class="journal-tag-box">
-            <text class="journal-tag captain-journal-tag">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}</text>
+            <text class="journal-tag captain-journal-tag">{{ act.captain_cheer_meta?.captain_title || "团长加油" }}</text>
             <text class="journal-compliance">全员可见</text>
           </view>
           <text class="journal-text">{{ act.captain_cheer }}</text>
@@ -131,6 +132,7 @@ import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } fro
 import { request, getStoredUser } from "../../utils/api";
 import GpsTrackModal from "../../components/GpsTrackModal.vue";
 import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
+import RgmIcon from "../../components/RgmIcon.vue";
 import { trackClick } from "../../utils/telemetry";
 
 const activities = ref<any[]>([]);
@@ -207,7 +209,7 @@ function openExcludeModeMenu(act: any) {
       if (!nextMode) return;
       try {
         const resp = await request(`/api/science/activities/${act.id}/exclude-mode`, "POST", {
-          uid: user.id,
+          user_id: user.id,
           exclude_mode: nextMode
         });
         if (resp?.success) {
@@ -567,4 +569,13 @@ onShareTimeline(() => {
   color: var(--rgm-text, #e5e5ea);
   line-height: 1.6;
 }
+.a3-card { margin-bottom: 18rpx; }
+.a3-pill {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+}
+.a3-coach-box { margin-top: 16rpx; display: flex; flex-direction: column; gap: 6rpx; }
+.a3-coach-lbl { font-size: 20rpx; font-weight: 700; color: var(--rgm-green); }
 </style>

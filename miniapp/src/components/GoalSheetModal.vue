@@ -23,14 +23,14 @@
           :class="{ active: activeTab === 'week' }"
           @click="switchTab('week')"
         >
-          <text>🏃 下周目标 ({{ editWeeklyKm }}k)</text>
+          <text>{{ goalState.isDefaultGoal ? '🏃 本周起目标' : '🏃 下周目标' }} ({{ editWeeklyKm }}k)</text>
         </view>
         <view
           class="gsm-tab"
           :class="{ active: activeTab === 'month' }"
           @click="switchTab('month')"
         >
-          <text>📅 下个月目标 ({{ previewNextMonthKm }}k)</text>
+          <text>{{ goalState.isDefaultGoal ? '📅 本月起目标' : '📅 下个月目标' }} ({{ previewNextMonthKm }}k)</text>
         </view>
       </view>
 
@@ -43,7 +43,7 @@
               <text class="gsm-big-unit">km / 周</text>
             </view>
             <text class="gsm-sub-hint">
-              即将应用于 {{ nextWeekLabel || "下周一" }} 起的新周周期
+              {{ goalState.isDefaultGoal ? "首次设定：保存后立即应用于本周及后续周" : `即将应用于 ${nextWeekLabel || "下周一"} 起的新周周期` }}
             </text>
           </view>
 
@@ -81,12 +81,14 @@
           <view class="gsm-sync-row" @click="toggleAutoSyncMonthly">
             <view class="gsm-sync-left">
               <text class="gsm-sync-title">
-                {{ goalState.autoSyncMonthly ? "☑️" : "⬜" }} 同步换算下个月目标（约 {{ calcSyncedMonthlyKm(goalState.editWeeklyKm) }} km/月）
+                {{ goalState.autoSyncMonthly ? "☑️" : "⬜" }} {{ goalState.isDefaultGoal ? "同步换算本月及后续月目标" : "同步换算下个月目标" }}（约 {{ calcSyncedMonthlyKm(goalState.editWeeklyKm) }} km/月）
               </text>
               <text class="gsm-sync-desc">
                 {{
                   goalState.hasIndependentMonthly
                     ? `您已单独设置月跑量（当前 ${goalState.editUniformMonthlyKm} km/月），默认关闭同步以防覆盖`
+                    : goalState.isDefaultGoal
+                    ? "已为您默认开启：修改周跑量将同步更新本月及后续月目标"
                     : "勾选后修改周跑量将按 ×4.3 自动同步下个月目标"
                 }}
               </text>
@@ -150,13 +152,13 @@
                 v-for="(val, idx) in goalState.editMonthlyArray"
                 :key="idx"
                 class="gsm-month-cell"
-                :class="{ locked: idx + 1 <= currentCalMonth }"
+                :class="{ locked: idx + 1 <= monthLockCutoff }"
               >
                 <text class="gsm-m-name">
-                  {{ idx + 1 }}月 {{ idx + 1 <= currentCalMonth ? "🔒" : "" }}
+                  {{ idx + 1 }}月 {{ idx + 1 <= monthLockCutoff ? "🔒" : "" }}
                 </text>
                 <input
-                  v-if="idx + 1 > currentCalMonth"
+                  v-if="idx + 1 > monthLockCutoff"
                   type="number"
                   class="gsm-m-input"
                   :value="String(val)"
@@ -170,7 +172,10 @@
 
         <!-- Plain-Language Lock Rule Explanation -->
         <view class="gsm-rule-note">
-          <text class="gsm-rule-text">
+          <text v-if="goalState.isDefaultGoal" class="gsm-rule-text">
+            ✨ 首次设定将立即应用于本周与本月；保存后进行中的本周与本月目标将锁定以保障公平。
+          </text>
+          <text v-else class="gsm-rule-text">
             💡 进行中的本周（{{ lockedWeekDisplay }}k）与本月（{{ lockedMonthDisplay }}k）目标已锁定不变；本次保存自下周一及下个月 1 日起生效。
           </text>
         </view>
@@ -253,8 +258,12 @@ const lockedMonthDisplay = computed(() => {
 });
 
 const previewNextMonthKm = computed(() => getPreviewNextMonthKm(goalState));
+const monthLockCutoff = computed(() => (goalState.isDefaultGoal ? currentCalMonth - 1 : currentCalMonth));
 
 const nextMonthSubHint = computed(() => {
+  if (goalState.isDefaultGoal) {
+    return `即将应用于本月 (${currentCalMonth}月) 及后续月份（首次设定立即生效）`;
+  }
   if (currentCalMonth >= 12) {
     return "即将应用于次年 1月（1月1日起生效）";
   }

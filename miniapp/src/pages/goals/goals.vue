@@ -18,8 +18,8 @@
         :max="600"
         :step="10"
         activeColor="#FC4C02"
-        backgroundColor="rgba(255,255,255,0.1)"
-        block-color="#ffffff"
+        :backgroundColor="isVolt ? '#E5E7EB' : 'rgba(255,255,255,0.1)'"
+        :block-color="isVolt ? '#111827' : '#ffffff'"
         block-size="20"
         @change="onSliderChange"
       />
@@ -76,7 +76,8 @@
           :min="150"
           :max="220"
           activeColor="#38bdf8"
-          backgroundColor="rgba(255,255,255,0.1)"
+          :backgroundColor="isVolt ? '#E5E7EB' : 'rgba(255,255,255,0.1)'"
+          :block-color="isVolt ? '#111827' : '#ffffff'"
           block-size="18"
           @change="(e) => maxHr = e.detail.value"
         />
@@ -92,7 +93,8 @@
           :min="35"
           :max="90"
           activeColor="#10b981"
-          backgroundColor="rgba(255,255,255,0.1)"
+          :backgroundColor="isVolt ? '#E5E7EB' : 'rgba(255,255,255,0.1)'"
+          :block-color="isVolt ? '#111827' : '#ffffff'"
           block-size="18"
           @change="(e) => restHr = e.detail.value"
         />
@@ -107,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import { currentTheme, themeClass, applySystemTheme, isVolt } from "../../utils/theme";
 import { ref, onMounted } from "vue";
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";

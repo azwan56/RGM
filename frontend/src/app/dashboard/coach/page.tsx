@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import TrainingPlanView from "@/components/TrainingPlanView";
 import TrainingTabSwitcher from "@/components/TrainingTabSwitcher";
+import CoachChatBox from "@/components/CoachChatBox";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import { showToast } from "@/components/ui/UiFeedbackProvider";
@@ -40,11 +41,25 @@ export default function CoachPage() {
   const [isCoachOrOwner, setIsCoachOrOwner] = useState(false);
   const [showRaceSetup, setShowRaceSetup] = useState(false);
 
-  // 支持 ?tab=report 深链（与「训练」三段切换器联动）
+  // 支持 ?tab=report 深链（与「训练」三段切换器 & Sidebar rgm-nav-intent 联动）
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "report" || t === "plan") setActiveTab(t);
+    const syncTab = (customHref?: string) => {
+      const q = customHref && customHref.includes("?")
+        ? `?${customHref.split("?")[1]}`
+        : window.location.search;
+      const t = new URLSearchParams(q).get("tab");
+      if (t === "report" || t === "plan") setActiveTab(t);
+    };
+    syncTab();
+    const onPop = () => syncTab();
+    const onNav = (e: Event) => syncTab((e as CustomEvent)?.detail?.href);
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("rgm-nav-intent", onNav);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("rgm-nav-intent", onNav);
+    };
   }, []);
 
   function switchTab(k: "plan" | "report") {
@@ -229,10 +244,11 @@ export default function CoachPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="rgm-web3-page">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Title Header — 与小程序「训练」页一致：标题 + 三段切换 */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
@@ -250,14 +266,117 @@ export default function CoachPage() {
         </div>
 
         {activeTab === "plan" ? (
-          <TrainingPlanView
-            user={user}
-            userRaces={userRaces}
-            initialTargetRace={targetRace}
-            initialTargetTime={targetTime}
-          />
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            <div className="xl:col-span-8 min-w-0">
+              <TrainingPlanView
+                user={user}
+                userRaces={userRaces}
+                initialTargetRace={targetRace}
+                initialTargetTime={targetTime}
+              />
+            </div>
+            {user?.id && (
+              <div className="hidden xl:block xl:col-span-4">
+                <CoachChatBox
+                  uid={user.id}
+                  mode="docked"
+                  onPlanUpdated={() => loadLatestAnalysis(user.id)}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           <>
+            {/* Web 3.0 W6.1 多赛事战略周期路线图 + 冲突诊断 */}
+            {userRaces.length > 0 && (() => {
+              const sortedUpcoming = [...userRaces]
+                .filter((r) => r.status !== "completed" && !r.is_completed && !r.is_past)
+                .sort((a, b) => String(a.race_date || "").localeCompare(String(b.race_date || "")));
+              let conflictMsg = "";
+              if (sortedUpcoming.length >= 2) {
+                for (let i = 0; i < sortedUpcoming.length - 1; i++) {
+                  const d1 = new Date(sortedUpcoming[i].race_date).getTime();
+                  const d2 = new Date(sortedUpcoming[i + 1].race_date).getTime();
+                  if (!isNaN(d1) && !isNaN(d2)) {
+                    const diffDays = Math.round((d2 - d1) / 86400000);
+                    if (diffDays >= 0 && diffDays <= 45) {
+                      conflictMsg = `赛程冲突诊断：${sortedUpcoming[i].name} 与 ${sortedUpcoming[i + 1].name} 间隔仅 ${diffDays} 天，建议将前者设为 B 级「以赛代练」并在赛后安排 7–10 天主动恢复期。`;
+                      break;
+                    }
+                  }
+                }
+              }
+              return (
+                <div className="rgm-bento-card p-5 space-y-4 border-t-[3px] border-t-[#FC4C02]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-black text-[var(--rgm-text)]">
+                        多赛事战略周期路线图 (Macrocycle Roadmap)
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[10px] font-bold text-[var(--rgm-text-2)]">
+                        {sortedUpcoming.length} 场待赛 · A/B/C 优先级联动
+                      </span>
+                    </div>
+                    {conflictMsg && (
+                      <span className="px-2.5 py-1 rounded-full bg-[var(--rgm-amber-tint)] border border-amber-500/40 text-amber-500 text-[11px] font-bold">
+                        已识别赛程冲突
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 4 Canova Phases Bar */}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { label: "基础期 Base", pct: "w-full", cls: "bg-emerald-500" },
+                      { label: "特异期 Specific", pct: "w-full", cls: "bg-sky-500" },
+                      { label: "巅峰期 Peak", pct: "w-full", cls: "bg-[#FC4C02]" },
+                      { label: "赛前减量 Taper", pct: "w-full", cls: "bg-purple-500" },
+                    ].map((ph) => (
+                      <div key={ph.label} className="space-y-1.5">
+                        <div className="text-[11px] font-bold text-[var(--rgm-text-2)] truncate">{ph.label}</div>
+                        <div className={`h-2 rounded-full ${ph.cls} opacity-85`} />
+                      </div>
+                    ))}
+                  </div>
+
+                  {sortedUpcoming.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {sortedUpcoming.slice(0, 4).map((rc) => {
+                        const lv =
+                          rc.priority === 2 || rc.priority === "B"
+                            ? "B"
+                            : rc.priority === 3 || rc.priority === "C"
+                            ? "C"
+                            : "A";
+                        return (
+                          <div
+                            key={rc.id || rc.name}
+                            className="px-3 py-1.5 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] flex items-center gap-2 text-xs"
+                          >
+                            <span
+                              className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black text-white ${
+                                lv === "A" ? "bg-[#FC4C02]" : lv === "B" ? "bg-blue-600" : "bg-zinc-600"
+                              }`}
+                            >
+                              {lv}
+                            </span>
+                            <span className="font-bold text-[var(--rgm-text)]">{rc.name}</span>
+                            <span className="text-[11px] text-[var(--rgm-text-muted)] font-mono">{rc.race_date}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {conflictMsg && (
+                    <div className="p-3 rounded-xl bg-[var(--rgm-amber-tint)] border border-amber-500/40 text-xs font-semibold text-amber-500 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{conflictMsg}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* 紧凑备赛摘要条（原「跑者档案 + 目标赛事」双大卡收纳为一行 + 可展开抽屉） */}
             <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-4 sm:p-5 space-y-3">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -714,6 +833,7 @@ export default function CoachPage() {
         </>
         )}
       </main>
+      </div>
     </div>
   );
 }

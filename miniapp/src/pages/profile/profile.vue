@@ -1,100 +1,93 @@
 <template>
   <view class="profile-page" :class="themeClass">
-    <!-- ── 「我的」首页头部：进入子页面时隐藏，减少滚动长度 ── -->
+    <!-- ── 「我的」L1 极简主视图（!activeSection） ── -->
     <template v-if="!activeSection">
-    <!-- ── 顶部用户卡（无论登录与否始终显示在最顶部）── -->
-    <view v-if="!user" class="login-hero-card">
-      <view class="login-hero-left">
-        <view class="hero-icon-circle">
-          <text class="hero-wx-icon">🟢</text>
+      <!-- 未登录态 -->
+      <view v-if="!user" class="login-hero-card">
+        <view class="login-hero-left">
+          <view class="hero-icon-circle">
+            <RgmIcon name="users" :size="40" color="brand" />
+          </view>
+          <view class="hero-text-wrap">
+            <text class="hero-title">微信跑者一键登录</text>
+          </view>
         </view>
-        <view class="hero-text-wrap">
-          <text class="hero-title">微信跑者一键登录</text>
-        </view>
+        <button class="hero-login-btn-native" @click="openAuthModal">
+          微信一键快速登录
+        </button>
+        <!-- #ifdef APP-PLUS -->
+        <button class="hero-login-btn-apple" @click="handleAppleLogin" style="margin-top: 16rpx; background: var(--rgm-card-2); color: var(--rgm-ink); border: 1px solid var(--rgm-line); border-radius: 9999rpx; font-size: 28rpx; height: 80rpx; line-height: 80rpx; display: flex; align-items: center; justify-content: center; font-weight: 600; width: 100%;">
+           通过 Apple 快速登录
+        </button>
+        <!-- #endif -->
       </view>
-      <!-- 用 button open-type 保证最高优先级点击响应 -->
-      <button class="hero-login-btn-native" @click="openAuthModal">
-        🟢 微信一键快速登录
-      </button>
-      <!-- #ifdef APP-PLUS -->
-      <button class="hero-login-btn-apple" @click="handleAppleLogin" style="margin-top: 16rpx; background: var(--rgm-card-2, #1c1c1e); color: var(--rgm-text, #ffffff); border: 1px solid var(--rgm-line, rgba(255,255,255,0.25)); border-radius: 9999rpx; font-size: 28rpx; height: 80rpx; line-height: 80rpx; display: flex; align-items: center; justify-content: center; font-weight: 600; width: 100%;   --rgm-text: var(--rgm-ink); --rgm-text-2: var(--rgm-ink-2); --rgm-text-3: var(--rgm-ink-3); ">
-         通过 Apple 快速登录
-      </button>
-      <!-- #endif -->
-    </view>
 
-    <!-- ── 已登录状态：展示跑者卡片与修改资料/切换账号 ── -->
-    <view v-else class="user-card" @click="openEditProfileModal">
-      <view class="avatar-wrap">
-        <image class="avatar" :src="profile?.avatar_url || user?.avatar_url || defaultAvatar" mode="aspectFill" />
-        <view class="avatar-camera-pill">
-          <text class="camera-icon">📷</text>
-        </view>
-      </view>
-      <view class="user-meta">
-        <view class="user-name-row">
-          <text class="user-name">{{ profile?.display_name || user?.display_name || "微信跑者" }}</text>
-          <text class="edit-pill">✏️ 编辑资料</text>
-        </view>
-        <text v-if="userClub?.name" class="user-id">{{ userClub.name }}</text>
-      </view>
-      <button class="switch-user-btn" @click.stop="handleConfirmLogout">退出</button>
-    </view>
-
-    <!-- ── 🚀 设定向导：仅在未完成时显示；完成后入口移到页面底部「帮助与设置」 ── -->
-    <view v-if="onboardingStatus && !onboardingStatus.is_completed" class="onboard-guide-card" @click="goToOnboarding(1)">
-      <view class="ogc-left">
-        <view class="ogc-icon-circle">🚀</view>
-        <view class="ogc-meta">
-          <view class="ogc-title-row">
-            <text class="ogc-title">设定向导</text>
-            <text class="ogc-progress-tag" :class="{ completed: onboardingStatus?.is_completed }">
-              {{ onboardingStatus?.is_completed ? '100%' : `${onboardingStatus?.percent || 0}%` }}
+      <!-- 已登录身份卡 + 右侧手表状态胶囊 -->
+      <view v-else class="rgm-card p3-identity-card" @click="openEditProfileModal">
+        <view class="p3-id-left">
+          <view class="p3-avatar-wrap">
+            <image class="p3-avatar" :src="profile?.avatar_url || user?.avatar_url || defaultAvatar" mode="aspectFill" />
+            <view class="p3-cam-dot">
+              <RgmIcon name="camera" :size="18" color="#ffffff" />
+            </view>
+          </view>
+          <view class="p3-id-meta">
+            <view class="p3-name-row">
+              <text class="p3-name">{{ profile?.display_name || user?.display_name || "微信跑者" }}</text>
+              <text v-if="userVdot" class="p3-vdot-tag">VDOT {{ userVdot }}</text>
+            </view>
+            <text class="p3-sub-line">
+              {{ userClub?.name ? `${userClub.name}${userClubs.length > 1 ? ` 等${userClubs.length}团` : ''}` : '自由跑者 · 点击编辑名片' }}
             </text>
           </view>
         </view>
+        <view
+          class="p3-watch-pill"
+          :class="{ 'is-bound': garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected }"
+          @click.stop="openSection('device')"
+        >
+          <view class="p3-watch-dot" />
+          <text class="p3-watch-txt">
+            {{ (garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected) ? deviceStatusText : '去绑表 ›' }}
+          </text>
+        </view>
       </view>
-      <view class="ogc-right">
-        <text class="ogc-action-txt">{{ onboardingStatus?.is_completed ? '重设 ›' : '去完善 ›' }}</text>
-      </view>
-    </view>
 
-    <!-- ── 快捷入口：常用的低频功能统一放在顶部一行，避免沉到长页面底部 ── -->
-    <view class="quick-grid">
-      <view class="qg-item" @click="openSection('personal')">
-        <view class="qg-icon-wrap">
-          <text class="qg-icon">🛡️</text>
-          <view v-if="personalNeedsAttention" class="qg-dot" />
+      <!-- 设定向导提示（仅未完成时显示） -->
+      <view v-if="onboardingStatus && !onboardingStatus.is_completed" class="onboard-guide-card" @click="goToOnboarding(1)">
+        <view class="ogc-left">
+          <view class="ogc-icon-circle">
+            <RgmIcon name="zap" :size="30" color="brand" />
+          </view>
+          <view class="ogc-meta">
+            <view class="ogc-title-row">
+              <text class="ogc-title">新手设定向导</text>
+              <text class="ogc-progress-tag">{{ onboardingStatus?.percent || 0 }}%</text>
+            </view>
+          </view>
         </view>
-        <text class="qg-label">隐私设定</text>
-      </view>
-      <view class="qg-item" @click="goToOnboarding(1)">
-        <view class="qg-icon-wrap">
-          <text class="qg-icon">🚀</text>
-          <view v-if="onboardingStatus && !onboardingStatus.is_completed" class="qg-dot" />
+        <view class="ogc-right">
+          <text class="ogc-action-txt">去完善 ›</text>
         </view>
-        <text class="qg-label">向导</text>
       </view>
-      <view class="qg-item" @click="scrollToDeviceCard">
-        <view class="qg-icon-wrap">
-          <text class="qg-icon">⌚</text>
-          <view v-if="!garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected" class="qg-dot" />
-        </view>
-        <text class="qg-label">{{ garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected ? '已绑表' : '绑表' }}</text>
-      </view>
-      <view class="qg-item" @click="goToSharePage">
-        <view class="qg-icon-wrap"><text class="qg-icon">📢</text></view>
-        <text class="qg-label">分享</text>
-      </view>
-      <view class="qg-item" @click="goToManual">
-        <view class="qg-icon-wrap"><text class="qg-icon">📖</text></view>
-        <text class="qg-label">帮助</text>
-      </view>
-    </view>
 
+      <!-- 大群实名待处理紧凑提醒（如有） -->
+      <view
+        v-if="userOrgs && userOrgs.length > 0 && userOrgs.some((o: any) => o.status !== 'confirmed')"
+        class="p3-org-alert-strip"
+        @click="scrollToRequiredFields({ message: '请补齐大群实名资料' })"
+      >
+        <view class="p3-oa-left">
+          <RgmIcon name="shield" :size="28" color="amber" />
+          <text class="p3-oa-txt">
+            {{ userOrgs[0].name }} · {{ userOrgs[0].status === 'expired' || userOrgs[0].is_suspended ? '临时期已过，去补资料' : `临时成员剩 ${userOrgs[0].days_remaining ?? 14} 天 · 待核验` }}
+          </text>
+        </view>
+        <text class="p3-oa-link">去处理 ›</text>
+      </view>
     </template>
 
-    <!-- ── 子页面返回栏：拆分后每个子页面顶部固定显示「‹ 我的」 ── -->
+    <!-- ── 子页面返回栏 ── -->
     <view v-if="activeSection" class="section-back-bar">
       <view class="sbb-back" @click="closeSection">
         <text class="sbb-arrow">‹</text>
@@ -104,196 +97,126 @@
       <view class="sbb-placeholder" />
     </view>
 
-    <!-- ══════════════════════════════════════════════════════════════ -->
-    <!-- TAB 1: 个人资料与账号 (Profile & Account)                     -->
-    <!-- ══════════════════════════════════════════════════════════════ -->
-    <!-- 首页：大群状态 + 跑团 + 功能菜单 -->
+    <!-- L1 主内容区 -->
     <template v-if="!activeSection">
-      <!-- ── CARD: 大群体成员认证与审核状态卡 (Grand Org Membership & Expiry Status) ── -->
-    <view v-if="userOrgs && userOrgs.length > 0" class="section-card org-status-section-card">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🏫</text>
-          <text class="card-title">大群认证</text>
-        </view>
-        <text class="security-chip" style="background: rgba(245, 158, 11, 0.15); color: var(--rgm-amber, #fbbf24); border-color: rgba(245, 158, 11, 0.3);">
-          2周实名核验制
-        </text>
-      </view>
-
-      <view v-for="org in userOrgs" :key="org.id" class="org-status-item" :class="'org-state-' + (org.status || 'temporary')">
-        <view class="org-status-header">
-          <view class="org-name-wrap">
-            <text class="org-item-name">{{ org.name }}</text>
+      <!-- 12个月年度跑量柱状图 + 个人周/月报海报入口 -->
+      <view v-if="user" class="rgm-card p3-year-card">
+        <view class="p3-card-head">
+          <view class="p3-yh-left">
+            <text class="p3-card-title">{{ yearMileageStats.currentYear }} 年度跑量</text>
+            <text class="p3-year-total">{{ yearMileageStats.totalKm }} <text class="p3-unit">km</text></text>
           </view>
-          <view class="org-status-badge" :class="'badge-' + (org.status || 'temporary')">
-            <text v-if="org.status === 'confirmed'">🏅 正式成员 · 已核验</text>
-            <text v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended">🚫 访问已暂停</text>
-            <text v-else-if="org.status === 'pending'">📋 待管理员核验 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
-            <text v-else>⏳ 临时状态 · 余{{ org.days_remaining !== null && org.days_remaining !== undefined ? org.days_remaining : 14 }}天</text>
+          <view class="p3-report-pill" @click="showPersonalReportModal = true">
+            <RgmIcon name="trophy" :size="24" color="brand" />
+            <text class="p3-report-txt">周/月报海报 ›</text>
           </view>
         </view>
 
-        <!-- Status Details -->
-        <view v-if="org.status === 'confirmed'" class="org-status-desc desc-confirmed">
-          <button class="org-action-btn btn-secondary" @click="scrollToRequiredFields({ message: '已为您展开大群实名认证资料与个人参数' })">
-            ✏️ 查看/修改认证资料
-          </button>
-        </view>
-        <view v-else-if="org.status === 'expired' || org.status === 'suspended' || org.is_suspended" class="org-status-desc desc-suspended">
-          <text class="org-desc-text warning-text">⚠️ 临时访问期已到期，大群内容已暂停访问</text>
-          <button class="org-action-btn btn-danger" @click="scrollToRequiredFields({ message: '请在下方补齐必填项' })">📝 去补齐必填项</button>
-        </view>
-        <view v-else-if="org.status === 'pending'" class="org-status-desc desc-pending">
-          <button class="org-action-btn btn-secondary" @click="scrollToRequiredFields({ message: '已为您展开待审核实名认证资料' })">
-            ✏️ 查看/修改资料
-          </button>
-        </view>
-        <view v-else class="org-status-desc desc-temporary">
-          <text class="org-desc-text">⏳ 请在 {{ org.days_remaining }} 天内补齐必填项，超期将暂停访问</text>
-          <view v-if="org.missing_fields && org.missing_fields.length" class="missing-fields-box">
-            <text class="missing-title">待补齐必填项：</text>
-            <text class="missing-labels">{{ org.missing_fields.map((f: any) => f.label).join('、') }}</text>
-          </view>
-          <button class="org-action-btn" @click="scrollToRequiredFields({ message: '请在下方补齐必填字段' })">📝 去补齐必填项</button>
-        </view>
-      </view>
-    </view>
-
-      <!-- ── CARD 1: 我的跑团与管理 (Running Club Card) ── -->
-    <view class="section-card club-card-highlight">
-      <view class="card-title-row">
-        <view class="title-with-icon">
-          <text class="title-icon">🏃</text>
-          <text class="card-title">我的跑团</text>
-        </view>
-        <text v-if="userClub" class="club-role-tag" :class="'role-' + (userClub.role || 'member')">
-          {{ userClub.role === 'owner' ? '👑 团长' : userClub.role === 'coach' ? '🧢 教练' : '🏃 团员' }}
-        </text>
-        <text v-else class="club-role-tag role-none">
-          未入团
-        </text>
-      </view>
-
-      <!-- Joined Club Summary -->
-      <view v-if="userClub" class="joined-club-box">
-        <view class="club-mini-info">
-          <image class="mini-logo" :src="userClub.logo_url || '/static/logo-square.png'" mode="aspectFill" />
-          <view class="mini-texts">
-            <view class="club-title-row">
-              <text class="club-title-text">{{ userClub.name }}</text>
-              <text v-if="userClubs.length > 1" class="multi-club-badge">{{ userClubs.length }}个跑团</text>
+        <view class="p3-bars-row">
+          <view v-for="mItem in yearMileageStats.months" :key="mItem.month" class="p3-bar-col">
+            <view class="p3-bar-track">
+              <view
+                class="p3-bar-fill"
+                :class="{ 'is-cur': mItem.isCurrent, 'is-empty': mItem.km <= 0 }"
+                :style="{ height: mItem.pct + '%' }"
+              />
             </view>
-            <text v-if="userClub.description" class="club-desc-text">{{ userClub.description }}</text>
+            <text class="p3-bar-lbl" :class="{ 'is-cur': mItem.isCurrent }">{{ mItem.month }}月</text>
           </view>
         </view>
       </view>
 
-      <!-- Unjoined Empty State -->
-      <view v-else class="joined-club-box empty-club-box" style="padding: 28rpx; text-align: center;">
-        <text style="font-size: 26rpx; color: var(--rgm-text, #ffffff); font-weight: bold; display: block; margin-bottom: 8rpx;">尚未加入跑团</text>
-        <text style="font-size: 22rpx; color: var(--rgm-text-3, #8e8e93); display: block; line-height: 1.5;">浏览跑团或凭邀请码加入</text>
+      <!-- 3格能力卡：VDOT / 全马PB / 半马PB -->
+      <view v-if="user" class="rgm-card p3-ability-card" @click="openSection('training')">
+        <view class="p3-card-head" style="margin-bottom: 14rpx;">
+          <text class="p3-card-title">个人跑步能力与 PB</text>
+          <text class="p3-sub-link">训练档案 ({{ races.length }}场) ›</text>
+        </view>
+        <view class="p3-ability-grid">
+          <view class="p3-ab-tile">
+            <text class="p3-ab-val is-brand">{{ userVdot ?? '—' }}</text>
+            <text class="p3-ab-lbl">VDOT 跑力</text>
+          </view>
+          <view class="p3-ab-tile">
+            <text class="p3-ab-val">{{ formatSecs(profile?.marathon_pb) }}</text>
+            <text class="p3-ab-lbl">全马 PB</text>
+          </view>
+          <view class="p3-ab-tile">
+            <text class="p3-ab-val">{{ formatSecs(profile?.half_pb) }}</text>
+            <text class="p3-ab-lbl">半马 PB</text>
+          </view>
+        </view>
       </view>
 
-      <!-- Club Action Buttons -->
-      <view class="club-btn-grid">
-        <button class="club-act-btn join-btn" @click="goToTeamPage">
-          {{ userClubs.length > 1 ? `⇄ 切换(${userClubs.length})` : userClub ? '🏃 跑团' : '🏃 发现' }}
-        </button>
-        <button class="club-act-btn create-btn" @click="showJoinModal = true">
-          🔑 凭码入团
-        </button>
-        <button class="club-act-btn self-create-btn" @click="goToCreateMyClub">
-          ✨ 自建跑团
-        </button>
+      <!-- 5个极简设置行 + 主题/字号内联胶囊 -->
+      <view class="section-card profile-menu-card">
+        <view class="pm-item" @click="openSection('device')">
+          <view class="p3-pm-ico"><RgmIcon name="watch" :size="30" color="blue" /></view>
+          <view class="pm-meta"><text class="pm-title">手表连接与数据同步</text></view>
+          <text class="pm-status" :class="{ ok: garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected, warn: !garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected }">{{ deviceStatusText }}</text>
+          <text class="pm-arrow">›</text>
+        </view>
+        <view class="pm-item" @click="openSection('training')">
+          <view class="p3-pm-ico"><RgmIcon name="trophy" :size="30" color="brand" /></view>
+          <view class="pm-meta"><text class="pm-title">赛事档案与周/月目标</text></view>
+          <text class="pm-status">{{ races.length }} 场赛事</text>
+          <text class="pm-arrow">›</text>
+        </view>
+        <view class="pm-item" @click="openSection('personal')">
+          <view class="p3-pm-ico"><RgmIcon name="shield" :size="30" color="green" /></view>
+          <view class="pm-meta"><text class="pm-title">隐私设定与大群实名</text></view>
+          <text v-if="personalNeedsAttention" class="pm-status warn">待补齐</text>
+          <text v-else class="pm-status ok">{{ privacySummaryBadge }}</text>
+          <text class="pm-arrow">›</text>
+        </view>
+        <view class="pm-item" @click="openSection('notifications')">
+          <view class="p3-pm-ico"><RgmIcon name="bell" :size="30" color="amber" /></view>
+          <view class="pm-meta"><text class="pm-title">消息与微信推送提醒</text></view>
+          <text class="pm-status" :class="{ ok: wechatSubscribeEnabled }">{{ wechatSubscribeEnabled ? '已开启' : '未开启' }}</text>
+          <text class="pm-arrow">›</text>
+        </view>
+        <view class="pm-item">
+          <view class="p3-pm-ico"><RgmIcon :name="currentTheme === 'dark' ? 'moon' : 'sun'" :size="30" color="purple" /></view>
+          <view class="pm-meta"><text class="pm-title">界面主题</text></view>
+          <view class="app-seg-group">
+            <view class="app-seg-pill" :class="{ active: currentTheme === 'dark' }" @click="setTheme('dark')">深色</view>
+            <view class="app-seg-pill" :class="{ active: currentTheme === 'volt' }" @click="setTheme('volt')">明亮</view>
+          </view>
+        </view>
+        <view class="pm-item">
+          <view class="p3-pm-ico"><RgmIcon name="sliders" :size="30" color="muted" /></view>
+          <view class="pm-meta"><text class="pm-title">字号大小</text></view>
+          <view class="app-seg-group">
+            <view
+              v-for="opt in FONT_SCALE_OPTIONS"
+              :key="opt.key"
+              class="app-seg-pill"
+              :class="{ active: currentFontScale === opt.key }"
+              @click="setFontScale(opt.key)"
+            >{{ opt.label }}</view>
+          </view>
+        </view>
+        <view class="pm-item" @click="goToTeamPage">
+          <view class="p3-pm-ico"><RgmIcon name="users" :size="30" color="ink" /></view>
+          <view class="pm-meta"><text class="pm-title">{{ userClub ? `我的跑团 (${userClub.name})` : '发现 / 凭码入团' }}</text></view>
+          <text class="pm-status" @click.stop="showJoinModal = true">凭码 ›</text>
+        </view>
+        <view class="pm-item" @click="goToManual">
+          <view class="p3-pm-ico"><RgmIcon name="file" :size="30" color="ink" /></view>
+          <view class="pm-meta"><text class="pm-title">使用手册与帮助</text></view>
+          <text class="pm-status" @click.stop="openSection('support')">在线客服 ›</text>
+        </view>
+        <view class="pm-item pm-item-last" @click="goToSharePage">
+          <view class="p3-pm-ico"><RgmIcon name="share" :size="30" color="ink" /></view>
+          <view class="pm-meta"><text class="pm-title">分享给跑友 / 新手向导</text></view>
+          <text class="pm-status" @click.stop="goToOnboarding(1)">向导 ›</text>
+        </view>
       </view>
-    </view>
 
-    <!-- ── 功能菜单：原来平铺的长表单拆成 4 个子页面，按需进入 ── -->
-    <view class="section-card profile-menu-card">
-      <view class="pm-item" @click="openSection('personal')">
-        <text class="pm-icon">🛡️</text>
-        <view class="pm-meta">
-          <text class="pm-title">隐私设定</text>
-        </view>
-        <text v-if="personalNeedsAttention" class="pm-status warn">待补齐</text>
-        <text v-else class="pm-status ok">{{ privacySummaryBadge }}</text>
-        <text class="pm-arrow">›</text>
+      <!-- 单一底部退出登录 -->
+      <view v-if="user" class="logout-box">
+        <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
       </view>
-      <view class="pm-item" @click="openSection('device')">
-        <text class="pm-icon">⌚</text>
-        <view class="pm-meta">
-          <text class="pm-title">手表连接</text>
-        </view>
-        <text class="pm-status" :class="{ ok: garminConnected || corosConnected || appleWatchConnected || huaweiConnected || suuntoConnected, warn: !garminConnected && !corosConnected && !appleWatchConnected && !huaweiConnected && !suuntoConnected }">{{ deviceStatusText }}</text>
-        <text class="pm-arrow">›</text>
-      </view>
-      <view class="pm-item" @click="openSection('training')">
-        <text class="pm-icon">🏃</text>
-        <view class="pm-meta">
-          <text class="pm-title">训练档案</text>
-        </view>
-        <text class="pm-arrow">›</text>
-      </view>
-      <view class="pm-item" @click="openSection('notifications')">
-        <text class="pm-icon">🔔</text>
-        <view class="pm-meta">
-          <text class="pm-title">消息提醒</text>
-        </view>
-        <text class="pm-status" :class="{ ok: wechatSubscribeEnabled }">{{ wechatSubscribeEnabled ? '已开启' : '未开启' }}</text>
-        <text class="pm-arrow">›</text>
-      </view>
-      <view class="pm-item pm-item-last" @click="openSection('support')">
-        <text class="pm-icon">💬</text>
-        <view class="pm-meta">
-          <text class="pm-title">帮助支持</text>
-        </view>
-        <text class="pm-status" :class="{ ok: hasSupportReply }">{{ hasSupportReply ? '已回复' : '在线' }}</text>
-        <text class="pm-arrow">›</text>
-      </view>
-    </view>
-
-    <!-- ── 外观与字号调节 ── -->
-    <view class="section-card profile-menu-card appearance-card">
-      <view class="pm-item">
-        <text class="pm-icon">🔤</text>
-        <view class="pm-meta">
-          <text class="pm-title">字号大小</text>
-        </view>
-        <view class="app-seg-group">
-          <view
-            v-for="opt in FONT_SCALE_OPTIONS"
-            :key="opt.key"
-            class="app-seg-pill"
-            :class="{ active: currentFontScale === opt.key }"
-            @click="setFontScale(opt.key)"
-          >{{ opt.label }}</view>
-        </view>
-      </view>
-      <view class="pm-item pm-item-last">
-        <text class="pm-icon">🎨</text>
-        <view class="pm-meta">
-          <text class="pm-title">界面主题</text>
-        </view>
-        <view class="app-seg-group">
-          <view
-            class="app-seg-pill"
-            :class="{ active: currentTheme === 'dark' }"
-            @click="setTheme('dark')"
-          >🌑 暗黑</view>
-          <view
-            class="app-seg-pill"
-            :class="{ active: currentTheme === 'volt' }"
-            @click="setTheme('volt')"
-          >☀️ 亮色</view>
-        </view>
-      </view>
-    </view>
-
-    <!-- 底部退出登录（仅登录后显示） -->
-    <view v-if="user" class="logout-box">
-      <button class="logout-btn" @click="handleConfirmLogout">退出登录</button>
-    </view>
     </template>
 
     <!-- 子页面：手表连接 -->
@@ -484,37 +407,37 @@
         <view style="display: grid; grid-template-columns: 1fr 1fr; gap: 14rpx; margin-bottom: 16rpx;">
           <view
             @click="scrollToPrivacyAnchor('#required-personal-fields')"
-            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+            style="padding: 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);"
           >
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">🔒 实名信息</text>
-            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">实名信息</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-ink); display: block; margin-top: 6rpx;">
               {{ mpPiiFilledCount }} / 5 已加密
             </text>
           </view>
           <view
             @click="scrollToPrivacyAnchor('#mp-privacy-controls')"
-            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+            style="padding: 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);"
           >
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">🎯 评语可见</text>
-            <text style="font-size: 27rpx; font-weight: 800; color: #34d399; display: block; margin-top: 6rpx;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">评语可见</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-green); display: block; margin-top: 6rpx;">
               {{ mpCritiqueVisSummary }}
             </text>
           </view>
           <view
             @click="scrollToPrivacyAnchor('#mp-body-and-org')"
-            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+            style="padding: 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);"
           >
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">💓 生理指标</text>
-            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">生理指标</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-ink); display: block; margin-top: 6rpx;">
               {{ mpBodyFilledCount }} / 6 已填
             </text>
           </view>
           <view
             @click="scrollToPrivacyAnchor('#mp-data-lifecycle')"
-            style="padding: 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);"
+            style="padding: 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);"
           >
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">⌚ 手表授权</text>
-            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-text, #ffffff); display: block; margin-top: 6rpx;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">手表授权</text>
+            <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-ink); display: block; margin-top: 6rpx;">
               {{ mpConnectedWatchCount }} 台已连接
             </text>
           </view>
@@ -523,38 +446,38 @@
         <view style="display: flex; flex-wrap: wrap; gap: 10rpx;">
           <text
             @click="scrollToPrivacyAnchor('#mp-privacy-controls')"
-            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
-          >🔒 权限设定</text>
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); color: var(--rgm-ink);"
+          >权限设定</text>
           <text
             @click="scrollToPrivacyAnchor('#required-personal-fields')"
-            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
-          >👤 实名信息</text>
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); color: var(--rgm-ink);"
+          >实名信息</text>
           <text
             @click="scrollToPrivacyAnchor('#mp-body-and-org')"
-            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
-          >💓 生理资料</text>
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); color: var(--rgm-ink);"
+          >生理资料</text>
           <text
             @click="scrollToPrivacyAnchor('#mp-data-lifecycle')"
-            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--rgm-text, #e2e8f0);"
-          >🔐 授权清除</text>
+            style="font-size: 21rpx; padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); color: var(--rgm-ink);"
+          >授权清除</text>
         </view>
       </view>
 
-      <!-- ── SECTION 1: 🔒 权限设定（即时生效） ── -->
+      <!-- ── SECTION 1: 权限设定（即时生效） ── -->
       <view v-if="user" id="mp-privacy-controls" class="section-card privacy-guard-card" style="margin-bottom: 24rpx;">
         <view class="card-title-row">
           <view class="title-with-badge">
-            <text class="card-title">🔒 权限设定</text>
-            <text class="security-chip" style="background: rgba(16, 185, 129, 0.14); color: var(--rgm-green, #34d399); border-color: rgba(16, 185, 129, 0.35);">即时生效</text>
+            <text class="card-title">权限设定</text>
+            <text class="security-chip" style="background: var(--rgm-green-tint); color: var(--rgm-green); border-color: var(--rgm-green-line);">即时生效</text>
           </view>
         </view>
 
-        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
+        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); border-radius: 16rpx; margin-bottom: 16rpx;">
           <view style="flex: 1; padding-right: 20rpx;">
-            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-              🗺️ 路线保密
+            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-ink); display: block; margin-bottom: 6rpx;">
+              路线保密
             </text>
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); line-height: 1.4;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); line-height: 1.4;">
               开启后，对非教练团友隐藏起终点与街道轨迹
             </text>
           </view>
@@ -565,12 +488,12 @@
           />
         </view>
 
-        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx; margin-bottom: 16rpx;">
+        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); border-radius: 16rpx; margin-bottom: 16rpx;">
           <view style="flex: 1; padding-right: 20rpx;">
-            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-              💓 生理保密
+            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-ink); display: block; margin-bottom: 6rpx;">
+              生理保密
             </text>
-            <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); line-height: 1.4;">
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); line-height: 1.4;">
               开启后，仅本人与跑团认证教练/1v1 师傅可见生理恢复指标
             </text>
           </view>
@@ -581,22 +504,22 @@
           />
         </view>
 
-        <!-- 🎯 评语可见（4-tier selector） -->
-        <view style="padding: 20rpx; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16rpx;">
-          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block; margin-bottom: 6rpx;">
-            🎯 评语可见
+        <!-- 评语可见（4-tier selector） -->
+        <view style="padding: 20rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); border-radius: 16rpx;">
+          <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-ink); display: block; margin-bottom: 6rpx;">
+            评语可见
           </text>
-          <text style="font-size: 22rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-bottom: 16rpx; line-height: 1.45;">
+          <text style="font-size: 22rpx; color: var(--rgm-ink-2); display: block; margin-bottom: 16rpx; line-height: 1.45;">
             默认仅自己可见；选择后将与网页版实时同步
           </text>
 
           <view style="display: flex; flex-direction: column; gap: 12rpx;">
             <view
               v-for="opt in [
-                { value: 'self', label: '🔒 仅自己', desc: '默认设置：仅本人可见，对跑团、教练与师傅均隐藏' },
-                { value: 'coach_mentor', label: '👨‍🏫 教练师傅', desc: '本人、结对师傅与跑团认证教练可见（不含团长/管理员）' },
-                { value: 'selected_clubs', label: '🏃 指定跑团', desc: '本人、认证教练/师傅，及所选跑团成员可见' },
-                { value: 'all_clubs', label: '🌐 全部跑团', desc: '本人、认证教练/师傅，及所有所在跑团成员可见' },
+                { value: 'self', label: '仅自己', desc: '默认设置：仅本人可见，对跑团、教练与师傅均隐藏' },
+                { value: 'coach_mentor', label: '教练与师傅', desc: '本人、结对师傅与跑团认证教练可见（不含团长/管理员）' },
+                { value: 'selected_clubs', label: '指定跑团', desc: '本人、认证教练/师傅，及所选跑团成员可见' },
+                { value: 'all_clubs', label: '全部跑团', desc: '本人、认证教练/师傅，及所有所在跑团成员可见' },
               ]"
               :key="opt.value"
               @tap="handleSelectCritiqueVisibility(opt.value)"
@@ -604,25 +527,25 @@
                 padding: '18rpx 20rpx',
                 borderRadius: '14rpx',
                 border: (profile?.canova_critique_visibility || 'self') === opt.value
-                  ? '1px solid rgba(16, 185, 129, 0.65)'
-                  : '1px solid rgba(255, 255, 255, 0.08)',
+                  ? '1px solid var(--rgm-green-line)'
+                  : '1px solid var(--rgm-line)',
                 background: (profile?.canova_critique_visibility || 'self') === opt.value
-                  ? 'rgba(16, 185, 129, 0.14)'
-                  : 'rgba(255, 255, 255, 0.02)',
+                  ? 'var(--rgm-green-tint)'
+                  : 'var(--rgm-card)',
               }"
             >
               <view style="display: flex; align-items: center; justify-content: space-between;">
-                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-ink);">
                   {{ opt.label }}
                 </text>
                 <text
                   v-if="(profile?.canova_critique_visibility || 'self') === opt.value"
-                  style="font-size: 20rpx; font-weight: 700; color: #10b981; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(16, 185, 129, 0.16);"
+                  style="font-size: 20rpx; font-weight: 700; color: var(--rgm-green); padding: 4rpx 12rpx; border-radius: 999rpx; background: var(--rgm-green-tint);"
                 >
                   当前
                 </text>
               </view>
-              <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 6rpx; line-height: 1.4;">
+              <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block; margin-top: 6rpx; line-height: 1.4;">
                 {{ opt.desc }}
               </text>
             </view>
@@ -630,9 +553,9 @@
 
           <view
             v-if="(profile?.canova_critique_visibility || 'self') === 'selected_clubs'"
-            style="margin-top: 16rpx; padding-top: 16rpx; border-top: 1px solid rgba(255, 255, 255, 0.08);"
+            style="margin-top: 16rpx; padding-top: 16rpx; border-top: 1px solid var(--rgm-line);"
           >
-            <text style="font-size: 22rpx; font-weight: 600; color: var(--rgm-text, #e2e8f0); display: block; margin-bottom: 12rpx;">
+            <text style="font-size: 22rpx; font-weight: 600; color: var(--rgm-ink); display: block; margin-bottom: 12rpx;">
               选择跑团（可多选）：
             </text>
             <view v-if="userClubs.length > 0" style="display: flex; flex-wrap: wrap; gap: 12rpx;">
@@ -646,30 +569,30 @@
                   fontSize: '22rpx',
                   fontWeight: 600,
                   border: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                    ? '1px solid #10b981'
-                    : '1px solid rgba(255, 255, 255, 0.16)',
+                    ? '1px solid var(--rgm-green)'
+                    : '1px solid var(--rgm-line)',
                   background: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                    ? 'rgba(16, 185, 129, 0.2)'
-                    : 'rgba(255, 255, 255, 0.04)',
+                    ? 'var(--rgm-green-tint)'
+                    : 'var(--rgm-card)',
                   color: (profile?.canova_critique_club_ids || []).includes(String(club.id))
-                    ? '#34d399'
-                    : 'var(--rgm-text-muted, #cbd5e1)',
+                    ? 'var(--rgm-green)'
+                    : 'var(--rgm-ink-2)',
                 }"
               >
                 <text>{{ (profile?.canova_critique_club_ids || []).includes(String(club.id)) ? '✓ ' : '+ ' }}{{ club.name || club.id }}</text>
               </view>
             </view>
-            <text v-else style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block;">
+            <text v-else style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">
               当前暂未加入跑团，保存后暂仅本人与认证教练/师傅可见。
             </text>
           </view>
 
           <view
             v-if="((profile?.canova_critique_visibility === 'selected_clubs') || (profile?.canova_critique_visibility === 'all_clubs')) && profile?.hide_biometrics"
-            style="margin-top: 16rpx; padding: 14rpx 16rpx; border-radius: 12rpx; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35);"
+            style="margin-top: 16rpx; padding: 14rpx 16rpx; border-radius: 12rpx; background: var(--rgm-amber-tint); border: 1px solid var(--rgm-amber-line);"
           >
-            <text style="font-size: 21rpx; color: #fbbf24; line-height: 1.45; display: block;">
-              💡 已开启生理保密：普通团友查看评语时，心率、HRV 与睡眠具体数值自动脱敏（教练与师傅不受影响）。
+            <text style="font-size: 21rpx; color: var(--rgm-amber); line-height: 1.45; display: block;">
+              已开启生理保密：普通团友查看评语时，心率、HRV 与睡眠具体数值自动脱敏（教练与师傅不受影响）。
             </text>
           </view>
         </view>
@@ -718,24 +641,24 @@
         <view
           v-if="user"
           @click="openEditProfileModal"
-          style="display: flex; align-items: center; justify-content: space-between; gap: 18rpx; padding: 16rpx 18rpx; border-radius: 16rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 20rpx;"
+          style="display: flex; align-items: center; justify-content: space-between; gap: 18rpx; padding: 16rpx 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); margin-bottom: 20rpx;"
         >
           <view style="display: flex; align-items: center; gap: 16rpx;">
             <image
               :src="profile?.avatar_url || user?.avatar_url || defaultAvatar"
               mode="aspectFill"
-              style="width: 72rpx; height: 72rpx; border-radius: 999rpx; border: 1px solid rgba(255,255,255,0.15);"
+              style="width: 72rpx; height: 72rpx; border-radius: 999rpx; border: 1px solid var(--rgm-line);"
             />
             <view>
-              <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+              <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-ink); display: block;">
                 {{ profile?.display_name || user?.display_name || '微信跑者' }}
               </text>
-              <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 2rpx;">
+              <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block; margin-top: 2rpx;">
                 个人形象
               </text>
             </view>
           </view>
-          <text style="font-size: 22rpx; font-weight: 700; color: #fc4c02;">✏️ 编辑 ›</text>
+          <text style="font-size: 22rpx; font-weight: 700; color: var(--rgm-brand-text);">编辑 ›</text>
         </view>
 
         <view class="form-grid-2">
@@ -1176,24 +1099,6 @@
                 />
               </view>
 
-              <!-- 急救 / 医护资质认证 (选填 · 用于官兔评估加权) -->
-              <view class="form-group full-width-group">
-                <text class="label">🚑 急救 / 医护资质（选填 · 马拉松官兔优先项）</text>
-                <picker
-                  mode="selector"
-                  :range="FIRST_AID_CERT_LABELS"
-                  :value="firstAidPickerIndex"
-                  @change="onFirstAidCertChange"
-                >
-                  <view class="picker-input-box">
-                    <text :class="{ 'placeholder-text': !profile?.first_aid_cert_type }">
-                      {{ FIRST_AID_CERT_LABELS[firstAidPickerIndex] || '暂未持有急救证书' }}
-                    </text>
-                    <text class="picker-arrow">▼</text>
-                  </view>
-                </picker>
-              </view>
-
               <!-- 健康声明 -->
               <view class="form-group full-width-group">
                 <view
@@ -1239,12 +1144,12 @@
           </view>
 
           <view style="display: flex; flex-direction: column; gap: 14rpx;">
-            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);">
               <view style="flex: 1; padding-right: 12rpx;">
-                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-ink); display: block;">
                   佳明手表
                 </text>
-                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block; margin-top: 4rpx;">
                   {{ garminConnected ? `已连接 ✓ · ${garminEmail || ''}` : '未连接' }}
                 </text>
               </view>
@@ -1258,16 +1163,16 @@
               <text
                 v-else
                 @click="openSection('device')"
-                style="font-size: 22rpx; font-weight: 700; color: #60a5fa;"
+                style="font-size: 22rpx; font-weight: 700; color: var(--rgm-blue);"
               >去连接 ›</text>
             </view>
 
-            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);">
               <view style="flex: 1; padding-right: 12rpx;">
-                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-ink); display: block;">
                   高驰手表
                 </text>
-                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block; margin-top: 4rpx;">
                   {{ corosConnected ? `已连接 ✓ · ${corosAccount || ''}` : '未连接' }}
                 </text>
               </view>
@@ -1281,16 +1186,16 @@
               <text
                 v-else
                 @click="openSection('device')"
-                style="font-size: 22rpx; font-weight: 700; color: #fc4c02;"
+                style="font-size: 22rpx; font-weight: 700; color: var(--rgm-brand-text);"
               >去连接 ›</text>
             </view>
 
-            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);">
+            <view style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 18rpx; border-radius: 14rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line);">
               <view style="flex: 1; padding-right: 12rpx;">
-                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff); display: block;">
+                <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-ink); display: block;">
                   其他手表
                 </text>
-                <text style="font-size: 21rpx; color: var(--rgm-text-muted, #94a3b8); display: block; margin-top: 4rpx;">
+                <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block; margin-top: 4rpx;">
                   {{ (appleWatchConnected || huaweiConnected || suuntoConnected) ? '已连接 ✓ · 苹果/华为/颂拓导入已激活' : '苹果 / 华为 / 颂拓 · 未连接' }}
                 </text>
               </view>
@@ -1304,7 +1209,7 @@
               <text
                 v-else
                 @click="openSection('device')"
-                style="font-size: 22rpx; font-weight: 700; color: var(--rgm-text-muted, #94a3b8);"
+                style="font-size: 22rpx; font-weight: 700; color: var(--rgm-ink-2);"
               >去连接 ›</text>
             </view>
           </view>
@@ -1640,7 +1545,7 @@
           :step="10"
           :disabled="goalMode === 'custom'"
           activeColor="#fc4c02"
-          backgroundColor="#2c2c2e"
+          :backgroundColor="isVolt ? '#E5E7EB' : '#2c2c2e'"
           block-size="20"
           @change="(e: any) => onTargetSliderChange(e.detail.value)"
         />
@@ -1712,7 +1617,7 @@
             :max="160"
             :step="5"
             activeColor="#10b981"
-            backgroundColor="#2c2c2e"
+            :backgroundColor="isVolt ? '#E5E7EB' : '#2c2c2e'"
             block-size="20"
             @change="(e: any) => onWeeklySliderChange(e.detail.value)"
           />
@@ -1834,6 +1739,30 @@
                 :class="{ active: race.priority == 3 || race.priority === 'C' }"
                 @click="handleUpdateRacePriority(race.id || race.name, 3)"
               >C 标 (拉练)</button>
+            </view>
+          </view>
+
+          <!-- E3 越野跑核心 4 格摘要 -->
+          <view
+            v-if="isTrail(race.race_type) && (getRaceInfoVal(race, 'race_distance_km') || getRaceInfoVal(race, 'elevation_gain_m') || getRaceInfoVal(race, 'max_altitude_m') || getRaceInfoVal(race, 'cutoff_notes'))"
+            class="p3-trail-4grid"
+            @click.stop="openEditRaceModal(race)"
+          >
+            <view class="p3-t4-cell">
+              <text class="p3-t4-val">{{ getRaceInfoVal(race, 'race_distance_km') ? getRaceInfoVal(race, 'race_distance_km') + 'k' : '—' }}</text>
+              <text class="p3-t4-lbl">赛程</text>
+            </view>
+            <view class="p3-t4-cell">
+              <text class="p3-t4-val">{{ getRaceInfoVal(race, 'elevation_gain_m') ? '+' + getRaceInfoVal(race, 'elevation_gain_m') + 'm' : '—' }}</text>
+              <text class="p3-t4-lbl">爬升 D+</text>
+            </view>
+            <view class="p3-t4-cell">
+              <text class="p3-t4-val">{{ getRaceInfoVal(race, 'max_altitude_m') ? getRaceInfoVal(race, 'max_altitude_m') + 'm' : '—' }}</text>
+              <text class="p3-t4-lbl">最高海拔</text>
+            </view>
+            <view class="p3-t4-cell">
+              <text class="p3-t4-val">{{ getRaceInfoVal(race, 'cutoff_notes') ? '已填' : '—' }}</text>
+              <text class="p3-t4-lbl">关门补给</text>
             </view>
           </view>
 
@@ -3265,6 +3194,12 @@
         </view>
       </view>
     </view>
+    <!-- 个人周/月报海报弹窗 -->
+    <PersonalReportModal
+      :visible="showPersonalReportModal"
+      @close="showPersonalReportModal = false"
+    />
+
     <!-- 个人打卡 & 已完赛赛事分享朋友圈卡片弹窗 -->
     <PersonalShareCardModal
       :visible="showRaceShareCard"
@@ -3281,6 +3216,7 @@
 import {
   currentTheme,
   themeClass,
+  isVolt,
   setTheme,
   applySystemTheme,
   currentFontScale,
@@ -3292,6 +3228,8 @@ import { explainTerm } from "../../utils/glossary";
 import { trackClick, trackModal, trackFunnelStep } from "../../utils/telemetry";
 import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
+import PersonalReportModal from "../../components/PersonalReportModal.vue";
+import RgmIcon from "../../components/RgmIcon.vue";
 import { ref, computed, watch } from "vue";
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
@@ -4118,6 +4056,40 @@ const inviteCodeInput = ref("");
 const joiningClub = ref(false);
 const userClubs = ref<any[]>([]);
 
+const showPersonalReportModal = ref(false);
+const userVdot = ref<number | null>(null);
+const userActivities = ref<any[]>([]);
+
+const yearMileageStats = computed(() => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const monthSums = Array(12).fill(0);
+  for (const act of userActivities.value || []) {
+    const rawDate = String(act?.start_date_local || act?.start_time || "");
+    if (!rawDate) continue;
+    const yr = Number(rawDate.slice(0, 4));
+    const mo = Number(rawDate.slice(5, 7));
+    if (yr === currentYear && mo >= 1 && mo <= 12) {
+      const distKm = act?.distance_km != null ? Number(act.distance_km) : Number(act?.distance_meters || 0) / 1000;
+      if (isFinite(distKm) && distKm > 0) monthSums[mo - 1] += distKm;
+    }
+  }
+  const hasRealActs = monthSums.some((v) => v > 0);
+  const displayVals = hasRealActs
+    ? monthSums.map((v) => Math.round(v))
+    : (monthlyTargets.value || []).slice(0, 12).map((v) => Number(v || 0));
+  const maxVal = Math.max(10, ...displayVals);
+  const totalKm = Math.round(monthSums.reduce((acc, v) => acc + v, 0));
+  const months = displayVals.map((km, idx) => ({
+    month: idx + 1,
+    km,
+    pct: km > 0 ? Math.max(10, Math.min(100, Math.round((km / maxVal) * 100))) : 8,
+    isCurrent: idx + 1 === currentMonth,
+  }));
+  return { currentYear, totalKm, months };
+});
+
 const isAnyProfilePageModalOpen = computed(() =>
   Boolean(
     showAuthModal.value ||
@@ -4125,7 +4097,8 @@ const isAnyProfilePageModalOpen = computed(() =>
       showJoinModal.value ||
       showEditProfileModal.value ||
       showRaceModal.value ||
-      showPurgeConfirmModal.value
+      showPurgeConfirmModal.value ||
+      showPersonalReportModal.value
   )
 );
 watch(isAnyProfilePageModalOpen, (open) => setTabBarHidden(open, "profile_page"));
@@ -4446,15 +4419,23 @@ async function loadProfileData() {
   const uid = user.value.id;
 
   try {
-    const [res, clubRes, orgRes, onboardRes] = await Promise.all([
+    const [res, clubRes, orgRes, onboardRes, sciRes, actRes] = await Promise.all([
       request(`/api/profile/${uid}`),
       request(`/api/team/my-clubs/${uid}`),
       request(`/api/org/my-orgs/${uid}`),
       request(`/api/profile/${uid}/onboarding-status`).catch(() => null),
+      request(`/api/science/metrics/${uid}`).catch(() => null),
+      request(`/api/miniapp/activities/${uid}`).catch(() => null),
     ]);
 
     if (onboardRes) {
       onboardingStatus.value = onboardRes;
+    }
+    if (sciRes?.vdot != null) {
+      userVdot.value = Number(sciRes.vdot);
+    }
+    if (Array.isArray(actRes?.activities)) {
+      userActivities.value = actRes.activities;
     }
 
     userOrgs.value = orgRes?.organizations || [];
@@ -5812,7 +5793,10 @@ async function handleBindGarmin() {
 
     if (res?.needs_mfa) {
       needsMfa.value = true;
-      uni.showToast({ title: "请输入邮箱中的验证码", icon: "none" });
+      if (res?.domain) {
+        inputDomain.value = res.domain;
+      }
+      uni.showToast({ title: res?.message || "请输入邮箱中的验证码", icon: "none" });
       return;
     }
 
@@ -6091,8 +6075,11 @@ async function handleBindCoros() {
 
     if (res?.needs_2fa) {
       needsCoros2fa.value = true;
-      trackFunnelStep("bind_coros_2fa_prompt", "高驰绑定触发短信两步验证");
-      uni.showToast({ title: "已向手机发送验证码", icon: "none" });
+      if (res?.domain) {
+        inputCorosDomain.value = res.domain;
+      }
+      trackFunnelStep("bind_coros_2fa_prompt", "高驰绑定触发短信两步验证", { domain: inputCorosDomain.value });
+      uni.showToast({ title: res?.message || "已向手机发送验证码", icon: "none" });
       return;
     }
 
@@ -10693,6 +10680,171 @@ onShareTimeline(() => {
   font-weight: 800;
   color: #090b10;
 }
+
+/* ── Minimalist Profile L1 + E3 Styles ── */
+.p3-identity-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+  margin-bottom: 18rpx;
+}
+.p3-id-left { display: flex; flex-direction: row; align-items: center; gap: 16rpx; min-width: 0; flex: 1; }
+.p3-avatar-wrap { position: relative; width: 88rpx; height: 88rpx; flex-shrink: 0; }
+.p3-avatar { width: 88rpx; height: 88rpx; border-radius: 50%; border: 2rpx solid var(--rgm-line); background: var(--rgm-card-2); }
+.p3-cam-dot {
+  position: absolute;
+  right: -2rpx;
+  bottom: -2rpx;
+  width: 30rpx;
+  height: 30rpx;
+  border-radius: 50%;
+  background: var(--rgm-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid var(--rgm-card);
+}
+.p3-id-meta { display: flex; flex-direction: column; gap: 6rpx; min-width: 0; flex: 1; }
+.p3-name-row { display: flex; flex-direction: row; align-items: center; gap: 10rpx; min-width: 0; }
+.p3-name { font-size: 32rpx; font-weight: 800; color: var(--rgm-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p3-vdot-tag {
+  font-size: 19rpx;
+  font-weight: 800;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
+  border: 1rpx solid var(--rgm-brand-line);
+  flex-shrink: 0;
+}
+.p3-sub-line { font-size: 21rpx; color: var(--rgm-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p3-watch-pill {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+  flex-shrink: 0;
+}
+.p3-watch-pill.is-bound { background: var(--rgm-green-tint); border-color: var(--rgm-green-line); }
+.p3-watch-dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: var(--rgm-brand); }
+.p3-watch-pill.is-bound .p3-watch-dot { background: var(--rgm-green); }
+.p3-watch-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-brand-text); white-space: nowrap; }
+.p3-watch-pill.is-bound .p3-watch-txt { color: var(--rgm-green); }
+
+.p3-org-alert-strip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 22rpx;
+  margin-bottom: 18rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+}
+.p3-oa-left { display: flex; flex-direction: row; align-items: center; gap: 10rpx; min-width: 0; flex: 1; }
+.p3-oa-txt { font-size: 22rpx; font-weight: 700; color: var(--rgm-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p3-oa-link { font-size: 22rpx; font-weight: 800; color: var(--rgm-amber); white-space: nowrap; margin-left: 10rpx; }
+
+.p3-year-card { margin-bottom: 18rpx; }
+.p3-card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 18rpx; }
+.p3-yh-left { display: flex; flex-direction: row; align-items: baseline; gap: 12rpx; }
+.p3-card-title { font-size: 26rpx; font-weight: 800; color: var(--rgm-ink); }
+.p3-year-total { font-size: 32rpx; font-weight: 800; color: var(--rgm-ink); font-variant-numeric: tabular-nums; }
+.p3-unit { font-size: 20rpx; font-weight: 600; color: var(--rgm-ink-3); }
+.p3-report-pill {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+}
+.p3-report-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-brand-text); white-space: nowrap; }
+.p3-sub-link { font-size: 22rpx; font-weight: 700; color: var(--rgm-brand-text); }
+
+.p3-bars-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8rpx;
+  height: 112rpx;
+}
+.p3-bar-col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6rpx;
+}
+.p3-bar-track {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 6rpx;
+  background: var(--rgm-card-2);
+  overflow: hidden;
+}
+.p3-bar-fill {
+  width: 100%;
+  border-radius: 6rpx 6rpx 2rpx 2rpx;
+  background: var(--rgm-ink-3);
+}
+.p3-bar-fill.is-cur { background: var(--rgm-brand); }
+.p3-bar-fill.is-empty { background: var(--rgm-track); }
+.p3-bar-lbl { font-size: 17rpx; color: var(--rgm-ink-3); font-variant-numeric: tabular-nums; }
+.p3-bar-lbl.is-cur { color: var(--rgm-brand-text); font-weight: 800; }
+
+.p3-ability-card { margin-bottom: 18rpx; }
+.p3-ability-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12rpx; }
+.p3-ab-tile {
+  padding: 16rpx 12rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+.p3-ab-val { font-size: 30rpx; font-weight: 800; color: var(--rgm-ink); font-variant-numeric: tabular-nums; }
+.p3-ab-val.is-brand { color: var(--rgm-brand-text); }
+.p3-ab-lbl { font-size: 20rpx; color: var(--rgm-ink-3); }
+
+.p3-pm-ico { width: 44rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+.p3-trail-4grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10rpx;
+  margin-top: 14rpx;
+  margin-bottom: 8rpx;
+}
+.p3-t4-cell {
+  padding: 12rpx 8rpx;
+  border-radius: 14rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+.p3-t4-val { font-size: 22rpx; font-weight: 800; color: var(--rgm-ink); font-variant-numeric: tabular-nums; }
+.p3-t4-lbl { font-size: 18rpx; color: var(--rgm-ink-3); }
 
 </style>
 

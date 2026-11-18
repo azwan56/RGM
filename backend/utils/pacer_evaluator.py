@@ -15,7 +15,7 @@ Capabilities:
    - S2 (25%): Pacing Stability / Metronome Index via Top-N Cruise Portfolio (巡航控速精准度·代表作择优制)
    - S3 (20%): Training Readiness & Endurance Base (训练水平与专项耐力储备)
    - S4 (15%): Race Experience & Execution Track Record (赛事履历与完赛经验)
-   - S5 (10%): Pacing & Leadership Credentials (领跑实战与官方/急救资质)
+   - S5 (10%): Pacing & Leadership Credentials (领跑实战与官兔履历)
    - S6 ( 5%): Autonomic Recovery & Reliability (生理恢复与出战可靠性, privacy-safe)
 5. Outputs all-group suitability matrix, 6-month mileage bars, showcase steady-run 1km split curve,
    club-wide batch candidate radar, and on-demand AI blind-pacing prescription & recruitment bio.
@@ -98,13 +98,6 @@ NOMINAL_DISTANCES_KM: Dict[str, float] = {
     "fm": 42.195,
     "hm": 21.0975,
     "10k": 10.0,
-}
-
-FIRST_AID_LABELS: Dict[str, str] = {
-    "medical_pro": "🏥 执业医护人员",
-    "aha": "❤️ AHA 急救认证",
-    "red_cross": "➕ 红十字救护员证",
-    "": "未登记急救资质",
 }
 
 
@@ -746,22 +739,36 @@ def _collect_verified_races_and_pacer_history(
                 "is_trail": is_trail,
             })
 
-    # Auto-supplement unlogged full/half marathon watch activities so newly synced runners aren't penalized
+    # Auto-supplement unlogged full/half marathon official road race watch activities
+    # Strictly excludes trail/mountain runs, track/indoor runs, and weekday/afternoon/LSD training runs.
     for act in (activities or []):
-        if act.get("exclude_mode") == "excluded" or act.get("is_excluded"):
+        if act.get("exclude_mode") in ("excluded", "ignore_vdot") or act.get("is_excluded"):
             continue
         sp_low = str(act.get("sport_type") or "").lower()
         nm_low = str(act.get("name") or "").lower()
-        if "trail" in sp_low or not LocalStore.is_running_activity(act.get("sport_type")):
+        if not LocalStore.is_running_activity(act.get("sport_type")):
             continue
+        if any(
+            bad in sp_low or bad in nm_low
+            for bad in (
+                "trail", "越野", "utmb", "山径", "登山", "徒步",
+                "track", "运动场", "操场", "treadmill", "indoor", "跑步机", "室内",
+            )
+        ):
+            continue
+
         dist_km = float(act.get("distance_meters") or 0.0) / 1000.0
         time_s = int(round(float(act.get("moving_time_seconds") or 0.0)))
         elp_s = int(round(float(act.get("elapsed_time_seconds") or time_s)))
-        eff_s = elp_s if (elp_s > time_s and (elp_s - time_s) <= 1800) else time_s
-        if dist_km < 20.8 or eff_s <= 3000:
+        pause_s = max(0, elp_s - time_s)
+        eff_s = elp_s if (elp_s > time_s and pause_s <= 1800) else time_s
+        elev_m = float(act.get("elevation_gain_meters") or 0.0)
+        avg_hr = float(act.get("average_heartrate") or 0.0)
+        if dist_km < 21.0 or eff_s <= 3300:
             continue
 
-        st_str = str(act.get("start_time") or "")[:10]
+        raw_st = str(act.get("start_time") or "")
+        st_str = raw_st[:10]
         try:
             act_d = datetime.strptime(st_str, "%Y-%m-%d").date()
         except Exception:
@@ -769,14 +776,61 @@ def _collect_verified_races_and_pacer_history(
         if any(abs((act_d - cd).days) <= 1 for cd in covered_dates):
             continue
 
-        # Classify watch-detected FM (41.6-44.5km) or HM (20.85-22.2km with race-like effort or race keyword)
-        is_watch_fm = 41.6 <= dist_km <= 44.5 and 7500 <= eff_s <= 24000
-        is_watch_hm = (
-            20.85 <= dist_km <= 22.2
-            and 3300 <= eff_s <= 11500
+        local_mins: Optional[int] = None
+        if len(raw_st) >= 16 and raw_st[11:13].isdigit() and raw_st[14:16].isdigit():
+            local_mins = int(raw_st[11:13]) * 60 + int(raw_st[14:16])
+
+        is_training_title = any(
+            k in nm_low
+            for k in (
+                "长距离", "long run", "lsd", "拉练", "约跑", "有氧耐", "慢跑",
+                "恢复", "模拟", "测试", "打卡", "通勤", "热身", "间歇", "interval",
+            )
+        )
+        has_explicit_race_title = (
+            any(
+                k in nm_low
+                for k in ("马拉松", "全马", "半马", "半程", "marathon", "锦标赛", "公开赛", "精英赛", "路跑赛")
+            )
+            and not is_training_title
+        )
+        is_weekend = act_d.weekday() in (5, 6)
+
+        is_watch_fm = bool(
+            41.95 <= dist_km <= 43.9
+            and 7200 <= eff_s <= 24000
+            and elev_m <= 650.0
+            and pause_s <= 600
+            and not is_training_title
             and (
-                any(k in nm_low for k in ("马拉松", "半马", "比赛", "marathon", "race", "半程"))
-                or float(act.get("average_heartrate") or 0) >= 148
+                has_explicit_race_title
+                or (
+                    is_weekend
+                    and local_mins is not None
+                    and (6 * 60 + 30) <= local_mins <= (10 * 60 + 30)
+                    and (avg_hr <= 0 or avg_hr >= 142.0)
+                )
+            )
+        )
+
+        is_hm_workout_title = is_training_title or any(
+            k in nm_low for k in ("训练", "有氧", "阈值", "tempo", "easy")
+        )
+        is_watch_hm = bool(
+            not is_watch_fm
+            and 21.05 <= dist_km <= 21.62
+            and 3400 <= eff_s <= 11400
+            and elev_m <= 320.0
+            and pause_s <= 300
+            and not is_hm_workout_title
+            and (
+                has_explicit_race_title
+                or (
+                    is_weekend
+                    and local_mins is not None
+                    and (6 * 60 + 50) <= local_mins <= (8 * 60 + 35)
+                    and (avg_hr >= 150.0 if avg_hr > 0 else False)
+                )
             )
         )
         if is_watch_fm or is_watch_hm:
@@ -790,7 +844,7 @@ def _collect_verified_races_and_pacer_history(
                 "date": st_str,
                 "distance_km": nom_d,
                 "is_trail": False,
-                "race_level": "手表轨迹核验",
+                "race_level": "手表赛事核验",
                 "finish_sec": norm_s,
                 "finish_time": format_duration(norm_s),
                 "target_sec": 0,
@@ -803,9 +857,14 @@ def _collect_verified_races_and_pacer_history(
 
     completed_list.sort(key=lambda r: r.get("date") or "", reverse=True)
 
-    road_24m = [r for r in completed_list if not r["is_trail"] and (r.get("date") or "") >= cutoff_24m]
-    fm_24m = [r for r in road_24m if r["distance_km"] >= 40.0]
-    hm_24m = [r for r in road_24m if 19.5 <= r["distance_km"] < 40.0]
+    road_all = [r for r in completed_list if not r["is_trail"]]
+    fm_all = [r for r in road_all if r["distance_km"] >= 40.0 and 7200 <= int(r.get("finish_sec") or 0) <= 25200]
+    hm_all = [r for r in road_all if 19.5 <= r["distance_km"] < 40.0 and 3400 <= int(r.get("finish_sec") or 0) <= 13500]
+    tk_all = [r for r in road_all if 8.5 <= r["distance_km"] < 15.0 and 1500 <= int(r.get("finish_sec") or 0) <= 5400]
+
+    road_24m = [r for r in road_all if (r.get("date") or "") >= cutoff_24m]
+    fm_24m = [r for r in fm_all if (r.get("date") or "") >= cutoff_24m]
+    hm_24m = [r for r in hm_all if (r.get("date") or "") >= cutoff_24m]
     official_pacer_races = [r for r in completed_list if r.get("was_official_pacer")]
 
     return {
@@ -814,8 +873,14 @@ def _collect_verified_races_and_pacer_history(
         "road_24m_count": len(road_24m),
         "fm_24m_count": len(fm_24m),
         "hm_24m_count": len(hm_24m),
-        "best_fm_24m_sec": min([r["finish_sec"] for r in fm_24m if r["finish_sec"] > 0], default=0),
-        "best_hm_24m_sec": min([r["finish_sec"] for r in hm_24m if r["finish_sec"] > 0], default=0),
+        "fm_all_count": len(fm_all),
+        "hm_all_count": len(hm_all),
+        "tk_all_count": len(tk_all),
+        "best_fm_all_sec": min([r["finish_sec"] for r in fm_all], default=0),
+        "best_hm_all_sec": min([r["finish_sec"] for r in hm_all], default=0),
+        "best_10k_all_sec": min([r["finish_sec"] for r in tk_all], default=0),
+        "best_fm_24m_sec": min([r["finish_sec"] for r in fm_24m], default=0),
+        "best_hm_24m_sec": min([r["finish_sec"] for r in hm_24m], default=0),
         "official_pacer_races": official_pacer_races,
     }
 
@@ -855,6 +920,56 @@ def _evaluate_group_run_leadership(pacer_records: List[Dict[str, Any]]) -> Dict[
         "club_pacer_total_count": total_count,
         "club_pacer_verified_count": verified_count,
         "club_pacer_on_target_count": on_target_count,
+    }
+
+
+def _extract_official_profile_pbs(uid: str, prof: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Extracts strictly official PB records explicitly stored on the runner profile or org registration,
+    filtering out legacy SQLite schema default placeholders and out-of-range typos,
+    WITHOUT pulling training-run times from general activities.
+    """
+    raw_mp = LocalStore._parse_duration_sec(prof.get("marathon_pb"))
+    raw_hp = LocalStore._parse_duration_sec(prof.get("half_pb"))
+    raw_tk = LocalStore._parse_duration_sec(prof.get("ten_k_pb"))
+    raw_fk = LocalStore._parse_duration_sec(prof.get("five_k_pb"))
+    org_mp = LocalStore._parse_duration_sec(prof.get("org_marathon_pb"))
+
+    is_non_alex = (
+        uid not in ("u_df65d9a588c9", "user_001")
+        and str(prof.get("display_name") or "") != "Alex"
+    )
+    has_default_tk_fk = (raw_tk in (2400, 2426) and raw_fk in (1140, 1164) and is_non_alex)
+    is_legacy_10800_tuple = (raw_mp == 10800 and raw_hp == 5100 and raw_tk == 2400 and raw_fk == 1140)
+    is_legacy_11370_tuple = (
+        raw_mp == 11370 and raw_hp == 5457 and raw_tk == 2426 and raw_fk == 1164 and is_non_alex
+    )
+    mp_is_placeholder = (
+        is_legacy_10800_tuple
+        or is_legacy_11370_tuple
+        or (raw_mp in (10800, 11370) and has_default_tk_fk)
+        or (raw_mp == 10800 and raw_hp is not None and raw_hp > 5600)
+    )
+    hp_is_placeholder = (
+        is_legacy_10800_tuple
+        or is_legacy_11370_tuple
+        or (raw_hp in (5100, 5457) and has_default_tk_fk)
+        or (raw_hp == 5100 and raw_tk is not None and raw_tk > 2800)
+    )
+    tk_is_placeholder = is_legacy_10800_tuple or is_legacy_11370_tuple or has_default_tk_fk
+
+    fm_cands = [
+        int(s)
+        for s in (org_mp, None if mp_is_placeholder else raw_mp)
+        if s and 7200 <= int(s) <= 25200
+    ]
+    hm_val = int(raw_hp) if (raw_hp and not hp_is_placeholder and 3400 <= int(raw_hp) <= 13500) else 0
+    tk_val = int(raw_tk) if (raw_tk and not tk_is_placeholder and 1500 <= int(raw_tk) <= 5400) else 0
+
+    return {
+        "prof_fm_sec": min(fm_cands, default=0),
+        "prof_hm_sec": hm_val,
+        "prof_10k_sec": tk_val,
     }
 
 
@@ -922,6 +1037,19 @@ def build_runner_pacer_context(
 
     race_plans = LocalStore.get_race_plans(canonical_uid)
     race_history = _collect_verified_races_and_pacer_history(race_plans, activities)
+    prof_off_pbs = _extract_official_profile_pbs(canonical_uid, profile)
+    fm_off_cands = [s for s in (prof_off_pbs["prof_fm_sec"], int(race_history.get("best_fm_all_sec") or 0)) if s > 0]
+    hm_off_cands = [s for s in (prof_off_pbs["prof_hm_sec"], int(race_history.get("best_hm_all_sec") or 0)) if s > 0]
+    tk_off_cands = [s for s in (prof_off_pbs["prof_10k_sec"], int(race_history.get("best_10k_all_sec") or 0)) if s > 0]
+    official_records = {
+        "has_fm": bool(fm_off_cands),
+        "has_hm": bool(hm_off_cands),
+        "has_10k": bool(tk_off_cands),
+        "fm_best_sec": min(fm_off_cands, default=0),
+        "hm_best_sec": min(hm_off_cands, default=0),
+        "ten_k_best_sec": min(tk_off_cands, default=0),
+    }
+
     club_pacer_records = LocalStore.get_user_group_run_pacer_records(canonical_uid)
     club_leadership = _evaluate_group_run_leadership(club_pacer_records)
     monthly_6m = _compute_monthly_mileage_6m(activities)
@@ -953,6 +1081,7 @@ def build_runner_pacer_context(
         "uid": canonical_uid,
         "profile": clean_profile,
         "raw_profile": profile,
+        "official_records": official_records,
         "can_view_confidential": can_view_confidential,
         "hide_biometrics": bool(profile.get("hide_biometrics")),
         "age": get_age_from_dob(profile.get("date_of_birth")),
@@ -1055,44 +1184,40 @@ def _predict_time_for_distance(ctx: Dict[str, Any], dist_km: float) -> int:
 
 def _best_certified_time_for_distance(ctx: Dict[str, Any], distance_type: str, dist_km: float) -> Tuple[int, str]:
     """
-    Resolves runner's best verified certificate/PB time for the target distance category.
-    For FM official pacers, requires actual FM PB / 24m FM finish (cannot extrapolate 5K PB to FM cert!).
-    For HM / 10K, accepts same-distance PB or longer-distance official PB pace equivalent.
+    Resolves runner's best verified official race record time for the target distance category.
+    Strictly uses official race records of the corresponding distance (no training-run extrapolation
+    and no FM-to-HM cross-extrapolation for official pacer evaluation).
     """
     prof = ctx["profile"]
     rh = ctx["race_history"]
-    mp = int(prof.get("marathon_pb") or 0)
-    hp = int(prof.get("half_pb") or 0)
-    tk = int(prof.get("ten_k_pb") or 0)
+    off = ctx.get("official_records") or {}
+    off_fm = int(off.get("fm_best_sec") or 0)
+    off_hm = int(off.get("hm_best_sec") or 0)
+    off_10k = int(off.get("ten_k_best_sec") or 0)
 
     best_fm_24m = int(rh.get("best_fm_24m_sec") or 0)
     best_hm_24m = int(rh.get("best_hm_24m_sec") or 0)
 
     if distance_type == "fm":
-        cands = [(s, src) for s, src in [(best_fm_24m, "近2年全马完赛"), (mp, "档案全马PB")] if s > 0]
+        cands = [(s, src) for s, src in [(best_fm_24m, "近2年全马完赛"), (off_fm, "正式全马纪录")] if s > 0]
         if not cands:
-            return 0, "暂无全马完赛证书"
+            return 0, "暂无正式全马比赛纪录"
         return min(cands, key=lambda x: x[0])
 
     if distance_type == "hm":
-        cands = [(s, src) for s, src in [(best_hm_24m, "近2年半马完赛"), (hp, "档案半马PB")] if s > 0]
-        if mp > 0:
-            # Official marathon certificate also qualifies for half marathon pacer (~0.478x FM time)
-            cands.append((int(round(mp * 0.478)), "全马PB折算资格"))
+        cands = [(s, src) for s, src in [(best_hm_24m, "近2年半马完赛"), (off_hm, "正式半马纪录")] if s > 0]
         if not cands:
-            return 0, "暂无半马/全马完赛证书"
+            return 0, "暂无正式半马比赛纪录"
         return min(cands, key=lambda x: x[0])
 
     if distance_type == "10k":
-        cands = []
-        if tk > 0:
-            cands.append((tk, "档案10K PB"))
-        if hp > 0:
-            cands.append((int(round(hp * 0.455)), "半马PB折算资格"))
-        if mp > 0:
-            cands.append((int(round(mp * 0.218)), "全马PB折算资格"))
+        cands = [
+            (s, src)
+            for s, src in [(int(rh.get("best_10k_all_sec") or 0), "正式10K完赛"), (off_10k, "正式10K纪录")]
+            if s > 0
+        ]
         if not cands:
-            return 0, "暂无10K及以上证书"
+            return 0, "暂无正式10K比赛纪录"
         return min(cands, key=lambda x: x[0])
 
     # Custom distance: project from best endurance VDOT
@@ -1386,29 +1511,30 @@ def _score_single_group(
     )
 
     # ── Dimension 5: Pacing & Leadership Credentials (10%) ──
+    # Note: Red Cross / First Aid certificates are NOT evaluated as part of pacer scoring.
     cl = ctx["club_leadership"]
     past_pacer_cnt = len(rh["official_pacer_races"])
-    club_pacer_ver = int(cl["club_pacer_verified_count"])
     club_pacer_tot = int(cl["club_pacer_total_count"])
     club_on_tgt = int(cl["club_pacer_on_target_count"])
-    fa_type = str(ctx["raw_profile"].get("first_aid_cert_type") or "").strip()
 
-    # Baseline 45 so strong runners without formal badges aren't crushed, scaling to 98 with real credentials
-    pacer_hist_pts = min(30.0, past_pacer_cnt * 16.0)
-    club_lead_pts = min(22.0, club_pacer_on_target_pts := (club_on_tgt * 7.5 + max(0, club_pacer_tot - club_on_tgt) * 3.5))
+    past_pacer_errs_s5 = [
+        abs(int(r["pacer_error_sec"]))
+        for r in rh["official_pacer_races"]
+        if r.get("pacer_error_sec") is not None
+    ]
+    pacer_acc_bonus = 6.0 if (past_pacer_errs_s5 and min(past_pacer_errs_s5) <= 30) else 0.0
+    pacer_hist_pts = min(36.0, past_pacer_cnt * 18.0 + pacer_acc_bonus)
+    club_lead_pts = min(24.0, club_on_tgt * 8.0 + max(0, club_pacer_tot - club_on_tgt) * 4.0)
     companion_runs = sum(1 for a in (ctx["activities"] or []) if a.get("exclude_mode") == "ignore_vdot")
-    comp_pts = min(6.0, companion_runs * 2.0)
-    fa_pts = 16.0 if fa_type in ("medical_pro", "aha") else (13.0 if fa_type == "red_cross" else 0.0)
+    comp_pts = min(8.0, companion_runs * 2.0)
 
-    s5_leadership = int(round(min(98.0, 42.0 + pacer_hist_pts + club_lead_pts + comp_pts + fa_pts)))
+    s5_leadership = int(round(min(98.0, 45.0 + pacer_hist_pts + club_lead_pts + comp_pts)))
     s5_tags = []
     if past_pacer_cnt > 0:
         s5_tags.append(f"往届官兔 {past_pacer_cnt}次")
     if club_pacer_tot > 0:
         s5_tags.append(f"约跑领跑 {club_pacer_tot}次")
-    if fa_type in FIRST_AID_LABELS and fa_type:
-        s5_tags.append(FIRST_AID_LABELS[fa_type].split(" ")[-1])
-    s5_disp = " · ".join(s5_tags) if s5_tags else (f"陪跑慢摇 {companion_runs}次" if companion_runs > 0 else "待积累领跑/急救履历")
+    s5_disp = " · ".join(s5_tags) if s5_tags else (f"陪跑慢摇 {companion_runs}次" if companion_runs > 0 else "待积累领跑履历")
 
     # ── Dimension 6: Autonomic Recovery & Reliability (5%, Privacy-Safe) ──
     rec_dim = next((d for d in (matrix.get("dimensions") or []) if d["key"] == "autonomic_recovery"), None)
@@ -1641,11 +1767,11 @@ def _score_single_group(
         },
         {
             "key": "leadership_credentials",
-            "label": "领跑实战与官方资质",
+            "label": "领跑实战与官兔履历",
             "weight_pct": 10,
             "score": s5_leadership,
             "display_value": s5_disp,
-            "desc": "统计跑团线下约跑「🐰 领跑兔」打卡配速准度、往届官兔压线经历及红十字/AHA/医护急救资质加分。",
+            "desc": "统计往届官方配速员压线经历、跑团线下约跑「🐰 领跑兔」打卡配速准度与定速带队次数。",
         },
         {
             "key": "recovery_reliability",
@@ -1677,8 +1803,6 @@ def _score_single_group(
         action_tips.append(
             f"耐力底座建议：未来 4~6 周建议将周均跑量稳步提升至 {int(round(req_wk_km))}km+，并完成至少 2 次 {int(round(req_long_km))}km 稳态长距离。"
         )
-    if not fa_type and strictness in ("platinum", "gold"):
-        action_tips.append("组委会优先项提示：考取红十字救护员证或 AHA 急救证，可在上马等头部赛事官兔选拔同等条件下获得优先录取权重。")
     if not action_tips:
         action_tips.append(
             f"各项指标高度契合【{calib['event_name']} · {group_spec['label']}】选拔标准，赛前保持每周 1 次目标配速巡航维持肌肉记忆即可稳妥压线！"
@@ -1773,6 +1897,72 @@ def evaluate_runner_pacer_fitness(
     min_cruise_km = 12.0 if calib["distance_km"] >= 18.0 else 7.5
     portfolio = _extract_cruise_portfolio(ctx["activities"], min_dist_km=min_cruise_km)
 
+    off_recs = ctx.get("official_records") or {}
+    official_eval_eligible = True
+    ineligible_reason = ""
+    if norm_dt == "fm" and not off_recs.get("has_fm"):
+        official_eval_eligible = False
+        ineligible_reason = "该队员暂无正式全程马拉松比赛纪录，不予生成全马官方兔子（官兔）评估。"
+    elif norm_dt == "hm" and not off_recs.get("has_hm"):
+        official_eval_eligible = False
+        ineligible_reason = "该队员暂无正式半程马拉松比赛纪录，不予生成半马官方兔子（官兔）评估。"
+    elif norm_dt == "10k" and not off_recs.get("has_10k"):
+        official_eval_eligible = False
+        ineligible_reason = "该队员暂无正式 10 公里比赛纪录，不予生成 10K 官方兔子评估。"
+
+    raw_prof = ctx["raw_profile"]
+    real_name_safe = (
+        (raw_prof.get("real_name") or "")
+        if ctx["can_view_confidential"]
+        else ""
+    )
+    runner_payload = {
+        "uid": ctx["uid"],
+        "display_name": raw_prof.get("display_name") or "跑者",
+        "real_name": real_name_safe,
+        "avatar_url": raw_prof.get("avatar_url") or "",
+        "gender": raw_prof.get("gender") or "male",
+        "age": ctx["age"],
+        "garmin_connected": bool(raw_prof.get("garmin_connected")),
+        "coros_connected": bool(raw_prof.get("coros_connected")),
+        "watch_verified_label": (
+            "Garmin 佳明官方同步认证"
+            if raw_prof.get("garmin_connected")
+            else ("COROS 高驰官方同步认证" if raw_prof.get("coros_connected") else "RGM 运动数据档案")
+        ),
+        "effective_vdot": ctx["canova_matrix"].get("effective_vdot"),
+        "weekly_km_avg": ctx["canova_matrix"].get("weekly_km_avg"),
+    }
+    official_records_summary = {
+        "has_fm": bool(off_recs.get("has_fm")),
+        "has_hm": bool(off_recs.get("has_hm")),
+        "has_10k": bool(off_recs.get("has_10k")),
+        "fm_best_str": format_duration(int(off_recs["fm_best_sec"])) if int(off_recs.get("fm_best_sec") or 0) > 0 else "",
+        "hm_best_str": format_duration(int(off_recs["hm_best_sec"])) if int(off_recs.get("hm_best_sec") or 0) > 0 else "",
+    }
+    credentials_summary = {
+        "official_pacer_count": len(ctx["race_history"]["official_pacer_races"]),
+        "club_pacer_total_count": ctx["club_leadership"]["club_pacer_total_count"],
+        "club_pacer_on_target_count": ctx["club_leadership"]["club_pacer_on_target_count"],
+    }
+
+    if not official_eval_eligible:
+        return {
+            "official_eval_eligible": False,
+            "ineligible_reason": ineligible_reason,
+            "official_records_summary": official_records_summary,
+            "runner": runner_payload,
+            "event_calibration": calib,
+            "selected_evaluation": None,
+            "recommended_group": None,
+            "all_groups_matrix": [],
+            "showcase_run": portfolio["showcase_run"],
+            "monthly_mileage_6m": ctx["monthly_mileage_6m"],
+            "verified_races": ctx["race_history"]["completed_races"][:8],
+            "upcoming_races": ctx["race_history"]["upcoming_races"][:5],
+            "pacer_credentials_summary": credentials_summary,
+        }
+
     # Build group specs to evaluate
     if norm_dt == "custom":
         dist_km = calib["distance_km"]
@@ -1844,34 +2034,11 @@ def evaluate_runner_pacer_fitness(
         for g in evaluated_groups
     ]
 
-    raw_prof = ctx["raw_profile"]
-    fa_code = str(raw_prof.get("first_aid_cert_type") or "").strip()
-    real_name_safe = (
-        (raw_prof.get("real_name") or "")
-        if ctx["can_view_confidential"]
-        else ""
-    )
-
     return {
-        "runner": {
-            "uid": ctx["uid"],
-            "display_name": raw_prof.get("display_name") or "跑者",
-            "real_name": real_name_safe,
-            "avatar_url": raw_prof.get("avatar_url") or "",
-            "gender": raw_prof.get("gender") or "male",
-            "age": ctx["age"],
-            "garmin_connected": bool(raw_prof.get("garmin_connected")),
-            "coros_connected": bool(raw_prof.get("coros_connected")),
-            "watch_verified_label": (
-                "Garmin 佳明官方同步认证"
-                if raw_prof.get("garmin_connected")
-                else ("COROS 高驰官方同步认证" if raw_prof.get("coros_connected") else "RGM 运动数据档案")
-            ),
-            "first_aid_cert_type": fa_code,
-            "first_aid_cert_label": FIRST_AID_LABELS.get(fa_code, "未登记急救资质"),
-            "effective_vdot": ctx["canova_matrix"].get("effective_vdot"),
-            "weekly_km_avg": ctx["canova_matrix"].get("weekly_km_avg"),
-        },
+        "official_eval_eligible": True,
+        "ineligible_reason": "",
+        "official_records_summary": official_records_summary,
+        "runner": runner_payload,
         "event_calibration": calib,
         "selected_evaluation": selected,
         "recommended_group": {
@@ -1888,13 +2055,7 @@ def evaluate_runner_pacer_fitness(
         "monthly_mileage_6m": ctx["monthly_mileage_6m"],
         "verified_races": ctx["race_history"]["completed_races"][:8],
         "upcoming_races": ctx["race_history"]["upcoming_races"][:5],
-        "pacer_credentials_summary": {
-            "official_pacer_count": len(ctx["race_history"]["official_pacer_races"]),
-            "club_pacer_total_count": ctx["club_leadership"]["club_pacer_total_count"],
-            "club_pacer_on_target_count": ctx["club_leadership"]["club_pacer_on_target_count"],
-            "first_aid_cert_type": fa_code,
-            "first_aid_cert_label": FIRST_AID_LABELS.get(fa_code, "未登记急救资质"),
-        },
+        "pacer_credentials_summary": credentials_summary,
     }
 
 
@@ -1982,6 +2143,8 @@ def evaluate_club_pacer_candidates(
 
     member_evals: List[Dict[str, Any]] = []
     group_buckets: Dict[str, List[Dict[str, Any]]] = {code: [] for code in desired_codes}
+    excluded_no_record_count = 0
+    custom_pace_fallback_str = fmt_pace_sec(parse_pace_str_to_sec(custom_target_pace) or 300)
 
     for uid in member_uids:
         ctx = build_runner_pacer_context(
@@ -2002,9 +2165,14 @@ def evaluate_club_pacer_candidates(
             precomputed_ctx=ctx,
             precomputed_calib=calib,
         )
+        if not res.get("official_eval_eligible", True) or not res.get("selected_evaluation"):
+            excluded_no_record_count += 1
+            continue
+
         runner_meta = res["runner"]
         rec = res["recommended_group"]
         cred = res["pacer_credentials_summary"]
+        custom_pace_fallback_str = res["selected_evaluation"]["target_pace_str"]
 
         # Map each group evaluation for this runner
         min_cruise_km = 12.0 if calib["distance_km"] >= 18.0 else 7.5
@@ -2042,7 +2210,6 @@ def evaluate_club_pacer_candidates(
                 "cert_gate_status": g_ev["gates"]["cert_gate"]["status"],
                 "club_pacer_count": cred["club_pacer_total_count"],
                 "official_pacer_count": cred["official_pacer_count"],
-                "first_aid_cert_label": cred["first_aid_cert_label"] if cred["first_aid_cert_type"] else "",
                 "dimensions": g_ev["dimensions"],
             })
 
@@ -2075,7 +2242,7 @@ def evaluate_club_pacer_candidates(
         )
         pace_str = next(
             (fmt_pace_sec(g["target_sec"] / calib["distance_km"]) for g in PACER_GROUP_PRESETS.get(norm_dt, []) if g["code"] == code),
-            res["selected_evaluation"]["target_pace_str"] if member_evals else "",
+            custom_pace_fallback_str if norm_dt == "custom" else "",
         )
         groups_ranking.append({
             "group_code": code,
@@ -2090,6 +2257,8 @@ def evaluate_club_pacer_candidates(
     return {
         "club_id": club_id,
         "total_members_evaluated": len(member_uids),
+        "eligible_members_count": len(member_evals),
+        "excluded_no_record_count": excluded_no_record_count,
         "event_calibration": calib,
         "groups_ranking": groups_ranking,
         "members_best_fit": member_evals,
@@ -2118,7 +2287,6 @@ def generate_pacer_ai_prescription(
         f"【第3周 · 实战补给与带队模拟】模拟{calib['event_name']}每 5km 进站减速取水后 400m 平滑回补配速（严禁猛冲），单次拉练 25~30km。\n"
         f"【第4周 · 赛前减量与配速手环核对】跑量减半释放 TSB 超量恢复，周三完成 6km @ {sel['target_pace_str']} 唤醒肌肉记忆，核对分枪计时毯节点。"
     )
-    fa_clause = f"，持有{cred['first_aid_cert_label'].split(' ')[-1]}" if cred.get("first_aid_cert_type") else ""
     pacer_clause = (
         f"，具备 {cred['official_pacer_count']} 场官方配速员及 {cred['club_pacer_total_count']} 次跑团定速领跑经验"
         if (cred.get("official_pacer_count") or cred.get("club_pacer_total_count"))
@@ -2127,8 +2295,8 @@ def generate_pacer_ai_prescription(
     sigma_clause = f"，长距离巡航每公里配速波动稳定在 ±{sel['sigma_avg_sec']}s 以内" if sel.get("sigma_avg_sec") else ""
     fallback_bio = (
         f"您好！我申请竞选【{calib['event_name']} · {sel['group_label']}（目标配速 {sel['target_pace_str']}）】。"
-        f"本人认证最佳成绩 {sel['cert_finish_str']}，当期有效跑力预测 {sel['pred_finish_str']}，相对目标组别具备充沛体能冗余；"
-        f"近半年累计跑量 {total_6m_km}km（周均 {runner.get('weekly_km_avg') or 0}km）{sigma_clause}{pacer_clause}{fa_clause}。"
+        f"本人正式比赛最佳成绩 {sel['cert_finish_str']}，当期有效跑力预测 {sel['pred_finish_str']}，相对目标组别具备充沛体能冗余；"
+        f"近半年累计跑量 {total_6m_km}km（周均 {runner.get('weekly_km_avg') or 0}km）{sigma_clause}{pacer_clause}。"
         f"严格遵守组委会赛前不背靠背参赛与官方装备纪律，有信心以 ±{calib['target_gun_error_sec']} 秒内精准压线带领跑友安全圆梦！"
     )
 
@@ -2136,14 +2304,14 @@ def generate_pacer_ai_prescription(
         "你是世界级马拉松教练兼白金标赛事官方配速员总管。"
         "请基于跑者的真实手表数据与目标赛事特征，输出严格 JSON（不含代码块标记）："
         '{"four_week_plan": "分4周的官兔盲跑控速与专项耐力课表（约220字，使用换行分段）", '
-        '"application_statement": "第一人称撰写的官方配速员竞选自荐陈述（约160~200字，数据真实硬核、语气专业诚恳，可直接粘贴进组委会报名表）"}'
+        '"application_statement": "第一人称撰写的官方配速员竞选自荐陈述（约160~200字，数据真实硬核、语气专业诚恳，可直接粘贴进组委会报名表，不要提及急救证书）"}'
     )
     user_prompt = (
         f"申请赛事：{calib['event_name']}（{calib['race_level']}，爬升 {calib['elevation_gain_m']}m，误差要求 ±{calib['target_gun_error_sec']}s）\n"
         f"目标组别：{sel['group_label']}（目标时间 {sel['target_time']}，配速 {sel['target_pace_str']}）\n"
         f"综合评分：{sel['overall_score']}分（{sel['verdict_label']}）\n"
-        f"证书PB：{sel['cert_finish_str']} | 当期预测：{sel['pred_finish_str']} | 近6月跑量：{total_6m_km}km（周均 {runner.get('weekly_km_avg')}km）\n"
-        f"代表作配速标准差：{sel.get('sigma_avg_sec') or '待采集'}s/km | 往届官兔：{cred['official_pacer_count']}次 | 跑团领跑：{cred['club_pacer_total_count']}次 | 急救资质：{cred['first_aid_cert_label']}\n"
+        f"正式比赛PB：{sel['cert_finish_str']} | 当期预测：{sel['pred_finish_str']} | 近6月跑量：{total_6m_km}km（周均 {runner.get('weekly_km_avg')}km）\n"
+        f"代表作配速标准差：{sel.get('sigma_avg_sec') or '待采集'}s/km | 往届官兔：{cred['official_pacer_count']}次 | 跑团领跑：{cred['club_pacer_total_count']}次\n"
         f"当前短板提示：{'; '.join(sel.get('action_tips') or [])}"
     )
 

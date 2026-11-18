@@ -946,6 +946,7 @@ def init_db():
                 device_model TEXT,
                 platform TEXT,
                 app_version TEXT,
+                env_version TEXT,
                 started_at TEXT NOT NULL,
                 last_event_at TEXT NOT NULL,
                 ended_at TEXT,
@@ -959,6 +960,22 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_miniapp_sessions_started ON miniapp_sessions(started_at DESC)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_miniapp_sessions_user ON miniapp_sessions(user_id, started_at DESC)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_miniapp_sessions_client ON miniapp_sessions(client_uuid, started_at DESC)")
+        try:
+            cursor.execute("ALTER TABLE miniapp_sessions ADD COLUMN env_version TEXT")
+        except Exception:
+            pass
+        cursor.execute(
+            """
+            UPDATE miniapp_sessions
+            SET env_version = CASE
+                WHEN LOWER(COALESCE(app_version, '')) LIKE '%-develop' OR LOWER(COALESCE(app_version, '')) = 'develop' THEN 'develop'
+                WHEN LOWER(COALESCE(app_version, '')) LIKE '%-trial' OR LOWER(COALESCE(app_version, '')) = 'trial' THEN 'trial'
+                WHEN LOWER(COALESCE(platform, '')) = 'devtools' THEN 'develop'
+                ELSE 'release'
+            END
+            WHERE env_version IS NULL OR TRIM(env_version) = ''
+            """
+        )
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS miniapp_events (
@@ -3429,6 +3446,8 @@ class LocalStore:
         next_week_key = f"{next_iso_y}-W{next_iso_w:02d}"
 
         existing = LocalStore.get_goal(canonical_uid)
+        was_default_goal = bool(existing.get("is_default"))
+        effective_lock = bool(enforce_started_lock and not was_default_goal)
         raw_existing_mt = existing.get("monthly_targets")
         if isinstance(raw_existing_mt, dict):
             existing_monthly = [float(raw_existing_mt.get(str(m), raw_existing_mt.get(m, 200.0))) for m in range(1, 13)]
@@ -3455,7 +3474,7 @@ class LocalStore:
         while len(incoming_monthly) < 12:
             incoming_monthly.append(target_dist)
 
-        if enforce_started_lock:
+        if effective_lock:
             # 1) Started months (1 .. today.month) are locked and cannot be modified
             final_monthly = []
             for m_idx in range(12):
@@ -19003,6 +19022,13 @@ class LocalStore:
             app_version = f"{raw_ver}-{raw_env}"[:30]
         else:
             app_version = raw_ver or raw_env or None
+        inferred_env = raw_env.lower() if raw_env else ""
+        if not inferred_env:
+            low_ver = raw_ver.lower()
+            if low_ver.endswith("-develop") or low_ver == "develop" or (platform or "").lower() == "devtools":
+                inferred_env = "develop"
+            elif low_ver.endswith("-trial") or low_ver == "trial":
+                inferred_env = "trial"
 
         events = payload.get("events")
         if not isinstance(events, list):
@@ -19081,6 +19107,12 @@ class LocalStore:
                 sess_model = device_model or (existing_sess["device_model"] if existing_sess else None)
                 sess_plat = platform or (existing_sess["platform"] if existing_sess else None)
                 sess_ver = app_version or (existing_sess["app_version"] if existing_sess else None)
+                existing_env = (
+                    (existing_sess["env_version"] or "").strip()
+                    if (existing_sess and "env_version" in existing_sess.keys())
+                    else ""
+                )
+                sess_env = inferred_env or existing_env or "release"
                 sess_ended = existing_sess["ended_at"] if existing_sess else None
                 sess_dur_ms = int(existing_sess["duration_ms"] or 0) if existing_sess else 0
                 sess_max_scroll = int(existing_sess["max_scroll_pct"] or 0) if existing_sess else 0
@@ -19217,9 +19249,9 @@ class LocalStore:
                     """
                     INSERT INTO miniapp_sessions (
                         session_id, user_id, client_uuid, scene, scene_label, entry_page, exit_page,
-                        inviter_uid, device_model, platform, app_version, started_at, last_event_at,
+                        inviter_uid, device_model, platform, app_version, env_version, started_at, last_event_at,
                         ended_at, duration_ms, page_count, click_count, max_scroll_pct, had_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(session_id) DO UPDATE SET
                         user_id = COALESCE(excluded.user_id, miniapp_sessions.user_id),
                         client_uuid = COALESCE(excluded.client_uuid, miniapp_sessions.client_uuid),
@@ -19231,6 +19263,7 @@ class LocalStore:
                         device_model = COALESCE(excluded.device_model, miniapp_sessions.device_model),
                         platform = COALESCE(excluded.platform, miniapp_sessions.platform),
                         app_version = COALESCE(excluded.app_version, miniapp_sessions.app_version),
+                        env_version = COALESCE(NULLIF(excluded.env_version, ''), miniapp_sessions.env_version),
                         last_event_at = excluded.last_event_at,
                         ended_at = COALESCE(excluded.ended_at, miniapp_sessions.ended_at),
                         duration_ms = excluded.duration_ms,
@@ -19251,6 +19284,7 @@ class LocalStore:
                         sess_model,
                         sess_plat,
                         sess_ver,
+                        sess_env,
                         sess_started,
                         now_iso,
                         sess_ended,
@@ -19261,6 +19295,39 @@ class LocalStore:
                         sess_had_err,
                     ),
                 )
+            # Single-owner anonymous-to-login stitching by client_uuid:
+            # Only backfill anonymous sessions/events if no other distinct verified user owns that client_uuid.
+            if eff_uid and client_uuid and not eff_uid.startswith("u_wx_c_"):
+                other_owner = cursor.execute(
+                    """
+                    SELECT 1 FROM miniapp_sessions
+                    WHERE client_uuid = ?
+                      AND user_id IS NOT NULL
+                      AND user_id != ''
+                      AND user_id != ?
+                    LIMIT 1
+                    """,
+                    (client_uuid, eff_uid),
+                ).fetchone()
+                if not other_owner:
+                    cursor.execute(
+                        """
+                        UPDATE miniapp_sessions
+                        SET user_id = ?
+                        WHERE client_uuid = ?
+                          AND (user_id IS NULL OR user_id = '')
+                        """,
+                        (eff_uid, client_uuid),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE miniapp_events
+                        SET user_id = ?
+                        WHERE client_uuid = ?
+                          AND (user_id IS NULL OR user_id = '')
+                        """,
+                        (eff_uid, client_uuid),
+                    )
             conn.commit()
 
         if primary_sess_uid and eff_uid and primary_sess_uid == eff_uid and not eff_uid.startswith("u_wx_c_"):
@@ -19392,13 +19459,50 @@ class LocalStore:
             )
 
     @staticmethod
-    def get_behavior_analytics_overview(days: int = 14) -> Dict[str, Any]:
+    def get_behavior_analytics_overview(
+        days: int = 14,
+        platform_scope: str = "all",
+        exclude_admins: bool = False,
+        release_only: bool = False,
+    ) -> Dict[str, Any]:
         """
-        Aggregates per-user MiniApp session, page stay, scroll depth, button click,
+        Aggregates per-user MiniApp/Web session, page stay, scroll depth, button click,
         page transition, and recent session list over the past N days.
+        Supports filtering by platform_scope ('all'|'miniapp'|'web'), exclude_admins, and release_only.
         """
         eff_days = max(1, min(90, int(days or 14)))
+        eff_scope = str(platform_scope or "all").strip().lower()
+        if eff_scope not in ("all", "miniapp", "web"):
+            eff_scope = "all"
         cutoff_iso = (datetime.now(_CN_TZ) - timedelta(days=eff_days)).isoformat(timespec="seconds")
+
+        sess_where = ["s.started_at >= ?"]
+        sess_params: List[Any] = [cutoff_iso]
+        has_session_filter = False
+        if eff_scope == "miniapp":
+            sess_where.append("LOWER(COALESCE(s.platform, '')) != 'web'")
+            has_session_filter = True
+        elif eff_scope == "web":
+            sess_where.append("LOWER(COALESCE(s.platform, '')) = 'web'")
+            has_session_filter = True
+        if exclude_admins:
+            admin_ids = sorted(set(LocalStore.SUPER_ADMIN_UIDS) | {"rgm_super_admin"})
+            ph = ",".join("?" for _ in admin_ids)
+            sess_where.append(f"COALESCE(s.user_id, '') NOT IN ({ph})")
+            sess_params.extend(admin_ids)
+            has_session_filter = True
+        if release_only:
+            sess_where.append("COALESCE(NULLIF(LOWER(TRIM(s.env_version)), ''), 'release') = 'release'")
+            sess_where.append("LOWER(COALESCE(s.platform, '')) != 'devtools'")
+            has_session_filter = True
+
+        sess_where_sql = " AND ".join(sess_where)
+        ev_filter_sql = (
+            f"AND e.session_id IN (SELECT s.session_id FROM miniapp_sessions s WHERE {sess_where_sql})"
+            if has_session_filter
+            else ""
+        )
+        ev_params: Tuple[Any, ...] = tuple([cutoff_iso] + sess_params) if has_session_filter else (cutoff_iso,)
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -19407,7 +19511,7 @@ class LocalStore:
             conn.commit()
 
             sess_rows = c.execute(
-                """
+                f"""
                 SELECT s.*,
                        p.display_name,
                        p.avatar_url,
@@ -19418,10 +19522,10 @@ class LocalStore:
                        p.suunto_connected
                 FROM miniapp_sessions s
                 LEFT JOIN profiles p ON p.id = s.user_id
-                WHERE s.started_at >= ?
+                WHERE {sess_where_sql}
                 ORDER BY s.started_at DESC
                 """,
-                (cutoff_iso,),
+                tuple(sess_params),
             ).fetchall()
 
             total_sessions = len(sess_rows)
@@ -19430,6 +19534,13 @@ class LocalStore:
                 for r in sess_rows
             })
             total_dur_ms = sum(int(r["duration_ms"] or 0) for r in sess_rows)
+            durations_sec = sorted(round(float(r["duration_ms"] or 0) / 1000.0, 1) for r in sess_rows)
+            if total_sessions == 0:
+                median_dur_sec = 0.0
+            elif total_sessions % 2 == 1:
+                median_dur_sec = durations_sec[total_sessions // 2]
+            else:
+                median_dur_sec = round((durations_sec[total_sessions // 2 - 1] + durations_sec[total_sessions // 2]) / 2.0, 1)
             total_pages = sum(int(r["page_count"] or 0) for r in sess_rows)
             total_scroll = sum(int(r["max_scroll_pct"] or 0) for r in sess_rows)
             bounce_cnt = sum(
@@ -19439,41 +19550,45 @@ class LocalStore:
             err_sess_cnt = sum(1 for r in sess_rows if int(r["had_error"] or 0) > 0)
 
             total_events_row = c.execute(
-                "SELECT COUNT(*) AS cnt FROM miniapp_events WHERE created_at >= ?",
-                (cutoff_iso,),
+                f"SELECT COUNT(*) AS cnt FROM miniapp_events e WHERE e.created_at >= ? {ev_filter_sql}",
+                ev_params,
             ).fetchone()
             total_events = int(total_events_row["cnt"] or 0) if total_events_row else 0
 
             # Per-page stay duration & scroll depth stats
             page_leave_rows = c.execute(
-                """
+                f"""
                 SELECT
-                    page_path,
-                    MAX(page_title) AS page_title,
+                    e.page_path,
+                    MAX(e.page_title) AS page_title,
                     COUNT(*) AS leave_cnt,
-                    COUNT(DISTINCT COALESCE(user_id, client_uuid, session_id)) AS uv,
-                    AVG(CASE WHEN stay_ms > 0 THEN stay_ms END) AS avg_stay_ms,
-                    AVG(CASE WHEN scroll_pct > 0 THEN scroll_pct END) AS avg_scroll_pct,
-                    SUM(CASE WHEN scroll_pct >= 85 THEN 1 ELSE 0 END) AS deep_read_cnt
-                FROM miniapp_events
-                WHERE created_at >= ?
-                  AND event_type IN ('page_leave', 'page_enter')
-                  AND page_path IS NOT NULL AND page_path != ''
-                GROUP BY page_path
+                    COUNT(DISTINCT COALESCE(e.user_id, e.client_uuid, e.session_id)) AS uv,
+                    AVG(CASE WHEN e.stay_ms > 0 THEN e.stay_ms END) AS avg_stay_ms,
+                    AVG(CASE WHEN e.scroll_pct > 0 THEN e.scroll_pct END) AS avg_scroll_pct,
+                    SUM(CASE WHEN e.scroll_pct >= 85 THEN 1 ELSE 0 END) AS deep_read_cnt
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.event_type IN ('page_leave', 'page_enter')
+                  AND e.page_path IS NOT NULL AND e.page_path != ''
+                GROUP BY e.page_path
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
 
             page_enter_counts = {
                 r["page_path"]: int(r["cnt"] or 0)
                 for r in c.execute(
-                    """
-                    SELECT page_path, COUNT(*) AS cnt
-                    FROM miniapp_events
-                    WHERE created_at >= ? AND event_type = 'page_enter' AND page_path IS NOT NULL
-                    GROUP BY page_path
+                    f"""
+                    SELECT e.page_path, COUNT(*) AS cnt
+                    FROM miniapp_events e
+                    WHERE e.created_at >= ?
+                      {ev_filter_sql}
+                      AND e.event_type = 'page_enter'
+                      AND e.page_path IS NOT NULL
+                    GROUP BY e.page_path
                     """,
-                    (cutoff_iso,),
+                    ev_params,
                 ).fetchall()
             }
             entry_counts: Dict[str, int] = {}
@@ -19508,17 +19623,18 @@ class LocalStore:
 
             # Per-page visited session counts so module exposure rates use same-page sessions as denominator
             page_sess_rows = c.execute(
-                """
+                f"""
                 SELECT
-                    page_path,
-                    COUNT(DISTINCT session_id) AS page_sessions
-                FROM miniapp_events
-                WHERE created_at >= ?
-                  AND page_path IS NOT NULL
-                  AND page_path != ''
-                GROUP BY page_path
+                    e.page_path,
+                    COUNT(DISTINCT e.session_id) AS page_sessions
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.page_path IS NOT NULL
+                  AND e.page_path != ''
+                GROUP BY e.page_path
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
             page_session_map = {
                 str(r["page_path"]): int(r["page_sessions"] or 0) for r in page_sess_rows
@@ -19526,22 +19642,23 @@ class LocalStore:
 
             # Module exposure stats (IntersectionObserver module_view)
             mod_rows = c.execute(
-                """
+                f"""
                 SELECT
-                    event_name,
-                    MAX(event_label) AS event_label,
-                    MAX(page_path) AS page_path,
+                    e.event_name,
+                    MAX(e.event_label) AS event_label,
+                    MAX(e.page_path) AS page_path,
                     COUNT(*) AS views,
-                    COUNT(DISTINCT session_id) AS unique_sessions,
-                    COUNT(DISTINCT COALESCE(user_id, client_uuid, session_id)) AS unique_users
-                FROM miniapp_events
-                WHERE created_at >= ?
-                  AND event_type = 'module_view'
-                GROUP BY event_name
+                    COUNT(DISTINCT e.session_id) AS unique_sessions,
+                    COUNT(DISTINCT COALESCE(e.user_id, e.client_uuid, e.session_id)) AS unique_users
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.event_type = 'module_view'
+                GROUP BY e.event_name
                 ORDER BY unique_sessions DESC, views DESC
                 LIMIT 30
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
             module_exposures = []
             for r in mod_rows:
@@ -19563,24 +19680,32 @@ class LocalStore:
                     }
                 )
 
-            # Top buttons / modals / subviews clicked
+            # Top buttons / modals / subviews clicked (keep per-label rows for tab switches)
             btn_rows = c.execute(
-                """
+                f"""
                 SELECT
-                    event_name,
-                    MAX(event_label) AS event_label,
-                    event_type,
-                    MAX(page_path) AS page_path,
+                    e.event_name,
+                    MAX(e.event_label) AS event_label,
+                    e.event_type,
+                    MAX(e.page_path) AS page_path,
                     COUNT(*) AS clicks,
-                    COUNT(DISTINCT COALESCE(user_id, client_uuid, session_id)) AS unique_users
-                FROM miniapp_events
-                WHERE created_at >= ?
-                  AND event_type IN ('button_click', 'modal_open', 'subview_enter', 'funnel_step')
-                GROUP BY event_name, event_type
+                    COUNT(DISTINCT COALESCE(e.user_id, e.client_uuid, e.session_id)) AS unique_users
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.event_type IN ('button_click', 'modal_open', 'subview_enter', 'funnel_step')
+                GROUP BY
+                    e.event_name,
+                    e.event_type,
+                    CASE
+                        WHEN e.event_name IN ('tabbar_switch', 'coach_tab_switch', 'team_subtab_switch', 'rank_view_switch')
+                        THEN COALESCE(NULLIF(TRIM(e.event_label), ''), e.event_name)
+                        ELSE ''
+                    END
                 ORDER BY clicks DESC
-                LIMIT 30
+                LIMIT 40
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
             top_buttons = [
                 {
@@ -19597,15 +19722,16 @@ class LocalStore:
 
             # Page-to-page navigation transitions
             enter_seq_rows = c.execute(
-                """
-                SELECT session_id, page_path
-                FROM miniapp_events
-                WHERE created_at >= ?
-                  AND event_type = 'page_enter'
-                  AND page_path IS NOT NULL AND page_path != ''
-                ORDER BY session_id, client_ts ASC, id ASC
+                f"""
+                SELECT e.session_id, e.page_path
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.event_type = 'page_enter'
+                  AND e.page_path IS NOT NULL AND e.page_path != ''
+                ORDER BY e.session_id, e.client_ts ASC, e.id ASC
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
             trans_counter: Dict[Tuple[str, str], int] = {}
             prev_sid = None
@@ -19632,16 +19758,18 @@ class LocalStore:
 
             # API errors / slow requests captured on client
             issue_rows = c.execute(
-                """
-                SELECT event_name, MAX(event_label) AS event_label, MAX(page_path) AS page_path,
-                       COUNT(*) AS count, MAX(props_json) AS sample_props
-                FROM miniapp_events
-                WHERE created_at >= ? AND event_type = 'api_issue'
-                GROUP BY event_name, event_label
+                f"""
+                SELECT e.event_name, MAX(e.event_label) AS event_label, MAX(e.page_path) AS page_path,
+                       COUNT(*) AS count, MAX(e.props_json) AS sample_props
+                FROM miniapp_events e
+                WHERE e.created_at >= ?
+                  {ev_filter_sql}
+                  AND e.event_type = 'api_issue'
+                GROUP BY e.event_name, e.event_label
                 ORDER BY count DESC
                 LIMIT 15
                 """,
-                (cutoff_iso,),
+                ev_params,
             ).fetchall()
             api_issues = []
             for ir in issue_rows:
@@ -19690,6 +19818,8 @@ class LocalStore:
                     "exit_title": LocalStore.resolve_page_title(sr["exit_page"]),
                     "device_model": sr["device_model"] or "",
                     "platform": sr["platform"] or "",
+                    "app_version": sr["app_version"] or "",
+                    "env_version": (sr["env_version"] if "env_version" in sr.keys() else "") or "",
                     "started_at": to_beijing_iso(sr["started_at"]),
                     "last_event_at": to_beijing_iso(sr["last_event_at"]),
                     "ended_at": to_beijing_iso(sr["ended_at"]) if sr["ended_at"] else None,
@@ -19702,11 +19832,17 @@ class LocalStore:
 
         return {
             "days": eff_days,
+            "filters": {
+                "platform_scope": eff_scope,
+                "exclude_admins": bool(exclude_admins),
+                "release_only": bool(release_only),
+            },
             "summary": {
                 "total_sessions": total_sessions,
                 "unique_visitors": unique_visitors,
                 "total_events": total_events,
                 "avg_session_duration_sec": round((total_dur_ms / 1000.0) / total_sessions, 1) if total_sessions > 0 else 0.0,
+                "median_session_duration_sec": median_dur_sec,
                 "avg_pages_per_session": round(total_pages / total_sessions, 2) if total_sessions > 0 else 0.0,
                 "avg_scroll_pct": round(total_scroll / total_sessions, 1) if total_sessions > 0 else 0.0,
                 "bounce_sessions_pct": round(bounce_cnt * 100.0 / total_sessions, 1) if total_sessions > 0 else 0.0,
@@ -19800,6 +19936,7 @@ class LocalStore:
                 "device_model": sess["device_model"] or "",
                 "platform": sess["platform"] or "",
                 "app_version": sess["app_version"] or "",
+                "env_version": (sess["env_version"] if "env_version" in sess.keys() else "") or "",
                 "started_at": to_beijing_iso(sess["started_at"]),
                 "ended_at": to_beijing_iso(sess["ended_at"]) if sess["ended_at"] else None,
                 "duration_sec": round(float(sess["duration_ms"] or 0) / 1000.0, 1),

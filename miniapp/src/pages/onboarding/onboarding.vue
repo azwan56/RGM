@@ -1,9 +1,14 @@
 <template>
   <view class="onboarding-page" :class="themeClass">
-    <!-- ── 顶部 4 步进度向导导航条 ── -->
+    <!-- ── 顶部 4 段式极简进度指示 ── -->
     <view class="stepper-header">
-      <view class="stepper-track">
-        <view class="stepper-fill" :style="{ width: progressPercent + '%' }" />
+      <view class="ob-seg-track">
+        <view
+          v-for="idx in 4"
+          :key="idx"
+          class="ob-seg-bar"
+          :class="{ done: isStepCompleted(idx) && currentStep > idx, active: currentStep === idx }"
+        />
       </view>
       <view class="steps-row">
         <view
@@ -21,7 +26,7 @@
         </view>
       </view>
       <view v-if="isAlreadyCompleted" class="stepper-edit-hint">
-        <text class="seh-badge">✏️ 编辑模式</text>
+        <text class="seh-badge">编辑模式</text>
         <text class="seh-text">点上方步骤可跳转修改</text>
       </view>
     </view>
@@ -324,8 +329,12 @@
             <text class="input-label">佳明 Connect 登录密码</text>
             <input class="text-input" password type="text" placeholder="请输入密码" placeholder-class="input-placeholder-class" v-model="garminPassword" />
           </view>
+          <view v-if="needsGarminMfa" class="form-group">
+            <text class="input-label">佳明 6 位安全验证码（请查收邮箱或短信）</text>
+            <input class="text-input" type="number" maxlength="8" placeholder="请输入 6 位验证码" placeholder-class="input-placeholder-class" v-model="garminMfaCode" />
+          </view>
           <button class="dbc-bind-btn garmin-btn" :loading="bindingGarmin" @click="handleBindGarmin">
-            一键直连 Garmin
+            {{ needsGarminMfa ? "提交验证码并绑定" : "一键直连 Garmin" }}
           </button>
         </view>
         <view v-else class="dbc-connected-tip">
@@ -347,6 +356,25 @@
 
         <view v-if="!isCorosConnected" class="dbc-body">
           <view class="form-group">
+            <text class="input-label">高驰服务器区域</text>
+            <view class="segmented-control mini">
+              <view
+                class="seg-item"
+                :class="{ active: corosDomain === 'teamcnapi.coros.com' }"
+                @click="corosDomain = 'teamcnapi.coros.com'"
+              >
+                <text class="seg-txt">中国版 (coros.com.cn)</text>
+              </view>
+              <view
+                class="seg-item"
+                :class="{ active: corosDomain === 'teamapi.coros.com' }"
+                @click="corosDomain = 'teamapi.coros.com'"
+              >
+                <text class="seg-txt">国际版 (coros.com)</text>
+              </view>
+            </view>
+          </view>
+          <view class="form-group">
             <text class="input-label">高驰账号 (手机号或邮箱)</text>
             <input class="text-input" type="text" placeholder="请输入高驰账号" placeholder-class="input-placeholder-class" v-model="corosAccount" />
           </view>
@@ -354,8 +382,12 @@
             <text class="input-label">高驰登录密码</text>
             <input class="text-input" password type="text" placeholder="请输入密码" placeholder-class="input-placeholder-class" v-model="corosPassword" />
           </view>
+          <view v-if="needsCoros2fa" class="form-group">
+            <text class="input-label">高驰手机短信 6 位安全验证码</text>
+            <input class="text-input" type="number" maxlength="8" placeholder="请输入短信验证码" placeholder-class="input-placeholder-class" v-model="coros2faCode" />
+          </view>
           <button class="dbc-bind-btn coros-btn" :loading="bindingCoros" @click="handleBindCoros">
-            一键直连 COROS
+            {{ needsCoros2fa ? "提交验证码并绑定" : "一键直连 COROS" }}
           </button>
         </view>
         <view v-else class="dbc-connected-tip">
@@ -450,9 +482,9 @@
           />
         </view>
 
-        <view class="privacy-toggle-row" style="border-top: 1rpx solid rgba(255,255,255,0.08); padding-top: 20rpx; margin-top: 16rpx;" @click="profileForm.hide_biometrics = !profileForm.hide_biometrics">
+        <view class="privacy-toggle-row" style="border-top: 1rpx solid var(--rgm-line); padding-top: 20rpx; margin-top: 16rpx;" @click="profileForm.hide_biometrics = !profileForm.hide_biometrics">
           <view class="ptr-left">
-            <text class="ptr-title">💓 生理保密</text>
+            <text class="ptr-title">生理保密</text>
           </view>
           <switch
             :checked="profileForm.hide_biometrics"
@@ -462,13 +494,13 @@
           />
         </view>
 
-        <view style="border-top: 1rpx solid rgba(255,255,255,0.08); padding-top: 20rpx; margin-top: 16rpx; display: flex; flex-direction: column; gap: 6rpx;">
+        <view style="border-top: 1rpx solid var(--rgm-line); padding-top: 20rpx; margin-top: 16rpx; display: flex; flex-direction: column; gap: 6rpx;">
           <view style="display: flex; align-items: center; justify-content: space-between; gap: 12rpx;">
-            <text class="ptr-title">🎯 评语可见</text>
-            <text style="font-size: 22rpx; font-weight: 700; color: #34D399; background: rgba(16,185,129,0.12); border: 1rpx solid rgba(16,185,129,0.28); border-radius: 999rpx; padding: 4rpx 14rpx;">🔒 仅自己</text>
+            <text class="ptr-title">评语可见</text>
+            <text style="font-size: 22rpx; font-weight: 700; color: var(--rgm-green); background: var(--rgm-green-tint); border: 1rpx solid var(--rgm-green-line); border-radius: 999rpx; padding: 4rpx 14rpx;">仅自己</text>
           </view>
-          <text style="font-size: 22rpx; color: rgba(255,255,255,0.58); line-height: 1.45;">
-            引导完成后，可随时在「我的 → 🛡️ 隐私设定」按需向教练师傅或跑团开放。
+          <text style="font-size: 22rpx; color: var(--rgm-ink-2); line-height: 1.45;">
+            引导完成后，可随时在「我的 → 隐私设定」按需向教练师傅或跑团开放。
           </text>
         </view>
       </view>
@@ -501,8 +533,8 @@
             :max="600"
             :step="10"
             activeColor="#FC4C02"
-            backgroundColor="rgba(255,255,255,0.1)"
-            block-color="#ffffff"
+            :backgroundColor="isVolt ? '#E5E7EB' : 'rgba(255,255,255,0.1)'"
+            :block-color="isVolt ? '#111827' : '#ffffff'"
             block-size="20"
             @change="(e: any) => targetKm = e.detail.value"
           />
@@ -638,8 +670,8 @@
 </template>
 
 <script setup lang="ts">
-import { currentTheme, themeClass, applySystemTheme } from "@/utils/theme";
-import { ref, computed, watch, onMounted } from "vue";
+import { currentTheme, themeClass, applySystemTheme, isVolt } from "@/utils/theme";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import {
   request,
@@ -1035,11 +1067,16 @@ const garminDomain = ref("garmin.cn");
 const garminEmail = ref("");
 const garminPassword = ref("");
 const bindingGarmin = ref(false);
+const needsGarminMfa = ref(false);
+const garminMfaCode = ref("");
 
 const isCorosConnected = ref(false);
+const corosDomain = ref("teamcnapi.coros.com");
 const corosAccount = ref("");
 const corosPassword = ref("");
 const bindingCoros = ref(false);
+const needsCoros2fa = ref(false);
+const coros2faCode = ref("");
 
 const isAppleWatchConnected = ref(false);
 const isHuaweiConnected = ref(false);
@@ -1074,17 +1111,34 @@ async function handleBindGarmin() {
     uni.showToast({ title: "请输入佳明邮箱与密码", icon: "none" });
     return;
   }
+  if (needsGarminMfa.value && !garminMfaCode.value.trim()) {
+    uni.showToast({ title: "请输入 6 位安全验证码", icon: "none" });
+    return;
+  }
   bindingGarmin.value = true;
   try {
     const uid = user.value?.id;
-    const res = await request("/api/auth/garmin/bind", "POST", {
+    const payload: any = {
       uid: uid,
       email: garminEmail.value.trim(),
       password: garminPassword.value.trim(),
       domain: garminDomain.value
-    });
+    };
+    if (needsGarminMfa.value && garminMfaCode.value.trim()) {
+      payload.mfa_code = garminMfaCode.value.trim();
+    }
+    const res = await request("/api/auth/garmin/bind", "POST", payload);
+    if (res?.needs_mfa) {
+      needsGarminMfa.value = true;
+      if (res?.domain) garminDomain.value = res.domain;
+      uni.showToast({ title: res?.message || "请输入邮箱或短信验证码", icon: "none" });
+      return;
+    }
     if (res?.connected || res?.success) {
       isGarminConnected.value = true;
+      needsGarminMfa.value = false;
+      garminMfaCode.value = "";
+      if (res?.domain) garminDomain.value = res.domain;
       onboardingStepsState.value.device = true;
       autoStartHistorySync();
       uni.showModal({
@@ -1108,17 +1162,34 @@ async function handleBindCoros() {
     uni.showToast({ title: "请输入高驰账号与密码", icon: "none" });
     return;
   }
+  if (needsCoros2fa.value && !coros2faCode.value.trim()) {
+    uni.showToast({ title: "请输入 6 位短信验证码", icon: "none" });
+    return;
+  }
   bindingCoros.value = true;
   try {
     const uid = user.value?.id;
-    const res = await request("/api/auth/coros/bind", "POST", {
+    const payload: any = {
       uid: uid,
       account: corosAccount.value.trim(),
       password: corosPassword.value.trim(),
-      domain: "teamcnapi.coros.com"
-    });
+      domain: corosDomain.value
+    };
+    if (needsCoros2fa.value && coros2faCode.value.trim()) {
+      payload.code = coros2faCode.value.trim();
+    }
+    const res = await request("/api/auth/coros/bind", "POST", payload);
+    if (res?.needs_2fa) {
+      needsCoros2fa.value = true;
+      if (res?.domain) corosDomain.value = res.domain;
+      uni.showToast({ title: res?.message || "已向手机发送短信验证码", icon: "none" });
+      return;
+    }
     if (res?.connected || res?.success) {
       isCorosConnected.value = true;
+      needsCoros2fa.value = false;
+      coros2faCode.value = "";
+      if (res?.domain) corosDomain.value = res.domain;
       onboardingStepsState.value.device = true;
       autoStartHistorySync();
       uni.showModal({
@@ -1293,6 +1364,11 @@ const selectedRangeDays = ref(90);
 const syncingHistory = ref(false);
 const syncedCount = ref<number | null>(null);
 
+let onboardingUnmounted = false;
+onUnmounted(() => {
+  onboardingUnmounted = true;
+});
+
 async function handleStartHistorySync() {
   syncingHistory.value = true;
   syncedCount.value = null;
@@ -1304,14 +1380,35 @@ async function handleStartHistorySync() {
 
     const res = await request("/api/sync/trigger", "POST", {
       uid: uid,
-      start_date: startDateStr
+      start_date: startDateStr,
+      async_mode: true
     });
-    syncedCount.value = res?.synced_activities ?? 0;
-    uni.showToast({ title: `成功同步 ${syncedCount.value} 条记录`, icon: "success" });
+    let finalRes: any = res;
+    if (res?.async_mode) {
+      const deadline = Date.now() + 120000;
+      while (!onboardingUnmounted && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (onboardingUnmounted) return;
+        const st = await request(`/api/sync/status/${uid}`, "GET");
+        if (!st || st.status === "idle" || st.status === "done" || st.status === "failed") {
+          finalRes = st?.detail || st;
+          break;
+        }
+      }
+    }
+    if (onboardingUnmounted) return;
+    syncedCount.value = finalRes?.synced_activities ?? finalRes?.synced_count ?? 0;
+    if (finalRes?.success === false) {
+      uni.showToast({ title: finalRes?.error || "同步未完成，请稍后刷新", icon: "none" });
+    } else {
+      uni.showToast({ title: `成功同步 ${syncedCount.value} 条记录`, icon: "success" });
+    }
   } catch (e: any) {
     uni.showToast({ title: e?.message || e?.detail || "同步失败，请稍后刷新", icon: "none" });
   } finally {
-    syncingHistory.value = false;
+    if (!onboardingUnmounted) {
+      syncingHistory.value = false;
+    }
   }
 }
 
@@ -1539,6 +1636,7 @@ async function loadUserData() {
 
     isCorosConnected.value = Boolean(p.coros_connected ?? details.coros_connected);
     if (p.coros_account) corosAccount.value = p.coros_account;
+    if (p.coros_domain) corosDomain.value = p.coros_domain;
 
     isAppleWatchConnected.value = Boolean(p.apple_watch_connected ?? details.apple_watch_connected);
     isHuaweiConnected.value = Boolean(p.huawei_connected ?? details.huawei_connected);
@@ -3029,4 +3127,19 @@ onMounted(async () => {
   color: var(--rgm-text-3, #9ca3af);
   line-height: 1.4;
 }
+/* 4-Segment Minimalist Progress Bar */
+.ob-seg-track {
+  display: flex;
+  flex-direction: row;
+  gap: 10rpx;
+  margin-bottom: 18rpx;
+}
+.ob-seg-bar {
+  flex: 1;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-track);
+}
+.ob-seg-bar.done { background: var(--rgm-green); }
+.ob-seg-bar.active { background: var(--rgm-brand); }
 </style>

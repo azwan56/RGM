@@ -19,8 +19,8 @@ export interface ShareTimelineResult {
 /** 统一对外分享主标题 (适合跑步群群发与朋友圈) */
 export const UNIFIED_SHARE_TITLE = "万跑跑团助手｜佳明·高驰·苹果·华为·颂拓同步 · 科学教练 · 自建跑团与约跑";
 
-/** 统一对外落地页 (所有分享均统一落地至统一分享专页，不携带任何个人 ID 或私密参数) */
-export const UNIFIED_SHARE_PATH = "/pages/share/share";
+/** 统一对外落地页 (所有分享均统一落地至小程序主页，不携带任何个人 ID 或跑团信息) */
+export const UNIFIED_SHARE_PATH = "/pages/index/index";
 
 /** 朋友圈分享统一 query (空参数，保障纯净与隐私) */
 export const UNIFIED_TIMELINE_QUERY = "";
@@ -56,9 +56,10 @@ export function getUnifiedShareAppMessage(inviterUid?: string): ShareMessageResu
 export function getInviteNewRunnerShareMessage(user?: any): ShareMessageResult {
   const uid = getCurrentInviterUid(user?.id || user?.uid);
   const name = user?.real_name || user?.display_name || "跑友";
+  const inviteLandingPath = "/pages/share/share";
   const path = uid
-    ? `${UNIFIED_SHARE_PATH}?inviter_uid=${encodeURIComponent(uid)}&from=create_club`
-    : UNIFIED_SHARE_PATH;
+    ? `${inviteLandingPath}?inviter_uid=${encodeURIComponent(uid)}&from=create_club`
+    : inviteLandingPath;
   return {
     title: `🏃‍♂️ ${name} 邀你加入万跑跑团助手｜支持佳明/高驰/苹果/华为/颂拓同步，一键组建专属跑团！`,
     path,

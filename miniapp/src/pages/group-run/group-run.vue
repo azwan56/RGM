@@ -68,25 +68,25 @@
         </view>
       </view>
 
-      <!-- 🗺️ 集合地点地图标注卡片（对所有受邀访客直接开放查看） -->
+      <!-- 集合地点地图标注卡片 -->
       <view
         v-if="event.latitude && event.longitude"
-        style="margin-bottom: 24rpx; border-radius: 20rpx; overflow: hidden; border: 1rpx solid rgba(59, 130, 246, 0.35); background: rgba(15, 23, 42, 0.6);"
+        style="margin-bottom: 24rpx; border-radius: 20rpx; overflow: hidden; border: 1rpx solid var(--rgm-blue-line); background: var(--rgm-card);"
       >
         <view style="display: flex; align-items: center; justify-content: space-between; padding: 14rpx 20rpx;">
           <view style="flex: 1; overflow: hidden;">
-            <text style="display: block; font-size: 24rpx; font-weight: 700; color: #f8fafc;">
-              📍 集合地点：{{ event.location || '约跑集合点' }}
+            <text style="display: block; font-size: 24rpx; font-weight: 700; color: var(--rgm-ink);">
+              集合地点：{{ event.location || '约跑集合点' }}
             </text>
-            <text v-if="event.location_detail" style="display: block; font-size: 21rpx; color: #94a3b8; margin-top: 2rpx;">
+            <text v-if="event.location_detail" style="display: block; font-size: 21rpx; color: var(--rgm-ink-2); margin-top: 2rpx;">
               {{ event.location_detail }}
             </text>
           </view>
           <view
-            style="padding: 8rpx 18rpx; border-radius: 999rpx; background: #2563eb; color: #ffffff; font-size: 22rpx; font-weight: 700; margin-left: 14rpx;"
+            style="padding: 8rpx 18rpx; border-radius: 999rpx; background: var(--rgm-blue); color: #ffffff; font-size: 22rpx; font-weight: 700; margin-left: 14rpx;"
             @tap="openRunLocation(event)"
           >
-            🗺️ 地图导航 ›
+            地图导航 ›
           </view>
         </view>
         <map
@@ -208,38 +208,27 @@
       <block v-else>
         <!-- ════════════ STAGE 1 · 约跑前：集结与分队 ════════════ -->
         <block v-if="activeStage === 'pre'">
-          <!-- ① 我的报名 -->
-          <view class="stage-sec-label"><text class="ssl-num">1</text><text class="ssl-text">我的报名</text></view>
-          <view class="my-status-card">
-            <view v-if="!event.is_joined" class="not-joined-box">
-              <view class="nj-info">
-                <text class="nj-title">{{ isEventArchived ? '📁 活动已归档结束' : '👋 尚未报名' }}</text>
-              </view>
-              <button v-if="!isEventArchived" class="join-cta-btn" :loading="joiningDirect" @tap="handleOneTapJoin">一键报名</button>
-            </view>
-            <view v-else class="joined-box">
+          <view class="my-status-card" v-if="event.is_joined">
+            <view class="joined-box">
               <view class="jb-top">
                 <view class="jb-left">
-                  <view class="jb-badge">✅ 已报名</view>
-                  <view class="jb-tag">{{ event.my_participation?.pace_group || '🏃 有氧组' }}</view>
-                  <view class="jb-tag role">{{ event.my_participation?.runner_role || '🏃 跟跑团员' }}</view>
+                  <view class="jb-badge">已报名</view>
+                  <view class="jb-tag">{{ event.my_participation?.pace_group || '有氧组' }}</view>
+                  <view class="jb-tag role">{{ event.my_participation?.runner_role || '跟跑团员' }}</view>
                 </view>
                 <view v-if="!isEventArchived" class="jb-actions">
                   <text class="jb-edit-btn" @tap="openJoinOrCheckinModal">修改分队</text>
-                  <text class="jb-leave-btn" @tap="handleLeaveEvent">取消报名</text>
+                  <text class="jb-leave-btn" @tap="handleLeaveEvent">取消</text>
                 </view>
-              </view>
-              <view class="pre-quick-row">
-                <view class="pre-quick-btn" @tap="addRunToCalendar(event)">📅 加入日历提醒</view>
-                <view class="pre-quick-btn" @tap="openRunLocation(event)">📍 导航到集合点</view>
-                <view class="pre-quick-btn accent" @tap="openPosterModal">🖼️ 约跑海报</view>
               </view>
             </view>
           </view>
 
-          <!-- ② 配速列车分队名单 -->
-          <view class="stage-sec-label"><text class="ssl-num">2</text><text class="ssl-text">配速分队（{{ (event.participants || []).length }} 人）</text></view>
+          <!-- 配速列车分队名单 -->
           <view class="roster-card">
+            <view class="sec-header" style="margin-bottom: 14rpx;">
+              <text class="sec-title">配速分队名单 ({{ (event.participants || []).length }} 人)</text>
+            </view>
             <view v-if="!preTrainGroups.length" class="empty-comment-hint">暂无报名</view>
             <view v-for="grp in preTrainGroups" :key="grp.name" class="train-group">
               <view class="tg-head">
@@ -268,8 +257,7 @@
           <text class="plt-text">约跑尚未开始，开跑后可登记成绩</text>
         </view>
 
-        <!-- ① 我的成绩 -->
-        <view class="stage-sec-label"><text class="ssl-num">1</text><text class="ssl-text">我的成绩</text></view>
+        <!-- 我的成绩 -->
         <view class="my-status-card">
           <view v-if="!event.is_joined" class="not-joined-box">
             <view class="nj-info">
@@ -281,7 +269,7 @@
             <view class="jb-stats-strip">
               <view class="jb-stat">
                 <text class="jb-stat-lbl">状态</text>
-                <text class="jb-stat-val highlight">{{ event.my_participation?.has_completed_run ? '🏆 已完赛' : '⏳ 待登记' }}</text>
+                <text class="jb-stat-val highlight">{{ event.my_participation?.has_completed_run ? '已完赛' : '待登记' }}</text>
               </view>
               <view class="jb-stat">
                 <text class="jb-stat-lbl">距离</text>
@@ -299,11 +287,21 @@
           </view>
         </view>
 
-        <!-- ② 团队战报 -->
-        <view class="stage-sec-label"><text class="ssl-num">2</text><text class="ssl-text">团队战报</text></view>
+        <!-- B4 团队完赛战报：环形完赛率 + MVP 徽章 -->
         <view class="summary-card">
-          <view class="sec-header">
-            <text class="sec-title">📊 战报总览</text>
+          <view class="sec-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16rpx;">
+            <text class="sec-title">完赛战报总览</text>
+            <view class="gr-ring-wrap">
+              <view
+                class="gr-comp-ring"
+                :style="{ background: `conic-gradient(var(--rgm-green) ${(Number(socialSummary.completion_rate || 0) * 3.6).toFixed(1)}deg, var(--rgm-track) 0deg)` }"
+              >
+                <view class="gr-comp-hole">
+                  <text class="gr-comp-pct">{{ socialSummary.completion_rate || 0 }}%</text>
+                </view>
+              </view>
+              <text class="gr-comp-lbl">完赛率 {{ socialSummary.completed_count || 0 }}/{{ socialSummary.participant_count || 0 }}</text>
+            </view>
           </view>
 
           <view class="team-kpi-grid">
@@ -357,8 +355,7 @@
           </view>
         </view>
 
-        <!-- ③ 最终参与人员与成绩榜 -->
-        <view class="stage-sec-label"><text class="ssl-num">3</text><text class="ssl-text">完赛成绩榜</text></view>
+        <!-- 最终参与人员与成绩榜 -->
         <view class="roster-card">
           <view class="sec-header">
             <view>
@@ -468,11 +465,7 @@
         </view>
         </block>
 
-        <!-- 文案生成：按阶段只展示一种内容（约跑前=群接龙；约跑后=完赛战报） -->
-        <view class="stage-sec-label">
-          <text class="ssl-num">{{ activeStage === 'pre' ? 3 : 4 }}</text>
-          <text class="ssl-text">{{ activeStage === 'pre' ? '分享群接龙' : '分享战报' }}</text>
-        </view>
+        <!-- 文案与海报分享 -->
         <view class="generator-card">
           <view class="copy-preview-box">
             <text selectable class="copy-preview-text">{{ activeStage === 'pre' ? socialSummary.share_solitaire_text : socialSummary.share_battle_report_text }}</text>
@@ -487,11 +480,7 @@
           </view>
         </view>
 
-        <!-- 留言墙：约跑前=集结喊话；约跑后=跑后感言 -->
-        <view class="stage-sec-label">
-          <text class="ssl-num">{{ activeStage === 'pre' ? 4 : 5 }}</text>
-          <text class="ssl-text">{{ activeStage === 'pre' ? '集结喊话' : '跑后感言' }}</text>
-        </view>
+        <!-- 留言墙 -->
         <view class="comments-card">
           <view class="sec-header">
             <text class="sec-title">💬 {{ activeStage === 'pre' ? '集结留言' : '跑后感言' }} ({{ (event.comments || []).length }})</text>
@@ -1629,12 +1618,12 @@ async function generateGroupRunPosterCanvas() {
     ctx.setFillStyle(bgGrad);
     ctx.fillRect(0, 0, W, H);
 
-    // Outer neon border
-    drawRoundedBox(ctx, 24, 24, W - 48, H - 48, 32, "rgba(17,24,39,0.92)", "#D0FD3E");
+    // Outer brand border
+    drawRoundedBox(ctx, 24, 24, W - 48, H - 48, 32, "rgba(17,24,39,0.92)", "#FC4C02");
 
     // 2. Top Badge & Club Header
-    drawRoundedBox(ctx, 56, 56, isPre ? 334 : 348, 46, 23, "#D0FD3E");
-    ctx.setFillStyle("#0B0D13");
+    drawRoundedBox(ctx, 56, 56, isPre ? 334 : 348, 46, 23, "#FC4C02");
+    ctx.setFillStyle("#FFFFFF");
     ctx.setFontSize(22);
     ctx.fillText(isPre ? "📣 万跑跑团助手 · 约跑召集令" : "🏆 万跑跑团助手 · 官方认证战报", 76, 87);
 
@@ -1664,7 +1653,7 @@ async function generateGroupRunPosterCanvas() {
     const imgY = 178;
     const imgW = W - 112;
     const imgH = 400;
-    drawRoundedBox(ctx, imgX, imgY, imgW, imgH, 24, "#1E293B", "rgba(208,253,62,0.4)");
+    drawRoundedBox(ctx, imgX, imgY, imgW, imgH, 24, "#1E293B", "rgba(252,76,2,0.45)");
     const rawCov = String(ev.cover_image || "");
     const preferClubImg = localLogo && (!rawCov || rawCov.includes("images.unsplash.com"));
     const heroSrc = preferClubImg ? localLogo : localCover || localLogo;
@@ -1692,7 +1681,7 @@ async function generateGroupRunPosterCanvas() {
       ctx.restore();
     }
     // Club slogan inside hero photo bottom (complete clause, never truncated mid-word)
-    ctx.setFillStyle("#D0FD3E");
+    ctx.setFillStyle("#FF6B2B");
     ctx.setFontSize(22);
     const slogan = formatPosterClubSlogan(ev);
     ctx.fillText(slogan, imgX + 24, imgY + imgH - 24);
@@ -1711,7 +1700,7 @@ async function generateGroupRunPosterCanvas() {
     ctx.fillText(`📍 集合地点：${locStr}`, 56, 720);
 
     // 5. Core Metrics Box (自适应字号，完整显示建议配速如 5:30-6:00)
-    drawRoundedBox(ctx, 56, 748, W - 112, 148, 24, "rgba(255,255,255,0.06)", "rgba(208,253,62,0.35)");
+    drawRoundedBox(ctx, 56, 748, W - 112, 148, 24, "rgba(255,255,255,0.06)", "rgba(252,76,2,0.35)");
     const colW = (W - 112) / 3;
     const stats = isPre
       ? [
@@ -1733,7 +1722,7 @@ async function generateGroupRunPosterCanvas() {
       const valStr = String(st.val || "");
       const valFontSize = valStr.length <= 7 ? 36 : valStr.length <= 10 ? 31 : valStr.length <= 13 ? 26 : 22;
       ctx.setTextAlign("center");
-      ctx.setFillStyle(st.accent ? "#D0FD3E" : "#FFFFFF");
+      ctx.setFillStyle(st.accent ? "#FF6B2B" : "#FFFFFF");
       ctx.setFontSize(valFontSize);
       ctx.fillText(valStr, cx, 814);
       ctx.setFillStyle("#94A3B8");
@@ -1743,8 +1732,8 @@ async function generateGroupRunPosterCanvas() {
     ctx.setTextAlign("left");
 
     // 6. Bottom QR Code & Newcomer Onboarding Callout (左右严格分栏，杜绝白框压字或超出底边)
-    drawRoundedBox(ctx, 56, 924, W - 112, 304, 24, "rgba(208,253,62,0.10)", "#D0FD3E");
-    ctx.setFillStyle("#D0FD3E");
+    drawRoundedBox(ctx, 56, 924, W - 112, 304, 24, "rgba(252,76,2,0.10)", "#FC4C02");
+    ctx.setFillStyle("#FF6B2B");
     ctx.setFontSize(24);
     ctx.fillText("👉 长按图片 · 识别右侧小程序码", 78, 978);
 
@@ -2257,8 +2246,8 @@ onShareTimeline(() => {
   border-radius: 999rpx;
   font-size: 22rpx;
   font-weight: 600;
-  background: rgba(208, 253, 62, 0.2);
-  color: #FC4C02;
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
 }
 .hero-title {
   display: block;
@@ -2544,9 +2533,9 @@ onShareTimeline(() => {
   color: var(--rgm-text, #f8fafc);
 }
 .jb-tag.role {
-  background: rgba(208, 253, 62, 0.14);
-  border-color: rgba(208, 253, 62, 0.35);
-  color: var(--rgm-accent, #FC4C02);
+  background: var(--rgm-brand-tint);
+  border-color: var(--rgm-brand-line);
+  color: var(--rgm-brand-text);
   font-weight: 700;
 }
 .jb-actions {
@@ -2556,12 +2545,12 @@ onShareTimeline(() => {
 }
 .jb-edit-btn {
   font-size: 22rpx;
-  color: var(--rgm-accent, #FC4C02);
+  color: var(--rgm-brand-text);
   font-weight: 700;
   padding: 6rpx 18rpx;
   border-radius: 999rpx;
-  background: rgba(252, 76, 2, 0.14);
-  border: 1px solid rgba(208, 253, 62, 0.35);
+  background: var(--rgm-brand-tint);
+  border: 1px solid var(--rgm-brand-line);
 }
 .jb-leave-btn {
   font-size: 22rpx;
@@ -2800,8 +2789,8 @@ onShareTimeline(() => {
   font-size: 20rpx;
   padding: 2rpx 12rpx;
   border-radius: 8rpx;
-  background: rgba(208, 253, 62, 0.16);
-  color: var(--rgm-accent);
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
   font-weight: 600;
 }
 .group-badge {
@@ -3060,7 +3049,7 @@ onShareTimeline(() => {
   max-height: 86vh;
   overflow-y: auto;
   background: var(--rgm-card, #141418);
-  border: 1.5px solid rgba(208, 253, 62, 0.35);
+  border: 1.5px solid var(--rgm-brand-line);
   border-radius: 32rpx;
   padding: 36rpx 30rpx;
   box-shadow: 0 28rpx 80rpx rgba(0, 0, 0, 0.78);
@@ -3154,7 +3143,7 @@ onShareTimeline(() => {
   color: #FFFFFF;
   font-weight: 800;
   border-color: #FC4C02;
-  box-shadow: 0 6rpx 18rpx rgba(208, 253, 62, 0.24);
+  box-shadow: 0 6rpx 18rpx var(--rgm-brand-glow);
 }
 .act-pick-list {
   max-height: 240rpx;
@@ -3170,8 +3159,8 @@ onShareTimeline(() => {
   margin-bottom: 12rpx;
 }
 .act-pick-item.active {
-  border-color: var(--rgm-accent, #FC4C02);
-  background: rgba(208, 253, 62, 0.1);
+  border-color: var(--rgm-brand);
+  background: var(--rgm-brand-tint);
 }
 .act-name {
   display: block;
@@ -3215,7 +3204,7 @@ onShareTimeline(() => {
   font-weight: 800;
   border-radius: 999rpx;
   margin-top: 16rpx;
-  box-shadow: 0 10rpx 28rpx rgba(208, 253, 62, 0.28);
+  box-shadow: 0 10rpx 28rpx var(--rgm-brand-glow);
 }
 .modal-submit-btn::after {
   border: none;
@@ -3364,9 +3353,9 @@ onShareTimeline(() => {
 .hero-poster-btn {
   padding: 10rpx 22rpx;
   border-radius: 999rpx;
-  background: rgba(208, 253, 62, 0.2);
-  border: 1px solid #FC4C02;
-  color: #FC4C02;
+  background: var(--rgm-brand-tint);
+  border: 1px solid var(--rgm-brand);
+  color: var(--rgm-brand-text);
   font-size: 22rpx;
   font-weight: 800;
 }
@@ -3381,8 +3370,8 @@ onShareTimeline(() => {
   margin-bottom: 24rpx;
   padding: 26rpx 28rpx;
   border-radius: 26rpx;
-  background: linear-gradient(135deg, rgba(208, 253, 62, 0.16) 0%, var(--rgm-card, #141418) 100%);
-  border: 1.5px solid var(--rgm-accent, #FC4C02);
+  background: var(--rgm-card);
+  border: 1.5px solid var(--rgm-brand);
 }
 .ncc-top {
   display: flex;
@@ -3448,7 +3437,7 @@ onShareTimeline(() => {
   padding: 20rpx 22rpx;
   border-radius: 20rpx;
   background: var(--rgm-card-sub, #1B1B22);
-  border: 1px solid rgba(208, 253, 62, 0.45);
+  border: 1px solid var(--rgm-brand-line);
 }
 .nmb-head {
   display: flex;
@@ -3553,8 +3542,8 @@ onShareTimeline(() => {
   gap: 16rpx;
   padding: 18rpx 20rpx;
   border-radius: 20rpx;
-  background: rgba(252, 76, 2, 0.14);
-  border: 1px solid rgba(208, 253, 62, 0.45);
+  background: var(--rgm-brand-tint);
+  border: 1px solid var(--rgm-brand-line);
 }
 .pqr-left {
   flex: 1;
@@ -3612,7 +3601,7 @@ onShareTimeline(() => {
   border-radius: 22rpx;
   overflow: hidden;
   margin-bottom: 20rpx;
-  border: 1px solid rgba(208, 253, 62, 0.45);
+  border: 1px solid var(--rgm-brand-line);
 }
 .poster-hero-img {
   width: 100%;
@@ -3793,5 +3782,39 @@ onShareTimeline(() => {
   font-size: 22rpx;
   line-height: 1.45;
   color: #d97706;
+}
+.gr-ring-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+.gr-comp-ring {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gr-comp-hole {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  background: var(--rgm-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gr-comp-pct {
+  font-size: 17rpx;
+  font-weight: 800;
+  color: var(--rgm-green);
+  font-variant-numeric: tabular-nums;
+}
+.gr-comp-lbl {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-ink-2);
 }
 </style>

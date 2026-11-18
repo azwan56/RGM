@@ -1,746 +1,332 @@
 <template>
-  <view class="dashboard-page" :class="themeClass">
-    <!-- 首屏骨架屏：首次进入时盖住尚未加载的数据，避免先闪示例数据 -->
+  <view class="dashboard-page home-v3" :class="themeClass">
+    <!-- 首屏骨架屏 -->
     <PageSkeleton v-if="firstLoadPending" overlay />
-    <!-- Header: User Greeting & Avatar -->
-    <view class="header-card">
-      <view class="user-info">
-        <image class="avatar" :src="dashboardData?.user?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" @click="goToQuickEditProfile" />
-        <view class="text-group">
-          <text class="greeting">欢迎回来，</text>
-          <view style="display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap;">
-            <text class="user-name">{{ dashboardData?.user?.display_name || user?.display_name || "跑者" }}</text>
-            <text
-              v-if="isDefaultNickname"
-              style="font-size: 20rpx; font-weight: 700; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(252, 76, 2, 0.14); color: #fc4c02; border: 1rpx solid rgba(252, 76, 2, 0.35);"
-              @click.stop="goToQuickEditProfile"
-            >
-              ✏️ 改昵称
-            </text>
-          </view>
-          <view v-if="dashboardData?.fitness_form && hasRunningData" class="user-fitness-sub" @click="goToBodyData">
-            <text
-              class="uf-tag"
-              :style="currentTheme === 'volt'
-                ? {
-                    color: '#059669',
-                    backgroundColor: '#ECFDF5',
-                    borderColor: 'rgba(16, 185, 129, 0.35)'
-                  }
-                : {
-                    color: dashboardData?.fitness_form?.status_color || '#38bdf8',
-                    backgroundColor: (dashboardData?.fitness_form?.status_color || '#38bdf8') + '22',
-                    borderColor: (dashboardData?.fitness_form?.status_color || '#38bdf8') + '44'
-                  }"
-            >
-              ● 今日状态：{{ dashboardData?.fitness_form?.status_label || "训练中" }}{{ currentVdot != null ? ` · VDOT ${currentVdot}` : '' }}
-            </text>
-          </view>
-        </view>
+
+    <!-- ── 极简顶栏：头像昵称 + 手表圆钮 + 铃铛圆钮（零冗余胶囊）── -->
+    <view class="h3-topbar">
+      <view class="h3-user" @click="goToQuickEditProfile">
+        <image
+          class="h3-avatar"
+          :src="dashboardData?.user?.avatar_url || user?.avatar_url || defaultAvatar"
+          mode="aspectFill"
+        />
+        <text class="h3-name">{{ dashboardData?.user?.display_name || user?.display_name || "跑者" }}</text>
+        <text v-if="isDefaultNickname" class="h3-edit-pill">改昵称</text>
       </view>
-      <view class="header-right-actions">
-        <view class="layout-order-pill" @click="openLayoutOrderModal">
-          <text class="layout-order-pill-txt">↕️ 排版</text>
+
+      <view class="h3-top-actions">
+        <view class="rgm-icon-btn h3-icon-btn" @click="handleHeaderWatchClick">
+          <RgmIcon name="watch" :size="32" :color="isDeviceConnected ? 'green' : 'text2'" />
+          <view v-if="isDeviceConnected" class="h3-conn-dot" />
         </view>
-        <view class="garmin-badge" :class="{ active: isDeviceConnected }" @click="goToDeviceBinding">
-          <view class="pulse-dot" />
-          <text class="badge-text">{{ isDeviceConnected ? deviceConnectedText : '绑表 ›' }}</text>
-        </view>
-        <view class="notif-bell-btn" @click="openNotificationsModal">
-          <text class="bell-icon">🔔</text>
-          <view v-if="unreadNotifCount > 0" class="notif-badge">
-            <text class="notif-badge-text">{{ unreadNotifCount > 99 ? '99+' : unreadNotifCount }}</text>
+        <view class="rgm-icon-btn h3-icon-btn" @click="openNotificationsModal">
+          <RgmIcon name="bell" :size="32" color="text2" />
+          <view v-if="unreadNotifCount > 0" class="h3-notif-badge">
+            <text class="h3-notif-badge-txt">{{ unreadNotifCount > 99 ? '99+' : unreadNotifCount }}</text>
           </view>
         </view>
       </view>
     </view>
 
-    <!-- ── ✅ 新手任务清单（替代原「设定向导」横幅：按真实状态逐项勾选，全部完成后自动消失）── -->
-    <view v-if="showStarterTasks" id="rgm-mod-starter" class="starter-card">
-      <view class="sc-head" @click="starterCollapsed = !starterCollapsed">
-        <view class="sc-head-left">
-          <text class="sc-title">新手任务</text>
-          <text class="sc-count">{{ starterDoneCount }}/{{ starterTasks.length }}</text>
+    <!-- ── 新手 4/5 步激活清单紧凑横条（全部完成后自动隐藏）── -->
+    <view v-if="showStarterTasks" id="rgm-mod-starter" class="h3-starter-bar">
+      <view class="h3-starter-head">
+        <view class="h3-starter-left" @click="goToOnboarding">
+          <text class="h3-starter-title">新手激活</text>
+          <text class="h3-starter-pill">{{ starterDoneCount }}/{{ starterTasks.length }}</text>
         </view>
-        <view class="sc-head-right">
-          <text class="sc-toggle">{{ starterCollapsed ? '展开 ▾' : '收起 ▴' }}</text>
-          <text class="sc-close" @click.stop="dismissOnboardBanner">✕</text>
-        </view>
+        <text class="h3-starter-close" @click.stop="dismissOnboardBanner">✕</text>
       </view>
-      <view class="sc-progress">
-        <view class="sc-progress-fill" :style="{ width: (starterDoneCount / starterTasks.length * 100) + '%' }"></view>
-      </view>
-      <view v-if="!starterCollapsed" class="sc-list">
-        <view
-          v-for="task in starterTasks"
-          :key="task.key"
-          class="sc-item"
-          :class="{ done: task.done }"
-          @click="runStarterTask(task.key, task.done)"
-        >
-          <text class="sc-check">{{ task.done ? '✓' : '' }}</text>
-          <view class="sc-item-meta">
-            <text class="sc-item-title">{{ task.title }}</text>
+      <scroll-view scroll-x class="h3-starter-chips" :show-scrollbar="false">
+        <view class="h3-starter-chips-inner">
+          <view
+            v-for="task in starterTasks"
+            :key="task.key"
+            class="h3-starter-chip"
+            :class="{ done: task.done }"
+            @click="runStarterTask(task.key, task.done)"
+          >
+            <text class="h3-starter-chip-txt">{{ task.done ? `${task.title.slice(0, 4)} ✓` : `${task.cta} ›` }}</text>
           </view>
-          <text v-if="!task.done" class="sc-item-go">{{ task.cta }} ›</text>
         </view>
-        <text class="sc-footer-link" @click="goToOnboarding">打开完整设定向导 ›</text>
-      </view>
+      </scroll-view>
     </view>
 
-    <!-- ── 大群必填资料待完善醒目提醒横幅 (若有) ── -->
+    <!-- ── 大群实名待完善单行提醒（若有）── -->
     <view
       v-if="pendingOrgReminder?.hasReminder"
-      class="org-reminder-banner"
-      :class="pendingOrgReminder.type === 'suspended' ? 'banner-suspended' : 'banner-temporary'"
+      class="h3-org-alert"
+      :class="{ suspended: pendingOrgReminder.type === 'suspended' }"
       @click="goToFillRequiredFields"
     >
-      <view class="orb-icon">{{ pendingOrgReminder.type === 'suspended' ? '🚫' : '⏳' }}</view>
-      <view class="orb-text-col">
-        <view class="orb-title-row">
-          <text class="orb-title">
-            {{ pendingOrgReminder.type === 'suspended' ? '大群访问已被暂停' : '大群档案待完善' }}
-          </text>
-          <text class="orb-badge" v-if="pendingOrgReminder.remainingDays !== undefined && pendingOrgReminder.remainingDays !== null">
-            剩余 {{ pendingOrgReminder.remainingDays }} 天
-          </text>
-        </view>
-        <text class="orb-desc">
-          {{ pendingOrgReminder.missingLabels ? '缺少必填项：' + pendingOrgReminder.missingLabels : '请尽快补齐实名资料以获管理员审核' }}
+      <view class="h3-org-alert-left">
+        <RgmIcon name="alert" :size="28" :color="pendingOrgReminder.type === 'suspended' ? 'red' : 'amber'" />
+        <text class="h3-org-alert-txt">
+          {{ pendingOrgReminder.type === 'suspended' ? '大群访问已暂停' : '大群实名待完善' }}
+          {{ pendingOrgReminder.remainingDays != null ? `· 剩 ${pendingOrgReminder.remainingDays} 天` : '' }}
         </text>
       </view>
-      <view class="orb-action-btn">
-        <text class="orb-btn-label">立即填写</text>
-        <text class="orb-arrow">›</text>
-      </view>
+      <text class="h3-org-alert-cta">去填写 ›</text>
     </view>
 
-    <!-- ── 首页核心板块容器（支持用户自定义显示次序，基于 Flex order 无损重排） ── -->
-    <view class="home-modules-container">
-    <!-- ── 🏃 我的下一场约跑：已报名且未结束时显示（汇总所有已加入跑团） ── -->
-    <view
-      v-if="myNextRun"
-      id="rgm-mod-nextrun"
-      class="next-run-card"
-      :style="{ order: getModuleOrder('nextrun') }"
-      @click="openGroupRunDetail(myNextRun.club_id, myNextRun.id)"
-    >
-      <view class="nr-header">
-        <view class="nr-badge">
-          <view class="nr-pulse" />
-          <text class="nr-badge-text">我报名的约跑</text>
-        </view>
-        <text class="nr-countdown">{{ getCountdownText(myNextRun.meet_time || myNextRun.start_date) }}</text>
-      </view>
-      <text class="nr-title">{{ myNextRun.title }}</text>
-      <view class="nr-meta-row">
-        <text class="nr-meta highlight">⏰ {{ formatMeetTime(myNextRun.meet_time || myNextRun.start_date) }}</text>
-      </view>
-      <view class="nr-meta-row">
-        <text class="nr-meta">📍 {{ myNextRun.location || '跑团集合点' }}</text>
-      </view>
-      <view class="nr-meta-row">
-        <text class="nr-meta dim">🏃 {{ myNextRun.club_name || '跑团' }} · 目标 {{ myNextRun.target_km || 10 }} km{{ myNextRun.pace_requirement ? ' · 配速 ' + myNextRun.pace_requirement : '' }}</text>
-      </view>
-      <view class="nr-actions">
-        <button class="nr-btn" @click.stop="addRunToCalendar(myNextRun)">🔔 日历</button>
-        <button class="nr-btn" open-type="share" :data-share-type="'group_run'" @click.stop>💬 转发</button>
-        <button class="nr-btn primary" @click.stop="openGroupRunDetail(myNextRun.club_id, myNextRun.id, isGroupRunPostStage(myNextRun) ? 'post' : 'pre')">{{ isGroupRunPostStage(myNextRun) ? '🏆 战报' : '📣 详情' }}</button>
-      </view>
-    </view>
-
-    <!-- ── 🔥 跑团打卡动态快捷入口（置于今日课表之上，展示最新打卡数与教练点评数） ── -->
-    <view
-      id="rgm-mod-feed"
-      class="home-feed-shortcut-bar home-feed-top-card"
-      :style="{ order: getModuleOrder('feed') }"
-      @click="goToClubFeed"
-    >
-      <view class="hfs-left">
-        <view
-          v-if="dashboardData?.club_feed_summary?.latest_checkins && dashboardData.club_feed_summary.latest_checkins.length > 0"
-          class="hfs-avatar-stack"
-        >
-          <image
-            v-for="(ck, cIdx) in dashboardData.club_feed_summary.latest_checkins.slice(0, 3)"
-            :key="ck.id || cIdx"
-            class="hfs-avatar"
-            :style="{ zIndex: 5 - Number(cIdx) }"
-            :src="ck.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
-            mode="aspectFill"
-          />
-        </view>
-        <text v-else class="hfs-fire-icon">🔥</text>
-
-        <view class="hfs-text-col">
-          <view class="hfs-title-row">
-            <text class="hfs-title">🔥 打卡动态</text>
-            <text class="hfs-stat-pill checkin">
-              {{ (dashboardData?.club_feed_summary?.today_checkin_count || 0) > 0
-                ? `今日 ${dashboardData.club_feed_summary.today_checkin_count} 打卡`
-                : `本周 ${dashboardData?.club_feed_summary?.week_checkin_count || dashboardData?.club_feed_summary?.month_checkin_count || 0} 打卡` }}
-            </text>
-            <text class="hfs-stat-pill critique">
-              🎯 {{ dashboardData?.club_feed_summary?.coach_critique_count || 0 }} 点评
+    <!-- ── 首页四大核心图形模块容器（支持 E5 Flex order 自定义排序）── -->
+    <view class="home-modules-container h3-modules">
+      <!-- 模块 1 · 登机牌式约跑票根（有近期已报名约跑时置顶） -->
+      <view
+        v-if="myNextRun"
+        id="rgm-mod-nextrun"
+        class="rgm-ticket h3-ticket-card"
+        :style="{ order: getModuleOrder('nextrun') }"
+        @click="openGroupRunDetail(myNextRun.club_id, myNextRun.id, isGroupRunPostStage(myNextRun) ? 'post' : 'pre')"
+      >
+        <view class="h3-ticket-top">
+          <view class="h3-ticket-time-row">
+            <view class="h3-pulse-orange" />
+            <text class="h3-ticket-countdown">
+              {{ getCountdownText(myNextRun.meet_time || myNextRun.start_date) }} · {{ formatMeetTime(myNextRun.meet_time || myNextRun.start_date) }}
             </text>
           </view>
-          <text
-            v-if="dashboardData?.club_feed_summary?.latest_checkins && dashboardData.club_feed_summary.latest_checkins.length > 0"
-            class="hfs-sub-line"
-          >
-            最新：{{ dashboardData.club_feed_summary.latest_checkins[0].display_name }} 打卡 {{ dashboardData.club_feed_summary.latest_checkins[0].distance_km }}km
-          </text>
+          <button class="h3-ticket-share-btn" open-type="share" :data-share-type="'group_run'" @click.stop>
+            <RgmIcon name="share" :size="26" color="brand" />
+          </button>
+        </view>
+
+        <view class="h3-ticket-title-row">
+          <text class="h3-ticket-title">{{ myNextRun.title }}</text>
+          <RgmIcon name="chevron-right" :size="28" color="brand" />
+        </view>
+
+        <view class="rgm-ticket-perf">
+          <view class="rgm-ticket-perf-line" />
+        </view>
+
+        <view class="h3-ticket-bottom">
+          <view class="h3-ticket-loc">
+            <RgmIcon name="pin" :size="24" color="brand" />
+            <text class="h3-ticket-loc-txt">{{ myNextRun.location || '跑团集合点' }}</text>
+          </view>
+          <text class="h3-ticket-club">{{ myNextRun.club_name || '跑团约跑' }}</text>
         </view>
       </view>
-      <view class="hfs-cta">
-        <text class="hfs-cta-text">进入 ›</text>
-      </view>
-    </view>
 
-    <!-- ── 📅 今日训练课表独立板块（与周/月目标完成度分开，支持独立排序） ── -->
-    <view id="rgm-mod-today" class="today-standalone-card" :style="{ order: getModuleOrder('today') }">
-      <view
-        v-if="dashboardData?.today_workout"
-        class="get-main-box standalone"
-        :class="{ 'is-completed': dashboardData.today_workout.completed, 'is-volt': currentTheme === 'volt' }"
-      >
-        <view class="get-main-row">
-          <view class="get-info-col" @click="goToCoachPage">
-            <view class="get-meta-row">
-              <text class="get-label">📅 今日课表</text>
-              <text class="tw-badge" :class="getWorkoutBadgeClass(dashboardData.today_workout.workout_type)">
+      <!-- 模块 2 · 自适应今日课表卡（有约跑时自动收窄为单行，日常态大字展开） -->
+      <view id="rgm-mod-today" :style="{ order: getModuleOrder('today') }">
+        <template v-if="dashboardData?.today_workout">
+          <!-- 约跑集结态：单行高对比条 -->
+          <view
+            v-if="myNextRun"
+            class="h3-today-compact"
+            :class="{ completed: dashboardData.today_workout.completed }"
+            @click="goToCoachPage"
+          >
+            <view class="h3-tc-left">
+              <text class="h3-type-badge" :class="getWorkoutBadgeClass(dashboardData.today_workout.workout_type)">
                 {{ getWorkoutTypeLabel(dashboardData.today_workout.workout_type) }}
               </text>
-              <text
-                v-if="dashboardData.today_workout.workout_type !== 'rest' && dashboardData.today_workout.distance_km"
-                class="get-dist-txt"
-              >
-                {{ dashboardData.today_workout.distance_km }}km
+              <text class="h3-tc-main">
+                {{ dashboardData.today_workout.workout_type === 'rest' ? dashboardData.today_workout.title : `${dashboardData.today_workout.distance_km || 0} km` }}
               </text>
               <text
                 v-if="dashboardData.today_workout.workout_type !== 'rest' && dashboardData.today_workout.target_pace && dashboardData.today_workout.target_pace !== '—'"
-                class="get-pace-txt"
+                class="h3-tc-pace"
               >
                 · {{ dashboardData.today_workout.target_pace }}
               </text>
-              <text class="get-more-link">详情 ›</text>
             </view>
-            <text class="get-title-txt">{{ dashboardData.today_workout.title }}</text>
+            <view class="h3-tc-right">
+              <view
+                v-if="dashboardData.today_workout.completed"
+                class="h3-feel-mini"
+                @click.stop="openCheckinLogModal"
+              >
+                <text class="h3-feel-mini-txt">体感</text>
+              </view>
+              <view
+                class="h3-check-circle small"
+                :class="{ checked: dashboardData.today_workout.completed }"
+                @click.stop="handleTodayWorkoutToggle"
+              >
+                <RgmIcon name="check" :size="28" :color="dashboardData.today_workout.completed ? 'white' : 'green'" :stroke-width="2.4" />
+              </view>
+            </view>
           </view>
 
-          <view class="get-action-col">
-            <button
-              class="get-checkin-btn"
-              :class="{ completed: dashboardData.today_workout.completed }"
-              :loading="togglingWorkout"
-              @click.stop="handleTodayWorkoutToggle"
-            >
-              <text class="get-checkin-btn-txt">
-                {{ dashboardData.today_workout.completed ? (dashboardData.today_workout.actual_distance_km ? `✅ ${dashboardData.today_workout.actual_distance_km}k` : '✅ 已打卡') : '打卡' }}
+          <!-- 日常训练态：翡翠微光聚焦卡 -->
+          <view
+            v-else
+            class="h3-today-hero"
+            :class="{ completed: dashboardData.today_workout.completed }"
+            @click="goToCoachPage"
+          >
+            <view class="h3-th-left">
+              <view class="h3-th-meta">
+                <text class="h3-type-badge" :class="getWorkoutBadgeClass(dashboardData.today_workout.workout_type)">
+                  {{ getWorkoutTypeLabel(dashboardData.today_workout.workout_type) }}
+                </text>
+                <text
+                  v-if="dashboardData.today_workout.workout_type !== 'rest' && dashboardData.today_workout.target_pace && dashboardData.today_workout.target_pace !== '—'"
+                  class="h3-th-pace"
+                >
+                  {{ dashboardData.today_workout.target_pace }}
+                </text>
+                <text class="h3-th-more">详情 ›</text>
+              </view>
+              <text class="h3-th-km">
+                {{ dashboardData.today_workout.workout_type === 'rest' ? '休息恢复日' : `${dashboardData.today_workout.distance_km || 0} km` }}
               </text>
-            </button>
-            <view
-              v-if="dashboardData.today_workout.completed"
-              class="get-log-icon-btn"
-              :class="{ filled: hasTodayCheckinLog }"
-              @click.stop="openCheckinLogModal"
-            >
-              <text class="get-log-icon-txt">{{ hasTodayCheckinLog ? '✏️ 感受' : '📝 感受' }}</text>
+              <text class="h3-th-title">{{ dashboardData.today_workout.title }}</text>
+              <text v-if="dashboardData.today_workout.completed && hasTodayCheckinLog" class="h3-th-feel-line" @click.stop="openCheckinLogModal">
+                {{ todayCheckinSummaryText }} ›
+              </text>
+            </view>
+
+            <view class="h3-th-actions">
+              <view
+                class="h3-check-circle"
+                :class="{ checked: dashboardData.today_workout.completed }"
+                @click.stop="handleTodayWorkoutToggle"
+              >
+                <RgmIcon name="check" :size="38" :color="dashboardData.today_workout.completed ? 'white' : 'green'" :stroke-width="2.4" />
+              </view>
+              <text
+                v-if="dashboardData.today_workout.completed"
+                class="h3-th-feel-link"
+                @click.stop="openCheckinLogModal"
+              >
+                {{ hasTodayCheckinLog ? '改体感' : '记体感' }}
+              </text>
             </view>
           </view>
-        </view>
+        </template>
 
-        <!-- 1-line Coach Notes preview if present -->
-        <view
-          v-if="dashboardData.today_workout.coach_notes"
-          class="get-sub-note coach"
-          @click="goToCoachPage"
-        >
-          <text class="get-sub-note-txt">👨‍🏫 教练批注：{{ dashboardData.today_workout.coach_notes }}</text>
-        </view>
-
-        <!-- 1-line Check-in Feeling/Photo summary if logged -->
-        <view
-          v-if="dashboardData.today_workout.completed && hasTodayCheckinLog"
-          class="get-sub-note feeling"
-          @click.stop="openCheckinLogModal"
-        >
-          <text class="get-sub-note-txt">{{ todayCheckinSummaryText }}</text>
-          <text class="get-sub-edit-arrow">编辑 ›</text>
+        <view v-else class="h3-today-compact" @click="goToCoachPage">
+          <view class="h3-tc-left">
+            <text class="h3-type-badge tw-badge-rest">今日</text>
+            <text class="h3-tc-main">暂无训练课表</text>
+          </view>
+          <text class="h3-th-more">定制课表 ›</text>
         </view>
       </view>
 
-      <view
-        v-else
-        class="get-empty-bar standalone"
-        :class="{ 'is-volt': currentTheme === 'volt' }"
-        @click="goToCoachPage"
-      >
-        <text class="get-empty-left">📅 今日课表 · 暂无训练安排</text>
-        <text class="get-empty-right">定制课表 ›</text>
-      </view>
-    </view>
-
-    <!-- ── 🎯 周 / 月目标完成度独立板块（同屏双饼图 + 7日打卡条） ── -->
-    <view id="rgm-mod-goal" class="hero-progress-card" :style="{ order: getModuleOrder('goal') }">
-      <!-- 一页同屏：左侧「本周完成度饼图」 + 右侧「当月完成度饼图」 -->
-      <view class="dual-pie-overview-grid">
-        <!-- 左侧：本周进度饼图卡 -->
-        <view class="dpo-card week-card" @click="openGoalSheet('week')">
-          <view class="dpo-card-head">
-            <text class="dpo-period-title">🏃 {{ shortWeekTitle }}</text>
-            <text class="dpo-period-pct text-emerald">{{ dashboardData?.weekly_progress?.progress_pct ?? 0 }}%</text>
-          </view>
-
-          <view class="dpo-pie-stage">
-            <view class="goal-pie-chart dpo-pie week-pie" :style="weekPieStyle">
-              <view class="pie-start-spoke" />
-              <view class="pie-origin-dot" />
+      <!-- 模块 3 · 双圆弧进度环（环心嵌数）+ 7 日阶梯能量柱 -->
+      <view id="rgm-mod-goal" class="rgm-card h3-goal-card" :style="{ order: getModuleOrder('goal') }">
+        <view class="h3-rings-row">
+          <view class="h3-ring-col" @click="openGoalSheet('week')">
+            <view class="h3-ring-outer" :style="weekPieStyle">
+              <view class="h3-ring-hole">
+                <text class="h3-ring-val text-emerald">{{ dashboardData?.weekly_progress?.current_week_km ?? 0 }}</text>
+                <text class="h3-ring-target">/ {{ dashboardData?.weekly_progress?.target_week_km ?? 50 }} km</text>
+              </view>
             </view>
+            <text class="h3-ring-label">{{ shortWeekTitle }}</text>
           </view>
 
-          <view class="dpo-km-ratio">
-            <text class="dpo-km-done text-emerald">{{ dashboardData?.weekly_progress?.current_week_km ?? 0 }}</text>
-            <text class="dpo-km-sep">/</text>
-            <text class="dpo-km-target">{{ dashboardData?.weekly_progress?.target_week_km ?? 50 }}</text>
-            <text class="dpo-km-unit">km</text>
+          <view class="h3-ring-col" @click="openGoalSheet('month')">
+            <view class="h3-ring-outer" :style="monthPieStyle">
+              <view class="h3-ring-hole">
+                <text class="h3-ring-val text-brand">{{ dashboardData?.progress?.current_month_km ?? 0 }}</text>
+                <text class="h3-ring-target">/ {{ dashboardData?.progress?.target_month_km ?? 200 }} km</text>
+              </view>
+            </view>
+            <text class="h3-ring-label">{{ currentMonth }}月</text>
           </view>
-          <text class="dpo-km-caption">
-            周完成/计划 · 剩 {{ dashboardData?.weekly_progress?.remaining_km ?? 0 }}k
-          </text>
         </view>
 
-        <!-- 右侧：当月进度饼图卡 -->
-        <view class="dpo-card month-card" @click="openGoalSheet('month')">
-          <view class="dpo-card-head">
-            <text class="dpo-period-title">📅 {{ currentMonth }}月</text>
-            <text class="dpo-period-pct primary-text">{{ dashboardData?.progress?.progress_pct || 0 }}%</text>
-          </view>
-
-          <view class="dpo-pie-stage">
-            <view class="goal-pie-chart dpo-pie month-pie" :style="monthPieStyle">
-              <view class="pie-start-spoke" />
-              <view class="pie-origin-dot" />
+        <!-- 7 日阶梯能量柱（一..日） -->
+        <view class="h3-energy-strip">
+          <view
+            v-for="(day, idx) in weekDaysBars"
+            :key="idx"
+            class="h3-energy-col"
+            :class="{ today: day.is_today }"
+          >
+            <text v-if="day.distance_km > 0" class="h3-energy-km" :class="{ today: day.is_today }">{{ day.distance_km }}</text>
+            <text v-else class="h3-energy-km-spacer"> </text>
+            <view class="h3-energy-stage">
+              <view
+                v-if="day.distance_km > 0"
+                class="h3-energy-bar"
+                :class="{ today: day.is_today }"
+                :style="{ height: day.barHeightRpx + 'rpx' }"
+              />
+              <view v-else class="h3-energy-dot" :class="{ future: !day.is_past && !day.is_today }" />
             </view>
-          </view>
-
-          <view class="dpo-km-ratio">
-            <text class="dpo-km-done primary-text">{{ dashboardData?.progress?.current_month_km || 0 }}</text>
-            <text class="dpo-km-sep">/</text>
-            <text class="dpo-km-target">{{ dashboardData?.progress?.target_month_km || 200 }}</text>
-            <text class="dpo-km-unit">km</text>
-          </view>
-          <text class="dpo-km-caption">
-            月完成/计划 · 剩 {{ dashboardData?.progress?.remaining_km || 0 }}k
-          </text>
-        </view>
-      </view>
-
-      <!-- 7-Day Mon-Sun Weekday Strip -->
-      <view class="week-days-strip">
-        <view
-          v-for="(day, idx) in (dashboardData?.weekly_progress?.daily_breakdown || defaultWeeklyDays)"
-          :key="idx"
-          class="day-strip-col"
-          :class="{ 'is-today': day.is_today, 'has-run': day.distance_km > 0 }"
-        >
-          <text class="d-name">{{ day.day_name || ('周' + day.short_day) }}</text>
-          <text class="d-date">{{ formatShortDayDate(day.date) }}</text>
-          <view class="d-val-pill" :class="{ 'active-run': day.distance_km > 0 }">
-            <text v-if="day.distance_km > 0" class="d-km-num">{{ day.distance_km }}</text>
-            <text v-else-if="day.is_past" class="d-km-dash">—</text>
-            <text v-else class="d-km-dash">0</text>
+            <text class="h3-energy-day" :class="{ today: day.is_today }">{{ day.shortLbl }}</text>
           </view>
         </view>
       </view>
 
-      <!-- Instant Sync, Personal Report & Share Card Action Buttons -->
-      <view class="sync-action-box" style="display: flex; gap: 12rpx;">
-        <button class="sync-btn" style="flex: 1.3; margin: 0; font-size: 26rpx; padding: 0 14rpx;" :loading="syncing" :disabled="syncing" @click="handleInstantSync">
-          <text class="btn-icon" style="font-size: 26rpx;">🔄</text>
-          <text style="white-space: nowrap;">{{ compactSyncLabel }}</text>
-        </button>
-        <button
-          class="sync-btn"
-          :style="currentTheme === 'volt'
-            ? 'flex: 0.95; margin: 0; padding: 0 12rpx; background: #FFF5EE; border: 1rpx solid rgba(252, 76, 2, 0.32); color: #C23800; font-size: 25rpx;'
-            : 'flex: 0.95; margin: 0; padding: 0 12rpx; background: linear-gradient(135deg, rgba(16,185,129,0.22) 0%, rgba(5,150,105,0.28) 100%); border: 1rpx solid rgba(16,185,129,0.55); color: #34d399; font-size: 25rpx;'"
-          @click="openPersonalReportModal(isMonthlyReportWindow && !isWeeklyReportWindow ? 'month' : 'week')"
-        >
-          <text class="btn-icon" style="font-size: 26rpx;">📊</text>
-          <text style="white-space: nowrap;">周/月报</text>
-        </button>
-        <button
-          class="sync-btn"
-          :style="currentTheme === 'volt'
-            ? 'flex: 0.85; margin: 0; padding: 0 12rpx; background: #F1F5F9; border: 1rpx solid rgba(15, 23, 42, 0.12); color: #334155; font-size: 25rpx;'
-            : 'flex: 0.85; margin: 0; padding: 0 12rpx; background: rgba(255,255,255,0.06); border: 1rpx solid rgba(255,255,255,0.14); color: #e4e4e7; font-size: 25rpx;'"
-          @click="openPersonalShareCard()"
-        >
-          <text class="btn-icon" style="font-size: 26rpx;">📸</text>
-          <text style="white-space: nowrap;">分享卡</text>
-        </button>
-      </view>
-    </view>
-
-    <!-- ── 合并减负卡片：身体状态与负荷横条 (一键直达完整生理与VDOT诊断) ── -->
-    <view id="rgm-mod-status" class="section-container" :style="{ order: getModuleOrder('status') }">
-      <view class="fitness-chart-card readiness-compact-card">
-        <view class="fitness-header-top">
-          <view class="title-with-desc" style="flex: 0 0 auto;">
-            <view class="title-row-with-icon" style="white-space: nowrap;">
-              <text class="zap-icon">🔋</text>
-              <text class="section-title" style="white-space: nowrap;">状态</text>
-              <text class="term-info" @click.stop="explainTerm('fitness')">ⓘ</text>
-            </view>
+      <!-- 模块 4 · 3 联图形生理状态微件 -->
+      <view id="rgm-mod-status" :style="{ order: getModuleOrder('status') }">
+        <view class="h3-metrics-row" @click="goToBodyData">
+          <view class="rgm-card h3-metric-tile">
+            <RgmIcon name="battery" :size="30" color="green" />
+            <text class="h3-metric-val text-emerald">{{ sleepOrBatteryVal }}</text>
+            <text class="h3-metric-lbl">{{ fitnessStatusLabel }}</text>
           </view>
-          <view class="readiness-header-actions" style="flex-shrink: 0;">
-            <view
-              class="fitness-status-badge"
-              :style="{
-                color: fitnessStatusColor,
-                backgroundColor: fitnessStatusColor + '24'
-              }"
-              @click="toggleFitnessChart"
-            >
-              <text class="fsb-text">{{ fitnessStatusLabel }} · TSB {{ formatTsbVal(dashboardData?.fitness_form?.tsb) }} {{ showFitnessChart ? '▴' : '▾' }}</text>
-            </view>
-            <text class="sub-date see-all-link" style="white-space: nowrap;" @click="goToBodyData">📊 VDOT ›</text>
+          <view class="rgm-card h3-metric-tile">
+            <RgmIcon name="pulse" :size="30" color="blue" />
+            <text class="h3-metric-val text-cyan">{{ dashboardData?.today_health?.hrv_ms ?? '—' }}</text>
+            <text class="h3-metric-lbl">HRV ms</text>
+          </view>
+          <view class="rgm-card h3-metric-tile">
+            <RgmIcon name="gauge" :size="30" color="purple" />
+            <text class="h3-metric-val text-vdot">{{ currentVdot ?? '—' }}</text>
+            <text class="h3-metric-lbl">VDOT</text>
           </view>
         </view>
-
-        <!-- 紧凑 4 维核心生理与跑力横条（含实时 VDOT 数值，同时保留右上角快捷键） -->
-        <view class="metrics-pill-group metrics-pill-4" @click="goToBodyData">
-          <view class="metric-pill">
-            <text class="pill-label">🔋 {{ isCorosOnly ? '睡眠' : '电量' }}</text>
-            <text class="pill-val text-amber">{{ sleepOrBatteryVal }}</text>
-            <text class="pill-sub">{{ sleepOrBatterySub }}</text>
-          </view>
-          <view class="metric-pill">
-            <text class="pill-label">🧬 HRV</text>
-            <text class="pill-val text-cyan">{{ dashboardData?.today_health?.hrv_ms != null ? (dashboardData.today_health.hrv_ms + 'ms') : '—' }}</text>
-            <text class="pill-sub">{{ dashboardData?.today_health?.hrv_weekly_avg != null ? ('周均 ' + dashboardData.today_health.hrv_weekly_avg + 'ms') : '神经恢复' }}</text>
-          </view>
-          <view class="metric-pill">
-            <text class="pill-label">💓 静息</text>
-            <text class="pill-val text-rose">{{ currentRestingHr != null ? (currentRestingHr + 'bpm') : '—' }}</text>
-            <text class="pill-sub">{{ dashboardData?.today_health?.night_wear_missing ? '未戴表缺失' : '清晨基线' }}</text>
-          </view>
-          <view class="metric-pill metric-pill-vdot">
-            <text class="pill-label">⚡ VDOT</text>
-            <text class="pill-val text-vdot">{{ currentVdot != null ? currentVdot : '—' }}</text>
-            <text class="pill-sub">{{ (dashboardData?.fitness_form?.is_recovery_phase && dashboardData?.fitness_form?.peak_vdot) ? ('巅峰 ' + dashboardData.fitness_form.peak_vdot + ' ›') : (currentVo2Max ? ('VO2 ' + currentVo2Max + ' ›') : '跑力诊断 ›') }}</text>
-          </view>
-        </view>
-
-        <!-- 夜间未佩戴手表 · 恢复数据缺失预警横幅（精简一行 + ⓘ 隐藏说明） -->
         <view
           v-if="dashboardData?.today_health?.night_wear_missing"
-          style="margin-top: 12rpx; padding: 12rpx 18rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
+          class="h3-wear-warn"
           @click.stop="explainTerm('watch_wear')"
         >
-          <text style="font-size: 22rpx; font-weight: 700; color: #b45309;">
-            ⚠️ {{ dashboardData?.today_health?.recovery_status_label || '夜间未佩戴 · 恢复数据缺失' }}
-          </text>
-          <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 12rpx;">ⓘ 详情</text>
+          <RgmIcon name="alert" :size="24" color="amber" />
+          <text class="h3-wear-warn-txt">{{ dashboardData?.today_health?.recovery_status_label || '夜间未佩戴 · 恢复基线缺失' }} ⓘ</text>
         </view>
-
-        <!-- 28天 CTL/ATL/TSB 负荷图：默认收起，点击状态徽章按需展开 -->
-        <template v-if="showFitnessChart">
-          <view class="metrics-pill-group" style="margin-top: 16rpx;">
-            <view class="metric-pill">
-              <text class="pill-label">CTL 体能</text>
-              <text class="pill-val" style="color: #3b82f6;">{{ formatMetricOneDec(dashboardData?.fitness_form?.ctl) }}</text>
-            </view>
-            <view class="metric-pill">
-              <text class="pill-label">ATL 疲劳</text>
-              <text class="pill-val" style="color: #f43f5e;">{{ formatMetricOneDec(dashboardData?.fitness_form?.atl) }}</text>
-            </view>
-            <view class="metric-pill">
-              <text class="pill-label">TSB 状况</text>
-              <text class="pill-val" :style="{ color: fitnessStatusColor }">
-                {{ formatTsbVal(dashboardData?.fitness_form?.tsb) }}
-              </text>
-            </view>
-          </view>
-
-          <template v-if="fitnessMiniBars.length > 0">
-            <view v-if="activeTooltip" class="chart-tooltip" @click="activeTooltip = null">
-              <text class="tip-date">{{ activeTooltip.short_date || activeTooltip.date }}</text>
-              <text class="tip-val" style="color: #3b82f6;">CTL {{ formatMetricOneDec(activeTooltip.ctl) }}</text>
-              <text class="tip-val" style="color: #f43f5e;">ATL {{ formatMetricOneDec(activeTooltip.atl) }}</text>
-              <text class="tip-val" :style="{ color: activeTooltip.tsb >= 5 ? '#10b981' : (activeTooltip.tsb >= -30 ? '#3b82f6' : '#f59e0b') }">
-                TSB {{ formatTsbVal(activeTooltip.tsb) }}
-              </text>
-            </view>
-
-            <view class="ios-fitness-mini-chart">
-              <view
-                v-for="(pt, idx) in fitnessMiniBars"
-                :key="pt.date || idx"
-                class="ios-bar-col"
-                :class="{ 'is-selected': activeTooltip?.date === pt.date }"
-                @click="selectFitnessBar(pt)"
-              >
-                <view class="ios-bar-stack">
-                  <view class="ios-bar-atl" :style="{ height: pt.atlPct + '%' }" />
-                  <view class="ios-bar-ctl" :style="{ height: pt.ctlPct + '%' }" />
-                </view>
-              </view>
-            </view>
-
-            <view class="ios-fitness-legend">
-              <view class="ios-legend-item">
-                <view class="ios-legend-dot" style="background-color: #3b82f6;" />
-                <text class="ios-legend-label">CTL (体能)</text>
-              </view>
-              <view class="ios-legend-item">
-                <view class="ios-legend-dot" style="background-color: #f43f5e;" />
-                <text class="ios-legend-label">ATL (疲劳)</text>
-              </view>
-              <view class="ios-legend-item">
-                <view class="ios-legend-dot" style="background-color: #10b981;" />
-                <text class="ios-legend-label">+5 巅峰</text>
-              </view>
-              <view class="ios-legend-item">
-                <view class="ios-legend-dot" style="background-color: #f59e0b;" />
-                <text class="ios-legend-label">-30 疲劳</text>
-              </view>
-            </view>
-          </template>
-        </template>
-      </view>
-    </view>
-
-    <!-- ── CARD 2: 最新 1 场运动记录（更多跳转全部记录页） ── -->
-    <view id="rgm-mod-recent" class="section-container" :style="{ order: getModuleOrder('recent') }">
-      <view class="section-header-row">
-        <view class="title-with-pill">
-          <text class="section-title">🏃 最新跑步</text>
-          <text class="month-active-badge">本月 {{ monthActivitiesList.length }} 次</text>
-        </view>
-        <text class="sub-date see-all-link" @click="goToAllActivities">全部记录 ›</text>
       </view>
 
-      <view v-if="displayedActivities.length" class="activity-list">
+      <!-- 模块 5 · 单行最新跑步轨迹条 -->
+      <view id="rgm-mod-recent" :style="{ order: getModuleOrder('recent') }">
         <view
-          v-for="act in displayedActivities"
-          :key="act.id"
-          class="activity-card"
+          v-if="displayedActivities.length > 0"
+          class="rgm-card h3-recent-bar"
+          @click="goToAllActivities"
         >
-          <view class="act-top">
-            <view class="act-name-group">
-              <text class="act-name">{{ act.name }}</text>
-              <text v-if="act.workout_effective_vdot" class="act-vdot-tag">⚡ VDOT {{ act.workout_effective_vdot }}</text>
-              <text v-if="act.elevation_gain_meters && act.elevation_gain_meters > 0" class="act-elev-tag">⛰️ +{{ Math.round(act.elevation_gain_meters) }}m</text>
+          <view class="h3-recent-left">
+            <view class="h3-track-thumb-box" @click.stop="openTrackModal(displayedActivities[0])">
+              <image class="h3-track-thumb-img" :src="recentTrackThumbUri" mode="aspectFit" />
             </view>
-            <text class="act-time">{{ formatTime(act.start_time) }}</text>
-          </view>
-          <view class="act-data-row">
-            <view class="act-col">
-              <text class="act-main-val">{{ act.distance_km }} <text class="unit">km</text></text>
-              <text class="act-sub-label">距离</text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val">{{ act.avg_pace_str }}</text>
-              <text class="act-sub-label">配速</text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val">{{ act.average_heartrate || '—' }} <text class="unit">bpm</text></text>
-              <text class="act-sub-label">心率</text>
-            </view>
-            <view class="act-col">
-              <text class="act-sub-val text-amber">{{ act.trimp || '—' }}</text>
-              <text class="act-sub-label">负荷</text>
+            <view class="h3-recent-info">
+              <text class="h3-recent-km">{{ displayedActivities[0].distance_km }} km</text>
+              <text class="h3-recent-meta">
+                {{ displayedActivities[0].avg_pace_str || '—' }} · {{ displayedActivities[0].average_heartrate ? displayedActivities[0].average_heartrate + ' bpm' : (displayedActivities[0].name || '最近记录') }}
+              </text>
             </view>
           </view>
-
-          <view v-if="act.captain_cheer" class="act-captain-cheer">
-            <text class="act-cap-title">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}：</text>
-            <text class="act-cap-text">{{ act.captain_cheer }}</text>
-          </view>
-
-          <!-- GPS Track & Moments Share Card Action Row -->
-          <view class="act-track-row act-dual-actions">
-            <view
-              v-if="act.has_gps_track || act.map_image_url || act.id?.startsWith('garmin_') || act.id?.startsWith('coros_')"
-              class="act-track-btn"
-              @click.stop="openTrackModal(act)"
-            >
-              <text class="act-track-icon">🗺️</text>
-              <text class="act-track-text">轨迹与分段</text>
-              <text class="act-track-arrow">›</text>
-            </view>
-            <view
-              class="act-share-card-btn"
-              @click.stop="openPersonalShareCard(act.id)"
-            >
-              <text class="act-track-icon">📸</text>
-              <text class="act-share-text">分享卡</text>
-            </view>
+          <view class="h3-recent-right">
+            <text class="h3-recent-time">{{ formatTime(displayedActivities[0].start_time).slice(0, 5) }}</text>
+            <RgmIcon name="chevron-right" :size="26" color="muted" />
           </view>
         </view>
 
-        <!-- 首页只展示最新 1 场，更多记录跳到「全部跑步记录」页 -->
-        <view v-if="monthActivitiesList.length > 1" class="expand-acts-toggle" @click="goToAllActivities">
-          <text class="expand-acts-text">
-            查看本月全部 {{ monthActivitiesList.length }} 次记录 ›
-          </text>
+        <view
+          v-else
+          class="rgm-card h3-recent-bar"
+          @click="isDeviceConnected ? handleInstantSync() : goToDeviceBinding()"
+        >
+          <view class="h3-recent-left">
+            <view class="h3-track-thumb-box">
+              <RgmIcon name="watch" :size="30" color="brand" />
+            </view>
+            <view class="h3-recent-info">
+              <text class="h3-recent-km">{{ isDeviceConnected ? '暂无近期记录' : '连接运动手表' }}</text>
+              <text class="h3-recent-meta">{{ isDeviceConnected ? '点击同步最新跑步轨迹与课表打卡' : '支持佳明 / 高驰 / 苹果 / 华为 / 颂拓' }}</text>
+            </view>
+          </view>
+          <text class="h3-th-more">{{ isDeviceConnected ? '同步 ›' : '绑表 ›' }}</text>
         </view>
       </view>
-      <view v-else class="empty-act-box">
-        <text class="empty-act-text">{{ isDeviceConnected ? '本月暂无记录，跑完后点同步即可' : '绑定手表后自动同步跑步记录' }}</text>
-        <button v-if="!isDeviceConnected" class="rgm-empty-cta" @click="goToDeviceBinding">⌚ 绑定手表</button>
-        <button v-else class="rgm-empty-cta ghost" :loading="syncing" @click="handleInstantSync">🔄 同步</button>
-      </view>
-    </view>
-
-    <!-- ── CARD 1.5: 年度跑量统计图表 (Yearly Running Mileage Chart) ── -->
-    <view id="rgm-mod-yearly" class="section-container yearly-section" :style="{ order: getModuleOrder('yearly') }">
-      <view class="section-header-row year-toggle-row" @click="showYearDetail = !showYearDetail">
-        <view class="title-with-desc">
-          <text class="section-title">🏆 {{ dashboardData?.yearly_stats?.year || currentYear }} 年度统计</text>
-          <text class="sub-formula">
-            <template v-if="dashboardData?.yearly_stats?.target_year_km">
-              目标 {{ dashboardData.yearly_stats.target_year_km }}k · 月均 {{ dashboardData?.yearly_stats?.monthly_target_km || 0 }}k
-            </template>
-            <template v-else>未设目标</template>
-          </text>
-        </view>
-        <view class="year-pct-badge">
-          <text class="year-pct-num">{{ dashboardData?.yearly_stats?.progress_pct || 0 }}%</text>
-          <text class="year-pct-sub">{{ showYearDetail ? '收起 ▴' : '展开 ▾' }}</text>
-        </view>
-      </view>
-
-      <!-- 年度统计默认折叠：首页优先展示今天和本周 -->
-      <view v-if="showYearDetail" class="year-card-body">
-        <!-- 1. 年度累计进度条 -->
-        <view class="year-progress-box">
-          <view class="year-progress-labels">
-            <text class="progress-left-label">
-              已累计完成 <text class="highlight-val">{{ dashboardData?.yearly_stats?.total_km || 0 }}</text> km
-            </text>
-            <text v-if="dashboardData?.yearly_stats?.target_year_km" class="progress-right-label">
-              剩余 {{ Math.max(0, Math.round(((dashboardData?.yearly_stats?.target_year_km || 0) - (dashboardData?.yearly_stats?.total_km || 0)) * 10) / 10) }} km
-            </text>
-          </view>
-          <view class="year-progress-track">
-            <view
-              class="year-progress-fill"
-              :style="{ width: Math.min(100, dashboardData?.yearly_stats?.progress_pct || 0) + '%' }"
-            />
-          </view>
-        </view>
-
-        <!-- 2. 12 个月跑量柱状图 (12-Month Mileage Bar Chart) -->
-        <view class="monthly-chart-box">
-          <!-- 选中或交互提示 -->
-          <view class="selected-month-tip" v-if="selectedYearMonth">
-            <text class="tip-dot">📍</text>
-            <text class="tip-text">
-              {{ selectedYearMonth.month_label }}：跑量 <text class="tip-hl">{{ selectedYearMonth.distance_km }} km</text> · {{ selectedYearMonth.runs_count }} 次跑步
-              <text v-if="selectedYearMonth.is_current" class="tip-tag current">（当前月）</text>
-            </text>
-          </view>
-          <view class="selected-month-tip placeholder" v-else>
-            <text class="tip-text-dim">💡 点击柱状图查看</text>
-          </view>
-
-          <!-- 12 根立柱 -->
-          <view class="months-bar-flex">
-            <view
-              v-for="m in (dashboardData?.yearly_stats?.monthly_breakdown || defaultMonthlyBreakdown)"
-              :key="m.month"
-              class="month-bar-col"
-              :class="{
-                'is-current': m.is_current,
-                'is-selected': selectedYearMonth?.month === m.month,
-                'is-past': m.is_past && !m.is_current
-              }"
-              @click="selectYearMonth(m)"
-            >
-              <!-- 柱顶公里数 (大于等于1km显示) -->
-              <view class="bar-val-top">
-                <text v-if="m.distance_km >= 1" class="bar-km-text">{{ Math.round(m.distance_km) }}</text>
-                <text v-else class="bar-km-empty"></text>
-              </view>
-
-              <!-- 立柱轨道与柱体 -->
-              <view class="bar-pillar-track">
-                <view
-                  class="bar-pillar-fill"
-                  :style="{ height: getBarHeight(m.distance_km) }"
-                  :class="{
-                    'current-fill': m.is_current,
-                    'past-fill': m.is_past && !m.is_current && m.distance_km > 0,
-                    'zero-fill': m.distance_km <= 0
-                  }"
-                />
-              </view>
-
-              <!-- 月份标签 -->
-              <view class="bar-month-label">
-                <text class="month-name">{{ m.month }}月</text>
-                <view v-if="m.is_current" class="current-indicator-dot" />
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <!-- 3. 年度 3 维关键指标 -->
-        <view class="year-metrics-row">
-          <view class="year-metric-tile">
-            <view class="m-top">
-              <text class="m-icon">🏃</text>
-              <text class="m-label">总跑次</text>
-            </view>
-            <view class="m-val-box">
-              <text class="m-val">{{ dashboardData?.yearly_stats?.total_runs || 0 }}</text>
-              <text class="m-unit">次</text>
-            </view>
-          </view>
-
-          <view class="year-metric-tile">
-            <view class="m-top">
-              <text class="m-icon">📅</text>
-              <text class="m-label">月均跑量</text>
-            </view>
-            <view class="m-val-box">
-              <text class="m-val">{{ dashboardData?.yearly_stats?.avg_monthly_km || 0 }}</text>
-              <text class="m-unit">km</text>
-            </view>
-          </view>
-
-          <view class="year-metric-tile">
-            <view class="m-top">
-              <text class="m-icon">🎯</text>
-              <text class="m-label">年终推算</text>
-            </view>
-            <view class="m-val-box">
-              <text class="m-val text-emerald">{{ dashboardData?.yearly_stats?.projected_year_km || 0 }}</text>
-              <text class="m-unit">km</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 4. 年度最佳月份横幅 -->
-        <view class="year-best-banner">
-          <text class="best-badge">🏅 年度最佳月份</text>
-          <text class="best-info">
-            {{ dashboardData?.yearly_stats?.best_month?.name || "—" }} · 
-            <text class="best-km">{{ dashboardData?.yearly_stats?.best_month?.distance_km || 0 }} km</text>
-            <text class="best-pace" v-if="dashboardData?.yearly_stats?.best_month?.avg_pace">（配速 {{ dashboardData?.yearly_stats?.best_month?.avg_pace }}）</text>
-          </text>
-        </view>
-      </view>
-    </view>
-
-    <!-- ── 底部「自定义首页板块顺序」常驻入口横条 ── -->
-    <view class="home-layout-customize-bar" style="order: 99;" @click="openLayoutOrderModal">
-      <text class="hlc-left">↕️ 自定义首页板块显示次序</text>
-      <text class="hlc-right">调整顺序 ›</text>
-    </view>
     </view>
 
     <!-- ── 进入小程序首先弹窗：微信跑者授权登录专属弹窗 ── -->
@@ -957,28 +543,40 @@
       @saved="handleHomeGoalSaved"
     />
 
-    <!-- ── 🔔 Canova教练与系统消息中心 Modal ── -->
-    <view v-if="showNotificationsModal" class="modal-mask notif-mask" @click="showNotificationsModal = false" @touchmove.stop.prevent>
-      <view class="modal-content notif-center-modal" @click.stop>
+    <!-- ── E5 双切页中心：通知中心 & 首页板块排序 ── -->
+    <view v-if="showNotificationsModal || showLayoutOrderModal" class="modal-mask notif-mask" @click="closeE5Modal" @touchmove.stop.prevent>
+      <view class="modal-content e5-sheet-modal" @click.stop="noop">
         <view class="modal-header">
           <view class="title-with-pill">
-            <text class="modal-title">🔔 教练与系统通知</text>
-            <text v-if="unreadNotifCount > 0" class="notif-count-pill">{{ unreadNotifCount }} 条未读</text>
+            <text class="modal-title">消息中心与首页排序</text>
+            <text v-if="e5ModalTab === 'notif' && unreadNotifCount > 0" class="notif-count-pill">{{ unreadNotifCount }} 未读</text>
           </view>
           <view class="header-actions-row">
-            <text v-if="unreadNotifCount > 0" class="btn-read-all" @click="handleReadAllNotifications">全部已读</text>
-            <text class="close-btn" @click="showNotificationsModal = false">✕</text>
+            <text v-if="e5ModalTab === 'notif' && unreadNotifCount > 0" class="btn-read-all" @click="handleReadAllNotifications">全部已读</text>
+            <text class="close-btn" @click="closeE5Modal">✕</text>
           </view>
         </view>
 
-        <scroll-view scroll-y class="modal-body notif-modal-body">
+        <view class="e5-seg-wrap">
+          <view class="rgm-seg-bar">
+            <view class="rgm-seg-item" :class="{ active: e5ModalTab === 'notif' }" @click="switchE5ModalTab('notif')">
+              <text>教练与约跑消息{{ unreadNotifCount > 0 ? ` (${unreadNotifCount})` : '' }}</text>
+            </view>
+            <view class="rgm-seg-item" :class="{ active: e5ModalTab === 'order' }" @click="switchE5ModalTab('order')">
+              <text>首页板块排序</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- Cut 1: 消息列表 -->
+        <scroll-view v-if="e5ModalTab === 'notif'" scroll-y class="modal-body notif-modal-body">
           <view v-if="loadingNotifications" class="notif-loading-box">
             <text class="loading-text">加载消息中...</text>
           </view>
           <view v-else-if="notificationsList.length === 0" class="notif-empty-box">
-            <text class="empty-icon">📭</text>
+            <RgmIcon name="bell" :size="48" color="muted" />
             <text class="empty-title">暂无新通知</text>
-            <text class="empty-desc">跑后点评将在此送达</text>
+            <text class="empty-desc">教练复盘与约跑集结提醒将在此送达</text>
           </view>
           <view v-else class="notif-list">
             <view
@@ -997,11 +595,56 @@
               </view>
               <text class="notif-content-preview">{{ item.content }}</text>
               <view class="notif-footer-row">
-                <text class="notif-action-hint">查看详情 →</text>
+                <text class="notif-action-hint">查看详情 ›</text>
               </view>
             </view>
           </view>
         </scroll-view>
+
+        <!-- Cut 2: 首页板块排序 -->
+        <view v-else class="layout-order-body">
+          <text class="layout-order-desc">
+            自由调整首页核心板块的上下次序，保存后立即生效。
+          </text>
+
+          <view class="layout-order-list">
+            <view
+              v-for="(modKey, idx) in homeOrderVisibleKeys"
+              :key="modKey"
+              class="layout-order-item"
+            >
+              <view class="loi-left">
+                <view class="loi-rank-badge">{{ idx + 1 }}</view>
+                <view class="loi-text-col">
+                  <text class="loi-title">{{ getModuleMeta(modKey).title }}</text>
+                  <text class="loi-sub">{{ getModuleMeta(modKey).desc }}</text>
+                </view>
+              </view>
+
+              <view class="loi-actions">
+                <view
+                  class="loi-btn arrow-btn"
+                  :class="{ disabled: idx === 0 }"
+                  @click="moveVisibleModuleOrder(modKey, -1)"
+                >
+                  <text class="loi-btn-txt">↑</text>
+                </view>
+                <view
+                  class="loi-btn arrow-btn"
+                  :class="{ disabled: idx === homeOrderVisibleKeys.length - 1 }"
+                  @click="moveVisibleModuleOrder(modKey, 1)"
+                >
+                  <text class="loi-btn-txt">↓</text>
+                </view>
+              </view>
+            </view>
+          </view>
+
+          <view class="layout-order-footer">
+            <button class="loi-footer-btn reset" @click="resetHomeModuleOrder">恢复默认</button>
+            <button class="loi-footer-btn save" @click="saveHomeModuleOrder">保存并应用到首页</button>
+          </view>
+        </view>
       </view>
     </view>
 
@@ -1143,7 +786,7 @@
       @close="showPersonalReportModal = false"
     />
 
-    <!-- ── 📝 今日打卡：训练感受 · 备注 · 照片弹窗 ── -->
+    <!-- ── A6 训练体感打卡与 RPE 点选弹窗 ── -->
     <view
       v-if="showCheckinLogModal"
       class="modal-mask checkin-log-mask"
@@ -1152,9 +795,9 @@
     >
       <view class="modal-content checkin-log-modal" @click.stop>
         <view class="modal-header">
-          <view style="display: flex; flex-direction: column; gap: 4rpx;">
-            <text class="modal-title">📝 训练打卡感受与照片</text>
-            <text style="font-size: 20rpx; color: var(--rgm-text-3, #8e8e93);">
+          <view class="a6-head-col">
+            <text class="modal-title">训练体感打卡 · 问教练</text>
+            <text class="a6-head-sub">
               {{ dashboardData?.today_workout?.date || '今日' }} · {{ dashboardData?.today_workout?.title || '今日训练' }}
             </text>
           </view>
@@ -1162,27 +805,11 @@
         </view>
 
         <scroll-view scroll-y class="checkin-log-body">
-          <!-- 1. 训练感受标签 -->
+          <!-- 1. 主观疲劳度 RPE (1-10) -->
           <view class="checkin-field-group">
-            <text class="checkin-field-label">😊 今日训练感受</text>
-            <view class="checkin-feel-grid">
-              <view
-                v-for="tag in FEELING_TAG_OPTIONS"
-                :key="tag"
-                class="checkin-feel-chip"
-                :class="{ active: checkinForm.feeling_tag === tag }"
-                @click="checkinForm.feeling_tag = checkinForm.feeling_tag === tag ? '' : tag"
-              >
-                <text class="checkin-feel-txt">{{ tag }}</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 2. 主观疲劳度 RPE (1-10) -->
-          <view class="checkin-field-group">
-            <view style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10rpx;">
-              <text class="checkin-field-label" style="margin-bottom: 0;">🔥 主观体感强度 (RPE 1-10)</text>
-              <text style="font-size: 20rpx; color: var(--rgm-text-3, #8e8e93);">1-3轻松 · 4-6适中 · 7-8吃力 · 9-10极限</text>
+            <view class="a6-row-between">
+              <text class="checkin-field-label">主观疲劳度 RPE (1-10)</text>
+              <text class="a6-rpe-hint">1-3 轻松 · 4-6 适中 · 7-10 吃力</text>
             </view>
             <view class="checkin-rpe-row">
               <view
@@ -1203,27 +830,29 @@
             </view>
           </view>
 
-          <!-- 3. 训练备注与心得 -->
+          <!-- 2. 训练感受点选标签 -->
           <view class="checkin-field-group">
-            <text class="checkin-field-label">💬 训练备注与心得</text>
-            <textarea
-              v-model="checkinForm.athlete_notes"
-              class="checkin-notes-textarea"
-              placeholder="记录配速体感、心率波动、补给状态、天气路况或小腿/膝踝反应..."
-              maxlength="300"
-            />
+            <text class="checkin-field-label">快捷体感标签</text>
+            <view class="checkin-feel-grid">
+              <view
+                v-for="tag in FEELING_TAG_OPTIONS"
+                :key="tag"
+                class="checkin-feel-chip"
+                :class="{ active: checkinForm.feeling_tag === tag }"
+                @click="checkinForm.feeling_tag = checkinForm.feeling_tag === tag ? '' : tag"
+              >
+                <text class="checkin-feel-txt">{{ tag }}</text>
+              </view>
+            </view>
           </view>
 
-          <!-- 4. 训练打卡照片 (最多 3 张) -->
+          <!-- 3. 打卡照片 (最多 3 张) + 备注 -->
           <view class="checkin-field-group">
-            <view style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12rpx;">
-              <text class="checkin-field-label" style="margin-bottom: 0;">📸 打卡照片（最多 3 张）</text>
-              <text style="font-size: 20rpx; color: var(--rgm-text-3, #8e8e93);">
-                {{ checkinForm.workout_photos.length + checkinForm.new_photos_preview.length }}/3
-              </text>
+            <view class="a6-row-between">
+              <text class="checkin-field-label">打卡照片 ({{ checkinForm.workout_photos.length + checkinForm.new_photos_preview.length }}/3)</text>
+              <text class="a6-ask-coach-link" @click="goAskCoachFromCheckin">问 Canova AI 教练 ›</text>
             </view>
             <view class="checkin-photo-uploader-grid">
-              <!-- 已保存照片 -->
               <view
                 v-for="(url, idx) in checkinForm.workout_photos"
                 :key="'saved_' + idx"
@@ -1238,7 +867,6 @@
                 <view class="checkin-photo-del" @click.stop="removeSavedWorkoutPhoto(Number(idx))">✕</view>
               </view>
 
-              <!-- 新选择待上传照片 -->
               <view
                 v-for="(pUrl, nIdx) in checkinForm.new_photos_preview"
                 :key="'new_' + nIdx"
@@ -1253,88 +881,73 @@
                 <view class="checkin-photo-del" @click.stop="removeNewWorkoutPhoto(Number(nIdx))">✕</view>
               </view>
 
-              <!-- 添加按钮 -->
               <view
                 v-if="checkinForm.workout_photos.length + checkinForm.new_photos_preview.length < 3"
                 class="checkin-photo-add"
                 @click="handleChooseWorkoutPhoto"
               >
-                <text class="add-plus">📷</text>
+                <RgmIcon name="camera" :size="34" color="muted" />
                 <text class="add-txt">添加照片</text>
               </view>
             </view>
+          </view>
+
+          <view class="checkin-field-group">
+            <text class="checkin-field-label">训练备注（选填）</text>
+            <textarea
+              v-model="checkinForm.athlete_notes"
+              class="checkin-notes-textarea"
+              placeholder="补充配速体感、天气或肌肉反应..."
+              maxlength="300"
+            />
           </view>
         </scroll-view>
 
         <view class="checkin-modal-footer">
           <button class="checkin-cancel-btn" @click="showCheckinLogModal = false">取消</button>
           <button class="checkin-save-btn" :loading="savingCheckinLog" @click="saveCheckinLog">
-            💾 保存打卡
+            保存打卡
           </button>
         </view>
       </view>
     </view>
 
-    <!-- ── ↕️ 自定义首页板块显示次序弹窗 (User-Customizable Homepage Module Order) ── -->
-    <view v-if="showLayoutOrderModal" class="modal-mask layout-order-mask" @click="showLayoutOrderModal = false">
-      <view class="modal-content layout-order-modal" @click.stop="noop">
-        <view class="modal-header">
-          <text class="modal-title">↕️ 自定义首页板块顺序</text>
-          <view class="close-hit" @click="showLayoutOrderModal = false">
-            <text class="close-btn">✕</text>
+    <!-- 已合并至 E5 双切页弹窗 -->
+
+    <!-- 原位 3 秒完善微信头像与昵称弹窗 -->
+    <view v-if="showQuickNicknameModal" class="modal-mask" @click="closeQuickNicknameModal" @touchmove.stop.prevent>
+      <view class="modal-content quick-nick-modal" @click.stop>
+        <view class="qn-header">
+          <text class="qn-title">✨ 完善个人名片</text>
+          <text class="qn-close" @click="closeQuickNicknameModal">✕</text>
+        </view>
+        <text class="qn-desc">换上微信头像与专属昵称，在榜单和跑团中让跑友轻松认出你</text>
+        <view class="qn-form-row">
+          <button class="qn-avatar-btn" open-type="chooseAvatar" @chooseavatar="onQuickChooseAvatar">
+            <image
+              class="qn-avatar-img"
+              :src="quickAvatarUrl || dashboardData?.user?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              mode="aspectFill"
+            />
+            <text class="qn-avatar-tip">换头像</text>
+          </button>
+          <view class="qn-input-col">
+            <text class="qn-label">微信昵称（点击自动带入）</text>
+            <input
+              type="nickname"
+              class="qn-input"
+              v-model="quickNickName"
+              placeholder="点击获取微信昵称或输入"
+              @blur="onQuickNickBlur"
+              @change="onQuickNickBlur"
+            />
           </view>
         </view>
-
-        <view class="layout-order-body">
-          <text class="layout-order-desc">
-            自由调整首页 7 大核心板块的上下显示次序，保存后立即生效并自动记忆在您的手机上。
-          </text>
-
-          <view class="layout-order-list">
-            <view
-              v-for="(modKey, idx) in homeModuleOrderDraft"
-              :key="modKey"
-              class="layout-order-item"
-            >
-              <view class="loi-left">
-                <view class="loi-rank-badge">{{ idx + 1 }}</view>
-                <text class="loi-icon">{{ getModuleMeta(modKey).icon }}</text>
-                <view class="loi-text-col">
-                  <text class="loi-title">{{ getModuleMeta(modKey).title }}</text>
-                  <text class="loi-sub">{{ getModuleMeta(modKey).desc }}</text>
-                </view>
-              </view>
-
-              <view class="loi-actions">
-                <view
-                  v-if="idx > 0"
-                  class="loi-btn top-btn"
-                  @click="pinModuleToTop(Number(idx))"
-                >
-                  <text class="loi-btn-txt">置顶</text>
-                </view>
-                <view
-                  class="loi-btn arrow-btn"
-                  :class="{ disabled: idx === 0 }"
-                  @click="moveModuleOrder(Number(idx), -1)"
-                >
-                  <text class="loi-btn-txt">↑</text>
-                </view>
-                <view
-                  class="loi-btn arrow-btn"
-                  :class="{ disabled: idx === homeModuleOrderDraft.length - 1 }"
-                  @click="moveModuleOrder(Number(idx), 1)"
-                >
-                  <text class="loi-btn-txt">↓</text>
-                </view>
-              </view>
-            </view>
-          </view>
-
-          <view class="layout-order-footer">
-            <button class="loi-footer-btn reset" @click="resetHomeModuleOrder">恢复默认</button>
-            <button class="loi-footer-btn save" @click="saveHomeModuleOrder">✓ 保存顺序</button>
-          </view>
+        <view class="qn-footer">
+          <button class="qn-btn cancel" @click="closeQuickNicknameModal">取消</button>
+          <button class="qn-btn save" :loading="savingQuickNick" :disabled="savingQuickNick" @click="saveQuickProfile">
+            ✓ 保存
+          </button>
         </view>
       </view>
     </view>
@@ -1345,12 +958,13 @@
 </template>
 
 <script setup lang="ts">
-import { currentTheme, themeClass, applySystemTheme, chartPalette } from "../../utils/theme";
+import { currentTheme, themeClass, applySystemTheme, chartPalette, syncTabBarTheme, isVolt } from "../../utils/theme";
 import { explainTerm } from "../../utils/glossary";
 import { trackClick, trackModal, observeModuleExposures, getCurrentSessionId } from "../../utils/telemetry";
 import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import PageSkeleton from "../../components/PageSkeleton.vue";
 import GoalSheetModal from "../../components/GoalSheetModal.vue";
+import RgmIcon from "../../components/RgmIcon.vue";
 import { ref, computed, onMounted, onUnmounted, getCurrentInstance, nextTick, watch } from "vue";
 import { onPullDownRefresh, onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";
@@ -1433,7 +1047,18 @@ function dismissOnboardBanner() {
 // ── ✅ 新手任务清单 ──
 // 每一项都按「真实完成状态」判断（不看向导里的“跳过”标记），全部完成后卡片自动消失；
 // 点 ✕ 后 7 天内不再出现（沿用 ONBOARD_DISMISS_KEY）。
-const starterCollapsed = ref(false);
+const starterManualCollapsed = ref<boolean | null>(null);
+const starterCollapsed = computed<boolean>({
+  get() {
+    if (starterManualCollapsed.value !== null) {
+      return starterManualCollapsed.value;
+    }
+    return starterDoneCount.value >= 2;
+  },
+  set(v: boolean) {
+    starterManualCollapsed.value = v;
+  },
+});
 const starterTasks = computed(() => {
   const st = onboardStatus.value || {};
   const steps = st.steps || {};
@@ -1528,6 +1153,37 @@ const selectedTrackActivity = ref<any>(null);
 function openTrackModal(act: any) {
   selectedTrackActivity.value = act;
 }
+
+const recentTrackThumbUri = computed(() => {
+  const stroke = "#FC4C02";
+  const act = displayedActivities.value?.[0];
+  const ptsRaw = act?.gps_points || act?.route_points;
+  let pathD = "M5 18L8 9L16 6L20 13L15 20Z";
+  if (Array.isArray(ptsRaw) && ptsRaw.length >= 3) {
+    const coords = ptsRaw.slice(0, 24).map((p: any) => ({
+      lat: Number(p.lat ?? p[0] ?? 0),
+      lng: Number(p.lng ?? p[1] ?? 0),
+    })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0));
+    if (coords.length >= 3) {
+      const lats = coords.map((p: any) => p.lat);
+      const lngs = coords.map((p: any) => p.lng);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+      const span = Math.max(maxLat - minLat, maxLng - minLng, 0.0001);
+      pathD = coords
+        .map((p: any, idx: number) => {
+          const x = (4 + ((p.lng - minLng) / span) * 16).toFixed(1);
+          const y = (20 - ((p.lat - minLat) / span) * 16).toFixed(1);
+          return `${idx === 0 ? "M" : "L"}${x} ${y}`;
+        })
+        .join(" ");
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${pathD}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+});
 
 const showPersonalShareModal = ref(false);
 const shareCardActivityId = ref<string>("");
@@ -1764,13 +1420,8 @@ async function loadNotifications() {
   }
 }
 
-function openNotificationsModal() {
-  showNotificationsModal.value = true;
-  loadingNotifications.value = true;
-  loadNotifications().finally(() => {
-    loadingNotifications.value = false;
-  });
-}
+// Duplicate removed (merged into openNotificationsModal above)
+function _unusedLoadNotifAnchor() {}
 
 async function handleNotificationClick(item: any) {
   const u = user.value || getStoredUser();
@@ -2088,6 +1739,25 @@ const displayedActivities = computed(() => {
   return Array.isArray(recent) && recent.length > 0 ? recent.slice(0, 1) : [];
 });
 
+const isDefaultUserGoal = computed(() => Boolean(dashboardData.value?.goal?.is_default));
+const latestRunSummary = computed(() => {
+  const act = displayedActivities.value?.[0];
+  if (!act) return "暂无跑步记录";
+  const km = Number(act.distance_km ?? (Number(act.distance || 0) / 1000)).toFixed(1);
+  const pace = act.pace_str ? ` · 配速 ${act.pace_str}` : "";
+  return `最近 ${km}km${pace}`;
+});
+const yearlyDigestText = computed(() => {
+  const total = Number(dashboardData.value?.yearly_stats?.total_km || 0).toFixed(1);
+  const target = Number(dashboardData.value?.yearly_stats?.target_year_km || 0);
+  return target > 0 ? `今年 ${total}/${target}km` : `今年累计 ${total}km`;
+});
+function scrollToYearlySection() {
+  showYearDetail.value = true;
+  trackClick("home.digest.jump_yearly", "首页摘要条跳转年度统计");
+  nextTick(() => uni.pageScrollTo({ selector: "#rgm-mod-yearly", duration: 280 }));
+}
+
 // 年度统计：默认折叠（仅当用户主动展开过记为 "1" 时展开，大幅缩短首屏滚动高度）；体能曲线默认折叠
 const storedYearExpanded = uni.getStorageSync("rgm_home_year_expanded");
 const showYearDetail = ref(storedYearExpanded === 1 || storedYearExpanded === "1");
@@ -2170,10 +1840,92 @@ function getModuleMeta(key: HomeModuleKey) {
   return HOME_MODULE_META[key] || { icon: '📌', title: key, desc: '' };
 }
 
+// ── E5 双切页弹窗状态：消息通知 & 首页排序 ──
+const e5ModalTab = ref<"notif" | "order">("notif");
+const homeOrderVisibleKeys = computed(() =>
+  homeModuleOrderDraft.value.filter((k) => ["nextrun", "today", "goal", "status", "recent"].includes(k))
+);
+
 function openLayoutOrderModal() {
   trackClick('home_open_layout_order', '首页点击「自定义首页板块顺序」');
   homeModuleOrderDraft.value = [...homeModuleOrder.value];
+  e5ModalTab.value = "order";
   showLayoutOrderModal.value = true;
+}
+
+function closeE5Modal() {
+  showNotificationsModal.value = false;
+  showLayoutOrderModal.value = false;
+}
+
+function switchE5ModalTab(tab: "notif" | "order") {
+  e5ModalTab.value = tab;
+  if (tab === "notif" && notificationsList.value.length === 0) {
+    loadingNotifications.value = true;
+    loadNotifications().finally(() => {
+      loadingNotifications.value = false;
+    });
+  } else if (tab === "order") {
+    homeModuleOrderDraft.value = [...homeModuleOrder.value];
+  }
+}
+
+function moveVisibleModuleOrder(key: HomeModuleKey, delta: number) {
+  const visible = homeOrderVisibleKeys.value;
+  const vIdx = visible.indexOf(key);
+  const targetVIdx = vIdx + delta;
+  if (vIdx < 0 || targetVIdx < 0 || targetVIdx >= visible.length) return;
+  const swapKey = visible[targetVIdx];
+  const list = [...homeModuleOrderDraft.value];
+  const a = list.indexOf(key);
+  const b = list.indexOf(swapKey);
+  if (a >= 0 && b >= 0) {
+    [list[a], list[b]] = [list[b], list[a]];
+    homeModuleOrderDraft.value = list;
+  }
+}
+
+function handleHeaderWatchClick() {
+  if (!isDeviceConnected.value) {
+    goToDeviceBinding();
+    return;
+  }
+  uni.showActionSheet({
+    itemList: [compactSyncLabel.value, "手表连接管理"],
+    success: (res) => {
+      if (res.tapIndex === 0) {
+        handleInstantSync();
+      } else if (res.tapIndex === 1) {
+        goToDeviceBinding();
+      }
+    },
+  });
+}
+
+const weekDaysBars = computed(() => {
+  const days = dashboardData.value?.weekly_progress?.daily_breakdown || defaultWeeklyDays;
+  const maxKm = Math.max(...days.map((d: any) => Number(d?.distance_km || 0)), 12);
+  return days.map((d: any) => {
+    const km = Number(d?.distance_km || 0);
+    const barH = km > 0 ? Math.max(16, Math.min(72, Math.round((km / maxKm) * 72))) : 0;
+    const rawName = String(d?.day_name || d?.short_day || "");
+    const shortLbl = rawName.replace(/^周/, "").slice(-1) || "一";
+    return {
+      ...d,
+      distance_km: km > 0 ? Number(km.toFixed(1)) : 0,
+      barHeightRpx: barH,
+      shortLbl,
+    };
+  });
+});
+
+function openNotificationsModal() {
+  e5ModalTab.value = "notif";
+  showNotificationsModal.value = true;
+  loadingNotifications.value = true;
+  loadNotifications().finally(() => {
+    loadingNotifications.value = false;
+  });
 }
 
 function moveModuleOrder(idx: number, delta: number) {
@@ -2217,9 +1969,10 @@ const weekPieStyle = computed(() => {
   const rawPct = Number(dashboardData.value?.weekly_progress?.progress_pct ?? 0);
   const clamped = Math.max(0, Math.min(100, isNaN(rawPct) ? 0 : rawPct));
   const deg = Math.round(clamped * 3.6 * 10) / 10;
-  const remainColor = currentTheme.value === 'volt' ? '#E2E8F0' : 'rgba(255, 255, 255, 0.13)';
+  const fillCol = currentTheme.value === 'volt' ? '#059669' : '#10B981';
+  const remainColor = currentTheme.value === 'volt' ? '#E2E8F0' : '#23232C';
   return {
-    background: `conic-gradient(#10b981 0deg ${deg}deg, ${remainColor} ${deg}deg 360deg)`,
+    background: `conic-gradient(${fillCol} 0deg ${deg}deg, ${remainColor} ${deg}deg 360deg)`,
   };
 });
 
@@ -2227,9 +1980,9 @@ const monthPieStyle = computed(() => {
   const rawPct = Number(dashboardData.value?.progress?.progress_pct ?? 0);
   const clamped = Math.max(0, Math.min(100, isNaN(rawPct) ? 0 : rawPct));
   const deg = Math.round(clamped * 3.6 * 10) / 10;
-  const remainColor = currentTheme.value === 'volt' ? '#E2E8F0' : 'rgba(255, 255, 255, 0.13)';
+  const remainColor = currentTheme.value === 'volt' ? '#E2E8F0' : '#23232C';
   return {
-    background: `conic-gradient(#fc4c02 0deg ${deg}deg, ${remainColor} ${deg}deg 360deg)`,
+    background: `conic-gradient(#FC4C02 0deg ${deg}deg, ${remainColor} ${deg}deg 360deg)`,
   };
 });
 const isWeeklyReportWindow = computed(() => {
@@ -2339,17 +2092,89 @@ const isDefaultNickname = computed(() => {
   );
 });
 
+const showQuickNicknameModal = ref(false);
+const quickNickName = ref("");
+const quickAvatarUrl = ref("");
+const savingQuickNick = ref(false);
+
 function goToQuickEditProfile() {
   const uid = user.value?.id || dashboardData.value?.user?.id || getStoredUser()?.id;
   if (!uid) {
     openAuthModal();
     return;
   }
-  trackClick("home.header.quick_edit_nickname", "首页点击快捷修改头像/昵称");
+  trackClick("home.header.quick_edit_nickname", "首页打开原位头像/昵称设置弹窗");
+  const curName = String(dashboardData.value?.user?.display_name || user.value?.display_name || "").trim();
+  quickNickName.value = isDefaultNickname.value ? "" : curName;
+  quickAvatarUrl.value = String(dashboardData.value?.user?.avatar_url || user.value?.avatar_url || "").trim();
+  showQuickNicknameModal.value = true;
+  setTabBarHidden(true, "home_quick_nick");
+}
+
+function closeQuickNicknameModal() {
+  showQuickNicknameModal.value = false;
+  setTabBarHidden(false, "home_quick_nick");
+}
+
+function onQuickNickBlur(e: any) {
+  const v = String(e?.detail?.value || "").trim();
+  if (v) quickNickName.value = v;
+}
+
+async function onQuickChooseAvatar(e: any) {
+  const tempUrl = e?.detail?.avatarUrl;
+  if (!tempUrl) return;
+  quickAvatarUrl.value = tempUrl;
+  const uid = user.value?.id || dashboardData.value?.user?.id || getStoredUser()?.id;
+  if (!uid) return;
   try {
-    uni.setStorageSync("auto_open_edit_profile", "1");
-  } catch (_) {}
-  uni.switchTab({ url: "/pages/profile/profile" });
+    const uploaded = await uploadAvatarFile(uid, tempUrl);
+    if (uploaded) {
+      quickAvatarUrl.value = uploaded;
+    }
+  } catch (err) {
+    console.warn("Quick avatar upload warn:", err);
+  }
+}
+
+async function saveQuickProfile() {
+  const uid = user.value?.id || dashboardData.value?.user?.id || getStoredUser()?.id;
+  if (!uid) return;
+  const cleanName = quickNickName.value.trim();
+  let finalAvatar = quickAvatarUrl.value.trim();
+  if (!cleanName && !finalAvatar) {
+    uni.showToast({ title: "请输入昵称或选择头像", icon: "none" });
+    return;
+  }
+  savingQuickNick.value = true;
+  try {
+    if (finalAvatar && (finalAvatar.startsWith("wxfile://") || finalAvatar.startsWith("http://tmp") || finalAvatar.startsWith("https://tmp"))) {
+      try {
+        const uploaded = await uploadAvatarFile(uid, finalAvatar);
+        if (uploaded) finalAvatar = uploaded;
+      } catch (_) {}
+    }
+    const payload: Record<string, any> = {};
+    if (cleanName) payload.display_name = cleanName;
+    if (finalAvatar) payload.avatar_url = finalAvatar;
+    await request(`/api/profile/${uid}`, "PUT", payload);
+    if (user.value) {
+      if (cleanName) user.value.display_name = cleanName;
+      if (finalAvatar) user.value.avatar_url = finalAvatar;
+      uni.setStorageSync("rgm_user", JSON.stringify(user.value));
+    }
+    if (dashboardData.value?.user) {
+      if (cleanName) dashboardData.value.user.display_name = cleanName;
+      if (finalAvatar) dashboardData.value.user.avatar_url = finalAvatar;
+    }
+    closeQuickNicknameModal();
+    uni.showToast({ title: "名片已更新 ✓", icon: "success" });
+    await loadDashboard();
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "保存失败，请重试", icon: "none" });
+  } finally {
+    savingQuickNick.value = false;
+  }
 }
 
 const deviceConnectedText = computed(() => {
@@ -2494,13 +2319,21 @@ function getTodayWorkoutBorderClass(type: string): string {
 }
 
 const FEELING_TAG_OPTIONS = [
-  "🤩 状态极佳",
-  "😊 轻松舒适",
-  "💪 正常发挥",
-  "😮‍💨 略感吃力",
-  "🥵 疲惫掉速",
-  "🦵 肌肉酸紧",
+  "状态极佳",
+  "轻松舒适",
+  "正常发挥",
+  "略感吃力",
+  "疲惫掉速",
+  "肌肉酸紧",
 ];
+
+function goAskCoachFromCheckin() {
+  showCheckinLogModal.value = false;
+  try {
+    uni.setStorageSync("rgm_coach_open_chat", "1");
+  } catch (_) {}
+  goToCoachPage();
+}
 
 const showCheckinLogModal = ref(false);
 const isAnyHomePageModalOpen = computed(() =>
@@ -2996,6 +2829,9 @@ async function loadDashboard() {
       writeCachedDashboardSnapshot(uid, data);
       try {
         uni.removeStorageSync("rgm_dashboard_dirty");
+        const feedBadge = Number(data?.club_feed_summary?.today_checkin_count || 0);
+        uni.setStorageSync("rgm_team_feed_badge", feedBadge);
+        syncTabBarTheme();
       } catch (_) {}
       if (data.user) {
         if (!user.value) user.value = {} as any;
@@ -3179,16 +3015,31 @@ async function markSkipHistoryStep(uid: string) {
   } catch (e) {}
 }
 
+let homeSyncUnmounted = false;
+
 async function executeCloudSync(
   uid: string,
   healthBrand?: "apple_watch" | "huawei" | "suunto",
   healthBrandLabel?: string
 ) {
   syncing.value = true;
-  uni.showLoading({ title: `同步 ${syncDeviceName.value} 中...` });
   try {
-    const res = await request("/api/sync/trigger", "POST", { uid });
-    uni.hideLoading();
+    const trigRes = await request("/api/sync/trigger", "POST", { uid, async_mode: true });
+    let res: any = trigRes;
+    if (trigRes?.async_mode) {
+      uni.showToast({ title: `正在后台同步${syncDeviceName.value}...`, icon: "none", duration: 2200 });
+      const deadline = Date.now() + 120000;
+      while (!homeSyncUnmounted && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (homeSyncUnmounted) return;
+        const st = await request(`/api/sync/status/${uid}`, "GET");
+        if (!st || st.status === "idle" || st.status === "done" || st.status === "failed") {
+          res = st?.detail || st;
+          break;
+        }
+      }
+    }
+    if (homeSyncUnmounted) return;
     if (
       (res?.watch_mode === "huawei" || res?.watch_mode === "apple_watch" || res?.watch_mode === "suunto") &&
       Number(res?.synced_activities || 0) === 0
@@ -3233,21 +3084,22 @@ async function executeCloudSync(
         },
       });
     } else {
-      if (onboardStatus.value?.steps && Number(res?.synced_activities || 0) > 0) {
+      if (onboardStatus.value?.steps && Number(res?.synced_activities ?? res?.synced_count ?? 0) > 0) {
         onboardStatus.value.steps.history = true;
       }
       uni.showToast({ title: "同步成功", icon: "success" });
     }
     await loadDashboard();
   } catch (e: any) {
-    uni.hideLoading();
     uni.showModal({
       title: "同步失败",
       content: e?.message || e?.data?.detail || "网络请求失败，请稍后重试",
       showCancel: false,
     });
   } finally {
-    syncing.value = false;
+    if (!homeSyncUnmounted) {
+      syncing.value = false;
+    }
   }
 }
 
@@ -3329,6 +3181,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  homeSyncUnmounted = true;
   if (observerTimer) {
     clearTimeout(observerTimer);
     observerTimer = null;
@@ -3341,6 +3194,7 @@ onUnmounted(() => {
 });
 
 onShow(() => {
+  homeSyncUnmounted = false;
   applySystemTheme(currentTheme.value);
   syncTabBarIndex(0);
   if (!firstLoadPending.value) {
@@ -7817,6 +7671,915 @@ onPullDownRefresh(async () => {
   background: linear-gradient(135deg, #fc4c02 0%, #ff6b2b 100%);
   color: #ffffff;
   border: none;
+}
+
+.goal-digest-strip {
+  margin-top: 16rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+}
+
+.gds-item {
+  flex: 1;
+  min-width: 0;
+  font-size: 21rpx;
+  font-weight: 600;
+  color: var(--rgm-text-2, #a1a1aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gds-sep {
+  font-size: 20rpx;
+  color: var(--rgm-text-3, #52525b);
+  flex-shrink: 0;
+}
+
+.quick-nick-modal {
+  margin-top: 90rpx;
+}
+
+.qn-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.qn-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--rgm-text, #ffffff);
+}
+
+.qn-close {
+  font-size: 30rpx;
+  color: var(--rgm-text-3, #71717a);
+  padding: 6rpx 10rpx;
+}
+
+.qn-desc {
+  display: block;
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+  margin-bottom: 26rpx;
+  line-height: 1.45;
+}
+
+.qn-form-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin-bottom: 30rpx;
+}
+
+.qn-avatar-btn {
+  width: 112rpx;
+  height: 112rpx;
+  padding: 0;
+  margin: 0;
+  border-radius: 56rpx;
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.qn-avatar-btn::after {
+  border: none;
+}
+
+.qn-avatar-img {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 56rpx;
+  border: 2rpx solid rgba(252, 76, 2, 0.5);
+}
+
+.qn-avatar-tip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32rpx;
+  line-height: 32rpx;
+  font-size: 18rpx;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.65);
+  text-align: center;
+}
+
+.qn-input-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.qn-label {
+  font-size: 21rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+
+.qn-input {
+  height: 76rpx;
+  padding: 0 20rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.06));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.14));
+  color: var(--rgm-text, #ffffff);
+  font-size: 26rpx;
+}
+
+.qn-footer {
+  display: flex;
+  gap: 16rpx;
+}
+
+.qn-btn {
+  flex: 1;
+  margin: 0;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 18rpx;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.qn-btn::after {
+  border: none;
+}
+
+.qn-btn.cancel {
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-text-2, #d4d4d8);
+}
+
+.qn-btn.save {
+  flex: 1.5;
+  background: linear-gradient(135deg, #fc4c02, #f97316);
+  color: #ffffff;
+}
+
+/* ── Home v3 Minimal Graphical System ── */
+.home-v3 {
+  padding: 20rpx 28rpx calc(140rpx + constant(safe-area-inset-bottom)) 28rpx;
+  padding: 20rpx 28rpx calc(140rpx + env(safe-area-inset-bottom)) 28rpx;
+}
+
+.h3-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.h3-user {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  min-width: 0;
+  flex: 1;
+}
+
+.h3-avatar {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+  border: 2rpx solid var(--rgm-line-2);
+  flex-shrink: 0;
+}
+
+.h3-name {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-edit-pill {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
+  border: 1rpx solid var(--rgm-brand-line);
+}
+
+.h3-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  flex-shrink: 0;
+}
+
+.h3-conn-dot {
+  position: absolute;
+  top: 10rpx;
+  right: 10rpx;
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background-color: var(--rgm-green);
+  border: 2rpx solid var(--rgm-card);
+}
+
+.h3-notif-badge {
+  position: absolute;
+  top: -4rpx;
+  right: -6rpx;
+  min-width: 30rpx;
+  height: 30rpx;
+  padding: 0 8rpx;
+  border-radius: 999rpx;
+  background-color: var(--rgm-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.h3-notif-badge-txt {
+  font-size: 18rpx;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.h3-starter-bar {
+  background: var(--rgm-green-tint);
+  border: 1rpx solid var(--rgm-green-line);
+  border-radius: 26rpx;
+  padding: 18rpx 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.h3-starter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+
+.h3-starter-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.h3-starter-title {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--rgm-green);
+}
+
+.h3-starter-pill {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card);
+  color: var(--rgm-text);
+}
+
+.h3-starter-close {
+  font-size: 24rpx;
+  color: var(--rgm-text-3);
+  padding: 4rpx 8rpx;
+}
+
+.h3-starter-chips {
+  white-space: nowrap;
+}
+
+.h3-starter-chips-inner {
+  display: inline-flex;
+  gap: 10rpx;
+}
+
+.h3-starter-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 48rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand);
+}
+
+.h3-starter-chip.done {
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-green-line);
+}
+
+.h3-starter-chip-txt {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.h3-starter-chip.done .h3-starter-chip-txt {
+  color: var(--rgm-green);
+}
+
+.h3-org-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 22rpx;
+  border-radius: 22rpx;
+  margin-bottom: 20rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+}
+
+.h3-org-alert.suspended {
+  background: var(--rgm-red-tint);
+  border-color: var(--rgm-red-line);
+}
+
+.h3-org-alert-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.h3-org-alert-txt {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-org-alert-cta {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text);
+  flex-shrink: 0;
+}
+
+.h3-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.h3-ticket-card {
+  padding: 24rpx 24rpx 20rpx;
+  background: linear-gradient(160deg, var(--rgm-brand-tint) 0%, var(--rgm-card) 58%);
+}
+
+.h3-ticket-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.h3-ticket-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.h3-pulse-orange {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: var(--rgm-brand);
+}
+
+.h3-ticket-countdown {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+}
+
+.h3-ticket-share-btn {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.h3-ticket-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+
+.h3-ticket-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-ticket-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+  gap: 12rpx;
+}
+
+.h3-ticket-loc {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.h3-ticket-loc-txt {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-ticket-club {
+  font-size: 21rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+  flex-shrink: 0;
+}
+
+.h3-today-hero {
+  background: var(--rgm-green-tint);
+  border: 1rpx solid var(--rgm-green-line);
+  border-radius: 32rpx;
+  padding: 26rpx 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.h3-today-hero.completed {
+  border-color: var(--rgm-green);
+}
+
+.h3-th-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.h3-th-meta {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.h3-type-badge {
+  font-size: 20rpx;
+  font-weight: 800;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+}
+
+.h3-th-pace,
+.h3-tc-pace {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--rgm-text-2);
+}
+
+.h3-th-more {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-text-3);
+}
+
+.h3-th-km {
+  font-size: 52rpx;
+  font-weight: 900;
+  color: var(--rgm-text);
+  line-height: 1.08;
+}
+
+.h3-th-title {
+  font-size: 24rpx;
+  color: var(--rgm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-th-feel-line {
+  font-size: 21rpx;
+  color: var(--rgm-green);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-th-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+
+.h3-th-feel-link {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: var(--rgm-green);
+}
+
+.h3-today-compact {
+  height: 94rpx;
+  padding: 0 22rpx;
+  border-radius: 26rpx;
+  background: var(--rgm-green-tint);
+  border: 1rpx solid var(--rgm-green-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.h3-tc-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.h3-tc-main {
+  font-size: 27rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-tc-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.h3-feel-mini {
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-green-line);
+}
+
+.h3-feel-mini-txt {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: var(--rgm-green);
+}
+
+.h3-check-circle {
+  width: 82rpx;
+  height: 82rpx;
+  border-radius: 50%;
+  background: var(--rgm-card);
+  border: 3rpx solid var(--rgm-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.h3-check-circle.small {
+  width: 58rpx;
+  height: 58rpx;
+}
+
+.h3-check-circle.checked {
+  background: var(--rgm-green);
+}
+
+.h3-goal-card {
+  padding: 26rpx 24rpx 22rpx;
+}
+
+.h3-rings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin-bottom: 24rpx;
+}
+
+.h3-ring-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.h3-ring-outer {
+  width: 176rpx;
+  height: 176rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.h3-ring-hole {
+  width: 146rpx;
+  height: 146rpx;
+  border-radius: 50%;
+  background-color: var(--rgm-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rpx;
+}
+
+.h3-ring-val {
+  font-size: 38rpx;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.text-brand {
+  color: var(--rgm-brand);
+}
+
+.h3-ring-target {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+}
+
+.h3-ring-label {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--rgm-text-2);
+}
+
+.h3-energy-strip {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid var(--rgm-line);
+}
+
+.h3-energy-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10rpx 0 8rpx;
+  border-radius: 18rpx;
+  border: 2rpx solid transparent;
+}
+
+.h3-energy-col.today {
+  border-color: var(--rgm-brand);
+  background: var(--rgm-brand-tint);
+}
+
+.h3-energy-km {
+  font-size: 19rpx;
+  font-weight: 700;
+  color: var(--rgm-green);
+  height: 26rpx;
+  line-height: 26rpx;
+}
+
+.h3-energy-km.today {
+  color: var(--rgm-brand);
+}
+
+.h3-energy-km-spacer {
+  height: 26rpx;
+}
+
+.h3-energy-stage {
+  height: 76rpx;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  margin: 6rpx 0 8rpx;
+}
+
+.h3-energy-bar {
+  width: 18rpx;
+  border-radius: 9rpx;
+  background: var(--rgm-green);
+}
+
+.h3-energy-bar.today {
+  background: var(--rgm-brand);
+}
+
+.h3-energy-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--rgm-text-3);
+  margin-bottom: 6rpx;
+  opacity: 0.45;
+}
+
+.h3-energy-dot.future {
+  background: transparent;
+  border: 2rpx dashed var(--rgm-text-3);
+}
+
+.h3-energy-day {
+  font-size: 21rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+}
+
+.h3-energy-day.today {
+  color: var(--rgm-brand);
+  font-weight: 800;
+}
+
+.h3-metrics-row {
+  display: flex;
+  gap: 14rpx;
+}
+
+.h3-metric-tile {
+  flex: 1;
+  min-width: 0;
+  padding: 20rpx 12rpx;
+  border-radius: 28rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.h3-metric-val {
+  font-size: 36rpx;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.h3-metric-lbl {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+  white-space: nowrap;
+}
+
+.h3-wear-warn {
+  margin-top: 12rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.h3-wear-warn-txt {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-amber);
+}
+
+.h3-recent-bar {
+  height: 104rpx;
+  padding: 0 22rpx;
+  border-radius: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+
+.h3-recent-left {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.h3-track-thumb-box {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.h3-track-thumb-img {
+  width: 44rpx;
+  height: 44rpx;
+}
+
+.h3-recent-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.h3-recent-km {
+  font-size: 28rpx;
+  font-weight: 900;
+  color: var(--rgm-text);
+}
+
+.h3-recent-meta {
+  font-size: 21rpx;
+  color: var(--rgm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-recent-right {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+}
+
+.h3-recent-time {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+}
+
+.e5-sheet-modal {
+  width: 690rpx;
+  max-height: 85vh;
+}
+
+.e5-seg-wrap {
+  padding: 0 26rpx 16rpx;
+}
+
+.a6-head-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.a6-head-sub {
+  font-size: 20rpx;
+  color: var(--rgm-text-3);
+}
+
+.a6-row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.a6-rpe-hint {
+  font-size: 20rpx;
+  color: var(--rgm-text-3);
+}
+
+.a6-ask-coach-link {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-blue);
 }
 
 </style>

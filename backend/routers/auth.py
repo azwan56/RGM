@@ -1101,7 +1101,31 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
                         "domain": domain
                     }
                 err_msg = adapter.last_error or ""
-                raise HTTPException(status_code=400, detail=err_msg or f"绑定失败，请检查佳明账号、密码及选择的区域（{domain}）。")
+                is_rate_limit = any(k in err_msg for k in ("429", "频繁", "Too Many Requests", "Rate limit"))
+                if not is_rate_limit:
+                    alt_domain = "garmin.com" if domain == "garmin.cn" else "garmin.cn"
+                    alt_adapter = GarminAdapter(email=request.email, password=request.password, domain=alt_domain)
+                    if os.path.exists(alt_adapter.token_path):
+                        try:
+                            os.remove(alt_adapter.token_path)
+                        except Exception:
+                            pass
+                    if alt_adapter.login(use_token=False):
+                        ok = True
+                        adapter = alt_adapter
+                        domain = alt_domain
+                    elif alt_adapter.needs_mfa:
+                        PENDING_MFA_ADAPTERS[email_key] = alt_adapter
+                        return {
+                            "success": False,
+                            "connected": False,
+                            "needs_mfa": True,
+                            "message": f"已为您自动切换至佳明{'国际区' if alt_domain == 'garmin.com' else '中国区'}并发送 6 位安全验证码，请输入验证码完成绑定。",
+                            "email": request.email,
+                            "domain": alt_domain,
+                        }
+                if not ok:
+                    raise HTTPException(status_code=400, detail=err_msg or f"绑定失败，请检查佳明账号、密码及选择的区域（{domain}）。")
 
     # 2. Encrypt password
     encrypted_pwd = encrypt_string(request.password)
@@ -1305,8 +1329,15 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
     code = (request.code or request.mfa_code or "").strip()
 
     if code:
-        # 2FA code submission path
+        # 2FA code submission path (also check alternate region key in case auto-fallback triggered on initial attempt)
+        alt_domain_for_key = "teamapi.coros.com" if "teamcnapi" in domain else "teamcnapi.coros.com"
+        alt_account_key = f"{clean_account.lower()}::{alt_domain_for_key}"
+        resolved_key = account_key
         adapter = PENDING_COROS_2FA_ADAPTERS.get(account_key)
+        if not adapter and PENDING_COROS_2FA_ADAPTERS.get(alt_account_key):
+            adapter = PENDING_COROS_2FA_ADAPTERS.get(alt_account_key)
+            domain = alt_domain_for_key
+            resolved_key = alt_account_key
         if not adapter or not adapter.login_ticket:
             adapter = CorosAdapter(account=clean_account, password=effective_pwd, domain=domain)
             # Re-initiate login to acquire loginTicket if adapter state was lost
@@ -1314,7 +1345,7 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
         ok = adapter.complete_2fa(code)
         if not ok:
             raise HTTPException(status_code=400, detail=adapter.last_error or "验证码错误或已失效，请重新输入手机短信中的 6 位验证码")
-        PENDING_COROS_2FA_ADAPTERS.pop(account_key, None)
+        PENDING_COROS_2FA_ADAPTERS.pop(resolved_key, None)
     else:
         # Initial login attempt (force=True ignores cache while preserving needs_2fa circuit-breaker until verified)
         adapter = CorosAdapter(account=clean_account, password=effective_pwd, domain=domain)
@@ -1330,8 +1361,28 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
                     "account": clean_account,
                     "domain": domain
                 }
-            err_msg = adapter.last_error or "高驰绑定失败，请检查高驰账号、密码及选择的区域。"
-            raise HTTPException(status_code=400, detail=err_msg)
+            err_msg = adapter.last_error or ""
+            is_rate_limit = any(k in err_msg for k in ("429", "频繁", "Too Many Requests", "Rate limit", "锁定"))
+            if not is_rate_limit:
+                alt_domain = "teamapi.coros.com" if "teamcnapi" in domain else "teamcnapi.coros.com"
+                alt_account_key = f"{clean_account.lower()}::{alt_domain}"
+                alt_adapter = CorosAdapter(account=clean_account, password=effective_pwd, domain=alt_domain)
+                if alt_adapter.login(force=True, trigger_2fa_sms=True):
+                    ok = True
+                    adapter = alt_adapter
+                    domain = alt_domain
+                elif alt_adapter.needs_2fa:
+                    PENDING_COROS_2FA_ADAPTERS[alt_account_key] = alt_adapter
+                    return {
+                        "success": False,
+                        "connected": False,
+                        "needs_2fa": True,
+                        "message": alt_adapter.last_error or f"已自动识别为高驰{'国际版' if 'teamapi' in alt_domain else '中国版'}账号并发送 6 位安全验证码，请输入完成绑定。",
+                        "account": clean_account,
+                        "domain": alt_domain,
+                    }
+            if not ok:
+                raise HTTPException(status_code=400, detail=err_msg or "高驰绑定失败，请检查高驰账号、密码及选择的区域。")
 
     # 2. Encrypt password
     encrypted_pwd = encrypt_string(effective_pwd)

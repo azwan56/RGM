@@ -15,21 +15,33 @@
 
     <!-- ── Authorized Cockpit View ── -->
     <view v-else-if="!loading" class="cockpit-content">
-      <!-- Top Club Header -->
-      <view class="top-club-bar">
-        <view class="club-info" @click="userClubs.length > 1 ? (showSwitchModal = true) : null">
-          <view class="title-with-arrow">
-            <text class="club-title">{{ currentClub?.name || "教练工作台" }}</text>
-            <text v-if="userClubs.length > 1" class="switch-arrow">▾</text>
-          </view>
+      <!-- Top Minimalist Club Header -->
+      <view class="cw-topbar">
+        <view class="cw-club-left" @click="userClubs.length > 1 ? (showSwitchModal = true) : null">
+          <text class="cw-club-name">{{ currentClub?.name || "教练工作台" }}</text>
+          <RgmIcon v-if="userClubs.length > 1" name="chevron-down" :size="24" color="muted" />
+          <text class="cw-role-pill" :class="'role-' + userRole">
+            {{ userRole === 'owner' ? '团长' : '教练' }}
+          </text>
         </view>
-        <view class="top-right-group">
-          <text class="role-badge" :class="'role-' + userRole">
-            {{ userRole === 'owner' ? '👑 团长' : '🧢 教练' }}
-          </text>
-          <text v-if="userClubs.length > 1" class="switch-link-pill" @click="showSwitchModal = true">
-            ⇄ 切换
-          </text>
+        <view class="cw-top-icons">
+          <view
+            class="rgm-icon-btn"
+            :class="{ 'is-active-icon': showStudentSearch || !!searchQuery }"
+            @click="showStudentSearch = !showStudentSearch"
+          >
+            <RgmIcon name="search" :size="28" :color="(showStudentSearch || searchQuery) ? 'brand' : 'ink'" />
+          </view>
+          <view class="rgm-icon-btn" @click="showBroadcastModal = true">
+            <RgmIcon name="zap" :size="28" color="ink" />
+          </view>
+          <view
+            class="rgm-icon-btn"
+            :class="{ 'is-active-icon': coachBenchTab === 'report_manage' }"
+            @click="switchBenchTab(coachBenchTab === 'report_manage' ? 'cockpit' : 'report_manage')"
+          >
+            <RgmIcon name="trophy" :size="28" :color="coachBenchTab === 'report_manage' ? 'brand' : 'ink'" />
+          </view>
         </view>
       </view>
 
@@ -49,420 +61,326 @@
         </view>
       </scroll-view>
 
-      <!-- ── Centralized 4-Module Coach Workbench Sub-Navigation ── -->
-      <view class="coach-workbench-tabs">
+      <!-- ── 3-Tab Minimalist Segmented Switcher ── -->
+      <view class="rgm-seg-bar cw-seg-bar">
         <view
-          class="cwt-tab"
+          class="rgm-seg-item"
           :class="{ active: coachBenchTab === 'cockpit' }"
           @click="switchBenchTab('cockpit')"
         >
-          <text class="cwt-icon">🧭</text>
-          <text class="cwt-label">罗盘</text>
+          学员罗盘
         </view>
         <view
-          class="cwt-tab"
+          class="rgm-seg-item"
           :class="{ active: coachBenchTab === 'feed' }"
           @click="switchBenchTab('feed')"
         >
-          <text class="cwt-icon">💬</text>
-          <text class="cwt-label">点评</text>
+          打卡点评{{ clubFeed.length ? ` (${clubFeed.length})` : '' }}
         </view>
         <view
-          class="cwt-tab"
+          class="rgm-seg-item"
           :class="{ active: coachBenchTab === 'events' }"
           @click="switchBenchTab('events')"
         >
-          <text class="cwt-icon">🏃</text>
-          <text class="cwt-label">约跑</text>
-        </view>
-        <view
-          class="cwt-tab"
-          :class="{ active: coachBenchTab === 'report_manage' }"
-          @click="switchBenchTab('report_manage')"
-        >
-          <text class="cwt-icon">📊</text>
-          <text class="cwt-label">战报</text>
+          约跑管理
         </view>
       </view>
 
       <!-- ==================== MODULE 1: 排课与全队体能罗盘 ==================== -->
       <view v-if="coachBenchTab === 'cockpit'">
-      <!-- 4-Grid Status Overview -->
-      <view class="status-summary-grid">
-        <view
-          class="status-card green"
-          :class="{ active: filterStatus === 'peak' }"
-          @click="setFilter('peak')"
-        >
-          <view class="status-top">
-            <text class="status-dot">🟢</text>
-            <text class="status-name">巅峰</text>
-          </view>
-          <text class="status-count">{{ summary?.peak_count || 0 }} <text class="unit">人</text></text>
-        </view>
-
-        <view
-          class="status-card blue"
-          :class="{ active: filterStatus === 'optimal' }"
-          @click="setFilter('optimal')"
-        >
-          <view class="status-top">
-            <text class="status-dot">🔵</text>
-            <text class="status-name">适应</text>
-          </view>
-          <text class="status-count">{{ summary?.optimal_count || 0 }} <text class="unit">人</text></text>
-        </view>
-
-        <view
-          class="status-card yellow"
-          :class="{ active: filterStatus === 'tired' }"
-          @click="setFilter('tired')"
-        >
-          <view class="status-top">
-            <text class="status-dot">🟡</text>
-            <text class="status-name">疲劳</text>
-          </view>
-          <text class="status-count">{{ summary?.tired_count || 0 }} <text class="unit">人</text></text>
-        </view>
-
-        <view
-          class="status-card red"
-          :class="{ active: filterStatus === 'danger' }"
-          @click="setFilter('danger')"
-        >
-          <view class="status-top">
-            <text class="status-dot">🔴</text>
-            <text class="status-name">预警</text>
-          </view>
-          <text class="status-count">{{ summary?.danger_count || 0 }} <text class="unit">人</text></text>
-        </view>
-      </view>
-
-      <!-- ── 全团选兔雷达 · 官方配速员与拉练领跑兔选拔 ── -->
-      <PacerClubRadarSection
-        v-if="currentClub?.id && user?.id"
-        :club-id="currentClub.id"
-        :operator-uid="user.id"
-        :club-name="currentClub.name"
-      ></PacerClubRadarSection>
-
-      <!-- ── Coach Training Plan & Execution Management Hub (教练排课与执行管理台) ── -->
-      <view class="coach-plan-hub-card">
-        <view class="cph-header">
-          <view class="cph-badge-row">
-            <view style="display: flex; align-items: center; gap: 8rpx;">
-              <text class="cph-pill">🧢 排课管理</text>
-              <text class="term-info" @click.stop="explainTerm('coach_hub')">ⓘ</text>
+        <!-- 4-Color Team Status Ratio Bar + Clickable Status Pills -->
+        <view class="rgm-card cw-ratio-card">
+          <view class="cw-ratio-head">
+            <view class="cw-ratio-title-row">
+              <text class="cw-ratio-title">全队体能分布</text>
+              <text class="term-info" @click.stop="explainTerm('tsb')">ⓘ</text>
             </view>
-            <text class="cph-compliance">周达成 {{ summary?.avg_week_compliance || 0 }}%</text>
+            <text class="cw-ratio-comp">周达成 {{ summary?.avg_week_compliance || 0 }}%</text>
+          </view>
+          <view class="cw-ratio-track">
+            <view class="cw-ratio-seg is-green" :style="{ width: teamRatioSegments.peakPct + '%' }" />
+            <view class="cw-ratio-seg is-blue" :style="{ width: teamRatioSegments.optimalPct + '%' }" />
+            <view class="cw-ratio-seg is-amber" :style="{ width: teamRatioSegments.tiredPct + '%' }" />
+            <view class="cw-ratio-seg is-red" :style="{ width: teamRatioSegments.dangerPct + '%' }" />
+          </view>
+          <view class="cw-status-pills">
+            <view class="cw-st-pill" :class="{ active: filterStatus === 'peak' }" @click="setFilter('peak')">
+              <view class="cw-dot is-green" />
+              <text class="cw-st-txt">巅峰 {{ summary?.peak_count || 0 }}</text>
+            </view>
+            <view class="cw-st-pill" :class="{ active: filterStatus === 'optimal' }" @click="setFilter('optimal')">
+              <view class="cw-dot is-blue" />
+              <text class="cw-st-txt">适应 {{ summary?.optimal_count || 0 }}</text>
+            </view>
+            <view class="cw-st-pill" :class="{ active: filterStatus === 'tired' }" @click="setFilter('tired')">
+              <view class="cw-dot is-amber" />
+              <text class="cw-st-txt">疲劳 {{ summary?.tired_count || 0 }}</text>
+            </view>
+            <view class="cw-st-pill" :class="{ active: filterStatus === 'danger' }" @click="setFilter('danger')">
+              <view class="cw-dot is-red" />
+              <text class="cw-st-txt">预警 {{ summary?.danger_count || 0 }}</text>
+            </view>
           </view>
         </view>
 
-        <!-- 2x2 Symmetrical Batch Action Grid -->
-        <view class="cph-actions-grid">
-          <button
-            class="cph-batch-btn pipeline"
-            :disabled="filteredStudents.length === 0"
-            @click="startPipelineReview"
-          >
-            🚀 流水线 ({{ filteredStudents.length }})
-          </button>
-          <button
-            class="cph-batch-btn template-btn"
-            @click="openTemplateAssignModal()"
-          >
-            📚 模版库
-          </button>
-          <button
-            class="cph-batch-btn broadcast"
-            @click="showBroadcastModal = true"
-          >
-            📢 合练派课
-          </button>
-          <button
-            class="cph-batch-btn primary"
-            :disabled="batchGenerating"
-            @click="handleBatchGenerateDrafts(true)"
-          >
-            {{ batchGenerating ? '生成中...' : '✨ 批量排草案' }}
-          </button>
+        <!-- 1-Line Pending Draft Plans Banner -->
+        <view
+          v-if="(summary?.plans_draft_count || 0) > 0"
+          class="cw-draft-banner"
+          @click="filterPlanState = filterPlanState === 'draft_pending' ? 'all' : 'draft_pending'"
+        >
+          <view class="cw-db-left">
+            <view class="cw-dot is-amber" />
+            <text class="cw-db-txt">{{ summary.plans_draft_count }} 位队员草案待教练审阅发布</text>
+          </view>
+          <text class="cw-db-action" @click.stop="startPipelineReview">流水线审阅 ›</text>
         </view>
 
-        <!-- Concise Plan Status Filter Chips -->
-        <view class="cph-filter-row">
-          <view
-            class="cph-filter-chip"
-            :class="{ active: filterPlanState === 'all' && filterStatus === 'all' && filterGroupCode === 'all' }"
-            @click="resetAllFilters"
-          >
-            全部 ({{ students.length }})
-          </view>
-          <view
-            class="cph-filter-chip draft"
-            :class="{ active: filterPlanState === 'draft_pending' }"
-            @click="filterPlanState = filterPlanState === 'draft_pending' ? 'all' : 'draft_pending'"
-          >
-            🟠 待审 ({{ summary?.plans_draft_count || 0 }})
-          </view>
-          <view
-            class="cph-filter-chip pub"
-            :class="{ active: filterPlanState === 'published' }"
-            @click="filterPlanState = filterPlanState === 'published' ? 'all' : 'published'"
-          >
-            🟢 执行 ({{ summary?.plans_published_count || 0 }})
-          </view>
-          <view
-            class="cph-filter-chip none"
-            :class="{ active: filterPlanState === 'none' }"
-            @click="filterPlanState = filterPlanState === 'none' ? 'all' : 'none'"
-          >
-            ⚪ 未排 ({{ summary?.plans_none_count || 0 }})
-          </view>
-          <view
-            class="cph-filter-chip injury"
-            :class="{ active: filterPlanState === 'injury_alert' }"
-            @click="filterPlanState = filterPlanState === 'injury_alert' ? 'all' : 'injury_alert'"
-          >
-            🚨 预警 ({{ injuryAlertCount }})
-          </view>
-        </view>
-
-        <!-- Integrated Search & Sort Row -->
-        <view class="cph-search-sort-row">
+        <!-- Toggleable Search Drawer -->
+        <view v-if="showStudentSearch || searchQuery" class="cw-search-wrap">
           <input
             class="student-search-input"
             type="text"
             :adjust-position="false"
             :cursor-spacing="30"
-            placeholder="🔍 搜索学员..."
+            placeholder="搜索学员昵称 / 目标..."
             v-model="searchQuery"
           />
-          <view class="sort-chip-group">
+        </view>
+
+        <!-- Concise Action & Filter Bar -->
+        <view class="rgm-card cw-hub-compact">
+          <view class="cw-batch-strip">
+            <button
+              class="cw-batch-pill is-primary"
+              :disabled="filteredStudents.length === 0"
+              @click="startPipelineReview"
+            >
+              流水线 ({{ filteredStudents.length }})
+            </button>
+            <button class="cw-batch-pill" @click="openTemplateAssignModal()">模版库</button>
+            <button class="cw-batch-pill" @click="showBroadcastModal = true">合练派课</button>
+            <button
+              class="cw-batch-pill"
+              :disabled="batchGenerating"
+              @click="handleBatchGenerateDrafts(true)"
+            >
+              {{ batchGenerating ? '生成中...' : '批量草案' }}
+            </button>
+          </view>
+
+          <view class="cw-filter-strip">
+            <view
+              class="cph-filter-chip"
+              :class="{ active: filterPlanState === 'all' && filterStatus === 'all' && filterGroupCode === 'all' }"
+              @click="resetAllFilters"
+            >
+              全部 ({{ students.length }})
+            </view>
+            <view
+              class="cph-filter-chip draft"
+              :class="{ active: filterPlanState === 'draft_pending' }"
+              @click="filterPlanState = filterPlanState === 'draft_pending' ? 'all' : 'draft_pending'"
+            >
+              待审 {{ summary?.plans_draft_count || 0 }}
+            </view>
+            <view
+              class="cph-filter-chip pub"
+              :class="{ active: filterPlanState === 'published' }"
+              @click="filterPlanState = filterPlanState === 'published' ? 'all' : 'published'"
+            >
+              执行 {{ summary?.plans_published_count || 0 }}
+            </view>
+            <view
+              class="cph-filter-chip none"
+              :class="{ active: filterPlanState === 'none' }"
+              @click="filterPlanState = filterPlanState === 'none' ? 'all' : 'none'"
+            >
+              未排 {{ summary?.plans_none_count || 0 }}
+            </view>
+            <view
+              class="cph-filter-chip injury"
+              :class="{ active: filterPlanState === 'injury_alert' }"
+              @click="filterPlanState = filterPlanState === 'injury_alert' ? 'all' : 'injury_alert'"
+            >
+              预警 {{ injuryAlertCount }}
+            </view>
             <view
               class="sort-chip"
               :class="{ active: sortBy === 'danger_first' }"
-              @click="setSortBy('danger_first')"
+              @click="setSortBy(sortBy === 'danger_first' ? 'peak_first' : 'danger_first')"
             >
-              🔴 预警↓
+              {{ sortBy === 'danger_first' ? '预警↓' : '巅峰↓' }}
             </view>
-            <view
-              class="sort-chip"
-              :class="{ active: sortBy === 'peak_first' }"
-              @click="setSortBy('peak_first')"
-            >
-              🟢 巅峰↓
-            </view>
-            <text class="term-info" @click.stop="explainTerm('tsb')">ⓘ</text>
           </view>
         </view>
-      </view>
 
-      <!-- Student Cards List -->
-      <view class="students-list">
-        <view
-          v-for="s in filteredStudents"
-          :key="s.user_id"
-          class="student-card"
-          :class="['border-' + s.status_level, s.plan_info?.plan_state === 'draft_pending' ? 'card-has-draft' : '']"
-        >
-          <!-- Student Top Row -->
-          <view class="student-header">
-            <view class="student-profile">
-              <image
-                class="student-avatar"
-                :src="s.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
-                mode="aspectFill"
-              />
-              <view class="student-name-box">
-                <view class="name-row">
-                  <text class="student-name">{{ s.display_name }}</text>
-                  <text v-if="s.role === 'owner'" class="mini-tag owner">团长</text>
-                  <text v-else-if="s.role === 'coach'" class="mini-tag coach">教练</text>
-                  <text v-if="s.plan_info?.plan_state === 'draft_pending'" class="mini-tag draft-tag">🟠 草案待审</text>
-                  <text v-else-if="s.plan_info?.plan_state === 'published'" class="mini-tag pub-tag">🟢 教练已发布</text>
-                  <text v-else-if="s.plan_info?.plan_state === 'self_active'" class="mini-tag self-tag">🔵 个人计划</text>
-                  <text v-if="s.gender_label || s.age" class="mini-tag self-tag">
-                    {{ s.gender_label ? s.gender_label : '' }}{{ s.age ? (s.gender_label ? '·' : '') + s.age + '岁' : '' }}
-                  </text>
-                  <text
-                    v-if="s.plan_info?.template_group_code"
-                    class="mini-tag tpl-tag"
-                    @click.stop="openTemplateAssignModal(s.plan_info.template_id, s.user_id)"
-                  >
-                    📚 {{ s.plan_info.template_group_code }}
-                  </text>
-                  <text
-                    v-else-if="s.recommended_group"
-                    class="mini-tag tpl-rec-tag"
-                    @click.stop="openTemplateAssignModal(s.recommended_group.template_id, s.user_id)"
-                  >
-                    🎯 荐:{{ s.recommended_group.group_code }}{{ s.recommended_group.recommended_scale && s.recommended_group.recommended_scale < 1 ? '(' + Math.round(s.recommended_group.recommended_scale * 100) + '%量)' : '' }}
-                  </text>
-                </view>
-                <view class="student-sub-meta">
-                  <text class="student-month-km">当月跑量: <text class="highlight">{{ s.month_km }} / {{ s.target_km || 200 }} km</text></text>
-                  <text v-if="s.marathon_pb" class="student-month-km">全马PB: <text class="highlight">{{ s.marathon_pb }}</text></text>
-                  <text v-if="s.goal_race" class="student-race-pill">🏁 {{ s.goal_race.name }}{{ (s.goal_race.days_until ?? s.goal_race.days_left) != null ? ` (${s.goal_race.days_until ?? s.goal_race.days_left}天)` : '' }}</text>
-                </view>
-                <view v-if="s.recommended_group?.reason" class="student-rec-reason-line">
-                  <text class="student-rec-reason-txt">🧭 {{ s.recommended_group.reason }}</text>
-                </view>
-              </view>
-            </view>
+        <!-- 全团选兔雷达 · 官方配速员与拉练领跑兔选拔 -->
+        <PacerClubRadarSection
+          v-if="currentClub?.id && user?.id"
+          :club-id="currentClub.id"
+          :operator-uid="user.id"
+          :club-name="currentClub.name"
+        ></PacerClubRadarSection>
 
-            <!-- Status Level Badge -->
-            <view class="status-badge" :class="'badge-' + s.status_level">
-              {{ s.status_level === 'peak' ? '🟢 巅峰' : s.status_level === 'optimal' ? '🔵 适应' : s.status_level === 'tired' ? '🟡 疲劳' : '🔴 预警' }}
-            </view>
-          </view>
-
-          <!-- Metrics 6-Grid -->
-          <view class="metrics-grid">
-            <view class="metric-cell">
-              <text class="m-label">CTL 体能</text>
-              <text class="m-val text-blue">{{ s.ctl }}</text>
-            </view>
-            <view class="metric-cell">
-              <text class="m-label">ATL 疲劳</text>
-              <text class="m-val text-purple">{{ s.atl }}</text>
-            </view>
-            <view class="metric-cell">
-              <text class="m-label">TSB 状况</text>
-              <text class="m-val" :class="s.ctl > 0 || s.atl > 0 ? (s.tsb >= 0 ? 'text-green' : 'text-yellow') : 'text-muted'">
-                {{ (s.ctl > 0 || s.atl > 0) ? (s.tsb > 0 ? '+' + s.tsb : s.tsb) : '—' }}
-              </text>
-            </view>
-            <view class="metric-cell">
-              <text class="m-label">静息心率</text>
-              <text class="m-val text-rose">{{ s.resting_heart_rate ? s.resting_heart_rate : '—' }} <text class="m-unit" v-if="s.resting_heart_rate">bpm</text></text>
-            </view>
-            <view class="metric-cell">
-              <text class="m-label">夜间 HRV <text class="term-info" @click.stop="explainTerm('hrv')">ⓘ</text></text>
-              <text class="m-val text-cyan">{{ s.hrv_ms ? s.hrv_ms : '—' }} <text class="m-unit" v-if="s.hrv_ms">ms</text></text>
-            </view>
-            <view class="metric-cell">
-              <text class="m-label">睡眠恢复</text>
-              <text class="m-val text-emerald">{{ s.sleep_score ? s.sleep_score : '—' }} <text class="m-unit" v-if="s.sleep_score">分</text></text>
-            </view>
-          </view>
-
-          <!-- 夜间未佩戴手表 · 恢复数据缺失预警（教练端精简一行 + ⓘ 说明） -->
+        <!-- Dense ~63px Traffic-Light Student Rows (Tap to Expand) -->
+        <view class="cw-students-list">
           <view
-            v-if="s.night_wear_missing"
-            style="margin: 10rpx 0 14rpx 0; padding: 10rpx 16rpx; border-radius: 12rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
-            @click.stop="explainTerm('watch_wear')"
+            v-for="s in filteredStudents"
+            :key="s.user_id"
+            class="cw-stu-row-card"
+            :class="['border-' + s.status_level, { 'card-has-draft': s.plan_info?.plan_state === 'draft_pending' }]"
+            @click="toggleStudentExpand(s.user_id)"
           >
-            <text style="font-size: 21rpx; font-weight: 700; color: #b45309;">
-              ⚠️ 夜间未佩戴 · 恢复数据缺失（暂停强度建议）
-            </text>
-            <text style="font-size: 20rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 10rpx;">ⓘ</text>
-          </view>
-
-          <!-- ── NEW: Weekly Training Plan & 7-Day Execution Strip ── -->
-          <view v-if="s.plan_info?.week_execution" class="student-plan-exec-box" @click="openStudentPlanModal(s)">
-            <view class="spe-top-row">
-              <view class="spe-title-col">
-                <text class="spe-plan-title">📋 {{ s.plan_info.title || '周期训练课表' }}</text>
-                <text class="spe-week-sub">
-                  W{{ s.plan_info.week_execution.week_number }} · {{ s.plan_info.week_execution.theme }}
-                </text>
+            <!-- Compact Dense Row (~63px) -->
+            <view class="cw-stu-main">
+              <view class="cw-stu-left">
+                <view class="cw-stu-avatar-wrap">
+                  <image
+                    class="cw-stu-avatar"
+                    :src="s.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                    mode="aspectFill"
+                  />
+                  <view class="cw-stu-status-dot" :class="'is-' + (s.status_level || 'optimal')" />
+                </view>
+                <view class="cw-stu-info">
+                  <view class="cw-stu-name-line">
+                    <text class="cw-stu-name">{{ s.display_name }}</text>
+                    <text v-if="s.plan_info?.template_group_code" class="cw-grp-tag">{{ s.plan_info.template_group_code }}</text>
+                    <text v-else-if="s.plan_info?.plan_state === 'draft_pending'" class="cw-grp-tag is-draft">待审</text>
+                  </view>
+                  <view class="cw-stu-sub">
+                    <view class="cw-mini-prog">
+                      <view class="cw-mini-fill" :style="{ width: getStudentWeekPct(s) + '%' }" />
+                    </view>
+                    <text class="cw-stu-sub-txt">
+                      {{ s.plan_info?.week_execution ? `${s.plan_info.week_execution.actual_km}/${s.plan_info.week_execution.planned_km}k` : `月 ${s.month_km}k` }} · TSB {{ (s.ctl > 0 || s.atl > 0) ? (s.tsb > 0 ? '+' + s.tsb : s.tsb) : '—' }}
+                    </text>
+                  </view>
+                </view>
               </view>
-              <view class="spe-stats-col">
-                <text class="spe-km-text">
-                  <text class="spe-actual">{{ s.plan_info.week_execution.actual_km }}</text>
-                  /{{ s.plan_info.week_execution.planned_km }}km
-                </text>
-                <text class="spe-rate-pill" :class="s.plan_info.week_execution.compliance_rate >= 80 ? 'good' : 'normal'">
-                  完成度 {{ s.plan_info.week_execution.compliance_rate }}% · 力量{{ s.plan_info.week_execution.strength_count || 0 }}次
-                </text>
-              </view>
-            </view>
 
-            <!-- W19 Summary Banner & Injury/Self-Summary Alerts -->
-            <view v-if="s.plan_info.week_execution.summary_banner_text" class="spe-w19-banner">
-              <text class="spe-w19-text">📊 {{ s.plan_info.week_execution.summary_banner_text }}</text>
-            </view>
-            <view v-if="s.plan_info.week_execution.injury_note || s.plan_info.week_execution.athlete_weekly_summary" class="spe-feedback-row">
-              <text v-if="s.plan_info.week_execution.injury_note && s.plan_info.week_execution.injury_note !== '无'" class="spe-injury-pill">
-                🩹 伤痛: {{ s.plan_info.week_execution.injury_note }}
-              </text>
-              <text v-if="s.plan_info.week_execution.athlete_weekly_summary" class="spe-summary-pill">
-                💬 体感: {{ s.plan_info.week_execution.athlete_weekly_summary }}
-              </text>
-            </view>
-
-            <!-- 7-Day Mini Execution Strip -->
-            <view v-if="s.plan_info.week_execution.days_brief?.length" class="spe-days-strip">
-              <view
-                v-for="(d, dIdx) in s.plan_info.week_execution.days_brief"
-                :key="dIdx"
-                class="spe-day-cell"
-                :class="['day-' + d.status, d.hrv_warning ? 'hrv-warn' : '']"
-              >
-                <text class="spe-day-name">{{ d.day_of_week.replace('周', '') }}{{ d.swapped_from ? '⇄' : '' }}</text>
-                <text class="spe-day-icon">
-                  {{ d.status === 'completed' ? '✅' : d.status === 'missed' ? '⚠️' : d.status === 'rest' ? '🛌' : '⏳' }}
-                </text>
-                <text class="spe-day-km">
-                  {{ d.status === 'rest' ? '休' : (d.status === 'completed' ? (d.actual_km || d.planned_km) + 'k' : d.planned_km + 'k') }}
-                </text>
-                <text v-if="d.rpe" class="spe-day-rpe">R{{ d.rpe }}</text>
+              <view class="cw-stu-right">
+                <view
+                  class="cw-plan-pill"
+                  :class="s.plan_info?.plan_state === 'draft_pending' ? 'is-draft' : s.plan_info?.has_active_plan ? 'is-pub' : 'is-none'"
+                  @click.stop="openStudentPlanModal(s)"
+                >
+                  {{ s.plan_info?.plan_state === 'draft_pending' ? '审阅' : s.plan_info?.has_active_plan ? '调课' : '排课' }}
+                </view>
+                <RgmIcon :name="expandedStudentIds[s.user_id] ? 'chevron-down' : 'chevron-right'" :size="24" color="muted" />
               </view>
             </view>
-          </view>
-          <view v-else class="student-no-plan-bar" @click="openStudentPlanModal(s)">
-            <text class="snp-text">⚪ 未排课表</text>
-            <text class="snp-link">去排课 ›</text>
+
+            <!-- Expanded Detail Panel (On-demand) -->
+            <view v-if="expandedStudentIds[s.user_id]" class="cw-stu-expand" @click.stop>
+              <view class="student-sub-meta" style="margin-bottom: 12rpx;">
+                <text class="student-month-km">当月跑量 <text class="highlight">{{ s.month_km }}/{{ s.target_km || 200 }}km</text></text>
+                <text v-if="s.marathon_pb" class="student-month-km">全马 <text class="highlight">{{ s.marathon_pb }}</text></text>
+                <text v-if="s.goal_race" class="student-race-pill">{{ s.goal_race.name }}{{ (s.goal_race.days_until ?? s.goal_race.days_left) != null ? ` (${s.goal_race.days_until ?? s.goal_race.days_left}天)` : '' }}</text>
+              </view>
+
+              <view class="metrics-grid">
+                <view class="metric-cell">
+                  <text class="m-label">CTL 体能</text>
+                  <text class="m-val text-blue">{{ s.ctl }}</text>
+                </view>
+                <view class="metric-cell">
+                  <text class="m-label">ATL 疲劳</text>
+                  <text class="m-val text-purple">{{ s.atl }}</text>
+                </view>
+                <view class="metric-cell">
+                  <text class="m-label">TSB 状况</text>
+                  <text class="m-val" :class="s.ctl > 0 || s.atl > 0 ? (s.tsb >= 0 ? 'text-green' : 'text-yellow') : 'text-muted'">
+                    {{ (s.ctl > 0 || s.atl > 0) ? (s.tsb > 0 ? '+' + s.tsb : s.tsb) : '—' }}
+                  </text>
+                </view>
+                <view class="metric-cell">
+                  <text class="m-label">静息心率</text>
+                  <text class="m-val text-rose">{{ s.resting_heart_rate || '—' }} <text class="m-unit" v-if="s.resting_heart_rate">bpm</text></text>
+                </view>
+                <view class="metric-cell">
+                  <text class="m-label">夜间 HRV</text>
+                  <text class="m-val text-cyan">{{ s.hrv_ms || '—' }} <text class="m-unit" v-if="s.hrv_ms">ms</text></text>
+                </view>
+                <view class="metric-cell">
+                  <text class="m-label">睡眠恢复</text>
+                  <text class="m-val text-emerald">{{ s.sleep_score || '—' }} <text class="m-unit" v-if="s.sleep_score">分</text></text>
+                </view>
+              </view>
+
+              <view v-if="s.night_wear_missing" class="cw-wear-warn" @click.stop="explainTerm('watch_wear')">
+                <text class="cw-wear-warn-txt">夜间未佩戴 · 恢复数据缺失（暂停强度建议）</text>
+                <text class="cw-wear-warn-txt">ⓘ</text>
+              </view>
+              <view v-else class="advice-box" style="margin-top: 10rpx;">
+                <text class="advice-text">{{ s.coach_diagnosis || s.status_text }}</text>
+              </view>
+
+              <view v-if="s.plan_info?.week_execution?.days_brief?.length" class="spe-days-strip" style="margin-top: 12rpx;" @click.stop="openStudentPlanModal(s)">
+                <view
+                  v-for="(d, dIdx) in s.plan_info.week_execution.days_brief"
+                  :key="dIdx"
+                  class="spe-day-cell"
+                  :class="['day-' + d.status, d.hrv_warning ? 'hrv-warn' : '']"
+                >
+                  <text class="spe-day-name">{{ d.day_of_week.replace('周', '') }}</text>
+                  <text class="spe-day-km">{{ d.status === 'rest' ? '休' : (d.status === 'completed' ? (d.actual_km || d.planned_km) + 'k' : d.planned_km + 'k') }}</text>
+                </view>
+              </view>
+
+              <view class="student-action-footer" style="display:flex;gap:12rpx;margin-top:14rpx;">
+                <button
+                  class="coach-plan-action-btn"
+                  style="flex:1.5;"
+                  :class="s.plan_info?.plan_state === 'draft_pending' ? 'btn-draft' : s.plan_info?.has_active_plan ? 'btn-active' : 'btn-create'"
+                  @click.stop="openStudentPlanModal(s)"
+                >
+                  {{ s.plan_info?.plan_state === 'draft_pending' ? '审核微调' : s.plan_info?.has_active_plan ? '调课/打卡' : '定制课表' }}
+                </button>
+                <button
+                  class="cw-vdot-btn"
+                  @click.stop="openStudentScienceAnalysis(s)"
+                >
+                  VDOT 跑力 ›
+                </button>
+              </view>
+            </view>
           </view>
 
-          <!-- Coach Advice Box (skip duplicate paragraph when night_wear_missing banner is already shown above) -->
-          <view v-if="!s.night_wear_missing" class="advice-box">
-            <text class="advice-icon">💡</text>
-            <text class="advice-text">{{ s.coach_diagnosis || s.status_text }}</text>
-          </view>
-
-          <!-- Primary Coach Plan Review & Action Row -->
-          <view class="student-action-footer" style="display:flex;gap:14rpx;">
-            <button
-              class="coach-plan-action-btn"
-              style="flex:1.6;"
-              :class="s.plan_info?.plan_state === 'draft_pending' ? 'btn-draft' : s.plan_info?.has_active_plan ? 'btn-active' : 'btn-create'"
-              @click="openStudentPlanModal(s)"
-            >
-              {{
-                s.plan_info?.plan_state === 'draft_pending'
-                  ? '🟠 审核微调'
-                  : s.plan_info?.has_active_plan
-                  ? '📋 调课/打卡'
-                  : '✨ 定制课表'
-              }}
-            </button>
-            <button
-              class="coach-plan-action-btn"
-              style="flex:1;background:rgba(6,182,212,0.14);border:1rpx solid rgba(6,182,212,0.38);color:var(--rgm-blue, #22d3ee);font-weight:700;white-space:nowrap;"
-              @click.stop="openStudentScienceAnalysis(s)"
-            >
-              📊 VDOT ›
-            </button>
+          <view v-if="filteredStudents.length === 0" class="cockpit-empty-card">
+            <text class="cec-title">暂无符合条件的队员</text>
+            <text class="cec-sub">可切换上方体能状态或排课状态筛选</text>
           </view>
         </view>
-
-        <!-- Empty State for Filtered Students -->
-        <view v-if="filteredStudents.length === 0" class="cockpit-empty-card">
-          <text class="cec-icon">👥</text>
-          <text class="cec-title">暂无符合条件的队员</text>
-          <text class="cec-sub">可尝试切换顶部体能状态或排课状态筛选</text>
-        </view>
-      </view>
       </view>
 
-      <!-- ==================== MODULE 2: 队员打卡动态与教练点评台 ==================== -->
+      <!-- ==================== MODULE 2: B5 5秒速评台 (打卡点评) ==================== -->
       <view v-else-if="coachBenchTab === 'feed'" class="cwb-module-box">
         <view class="cwb-sec-header">
-          <view>
-            <text class="cwb-sec-title">💬 打卡点评</text>
+          <view class="cw-feed-pager">
+            <text class="cwb-sec-title">5秒教练速评</text>
+            <text v-if="clubFeed.length > 0" class="cw-feed-idx">{{ activeFeedIndex + 1 }} / {{ clubFeed.length }}</text>
           </view>
-          <button class="cwb-mini-btn" @click="loadClubCoachExtras(currentClub?.id)">↻ 刷新</button>
+          <view class="cw-feed-nav-btns">
+            <view
+              v-if="clubFeed.length > 1"
+              class="cw-nav-chip"
+              :class="{ disabled: activeFeedIndex <= 0 }"
+              @click="stepActiveFeed(-1)"
+            >
+              ‹ 上一位
+            </view>
+            <view
+              v-if="clubFeed.length > 1"
+              class="cw-nav-chip"
+              :class="{ disabled: activeFeedIndex >= clubFeed.length - 1 }"
+              @click="stepActiveFeed(1)"
+            >
+              下一位 ›
+            </view>
+            <view class="cw-nav-chip" @click="loadClubCoachExtras(currentClub?.id)">刷新</view>
+          </view>
         </view>
 
         <view v-if="loadingFeed" class="pm-loading-box">
@@ -471,89 +389,91 @@
         <view v-else-if="clubFeed.length === 0" class="empty-box">
           <text class="empty-text">暂无打卡记录</text>
         </view>
-        <view v-else class="cwb-feed-list">
-          <view v-for="act in clubFeed" :key="act.id" class="cwb-feed-card">
+        <view v-else-if="currentFeedActivity" class="cwb-feed-list">
+          <view class="cwb-feed-card">
+            <!-- Header: Athlete + Plan vs Actual -->
             <view class="cwb-fc-top">
               <view class="cwb-fc-user">
                 <image
                   class="cwb-fc-avatar"
-                  :src="act.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="currentFeedActivity.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
                   mode="aspectFill"
                 />
                 <view>
                   <view class="cwb-fc-name-row">
-                    <text class="cwb-fc-name">{{ act.display_name }}</text>
-                    <text class="cwb-fc-time">{{ (act.start_time || '').slice(5, 16).replace('T', ' ') }}</text>
+                    <text class="cwb-fc-name">{{ currentFeedActivity.display_name }}</text>
+                    <text class="cwb-fc-time">{{ (currentFeedActivity.start_time || '').slice(5, 16).replace('T', ' ') }}</text>
                   </view>
-                  <text class="cwb-fc-actname">{{ act.name || '日常耐力训练' }}</text>
+                  <text class="cwb-fc-actname">{{ currentFeedActivity.name || '日常耐力训练' }}</text>
                 </view>
               </view>
               <view class="cwb-fc-dist">
-                <text class="cwb-fc-km">{{ formatMetersToKm(act.distance_meters) }}</text>
+                <text class="cwb-fc-km">{{ formatMetersToKm(currentFeedActivity.distance_meters) }}</text>
                 <text class="cwb-fc-unit">km</text>
               </view>
             </view>
 
+            <!-- 3 Signal Pills -->
             <view class="cwb-fc-metrics">
-              <text class="cwb-fcm-pill">⏱ 配速 {{ act.avg_pace_str || '—' }}</text>
-              <text class="cwb-fcm-pill">❤️ 心率 {{ act.average_heartrate || '—' }}bpm</text>
-              <text class="cwb-fcm-pill">⚡ 负荷 {{ act.trimp || 50 }}</text>
-              <text v-if="Number(act.elevation_gain_meters || act.total_elevation_gain || 0) > 0" class="cwb-fcm-pill">
-                ⛰ 爬升 +{{ Math.round(Number(act.elevation_gain_meters || act.total_elevation_gain || 0)) }}m
+              <text class="cwb-fcm-pill">配速 {{ currentFeedActivity.avg_pace_str || '—' }}</text>
+              <text class="cwb-fcm-pill">心率 {{ currentFeedActivity.average_heartrate || '—' }} bpm</text>
+              <text class="cwb-fcm-pill">负荷 {{ currentFeedActivity.trimp || 50 }}</text>
+              <text v-if="Number(currentFeedActivity.elevation_gain_meters || currentFeedActivity.total_elevation_gain || 0) > 0" class="cwb-fcm-pill">
+                爬升 +{{ Math.round(Number(currentFeedActivity.elevation_gain_meters || currentFeedActivity.total_elevation_gain || 0)) }}m
               </text>
             </view>
 
-            <view v-if="formatAiJournal(act.ai_journal)" class="cwb-fc-canova">
-              <text class="cwb-fcc-label">🧬 生理复盘：</text>
-              <text class="cwb-fcc-text">{{ formatAiJournal(act.ai_journal) }}</text>
+            <view v-if="formatAiJournal(currentFeedActivity.ai_journal)" class="rgm-coach-box" style="margin-bottom: 14rpx;">
+              <text class="cwb-fcc-label">AI 信号复盘：</text>
+              <text class="cwb-fcc-text">{{ formatAiJournal(currentFeedActivity.ai_journal) }}</text>
             </view>
-            <view v-if="act.captain_cheer" class="cwb-fc-canova cwb-fc-captain">
-              <text class="cwb-fcc-label cwb-fcc-cap-label">📣 {{ act.captain_cheer_meta?.captain_title || "团长加油" }}：</text>
-              <text class="cwb-fcc-text">{{ act.captain_cheer }}</text>
+            <view v-if="currentFeedActivity.captain_cheer" class="cwb-fc-canova cwb-fc-captain">
+              <text class="cwb-fcc-label cwb-fcc-cap-label">{{ currentFeedActivity.captain_cheer_meta?.captain_title || "团长加油" }}：</text>
+              <text class="cwb-fcc-text">{{ currentFeedActivity.captain_cheer }}</text>
             </view>
 
             <!-- Existing Comments -->
-            <view v-if="act.comments && act.comments.length > 0" class="cwb-fc-comments">
-              <view v-for="cmt in act.comments" :key="cmt.id" class="cwb-fcc-item">
+            <view v-if="currentFeedActivity.comments && currentFeedActivity.comments.length > 0" class="cwb-fc-comments">
+              <view v-for="cmt in currentFeedActivity.comments" :key="cmt.id" class="cwb-fcc-item">
                 <text class="cwb-fcc-author">{{ cmt.author_name }}：</text>
                 <text class="cwb-fcc-content">{{ cmt.content }}</text>
               </view>
             </view>
 
-            <!-- Quick Coach Critique Presets -->
-            <view class="cwb-preset-row">
+            <!-- 3x2 Quick Coach Critique Presets -->
+            <view class="cw-preset-grid">
               <text
                 v-for="(pTxt, pIdx) in coachQuickComments"
                 :key="pIdx"
-                class="cwb-preset-chip"
-                @click="applyQuickCoachComment(act.id, pTxt)"
+                class="cw-preset-chip"
+                @click="applyQuickCoachComment(currentFeedActivity.id, pTxt)"
               >
                 {{ pTxt.label }}
               </text>
             </view>
 
-            <!-- Coach Comment Input & Like -->
+            <!-- Coach Comment Input + Send & Next -->
             <view class="cwb-comment-bar">
               <view
                 class="cwb-like-btn"
-                :class="{ liked: act.has_liked }"
-                @click="handleToggleFeedLike(act)"
+                :class="{ liked: currentFeedActivity.has_liked }"
+                @click="handleToggleFeedLike(currentFeedActivity)"
               >
-                ❤️ {{ act.likes_count || 0 }}
+                赞 {{ currentFeedActivity.likes_count || 0 }}
               </view>
               <input
                 class="cwb-comment-input"
                 type="text"
                 :adjust-position="false"
-                v-model="feedCommentInputs[act.id]"
-                placeholder="输入教练专业点评或鼓励..."
+                v-model="feedCommentInputs[currentFeedActivity.id]"
+                placeholder="点上方短语或输入点评..."
               />
               <button
                 class="cwb-send-btn"
-                :disabled="!feedCommentInputs[act.id] || submittingFeedComment[act.id]"
-                @click="handlePostCoachComment(act)"
+                :disabled="!feedCommentInputs[currentFeedActivity.id] || submittingFeedComment[currentFeedActivity.id]"
+                @click="handlePostCoachCommentAndNext(currentFeedActivity)"
               >
-                点评
+                {{ activeFeedIndex < clubFeed.length - 1 ? '发评并下一位' : '发送点评' }}
               </button>
             </view>
           </view>
@@ -602,7 +522,7 @@
                 style="display: inline-flex; align-items: center; gap: 6rpx; padding: 8rpx 16rpx; border-radius: 999rpx; font-size: 22rpx; font-weight: 600;"
                 :style="selectedEvtTplId === tpl.id
                   ? 'background: #10b981; color: #ffffff; border: 1rpx solid #059669;'
-                  : (tpl.is_custom ? 'background: rgba(245, 158, 11, 0.14); color: #f59e0b; border: 1rpx solid rgba(245, 158, 11, 0.4);' : 'background: var(--rgm-card-2, #1B1B22); color: var(--rgm-text, #F4F4F6); border: 1rpx solid var(--rgm-border, #27272F);')"
+                  : (tpl.is_custom ? 'background: var(--rgm-amber-tint); color: var(--rgm-amber); border: 1rpx solid var(--rgm-amber-line);' : 'background: var(--rgm-card-2); color: var(--rgm-ink); border: 1rpx solid var(--rgm-line);')"
                 @click="applyGroupRunTemplate(tpl)"
               >
                 <text>{{ tpl.is_custom ? '⭐ ' + tpl.name : tpl.name }}</text>
@@ -858,17 +778,17 @@
 
         <!-- Section C: Low-Frequency Admin Tasks Offloaded to Web -->
         <view class="cwb-feed-card">
-          <view style="display: flex; align-items: center; justify-content: space-between; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.28); border-radius: 14rpx; padding: 16rpx 20rpx;">
+          <view style="display: flex; align-items: center; justify-content: space-between; background: var(--rgm-blue-tint); border: 1px solid var(--rgm-blue-line); border-radius: 14rpx; padding: 16rpx 20rpx;">
             <view style="display: flex; align-items: center; gap: 8rpx;" @click="explainTerm('web_admin')">
-              <text style="font-size: 24rpx; font-weight: 700; color: #38bdf8;">💻 网页端后台 (rgm.vanpower.net)</text>
+              <text style="font-size: 24rpx; font-weight: 700; color: var(--rgm-blue);">网页端后台 (rgm.vanpower.net)</text>
               <text class="term-info">ⓘ</text>
             </view>
             <button
               class="cwb-mini-btn"
-              style="margin: 0; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4);"
+              style="margin: 0; background: var(--rgm-card); color: var(--rgm-blue); border: 1px solid var(--rgm-blue-line);"
               @click="copyWebAdminUrl"
             >
-              📋 复制网址
+              复制网址
             </button>
           </view>
         </view>
@@ -953,12 +873,13 @@
           <!-- 教练排课弹窗内：队员夜间未佩戴手表预警 -->
           <view
             v-if="activeStudent?.night_wear_missing"
-            style="margin: 12rpx 0 16rpx 0; padding: 14rpx 18rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.15); border: 1rpx solid rgba(245, 158, 11, 0.48);"
+            class="cw-wear-warn"
+            style="margin: 12rpx 0 16rpx 0; padding: 14rpx 18rpx; border-radius: 14rpx;"
           >
-            <text style="display: block; font-size: 23rpx; font-weight: 700; color: #b45309; margin-bottom: 4rpx;">
-              ⚠️ 夜间未佩戴手表 · 恢复数据缺失
+            <text class="cw-wear-warn-txt" style="display: block; font-size: 23rpx; margin-bottom: 4rpx;">
+              夜间未佩戴手表 · 恢复数据缺失
             </text>
-            <text style="display: block; font-size: 21rpx; line-height: 1.5; color: #92400e;">
+            <text class="cw-wear-warn-sub">
               {{ activeStudent?.recovery_data_warning || '暂无法给出强度建议，请提醒队员佩戴手表' }}
             </text>
           </view>
@@ -1904,6 +1825,7 @@ import { themeClass } from "../utils/theme";
 import PageSkeleton from "./PageSkeleton.vue";
 import MapPinPickerModal from "./MapPinPickerModal.vue";
 import PacerClubRadarSection from "./PacerClubRadarSection.vue";
+import RgmIcon from "./RgmIcon.vue";
 import { explainTerm } from "../utils/glossary";
 import { trackClick, trackModal, trackSubView, trackFunnelStep } from "../utils/telemetry";
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
@@ -2026,13 +1948,59 @@ const coachedClubs = computed(() => {
 });
 
 const coachQuickComments = [
-  { label: "👏 配速稳·有氧佳", text: "🧢 教练点评：本次配速与心率控制非常稳，有氧基础扎实，继续保持！" },
-  { label: "⚠️ 心率偏高·排酸", text: "🧢 教练点评：本次心率偏高，明后天注意低心率排酸慢跑与保证充足睡眠恢复。" },
-  { label: "🔥 间歇完成度高", text: "🧢 教练点评：核心强度课完成质量很高！跑后务必做好臀腿拉伸与蛋白质补充。" },
-  { label: "💪 LSD耐力在线", text: "🧢 教练点评：长距离耐力在线，注意每5km补水补胶节奏，前半程严防起跑过快。" },
+  { label: "配速稳·有氧佳", text: "教练点评：本次配速与心率控制非常稳，有氧基础扎实，继续保持！" },
+  { label: "心率偏高·排酸", text: "教练点评：本次心率偏高，明后天注意低心率排酸慢跑与保证充足睡眠恢复。" },
+  { label: "间歇完成度高", text: "教练点评：核心强度课完成质量很高！跑后务必做好臀腿拉伸与蛋白质补充。" },
+  { label: "LSD耐力在线", text: "教练点评：长距离耐力在线，注意每5km补水补胶节奏，前半程严防起跑过快。" },
+  { label: "节奏掌控合理", text: "教练点评：负分割渐加速表现出色，乳酸阈值把控精准！" },
+  { label: "减量蓄力备赛", text: "教练点评：临近比赛请严格执行降量保强，保证睡前放松与补水。" },
 ];
 
+const showStudentSearch = ref(false);
+const expandedStudentIds = ref<Record<string, boolean>>({});
+function toggleStudentExpand(uid: string) {
+  if (!uid) return;
+  expandedStudentIds.value = {
+    ...expandedStudentIds.value,
+    [uid]: !expandedStudentIds.value[uid],
+  };
+}
+const activeFeedIndex = ref(0);
+const currentFeedActivity = computed(() => {
+  if (!clubFeed.value.length) return null;
+  const idx = Math.min(Math.max(0, activeFeedIndex.value), clubFeed.value.length - 1);
+  return clubFeed.value[idx] || null;
+});
+function stepActiveFeed(delta: number) {
+  const maxIdx = Math.max(0, clubFeed.value.length - 1);
+  activeFeedIndex.value = Math.min(maxIdx, Math.max(0, activeFeedIndex.value + delta));
+}
+
 const summary = ref<any>(null);
+const teamRatioSegments = computed(() => {
+  const pk = Number(summary.value?.peak_count || 0);
+  const opt = Number(summary.value?.optimal_count || 0);
+  const tr = Number(summary.value?.tired_count || 0);
+  const dg = Number(summary.value?.danger_count || 0);
+  const total = pk + opt + tr + dg;
+  if (total <= 0) {
+    return { peakPct: 25, optimalPct: 50, tiredPct: 15, dangerPct: 10 };
+  }
+  return {
+    peakPct: Math.round((pk / total) * 100),
+    optimalPct: Math.round((opt / total) * 100),
+    tiredPct: Math.round((tr / total) * 100),
+    dangerPct: Math.max(0, 100 - Math.round((pk / total) * 100) - Math.round((opt / total) * 100) - Math.round((tr / total) * 100)),
+  };
+});
+function getStudentWeekPct(s: any): number {
+  const we = s?.plan_info?.week_execution;
+  if (we && Number(we.planned_km) > 0) {
+    return Math.min(100, Math.round((Number(we.actual_km || 0) / Number(we.planned_km)) * 100));
+  }
+  const target = Number(s?.target_km || 200);
+  return target > 0 ? Math.min(100, Math.round((Number(s?.month_km || 0) / target) * 100)) : 0;
+}
 const students = ref<any[]>([]);
 const filterStatus = ref("all");
 const filterPlanState = ref<"all" | "injury_alert" | "draft_pending" | "published" | "none">("all");
@@ -2975,10 +2943,19 @@ async function handlePostCoachComment(act: any) {
     });
     feedCommentInputs.value[act.id] = "";
     uni.showToast({ title: "教练点评已发布 ✓", icon: "success" });
+    return true;
   } catch (e: any) {
     uni.showToast({ title: e.message || "点评失败", icon: "none" });
+    return false;
   } finally {
     submittingFeedComment.value[act.id] = false;
+  }
+}
+
+async function handlePostCoachCommentAndNext(act: any) {
+  const ok = await handlePostCoachComment(act);
+  if (ok && activeFeedIndex.value < clubFeed.value.length - 1) {
+    activeFeedIndex.value += 1;
   }
 }
 
@@ -7002,6 +6979,329 @@ onBeforeUnmount(() => {
 .cec-sub {
   font-size: 22rpx;
   color: var(--rgm-text-3, #71717a);
+}
+
+/* ── Minimalist Cockpit Styles (Obsidian + Volt Light) ── */
+.cw-topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+  margin-bottom: 18rpx;
+}
+.cw-club-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+  flex: 1;
+}
+.cw-club-name {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cw-role-pill {
+  font-size: 19rpx;
+  font-weight: 700;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
+  border: 1rpx solid var(--rgm-brand-line);
+  flex-shrink: 0;
+}
+.cw-top-icons {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+.cw-top-icons .is-active-icon {
+  border-color: var(--rgm-brand-line);
+  background: var(--rgm-brand-tint);
+}
+.cw-seg-bar { margin-bottom: 20rpx; }
+
+.cw-ratio-card { margin-bottom: 16rpx; padding: 22rpx 24rpx; }
+.cw-ratio-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+}
+.cw-ratio-title-row { display: flex; flex-direction: row; align-items: center; gap: 8rpx; }
+.cw-ratio-title { font-size: 25rpx; font-weight: 800; color: var(--rgm-ink); }
+.cw-ratio-comp { font-size: 22rpx; font-weight: 700; color: var(--rgm-brand-text); font-variant-numeric: tabular-nums; }
+.cw-ratio-track {
+  display: flex;
+  flex-direction: row;
+  height: 14rpx;
+  border-radius: 999rpx;
+  overflow: hidden;
+  background: var(--rgm-track);
+  margin-bottom: 16rpx;
+}
+.cw-ratio-seg { height: 100%; }
+.cw-ratio-seg.is-green { background: var(--rgm-green); }
+.cw-ratio-seg.is-blue { background: var(--rgm-blue); }
+.cw-ratio-seg.is-amber { background: var(--rgm-amber); }
+.cw-ratio-seg.is-red { background: var(--rgm-red); }
+.cw-status-pills {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+}
+.cw-st-pill {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+  height: 54rpx;
+  border-radius: 14rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.cw-st-pill.active {
+  border-color: var(--rgm-brand);
+  background: var(--rgm-brand-tint);
+}
+.cw-dot { width: 12rpx; height: 12rpx; border-radius: 50%; flex-shrink: 0; }
+.cw-dot.is-green { background: var(--rgm-green); }
+.cw-dot.is-blue { background: var(--rgm-blue); }
+.cw-dot.is-amber { background: var(--rgm-amber); }
+.cw-dot.is-red { background: var(--rgm-red); }
+.cw-st-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-ink); }
+
+.cw-draft-banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 22rpx;
+  margin-bottom: 16rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+}
+.cw-db-left { display: flex; flex-direction: row; align-items: center; gap: 10rpx; }
+.cw-db-txt { font-size: 23rpx; font-weight: 700; color: var(--rgm-ink); }
+.cw-db-action { font-size: 22rpx; font-weight: 800; color: var(--rgm-amber); white-space: nowrap; }
+
+.cw-search-wrap { margin-bottom: 14rpx; }
+.cw-hub-compact { margin-bottom: 18rpx; padding: 18rpx 20rpx; }
+.cw-batch-strip { display: flex; flex-direction: row; gap: 10rpx; margin-bottom: 14rpx; }
+.cw-batch-pill {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0 8rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  border-radius: 14rpx;
+  background: var(--rgm-card-2);
+  color: var(--rgm-ink);
+  border: 1rpx solid var(--rgm-line);
+  white-space: nowrap;
+}
+.cw-batch-pill.is-primary {
+  background: var(--rgm-brand);
+  color: #ffffff;
+  border-color: var(--rgm-brand);
+}
+.cw-batch-pill::after { border: none; }
+.cw-filter-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  align-items: center;
+}
+
+.cw-students-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 14rpx;
+}
+.cw-stu-row-card {
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+  border-left: 6rpx solid var(--rgm-blue);
+  border-radius: 22rpx;
+  padding: 18rpx 20rpx;
+}
+.cw-stu-row-card.border-peak { border-left-color: var(--rgm-green); }
+.cw-stu-row-card.border-optimal { border-left-color: var(--rgm-blue); }
+.cw-stu-row-card.border-tired { border-left-color: var(--rgm-amber); }
+.cw-stu-row-card.border-danger { border-left-color: var(--rgm-red); }
+.cw-stu-row-card.card-has-draft { border-color: var(--rgm-amber-line); }
+
+.cw-stu-main {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.cw-stu-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
+  flex: 1;
+  min-width: 0;
+}
+.cw-stu-avatar-wrap { position: relative; width: 68rpx; height: 68rpx; flex-shrink: 0; }
+.cw-stu-avatar { width: 68rpx; height: 68rpx; border-radius: 50%; background: var(--rgm-card-2); }
+.cw-stu-status-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  border: 3rpx solid var(--rgm-card);
+  background: var(--rgm-blue);
+}
+.cw-stu-status-dot.is-peak { background: var(--rgm-green); }
+.cw-stu-status-dot.is-tired { background: var(--rgm-amber); }
+.cw-stu-status-dot.is-danger { background: var(--rgm-red); }
+
+.cw-stu-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.cw-stu-name-line { display: flex; flex-direction: row; align-items: center; gap: 8rpx; min-width: 0; }
+.cw-stu-name {
+  font-size: 27rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cw-grp-tag {
+  font-size: 18rpx;
+  font-weight: 700;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: var(--rgm-tint-2);
+  color: var(--rgm-ink-2);
+  flex-shrink: 0;
+}
+.cw-grp-tag.is-draft { background: var(--rgm-amber-tint); color: var(--rgm-amber); }
+.cw-stu-sub { display: flex; flex-direction: row; align-items: center; gap: 10rpx; }
+.cw-mini-prog {
+  width: 96rpx;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-track);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cw-mini-fill { height: 100%; border-radius: 999rpx; background: var(--rgm-brand); }
+.cw-stu-sub-txt { font-size: 20rpx; color: var(--rgm-ink-2); font-variant-numeric: tabular-nums; }
+.cw-stu-right { display: flex; flex-direction: row; align-items: center; gap: 10rpx; flex-shrink: 0; }
+.cw-plan-pill {
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  color: var(--rgm-ink);
+  border: 1rpx solid var(--rgm-line);
+}
+.cw-plan-pill.is-draft { background: var(--rgm-amber-tint); border-color: var(--rgm-amber-line); color: var(--rgm-amber); }
+.cw-plan-pill.is-pub { background: var(--rgm-green-tint); border-color: var(--rgm-green-line); color: var(--rgm-green); }
+
+.cw-stu-expand {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid var(--rgm-line);
+}
+.cw-wear-warn {
+  margin-top: 10rpx;
+  padding: 10rpx 16rpx;
+  border-radius: 12rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.cw-wear-warn-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-amber); }
+.cw-wear-warn-sub { display: block; font-size: 20rpx; line-height: 1.45; color: var(--rgm-ink-2); }
+.cw-vdot-btn {
+  flex: 1;
+  margin: 0;
+  height: 70rpx;
+  line-height: 70rpx;
+  border-radius: 16rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+  background: var(--rgm-blue-tint);
+  border: 1rpx solid var(--rgm-blue-line);
+  color: var(--rgm-blue);
+}
+.cw-vdot-btn::after { border: none; }
+
+/* B5 Feed Focus Desk */
+.cw-feed-pager { display: flex; flex-direction: row; align-items: center; gap: 10rpx; }
+.cw-feed-idx {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-tint-2);
+  color: var(--rgm-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.cw-feed-nav-btns { display: flex; flex-direction: row; align-items: center; gap: 8rpx; }
+.cw-nav-chip {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+  color: var(--rgm-ink);
+}
+.cw-nav-chip.disabled { opacity: 0.4; }
+.cw-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10rpx;
+  margin: 14rpx 0;
+}
+.cw-preset-chip {
+  text-align: center;
+  padding: 12rpx 8rpx;
+  border-radius: 14rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  color: var(--rgm-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
 

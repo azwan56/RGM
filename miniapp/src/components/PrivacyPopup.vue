@@ -4,11 +4,11 @@
     <view class="pp-panel">
       <text class="pp-title">用户隐私保护提示</text>
       <text class="pp-desc">
-        感谢使用万跑跑团助手！使用前请阅读
+        使用前请阅读
         <text class="pp-link" @click="openContract">{{ contractName || "《万跑跑团助手小程序隐私保护指引》" }}</text>
-        。我们仅在对应功能场景（上传头像、保存战报图片、复制邀请码、选择集合地点）及本小程序内训练诊断与体验优化中处理必要信息，绝不向第三方出售或共享。
+        。我们仅在上传头像、保存战报、复制邀请码、集合定位及训练诊断中处理必要信息，绝不向第三方出售或共享。
       </text>
-      <text class="pp-sub">不同意仍可浏览，但上述功能将无法使用。</text>
+      <text class="pp-sub">不同意仍可浏览，但上述功能将受限。</text>
       <view class="pp-actions">
         <button class="pp-btn ghost" @click="disagree">不同意</button>
         <button

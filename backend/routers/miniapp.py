@@ -1922,64 +1922,12 @@ def get_personal_share_card_data(
         except Exception as cc_ex:
             logger.warning(f"[miniapp] Share card captain cheer skipped: {cc_ex}")
 
-    # 5. Resolve User's Primary Club & Generate Official WeChat Invite QR Code (wxacode)
-    user_clubs = LocalStore.get_user_clubs(eff_uid)
-    target_club = None
-    if club_id:
-        for c in user_clubs:
-            if c.get("id") == club_id:
-                target_club = c
-                break
-        if not target_club:
-            target_club = LocalStore.get_club(club_id)
-    if not target_club and user_clubs:
-        target_club = user_clubs[0]
-    if not target_club:
-        target_club = LocalStore.get_club("club_fudan_gobi_main") or LocalStore.get_club("club_rgm_flagship") or {
-            "id": "club_fudan_gobi_main",
-            "name": "万跑跑团助手",
-            "invite_code": "FD8888",
-            "logo_url": "https://rgm.vanpower.net/api/avatars/rgm-logo.png",
-        }
-
-    eff_club_id = target_club.get("id") or "club_fudan_gobi_main"
-    eff_club_name = target_club.get("name") or "万跑跑团助手"
-    eff_club_code = (target_club.get("invite_code") or "").strip()
-
+    # 5. Generate Official WeChat Mini Program Home QR Code (wxacode -> pages/index/index, no club info)
     eff_env = env_version if env_version in ("release", "trial", "develop") else "release"
-    safe_uid_tag = "".join(c for c in eff_uid if c.isalnum() or c in ("_", "-"))[:24]
-    safe_club_tag = "".join(c for c in eff_club_id if c.isalnum() or c in ("_", "-"))[:20]
-    qr_filename = f"wxacode_share_{eff_env}_{safe_uid_tag}_{safe_club_tag}.jpg"
-    qr_file_path = os.path.join(avatar_dir, qr_filename)
-
-    qr_path = f"pages/team/team?club_id={eff_club_id}&action=join_club&invite_code={eff_club_code}&inviter_uid={eff_uid}"
-
-    if not os.path.exists(qr_file_path) or os.path.getsize(qr_file_path) < 500:
-        try:
-            img_bytes = wechat_client.get_wxacode_by_path(
-                path=qr_path,
-                width=280,
-                env_version=eff_env,
-            )
-            if not img_bytes:
-                img_bytes = wechat_client.get_wxacode_unlimit(
-                    scene=f"inv={eff_uid[:16]}"[:32],
-                    page="pages/team/team",
-                    width=280,
-                    env_version=eff_env,
-                )
-            if img_bytes and len(img_bytes) >= 500:
-                with open(qr_file_path, "wb") as f:
-                    f.write(img_bytes)
-        except Exception as qre:
-            logger.warning(f"[miniapp] Generate personal share QR code failed: {qre}")
-
-    qrcode_b64 = ""
-    qrcode_url = ""
-    if os.path.exists(qr_file_path) and os.path.getsize(qr_file_path) >= 500:
-        qrcode_url = f"https://rgm.vanpower.net/api/avatars/{qr_filename}"
-        with open(qr_file_path, "rb") as f:
-            qrcode_b64 = base64.b64encode(f.read()).decode("ascii")
+    qr_info = LocalStore.get_pure_miniapp_qrcode(eff_env)
+    qrcode_b64 = qr_info.get("qrcode_base64", "")
+    qrcode_url = qr_info.get("qrcode_url", "")
+    qr_path = qr_info.get("qr_path", "pages/index/index")
 
     avatar_b64 = _resolve_img_b64(profile.get("avatar_url"))
 
@@ -2025,9 +1973,9 @@ def get_personal_share_card_data(
             "display_name": profile.get("display_name") or profile.get("real_name") or "跑者",
             "avatar_url": profile.get("avatar_url"),
             "avatar_base64": avatar_b64,
-            "club_id": eff_club_id,
-            "club_name": eff_club_name,
-            "club_invite_code": eff_club_code,
+            "club_id": "",
+            "club_name": "",
+            "club_invite_code": "",
         },
         "day_plan": day_plan,
         "actual_data": actual_data,

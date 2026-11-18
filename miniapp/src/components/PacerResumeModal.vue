@@ -282,12 +282,9 @@ function drawPoster() {
 
     const tags: string[] = [];
     if (runner.age) tags.push(`${runner.age}岁`);
-    if (runner.first_aid_cert_type && runner.first_aid_cert_label) {
-      tags.push(runner.first_aid_cert_label);
-    }
     ctx.setFillStyle(textSub);
     ctx.setFontSize(16);
-    ctx.fillText(tags.join(" · ") || "跑团认证队员", 60, 246);
+    ctx.fillText(tags.join(" · ") || "认证耐力跑者", 60, 246);
 
     const kvs = [
       { k: "认证PB", v: sel.cert_finish_str || "待填" },

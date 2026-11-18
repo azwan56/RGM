@@ -36,10 +36,34 @@
   box-sizing: border-box;
 }
 
-.tab-bar-icon {
+.tab-bar-icon-wrap {
+  position: relative;
   width: 24px;
   height: 24px;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-bar-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.tab-badge-dot {
+  position: absolute;
+  top: -1px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #FC4C02;
+  border: 1.5px solid #141418;
+}
+
+.tab-bar.theme-volt .tab-badge-dot {
+  border-color: #FFFFFF;
 }
 
 .tab-bar-text {

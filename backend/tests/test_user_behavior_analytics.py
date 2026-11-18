@@ -5,6 +5,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+import atexit
 import jwt
 import pytest
 
@@ -18,13 +19,27 @@ import utils.local_store as local_store_mod
 import routers.miniapp as miniapp_router_mod
 import routers.profile as profile_router_mod
 import routers.auth as auth_router_mod
+import routers.science as science_router_mod
+import routers.team as team_router_mod
+import routers.sync as sync_router_mod
 from fastapi.testclient import TestClient
 from config import settings
 from main import app
 from routers.admin import ADMIN_EMAIL, ADMIN_PASSWORD
-from utils.local_store import LocalStore, init_db
+from utils.local_store import LocalStore, init_db, get_beijing_today
 
 client = TestClient(app)
+
+
+def _cleanup_boot_tmp_db():
+    if os.path.exists(_BOOT_TMP_DB):
+        try:
+            os.remove(_BOOT_TMP_DB)
+        except OSError:
+            pass
+
+
+atexit.register(_cleanup_boot_tmp_db)
 
 
 @pytest.fixture(autouse=True)
@@ -33,19 +48,19 @@ def isolated_temp_db(tmp_path, monkeypatch):
     temp_db = str(tmp_path / "test_rgm_isolated.db")
     monkeypatch.setattr(local_store_mod, "DB_PATH", temp_db)
     monkeypatch.setattr(miniapp_router_mod, "DB_PATH", temp_db)
+    monkeypatch.setattr(sync_router_mod, "DB_PATH", temp_db)
     monkeypatch.setattr(miniapp_router_mod, "supabase_admin", None)
     monkeypatch.setattr(profile_router_mod, "supabase_admin", None)
     monkeypatch.setattr(auth_router_mod, "supabase_admin", None)
+    monkeypatch.setattr(science_router_mod, "supabase_admin", None)
+    monkeypatch.setattr(team_router_mod, "supabase_admin", None)
+    monkeypatch.setattr(sync_router_mod, "supabase_admin", None)
     miniapp_router_mod._TELEMETRY_RATE_BUCKETS.clear()
+    with sync_router_mod._USER_SYNC_LOCK:
+        sync_router_mod._USER_SYNC_JOBS.clear()
     LocalStore._last_telemetry_prune_ts = 0.0
     init_db()
     yield temp_db
-    for p in (_BOOT_TMP_DB,):
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
 
 
 def _mint_user_jwt(uid: str) -> str:
@@ -541,4 +556,298 @@ def test_stale_os_killed_sessions_auto_close_after_30_minutes(isolated_temp_db):
 
     assert by_sid["s_killed_45m_ago"]["ended_at"] == stale_iso
     assert by_sid["s_active_5m_ago"]["ended_at"] is None
+
+
+def test_activity_exclude_mode_and_mentorship_uid_aliases(isolated_temp_db):
+    LocalStore.upsert_profile("u_runner_ex", {"display_name": "跑友Ex"})
+    with sqlite3.connect(isolated_temp_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO activities (
+                id, user_id, name, sport_type, start_time, distance_meters, moving_time_seconds
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("act_ex_1", "u_runner_ex", "清晨轻松跑", "running", "2026-11-10T06:30:00", 8000.0, 2400),
+        )
+        conn.commit()
+
+    # Accepts legacy `uid` alias (cached MiniApp builds) AND `user_id`
+    res_uid = client.post(
+        "/api/science/activities/act_ex_1/exclude-mode",
+        json={"uid": "u_runner_ex", "exclude_mode": "ignore_vdot"},
+    )
+    assert res_uid.status_code == 200
+    assert res_uid.json()["success"] is True
+    assert res_uid.json()["exclude_mode"] == "ignore_vdot"
+
+    res_user_id = client.post(
+        "/api/science/activities/act_ex_1/exclude-mode",
+        json={"user_id": "u_runner_ex", "exclude_mode": "excluded"},
+    )
+    assert res_user_id.status_code == 200
+    assert res_user_id.json()["exclude_mode"] == "excluded"
+
+    res_missing = client.post("/api/science/activities/act_ex_1/exclude-mode", json={"exclude_mode": "normal"})
+    assert res_missing.status_code == 422
+
+    # Mentorship bind/unbind accept both mentor_id/mentee_id and mentor_uid/mentee_uid
+    LocalStore.upsert_profile("u_mentor_a", {"display_name": "师傅A"})
+    LocalStore.upsert_profile("u_mentee_b", {"display_name": "徒弟B"})
+    club = LocalStore.create_club(owner_id="u_mentor_a", name="别名回归测试团")
+    LocalStore.join_club_by_code("u_mentee_b", club["invite_code"])
+
+    bind_res = client.post(
+        "/api/team/mentorship/bind",
+        json={"mentor_id": "u_mentor_a", "mentee_id": "u_mentee_b", "operator_uid": "u_mentor_a"},
+    )
+    assert bind_res.status_code == 200
+    assert bind_res.json()["success"] is True
+
+    unbind_res = client.post(
+        "/api/team/mentorship/unbind",
+        json={"mentor_id": "u_mentor_a", "mentee_id": "u_mentee_b", "operator_uid": "u_mentor_a"},
+    )
+    assert unbind_res.status_code == 200
+    assert unbind_res.json()["success"] is True
+
+
+def test_analytics_filters_median_tab_breakdown_and_single_owner_stitching(isolated_temp_db):
+    LocalStore.upsert_profile("u_real_1", {"display_name": "正式用户一"})
+    LocalStore.upsert_profile("u_real_2", {"display_name": "正式用户二"})
+    LocalStore.upsert_profile("rgm_super_admin", {"display_name": "平台超级管理员"})
+    base_ts = int(time.time() * 1000) - 120000
+
+    # 1) Release MiniApp session for u_real_1: starts anonymous with client_uuid='cli_single_owner', then logs in on second session
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        json={
+            "session_id": "s_stitch_anon",
+            "client_uuid": "cli_single_owner",
+            "entry_page": "pages/index/index",
+            "platform": "ios",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [
+                {"event_id": "e_a1", "event_type": "page_view", "event_name": "page_view", "page_path": "pages/index/index", "client_ts": base_ts},
+                {"event_id": "e_a2", "event_type": "button_click", "event_name": "tabbar_switch", "event_label": "跑团", "page_path": "pages/index/index", "client_ts": base_ts + 2000},
+                {"event_id": "e_a3", "event_type": "app_background", "event_name": "app_background", "page_path": "pages/index/index", "stay_ms": 10000, "client_ts": base_ts + 10000},
+            ],
+        },
+    ).status_code == 200
+
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('u_real_1')}"},
+        json={
+            "session_id": "s_stitch_authed",
+            "client_uuid": "cli_single_owner",
+            "entry_page": "pages/team/team",
+            "platform": "ios",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [
+                {"event_id": "e_b1", "event_type": "button_click", "event_name": "tabbar_switch", "event_label": "我的", "page_path": "pages/team/team", "client_ts": base_ts},
+                {"event_id": "e_b2", "event_type": "app_background", "event_name": "app_background", "page_path": "pages/team/team", "stay_ms": 30000, "client_ts": base_ts + 30000},
+            ],
+        },
+    ).status_code == 200
+
+    # 2) Shared device client_uuid owned by two different users MUST NOT overwrite earlier u_real_1 sessions
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('u_real_1')}"},
+        json={
+            "session_id": "s_shared_u1",
+            "client_uuid": "cli_shared_dev",
+            "entry_page": "pages/index/index",
+            "platform": "android",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [
+                {"event_id": "e_c0", "event_type": "page_view", "event_name": "page_view", "page_path": "pages/index/index", "client_ts": base_ts},
+                {"event_id": "e_c1", "event_type": "app_background", "event_name": "app_background", "page_path": "pages/index/index", "stay_ms": 90000, "client_ts": base_ts + 90000},
+            ],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        json={
+            "session_id": "s_shared_anon",
+            "client_uuid": "cli_shared_dev",
+            "entry_page": "pages/index/index",
+            "platform": "android",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [
+                {"event_id": "e_c_anon", "event_type": "page_view", "event_name": "page_view", "page_path": "pages/index/index", "client_ts": base_ts},
+            ],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('u_real_2')}"},
+        json={
+            "session_id": "s_shared_u2",
+            "client_uuid": "cli_shared_dev",
+            "entry_page": "pages/rank/rank",
+            "platform": "android",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [
+                {"event_id": "e_d1", "event_type": "page_view", "event_name": "page_view", "page_path": "pages/rank/rank", "client_ts": base_ts + 2000},
+            ],
+        },
+    ).status_code == 200
+
+    # 3) Admin release session, trial/devtools session, and Web session
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('rgm_super_admin')}"},
+        json={
+            "session_id": "s_admin_release",
+            "client_uuid": "cli_admin",
+            "entry_page": "pages/index/index",
+            "platform": "ios",
+            "app_version": "2.1.0",
+            "env_version": "release",
+            "events": [{"event_id": "e_adm", "event_type": "page_view", "event_name": "page_view", "client_ts": base_ts}],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('u_real_1')}"},
+        json={
+            "session_id": "s_trial_devtools",
+            "client_uuid": "cli_dev",
+            "entry_page": "pages/coach/coach",
+            "platform": "devtools",
+            "app_version": "2.1.0-trial",
+            "env_version": "trial",
+            "events": [{"event_id": "e_dev", "event_type": "page_view", "event_name": "page_view", "client_ts": base_ts}],
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/miniapp/telemetry/batch",
+        headers={"Authorization": f"Bearer {_mint_user_jwt('u_real_2')}"},
+        json={
+            "session_id": "s_web_release",
+            "client_uuid": "cli_web",
+            "entry_page": "/dashboard",
+            "platform": "web",
+            "app_version": "web-1.0",
+            "env_version": "release",
+            "events": [{"event_id": "e_web", "event_type": "page_view", "event_name": "page_view", "client_ts": base_ts}],
+        },
+    ).status_code == 200
+
+    # Verify DB stitching invariants
+    with sqlite3.connect(isolated_temp_db) as conn:
+        stitch_uid = conn.execute("SELECT user_id, env_version FROM miniapp_sessions WHERE session_id = 's_stitch_anon'").fetchone()
+        shared_anon_uid = conn.execute("SELECT user_id FROM miniapp_sessions WHERE session_id = 's_shared_anon'").fetchone()
+        assert stitch_uid[0] == "u_real_1"
+        assert stitch_uid[1] == "release"
+        assert shared_anon_uid[0] is None  # Multi-owner client_uuid must NOT backfill!
+
+    headers = _admin_headers()
+
+    # Filtered view: miniapp + exclude_admins + release_only
+    ov_mini = client.get(
+        "/api/admin/analytics/overview?days=7&include_wechat=false&platform_scope=miniapp&exclude_admins=true&release_only=true",
+        headers=headers,
+    ).json()
+    beh_mini = ov_mini["behavior"]
+    sids_mini = {s["session_id"]: s for s in beh_mini["recent_sessions"]}
+    assert set(sids_mini.keys()) == {"s_stitch_anon", "s_stitch_authed", "s_shared_u1", "s_shared_anon", "s_shared_u2"}
+    assert sids_mini["s_stitch_anon"]["env_version"] == "release"
+    # Durations among filtered sessions: [0s, 0s, 10s, 30s, 90s] -> median is 10.0s
+    assert beh_mini["summary"]["median_session_duration_sec"] == 10.0
+
+    # Top buttons should split tabbar_switch by event_label ('跑团' vs '我的')
+    tab_rows = [b for b in beh_mini["top_buttons"] if b["event_name"] == "tabbar_switch"]
+    tab_labels = {b.get("event_label") for b in tab_rows}
+    assert {"跑团", "我的"}.issubset(tab_labels)
+
+    # Web scope should only see web session
+    ov_web = client.get(
+        "/api/admin/analytics/overview?days=7&include_wechat=false&platform_scope=web&exclude_admins=true&release_only=true",
+        headers=headers,
+    ).json()
+    web_sids = {s["session_id"] for s in ov_web["behavior"]["recent_sessions"]}
+    assert web_sids == {"s_web_release"}
+
+    # Unfiltered all scope should include admin & trial sessions too
+    ov_all = client.get(
+        "/api/admin/analytics/overview?days=7&include_wechat=false&platform_scope=all&exclude_admins=false&release_only=false",
+        headers=headers,
+    ).json()
+    all_sids = {s["session_id"] for s in ov_all["behavior"]["recent_sessions"]}
+    assert {"s_admin_release", "s_trial_devtools", "s_web_release", "s_stitch_anon"}.issubset(all_sids)
+
+
+def test_first_time_default_goal_updates_current_week_and_month_then_locks(isolated_temp_db):
+    LocalStore.upsert_profile("u_goal_first", {"display_name": "首次设目标"})
+    initial_goal = LocalStore.get_goal("u_goal_first")
+    assert initial_goal["is_default"] is True
+
+    cur_month_idx = get_beijing_today().month - 1
+    first_map = {str(m): 180.0 for m in range(1, 13)}
+
+    res_first = client.put(
+        "/api/profile/u_goal_first/goal",
+        json={
+            "weekly_target": 45.0,
+            "target_period": "next_week",
+            "monthly_targets": first_map,
+            "enforce_started_lock": True,
+        },
+    )
+    assert res_first.status_code == 200
+    saved_first = res_first.json()["goal"]
+    assert saved_first["is_default"] is False
+    assert saved_first["current_week_target"] == 45.0
+    assert saved_first["monthly_targets"][cur_month_idx] == 180.0
+
+    second_map = {str(m): 260.0 for m in range(1, 13)}
+    res_second = client.put(
+        "/api/profile/u_goal_first/goal",
+        json={
+            "weekly_target": 70.0,
+            "target_period": "next_week",
+            "monthly_targets": second_map,
+            "enforce_started_lock": True,
+        },
+    )
+    assert res_second.status_code == 200
+    saved_second = res_second.json()["goal"]
+    assert saved_second["current_week_target"] == 45.0
+    assert saved_second["next_weekly_target"] == 70.0
+    assert saved_second["monthly_targets"][cur_month_idx] == 180.0
+
+
+def test_async_sync_trigger_and_status_polling(isolated_temp_db):
+    LocalStore.upsert_profile("u_async_sync", {"display_name": "异步同步测试"})
+
+    with patch(
+        "routers.sync.sync_single_user",
+        return_value={"success": True, "synced_count": 3, "synced_activities": 3},
+    ):
+        trig = client.post("/api/sync/trigger", json={"uid": "u_async_sync", "async_mode": True})
+        assert trig.status_code == 200
+        t_data = trig.json()
+        assert t_data["accepted"] is True
+        assert t_data["async_mode"] is True
+
+        final_status = None
+        for _ in range(40):
+            st_resp = client.get("/api/sync/status/u_async_sync")
+            assert st_resp.status_code == 200
+            final_status = st_resp.json()
+            if final_status["status"] in ("done", "failed"):
+                break
+            time.sleep(0.05)
+
+        assert final_status is not None
+        assert final_status["status"] == "done"
+        assert final_status["success"] is True
+        assert final_status["synced_count"] == 3
 

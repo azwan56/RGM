@@ -9,6 +9,8 @@ import CoachScheduleImportModal from "@/components/CoachScheduleImportModal";
 import PersonalReportModal from "@/components/PersonalReportModal";
 import PacerClubRadarPanel from "@/components/PacerClubRadarPanel";
 import OrgManagementHub from "@/components/OrgManagementHub";
+import CaptainExecutiveCockpit from "@/components/web3/CaptainExecutiveCockpit";
+import BatchCritiqueCockpit from "@/components/web3/BatchCritiqueCockpit";
 import { supabase } from "@/lib/supabase";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
 import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
@@ -78,6 +80,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   const [activeTab, setActiveTab] = useState<"leaderboard" | "president" | "coach" | "events">(
     coachWorkbenchMode ? "coach" : "leaderboard"
   );
+  const [coachViewMode, setCoachViewMode] = useState<"compass" | "critique">("compass");
+  const [pendingWeb3Intent, setPendingWeb3Intent] = useState<{
+    open?: string | null;
+    orgAction?: string | null;
+  } | null>(null);
 
   // Data states
   const [loading, setLoading] = useState(true);
@@ -358,6 +365,67 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       }
     });
   }, [router]);
+
+  useEffect(() => {
+    const syncTeamQuery = (hrefOverride?: string) => {
+      if (typeof window === "undefined") return;
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const sp = new URLSearchParams(searchStr);
+      const qTab = sp.get("tab");
+      const qMode = sp.get("mode");
+      const qOpen = sp.get("open");
+      const qOrgAction = sp.get("org_action");
+
+      if (qTab === "leaderboard" || qTab === "president" || qTab === "coach" || qTab === "events") {
+        setActiveTab(qTab);
+      }
+      if (qMode === "batch-critique") {
+        setActiveTab("coach");
+        setCoachViewMode("critique");
+      } else if (qMode === "compass") {
+        setCoachViewMode("compass");
+      }
+      if (qOpen || qOrgAction) {
+        setPendingWeb3Intent({ open: qOpen, orgAction: qOrgAction });
+      }
+    };
+
+    syncTeamQuery();
+    const onPopState = () => syncTeamQuery();
+    const onNavIntent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const href = String(detail?.href || "");
+      if (href.startsWith("/dashboard/team")) {
+        syncTeamQuery(href);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingWeb3Intent) return;
+    if (pendingWeb3Intent.open === "club-report" && currentClub?.id) {
+      openClubReportModal();
+      setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+    }
+    const targetOrg = activeManagedOrg || managedOrgs[0];
+    if (pendingWeb3Intent.orgAction && targetOrg) {
+      const act = pendingWeb3Intent.orgAction;
+      if (act === "roster") openOrgRosterModalFor(targetOrg);
+      else if (act === "report") openOrgReportModalFor(targetOrg);
+      else if (act === "fields") openOrgFieldRulesModalFor(targetOrg);
+      else if (act === "settings") openOrgSettingsModalFor(targetOrg);
+      else if (act === "events") openOrgEventsModalFor(targetOrg);
+      setPendingWeb3Intent((prev) => (prev ? { ...prev, orgAction: null } : null));
+    }
+  }, [pendingWeb3Intent, currentClub?.id, activeManagedOrg?.id, managedOrgs.length]);
 
   async function loadIncomingClubInvite(
     clubId: string,
@@ -2437,8 +2505,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       const mentorUid = mentorshipBindRole === "as_mentee" ? target : user.id;
       const menteeUid = mentorshipBindRole === "as_mentee" ? user.id : target;
       const res = await apiClient.post("/api/team/mentorship/bind", {
-        mentor_id: mentorUid,
-        mentee_id: menteeUid,
+        mentor_uid: mentorUid,
+        mentee_uid: menteeUid,
         operator_uid: user.id,
       });
       showToast(res.data?.message || "师徒结对成功！");
@@ -2459,8 +2527,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     if (!await askConfirm(`确定要解除与【${labelName}】的 1对1 师徒关系吗？`)) return;
     try {
       const res = await apiClient.post("/api/team/mentorship/unbind", {
-        mentor_id: mentorUid,
-        mentee_id: menteeUid,
+        mentor_uid: mentorUid,
+        mentee_uid: menteeUid,
         operator_uid: user.id,
       });
       showToast(res.data?.message || "已解除师徒关系");
@@ -2476,7 +2544,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   const visibleFeed = isFeedExpanded || feed.length <= 20 ? feed : feed.slice(0, 20);
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen rgm-web3-page bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
       {loading ? (
@@ -3184,6 +3252,46 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               </div>
             </div>
 
+            {/* W1.5: My-Rank Gap Strip */}
+            {leaderboard.length > 0 && user?.id && (() => {
+              const myIdx = leaderboard.findIndex((r: any) => String(r.user_id) === String(user.id));
+              const myRow = myIdx >= 0 ? leaderboard[myIdx] : null;
+              const aheadRow = myIdx > 0 ? leaderboard[myIdx - 1] : null;
+              const gapKm =
+                myRow && aheadRow
+                  ? Math.max(0.1, Number(aheadRow.distance_km || 0) - Number(myRow.distance_km || 0)).toFixed(1)
+                  : null;
+              return (
+                <div className="rgm-bento-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="px-2.5 py-1 rounded-xl bg-[#FC4C02]/15 border border-[#FC4C02]/30 text-[#FC4C02] text-xs font-black shrink-0">
+                      {myRow ? `我的本月排名 #${myRow.rank || myIdx + 1}` : "本月暂未上榜"}
+                    </span>
+                    <div className="text-xs text-zinc-300 truncate">
+                      {myRow ? (
+                        aheadRow && gapKm ? (
+                          <span>
+                            已跑 <strong className="text-white">{myRow.distance_km} km</strong>（目标完成 {myRow.progress_pct}%）· 距前一名「
+                            <strong className="text-white">{aheadRow.display_name}</strong>」仅差{" "}
+                            <strong className="text-[#FC4C02]">{gapKm} km</strong>，再跑一课即可反超！
+                          </span>
+                        ) : (
+                          <span>
+                            🎉 领跑全团榜首！本月累计 <strong className="text-white">{myRow.distance_km} km</strong>，保持节奏！
+                          </span>
+                        )
+                      ) : (
+                        <span>完成一次手表或小程序跑步同步，即可自动计入跑团英雄榜排名！</span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-bold text-zinc-400 shrink-0">
+                    共 {leaderboard.length} 位团友参与本月角逐
+                  </span>
+                </div>
+              );
+            })()}
+
             {/* 桌面双栏：左侧「师徒传帮带 + 英雄榜」，右侧打卡动态（主内容流） */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-5 space-y-6">
@@ -3652,7 +3760,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       )}
 
                       {/* Coach Quick Critique Presets (Visible to Coach & Owner) */}
-                      {(currentRole === "owner" || currentRole === "coach") && (
+                      {(currentRole === "owner" || currentRole === "coach") ? (
                         <div className="flex items-center gap-1.5 flex-wrap pt-1">
                           <span className="text-[11px] font-bold text-amber-300">🧢 教练快捷点评:</span>
                           {[
@@ -3670,6 +3778,27 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               className="px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 text-[11px] font-bold transition cursor-pointer"
                             >
                               {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                          <span className="text-[11px] font-bold text-emerald-400">🙌 团友快赞:</span>
+                          {[
+                            "👏 好稳的有氧！",
+                            "🔥 核心课太顶了",
+                            "💪 向你学习打卡",
+                            "⚡ 恢复跑节奏极佳",
+                          ].map((praise) => (
+                            <button
+                              key={praise}
+                              type="button"
+                              onClick={() =>
+                                setCommentInputs((prev) => ({ ...prev, [act.id]: praise }))
+                              }
+                              className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 text-[11px] font-bold transition cursor-pointer"
+                            >
+                              {praise}
                             </button>
                           ))}
                         </div>
@@ -3791,6 +3920,16 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         {/* ── TAB 2: 👥 跑团成员与管理 ── */}
         {activeTab === "president" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
+            <CaptainExecutiveCockpit
+              club={currentClub}
+              dashboardMetrics={dashboardMetrics}
+              members={members}
+              eventsCount={events.length}
+              onOpenInviteModal={() => openClubInviteModal(currentClub)}
+              onOpenClubReport={openClubReportModal}
+              onSwitchToEvents={() => setActiveTab("events")}
+              onSwitchToCoach={() => setActiveTab("coach")}
+            />
             {/* Club Lifecycle & Status Management (Only Owner & Admin) */}
             {(currentRole === "owner" || user?.is_admin) && (
               <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-5 shadow-xl">
@@ -4380,6 +4519,73 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         )}
         {activeTab === "coach" && (currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
           <div className="space-y-6">
+            {/* W4.2 Mode Switcher: 学员罗盘 vs 5秒连续批阅工作台 */}
+            <div className="rgm-bento-card p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setCoachViewMode("compass")}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition border ${
+                    coachViewMode === "compass"
+                      ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-md shadow-[#FC4C02]/20"
+                      : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                  }`}
+                >
+                  🧭 全景学员罗盘与周课表
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCoachViewMode("critique")}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition border flex items-center gap-2 ${
+                    coachViewMode === "critique"
+                      ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-md shadow-[#FC4C02]/20"
+                      : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                  }`}
+                >
+                  <span>⚡ 5秒连续批阅打卡工作台</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      coachViewMode === "critique"
+                        ? "bg-black/25 text-white"
+                        : "bg-amber-500/20 text-amber-300"
+                    }`}
+                  >
+                    {
+                      feed.filter(
+                        (a: any) =>
+                          !(a.comments || []).some(
+                            (c: any) =>
+                              (user?.id && c.user_id === user.id) ||
+                              String(c.content || "").includes("教练点评")
+                          )
+                      ).length
+                    }{" "}
+                    待批
+                  </span>
+                </button>
+              </div>
+              <span className="text-[11px] text-zinc-400">
+                当前主控跑团：{currentClub?.name || "跑团"} · {sortedCoachStudents.length} 位学员
+              </span>
+            </div>
+
+            {coachViewMode === "critique" ? (
+              <BatchCritiqueCockpit
+                feed={feed}
+                students={sortedCoachStudents}
+                currentUser={user}
+                userProfile={userProfile}
+                onSelectStudentForPlan={(stu) => setSelectedStudentForPlan(stu)}
+                onCommentPosted={(actId, newComment) =>
+                  setFeed((prev) =>
+                    prev.map((a) =>
+                      a.id === actId ? { ...a, comments: [...(a.comments || []), newComment] } : a
+                    )
+                  )
+                }
+              />
+            ) : (
+              <>
             {currentClub?.id && user?.id && (
               <PacerClubRadarPanel
                 clubId={currentClub.id}
@@ -5220,6 +5426,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 })}
               </div>
             </div>
+              </>
+            )}
           </div>
         )}
 

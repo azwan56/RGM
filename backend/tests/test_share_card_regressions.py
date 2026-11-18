@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from unittest.mock import patch
 
@@ -114,6 +115,10 @@ def test_personal_share_card_with_active_scheduled_plan_and_json_journal():
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["success"] is True
+    assert data["qr_path"] == "pages/index/index"
+    assert data["user"]["club_id"] == ""
+    assert data["user"]["club_name"] == ""
+    assert data["user"]["club_invite_code"] == ""
     assert data["day_plan"]["has_scheduled_plan"] is True
     assert data["actual_data"]["distance_km"] == 14.3
     opts = {o["key"]: o for o in data["commentary_options"]}
@@ -241,6 +246,10 @@ def test_personal_share_card_respects_gps_and_biometrics_privacy():
         )
         assert r_self.status_code == 200
         d_self = r_self.json()
+        assert d_self["qr_path"] == "pages/index/index"
+        assert d_self["user"]["club_id"] == ""
+        assert d_self["user"]["club_name"] == ""
+        assert d_self["user"]["club_invite_code"] == ""
         assert d_self["track_overlay"]["has_gps_track"] is True
         assert d_self["actual_data"]["average_heartrate"] == 152
 
@@ -252,8 +261,84 @@ def test_personal_share_card_respects_gps_and_biometrics_privacy():
         assert r_mate.status_code == 200
         d_mate = r_mate.json()
         assert d_mate["success"] is True
+        assert d_mate["qr_path"] == "pages/index/index"
+        assert d_mate["user"]["club_name"] == ""
         assert d_mate["track_overlay"]["has_gps_track"] is False
         assert d_mate["actual_data"]["average_heartrate"] is None
+
+
+def test_personal_share_card_omits_club_info_and_points_qr_to_home():
+    """
+    Personal share cards must NOT attach club info or club-invite routing;
+    their WeChat QR code (wxacode) must point purely to the homepage (pages/index/index).
+    """
+    ts = int(time.time() * 1000)
+    uid = f"u_share_pure_home_{ts}"
+    today_iso = get_beijing_today().isoformat()
+
+    LocalStore.upsert_profile(
+        uid,
+        {
+            "id": uid,
+            "display_name": "主页扫码跑者",
+            "gender": "male",
+        },
+    )
+    club = LocalStore.create_club(uid, f"复旦测试跑团_{ts}", "纯主页二维码测试")
+    club_id = club["id"]
+
+    act_id = f"coros_pure_{ts}"
+    LocalStore.upsert_activity(
+        {
+            "id": act_id,
+            "user_id": uid,
+            "name": "晨跑 10km",
+            "sport_type": "Run",
+            "start_time": f"{today_iso}T07:30:00",
+            "distance_meters": 10000.0,
+            "moving_time_seconds": 3100,
+            "avg_pace_str": "5:10",
+            "average_heartrate": 144,
+        },
+        notify=False,
+        reconcile_plan=False,
+    )
+
+    backend_dir = os.path.dirname(os.path.dirname(__file__))
+    trial_qr_path = os.path.join(backend_dir, "data", "avatars", "wxacode_pure_home_trial.jpg")
+    had_existing = os.path.exists(trial_qr_path)
+    existing_bytes = b""
+    if had_existing:
+        with open(trial_qr_path, "rb") as f:
+            existing_bytes = f.read()
+        os.remove(trial_qr_path)
+
+    fake_qr = b"\xff\xd8\xff\xe0" + b"Q" * 600
+    try:
+        with patch("utils.wechat.wechat_client.get_wxacode_by_path", return_value=fake_qr) as mock_by_path, patch(
+            "utils.wechat.wechat_client.get_wxacode_unlimit", return_value=b""
+        ):
+            resp = client.get(
+                f"/api/miniapp/personal-share-card/{uid}?env_version=trial&activity_id={act_id}&club_id={club_id}",
+                headers={"Authorization": f"Bearer {_make_jwt(uid)}"},
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["success"] is True
+        assert data["qr_path"] == "pages/index/index"
+        assert data["qrcode_base64"]
+        assert data["user"]["club_id"] == ""
+        assert data["user"]["club_name"] == ""
+        assert data["user"]["club_invite_code"] == ""
+        mock_by_path.assert_called_once()
+        assert mock_by_path.call_args.kwargs.get("path") == "pages/index/index"
+        assert mock_by_path.call_args.kwargs.get("env_version") == "trial"
+    finally:
+        if os.path.exists(trial_qr_path):
+            os.remove(trial_qr_path)
+        if had_existing and existing_bytes:
+            with open(trial_qr_path, "wb") as f:
+                f.write(existing_bytes)
 
 
 def test_workout_segmentation_handles_partial_tail_lap_with_none_pace():

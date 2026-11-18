@@ -1,5 +1,7 @@
 import json
 import hashlib
+import threading
+import time
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -19,6 +21,11 @@ router = APIRouter()
 class SyncTriggerRequest(BaseModel):
     uid: str
     start_date: Optional[str] = None
+    async_mode: Optional[bool] = False
+
+
+_USER_SYNC_LOCK = threading.Lock()
+_USER_SYNC_JOBS: Dict[str, Dict[str, Any]] = {}
 
 
 def _activity_source_prefix(act_id: str) -> str:
@@ -542,13 +549,96 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
         logger.error(f"[sync] Error during synchronization for user {uid}: {e}")
         return {"success": False, "error": str(e)}
 
+def _run_background_user_sync(canonical_uid: str, raw_uid: str, start_date: Optional[str]) -> None:
+    try:
+        res = sync_single_user(raw_uid, start_date=start_date)
+        with _USER_SYNC_LOCK:
+            cur = _USER_SYNC_JOBS.get(canonical_uid) or {}
+            ok = bool(res.get("success")) if isinstance(res, dict) else False
+            synced_cnt = int(res.get("synced_count") or 0) if isinstance(res, dict) else 0
+            err_msg = ""
+            if isinstance(res, dict) and not ok:
+                err_msg = str(res.get("error") or res.get("message") or "").strip()
+            cur.update({
+                "status": "done" if ok else "failed",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "synced_count": synced_cnt,
+                "success": ok,
+                "error": err_msg or None,
+                "detail": res if isinstance(res, dict) else {"raw": str(res)},
+            })
+            _USER_SYNC_JOBS[canonical_uid] = cur
+    except Exception as exc:
+        logger.error(f"[sync] Async sync error for {canonical_uid}: {exc}", exc_info=True)
+        with _USER_SYNC_LOCK:
+            cur = _USER_SYNC_JOBS.get(canonical_uid) or {}
+            cur.update({
+                "status": "failed",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "success": False,
+                "error": str(exc),
+            })
+            _USER_SYNC_JOBS[canonical_uid] = cur
+
+
 @router.post("/trigger")
 def trigger_sync(req: SyncTriggerRequest):
     """
-    Synchronous trigger for manual sync button in frontend and miniapp.
+    Triggers watch/account sync for a single user.
+    - Default (async_mode=False): synchronous execution returning full sync result (legacy contract).
+    - async_mode=True: starts/deduplicates a background thread job and returns immediately; poll GET /api/sync/status/{uid}.
     """
-    result = sync_single_user(req.uid, start_date=req.start_date)
-    return result
+    if not req.async_mode:
+        return sync_single_user(req.uid, start_date=req.start_date)
+
+    canonical_uid = LocalStore.resolve_user_id(req.uid)
+    now_ts = time.time()
+    with _USER_SYNC_LOCK:
+        existing = _USER_SYNC_JOBS.get(canonical_uid)
+        if existing and existing.get("status") == "running" and (now_ts - float(existing.get("started_ts") or 0)) < 900:
+            snap = {k: v for k, v in existing.items() if k != "started_ts"}
+            return {"accepted": True, "async_mode": True, "already_running": True, **snap}
+
+        job = {
+            "uid": canonical_uid,
+            "status": "running",
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "finished_at": None,
+            "started_ts": now_ts,
+            "start_date": req.start_date,
+            "synced_count": 0,
+            "success": None,
+            "error": None,
+            "detail": None,
+        }
+        _USER_SYNC_JOBS[canonical_uid] = job
+        snap = {k: v for k, v in job.items() if k != "started_ts"}
+
+    t = threading.Thread(
+        target=_run_background_user_sync,
+        args=(canonical_uid, req.uid, req.start_date),
+        daemon=True,
+    )
+    t.start()
+    return {"accepted": True, "async_mode": True, "already_running": False, **snap}
+
+
+@router.get("/status/{uid}")
+def get_user_sync_status(uid: str):
+    """Returns latest async sync job status for a user."""
+    canonical_uid = LocalStore.resolve_user_id(uid)
+    with _USER_SYNC_LOCK:
+        job = dict(_USER_SYNC_JOBS.get(canonical_uid) or _USER_SYNC_JOBS.get(uid) or {})
+    if not job:
+        return {
+            "uid": canonical_uid,
+            "status": "idle",
+            "synced_count": 0,
+            "success": None,
+            "error": None,
+        }
+    job.pop("started_ts", None)
+    return job
 
 
 # ── Apple HealthKit import (iOS) ──────────────────────────────────────────────

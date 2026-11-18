@@ -109,21 +109,11 @@ export default function PersonalShareCardModal({
               setSelectedActId(data.actual_data.id);
             }
           }
-          const baseOpts: Array<{ key: string; label: string; text: string }> = data.commentary_options || [];
-          const opts = data.captain_cheer
-            ? [
-                ...baseOpts,
-                {
-                  key: "captain",
-                  label: "📣 团长加油",
-                  text: data.captain_cheer,
-                },
-              ]
-            : baseOpts;
+          const opts: Array<{ key: string; label: string; text: string }> = Array.isArray(data.commentary_options) ? data.commentary_options : [];
           setCommentaryOptions(opts);
-          if (data.is_critique_hidden && data.captain_cheer) {
-            setActiveCommKey("captain");
-            setCustomCommentary(data.captain_cheer);
+          if (data.is_critique_hidden || opts.length === 0) {
+            setActiveCommKey("exec");
+            setCustomCommentary("");
           } else {
             const defaultKey = showDailyPlan ? "exec" : "phys";
             const matchedOpt = opts.find((o) => o.key === defaultKey) || opts[0];
@@ -367,35 +357,6 @@ export default function PersonalShareCardModal({
       ctx.font = "bold 26px sans-serif";
       ctx.fillStyle = isLight ? "#0F172A" : "#ffffff";
       ctx.fillText(runnerName, 132, 76);
-
-      const clubName = String(usr.club_name || "万跑跑团助手").slice(0, 14);
-      const nameW = Math.min(220, ctx.measureText(runnerName).width + 20);
-      drawRoundRect(
-        ctx,
-        132 + nameW,
-        50,
-        Math.min(240, clubName.length * 18 + 38),
-        34,
-        17,
-        isLight
-          ? isRace
-            ? "#FEF3C7"
-            : "#FFF3ED"
-          : isRace
-          ? "rgba(251,191,36,0.16)"
-          : "rgba(252,76,2,0.16)",
-        isLight
-          ? isRace
-            ? "rgba(217,119,6,0.4)"
-            : "rgba(252,76,2,0.35)"
-          : isRace
-          ? "rgba(251,191,36,0.48)"
-          : "rgba(252,76,2,0.45)",
-        1
-      );
-      ctx.font = "bold 16px sans-serif";
-      ctx.fillStyle = isLight ? (isRace ? "#B45309" : "#C23800") : isRace ? "#fbbf24" : "#fc4c02";
-      ctx.fillText(`${isRace ? "🏅" : "🏃"} ${clubName}`, 146 + nameW, 72);
 
       ctx.font = "18px sans-serif";
       ctx.fillStyle = isLight ? "#64748B" : "#9ca3af";
@@ -878,11 +839,9 @@ export default function PersonalShareCardModal({
       });
       ctx.restore();
 
-      // Section 4: Commentary (Canova Coach or Club Captain Cheer)
+      // Section 4: Commentary (Canova Coach)
       const cY = showDailyPlan ? 956 : 932;
       const cH = showDailyPlan ? 254 : 276;
-      const isCaptainMode =
-        activeCommKey === "captain" || (Boolean(d.is_critique_hidden) && Boolean(d.captain_cheer));
       ctx.save();
       drawRoundRect(
         ctx,
@@ -891,26 +850,20 @@ export default function PersonalShareCardModal({
         pW,
         cH,
         20,
-        isLight ? "#F8FAFC" : isCaptainMode ? "#1f1912" : "#171426",
-        isLight ? "#E2E8F0" : isCaptainMode ? "rgba(245,158,11,0.45)" : "rgba(191,90,242,0.45)",
+        isLight ? "#F8FAFC" : "#171426",
+        isLight ? "#E2E8F0" : "rgba(191,90,242,0.45)",
         1.5
       );
       ctx.clip();
       if (isLight) {
-        drawRoundRect(ctx, pX, cY + 20, 6, cH - 40, 3, isCaptainMode ? "#f59e0b" : "#FC4C02");
+        drawRoundRect(ctx, pX, cY + 20, 6, cH - 40, 3, "#FC4C02");
       }
       ctx.font = "bold 22px sans-serif";
-      ctx.fillStyle = isLight ? "#0F172A" : isCaptainMode ? "#fbbf24" : "#c084fc";
-      const captainHeader = d.captain_cheer_meta?.captain_title
-        ? `📣 ${d.captain_cheer_meta.captain_title}`
-        : "📣 跑团团长加油";
+      ctx.fillStyle = isLight ? "#0F172A" : "#c084fc";
       const coachHeader = isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评";
-      ctx.fillText(isCaptainMode ? captainHeader : coachHeader, pX + 24, cY + 40);
+      ctx.fillText(coachHeader, pX + 24, cY + 40);
 
-      const fallbackQuote =
-        activeCommKey === "captain"
-          ? d.captain_cheer || ""
-          : d.canova_commentary || (d.is_critique_hidden ? d.captain_cheer || "" : "");
+      const fallbackQuote = d.canova_commentary || "";
       const cardQuote = (customCommentary || fallbackQuote).trim();
       if (cardQuote) {
         ctx.font = "18px sans-serif";
@@ -964,7 +917,7 @@ export default function PersonalShareCardModal({
       ctx.fillStyle = isLight ? "#0F172A" : "#ffffff";
       drawFittedText(`${runnerName} 邀你一起科学奔跑`, pX + 24, fY + 80, footerLeftMaxW, 25, 18, true);
       ctx.fillStyle = isLight ? "#475569" : "#a1a1aa";
-      drawFittedText(`长按识别小程序码 · 加入【${clubName}】`, pX + 24, fY + 116, footerLeftMaxW, 18, 13);
+      drawFittedText("长按识别小程序码 · 微信打开小程序主页", pX + 24, fY + 116, footerLeftMaxW, 18, 13);
       ctx.fillStyle = isLight ? "#64748B" : "#38bdf8";
       drawFittedText("⌚ 佳明/高驰手表自动同步  ·  📈 Canova 专属计划", pX + 24, fY + 152, footerLeftMaxW, 16, 12);
       drawRoundRect(
@@ -982,8 +935,10 @@ export default function PersonalShareCardModal({
         ctx.drawImage(qrImg, qrBoxX + 6, qrBoxY + 6, 120, 120);
       }
       ctx.font = "bold 15px sans-serif";
-      ctx.fillStyle = isLight ? "#059669" : "#10B981";
-      ctx.fillText("长按扫码受邀入团", qrBoxX + 6, fY + 172);
+      ctx.fillStyle = isLight ? "#C23800" : "#FF6B2B";
+      const qrCap = "扫码进入小程序";
+      const qrCapW = ctx.measureText(qrCap).width;
+      ctx.fillText(qrCap, qrBoxX + Math.max(0, (132 - qrCapW) / 2), fY + 172);
       ctx.restore();
 
       setPosterDataUrl(canvas.toDataURL("image/jpeg", 0.92));
@@ -1016,7 +971,7 @@ export default function PersonalShareCardModal({
               <span>{cardMode === "race" ? "🏅 赛事完赛纪念分享卡" : "📸 个人打卡分享朋友圈卡片"}</span>
             </h3>
             <p className="text-xs text-zinc-400 mt-0.5">
-              包含当天计划/赛前目标 · 实际完成数据 · Canova 教练点评 · 智能人脸置中 · 轨迹/海拔叠加 · 邀请码
+              包含当天计划/赛前目标 · 实际完成数据 · Canova 教练点评 · 智能人脸置中 · 轨迹/海拔叠加 · 小程序码
             </p>
           </div>
           <button
@@ -1304,11 +1259,7 @@ export default function PersonalShareCardModal({
             <div className="bg-[#181c28] border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-[#FC4C02]" />
-                <span>
-                  {activeCommKey === "captain" || (shareData?.is_critique_hidden && shareData?.captain_cheer)
-                    ? "4. 团长加油寄语"
-                    : "4. Canova 教练点评"}
-                </span>
+                <span>4. Canova 教练点评</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {commentaryOptions.map((opt) => (

@@ -22,7 +22,8 @@ router = APIRouter()
 
 
 class ActivityExcludeModeRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
+    uid: Optional[str] = None
     exclude_mode: str = "normal"  # 'normal' | 'ignore_vdot' | 'excluded'
 
 
@@ -246,7 +247,10 @@ def update_activity_exclude_mode(activity_id: str, req: ActivityExcludeModeReque
     - 'ignore_vdot': 陪跑/慢摇模式（计入跑量，不计入等效 VDOT）
     - 'excluded': 忽略此记录（多表重复或心率异常，不计入跑量、榜单与负荷）
     """
-    res = LocalStore.set_activity_exclude_mode(req.user_id, activity_id, req.exclude_mode)
+    effective_uid = (req.user_id or req.uid or "").strip()
+    if not effective_uid:
+        raise HTTPException(status_code=422, detail="user_id is required")
+    res = LocalStore.set_activity_exclude_mode(effective_uid, activity_id, req.exclude_mode)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error") or "更新失败")
     return res
@@ -373,7 +377,14 @@ def create_pacer_ai_prescription(uid: str, req: PacerAiPrescriptionRequest):
             viewer_uid=req.viewer_uid,
             allow_web_search=False,
         )
+        if not eval_res.get("official_eval_eligible", True) or not eval_res.get("selected_evaluation"):
+            raise HTTPException(
+                status_code=400,
+                detail=eval_res.get("ineligible_reason") or "该队员暂无正式比赛纪录，不予生成官方兔子评估与自荐语",
+            )
         return generate_pacer_ai_prescription(eval_res)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[science] Pacer AI prescription failed for {uid}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"生成官兔AI处方与自荐语失败: {str(e)}")

@@ -6,7 +6,7 @@ import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
-import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check, BookOpen } from "lucide-react";
+import { User, Target, Save, Heart, Shield, Award, Plus, Trash2, Zap, RefreshCw, Flame, Camera, CheckCircle2, Trophy, Clock, Image as ImageIcon, ExternalLink, X, Loader2, Eye, EyeOff, Lock, AlertTriangle, Check, BookOpen, Watch } from "lucide-react";
 
 export interface RacePlan {
   id?: string;
@@ -110,7 +110,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"profile" | "device" | "training">("profile");
+  const [activeTab, setActiveTab] = useState<"bento" | "profile" | "device" | "training">("bento");
   const [highlightPulse, setHighlightPulse] = useState(false);
 
   function scrollToSection(elementId: string) {
@@ -140,24 +140,47 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   }
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const urlParams = new URLSearchParams(window.location.search);
+    const syncTabFromQuery = (hrefOverride?: string) => {
+      if (typeof window === "undefined") return;
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const urlParams = new URLSearchParams(searchStr);
       const tabParam = urlParams.get("tab");
+      const shouldScroll =
+        urlParams.get("scroll_to_required") === "1" ||
+        sessionStorage.getItem("auto_scroll_to_required_fields") === "1";
+
       if (tabParam === "device") {
         setActiveTab("device");
       } else if (tabParam === "training") {
         setActiveTab("training");
-      } else if (tabParam === "privacy" || tabParam === "profile") {
+      } else if (tabParam === "privacy" || tabParam === "profile" || shouldScroll) {
         setActiveTab("profile");
+      } else if (tabParam === "bento") {
+        setActiveTab("bento");
       }
-      const shouldScroll =
-        urlParams.get("scroll_to_required") === "1" ||
-        sessionStorage.getItem("auto_scroll_to_required_fields") === "1";
+
       if (shouldScroll) {
         sessionStorage.removeItem("auto_scroll_to_required_fields");
         scrollToRequiredFields();
       }
-    }
+    };
+
+    syncTabFromQuery();
+    const onPopState = () => syncTabFromQuery();
+    const onNavIntent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.href && String(detail.href).startsWith("/dashboard/profile")) {
+        syncTabFromQuery(String(detail.href));
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    };
   }, []);
 
   function computeAge(dobStr: string): number | null {
@@ -1290,14 +1313,20 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   }
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen rgm-web3-page bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <main className={`${activeTab === "bento" ? "max-w-[1440px]" : "max-w-4xl"} mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
-              {activeTab === "device" ? "手表连接" : activeTab === "training" ? "训练档案" : "隐私设定"}
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+              {activeTab === "bento"
+                ? "三栏一屏档案与隐私工作台"
+                : activeTab === "device"
+                ? "手表连接明细"
+                : activeTab === "training"
+                ? "训练与赛事目标"
+                : "隐私设定明细"}
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1">
               集中检查并管理实名加密资料、身体参数、GPS/HRV 保密、Canova 评语可见范围与数据源授权
@@ -1313,46 +1342,552 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-white/10 mb-8 space-x-2 overflow-x-auto">
+        <div className="flex border-b border-white/10 mb-7 space-x-2 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveTab("bento")}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
+              activeTab === "bento"
+                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
+                : "text-zinc-400 border-transparent hover:text-zinc-200"
+            }`}
+          >
+            <span>🗂️</span>
+            <span>三栏一屏工作台</span>
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab("profile")}
-            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
               activeTab === "profile"
                 ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
                 : "text-zinc-400 border-transparent hover:text-zinc-200"
             }`}
           >
             <span>🛡️</span>
-            <span>隐私设定</span>
+            <span>隐私设定明细</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("device")}
-            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
               activeTab === "device"
                 ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
                 : "text-zinc-400 border-transparent hover:text-zinc-200"
             }`}
           >
             <span>⌚</span>
-            <span>手表连接</span>
+            <span>手表连接明细</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("training")}
-            className={`flex items-center gap-2 px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
               activeTab === "training"
                 ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
                 : "text-zinc-400 border-transparent hover:text-zinc-200"
             }`}
           >
             <span>🏃</span>
-            <span>训练档案</span>
+            <span>训练与赛事目标</span>
           </button>
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* TAB 0: W2.4 三栏一屏 Bento 工作台 (Three-Column Bento Workbench)    */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {activeTab === "bento" && (() => {
+            const annualPlanKm = monthlyTargets.reduce((sum, v) => sum + (Number(v) || 0), 0);
+            const maxMonthTarget = Math.max(100, ...monthlyTargets.map((v) => Number(v) || 0));
+            const maskValue = (val: string, keepFront = 1, keepBack = 0) => {
+              const s = (val || "").trim();
+              if (!s) return "未填写";
+              if (s.length <= keepFront + keepBack) return `${s[0]}*`;
+              return `${s.slice(0, keepFront)}${"*".repeat(Math.min(6, Math.max(2, s.length - keepFront - keepBack)))}${keepBack > 0 ? s.slice(-keepBack) : ""}`;
+            };
+            return (
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+                  {/* ── COLUMN 1: 大群 14 天准入合规 & AES-256 实名安全区 ── */}
+                  <div className="rgm-bento-card p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400">
+                          <Award className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-black text-white">大群准入合规 & 实名保险箱</h2>
+                          <p className="text-[11px] text-zinc-400">14 天核验窗口 · AES-256 加密存储</p>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        实名 {piiFilledCount}/4
+                      </span>
+                    </div>
+
+                    {/* 14-day Org Compliance Strip */}
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                        商学院大组织准入状态
+                      </div>
+                      {userOrgs && userOrgs.length > 0 ? (
+                        <div className="space-y-2">
+                          {userOrgs.map((org: any) => {
+                            const isConfirmed = org.status === "confirmed";
+                            const isSuspended =
+                              org.status === "expired" || org.status === "suspended" || org.is_suspended;
+                            const daysRemaining =
+                              org.days_remaining !== null && org.days_remaining !== undefined
+                                ? org.days_remaining
+                                : 14;
+                            return (
+                              <div
+                                key={org.id}
+                                className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
+                                  isConfirmed
+                                    ? "bg-emerald-500/10 border-emerald-500/25"
+                                    : isSuspended
+                                    ? "bg-rose-500/10 border-rose-500/30"
+                                    : "bg-amber-500/10 border-amber-500/30"
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-white truncate">{org.name}</div>
+                                  <div className="text-[10px] text-zinc-400 truncate">
+                                    {org.city || "商学院总会"} · {program || className || "校友成员"}
+                                  </div>
+                                </div>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 border ${
+                                    isConfirmed
+                                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                      : isSuspended
+                                      ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                                      : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                                  }`}
+                                >
+                                  {isConfirmed
+                                    ? "✓ 正式队员"
+                                    : isSuspended
+                                    ? "🚫 访问已暂停"
+                                    : `⏳ 待核验 · 余 ${daysRemaining} 天`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-3">
+                          <div className="text-xs text-zinc-400">尚未关联商学院或校友大群</div>
+                          <Link
+                            href="/dashboard/team"
+                            className="px-2.5 py-1 rounded-lg bg-[#FC4C02] text-white text-[11px] font-bold shrink-0"
+                          >
+                            前往加入 ›
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Masked PII Vault Summary */}
+                    <div className="space-y-2.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-zinc-400">
+                          实名资料脱敏视图（昵称：{displayName || "未设置"}）
+                        </span>
+                        <button
+                          type="button"
+                          onClick={toggleAllPiiVisibility}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-bold text-zinc-300 transition"
+                        >
+                          {allPiiVisible ? (
+                            <>
+                              <EyeOff className="w-3 h-3" /> 隐藏明文
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3 h-3" /> 预览明文
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: "真实姓名", val: showRealName ? realName || "未填写" : maskValue(realName, 1, 0) },
+                          { label: "手机号码", val: showPhone ? phone || "未填写" : maskValue(phone, 3, 2) },
+                          {
+                            label: "出生年月",
+                            val: showDob
+                              ? dateOfBirth || "未填写"
+                              : dateOfBirth
+                              ? `${dateOfBirth.slice(0, 4)}-**-**`
+                              : "未填写",
+                          },
+                          { label: "证件编号", val: showIdCard ? idCard || "未填写" : maskValue(idCard, 3, 2) },
+                        ].map((row) => (
+                          <div
+                            key={row.label}
+                            className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10"
+                          >
+                            <div className="text-[10px] text-zinc-400">{row.label}</div>
+                            <div className="text-xs font-bold text-white font-mono mt-0.5 truncate">
+                              {row.val}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1">
+                        <span>身体生理档案已填 {bodyFilledCount}/6 项 · VO2max {vo2max || "—"}</span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("profile")}
+                          className="text-[#FC4C02] hover:underline font-bold"
+                        >
+                          编辑实名与身体参数 →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── COLUMN 2: 手表直连同步 (Garmin/COROS) & 12 月跑量目标柱状图 ── */}
+                  <div className="rgm-bento-card p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-blue-500/15 text-blue-400">
+                          <Watch className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-black text-white">双平台手表直连 & 年度跑量</h2>
+                          <p className="text-[11px] text-zinc-400">Garmin / COROS 自动拉取训练日志</p>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                        已连 {connectedWatchCount}/2
+                      </span>
+                    </div>
+
+                    {/* Watch Connections */}
+                    <div className="space-y-2">
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                garminConnected ? "bg-emerald-400" : "bg-zinc-600"
+                              }`}
+                            />
+                            <span>Garmin 佳明</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 font-normal">
+                              {garminDomain}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 truncate mt-0.5">
+                            {garminConnected ? garminEmail || "已授权同步心率/配速" : "点击授权账号直连"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalBrand("garmin");
+                            setGarminModalOpen(true);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-bold shrink-0 transition ${
+                            garminConnected
+                              ? "bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10"
+                              : "bg-[#FC4C02] text-white"
+                          }`}
+                        >
+                          {garminConnected ? "管理" : "连接"}
+                        </button>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                corosConnected ? "bg-emerald-400" : "bg-zinc-600"
+                              }`}
+                            />
+                            <span>COROS 高驰</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 font-normal">
+                              {corosDomain.includes("cn") ? "中国区" : "国际区"}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 truncate mt-0.5">
+                            {corosConnected ? corosAccount || "已授权同步训练数据" : "点击授权账号直连"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalBrand("coros");
+                            setGarminModalOpen(true);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-bold shrink-0 transition ${
+                            corosConnected
+                              ? "bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10"
+                              : "bg-[#FC4C02] text-white"
+                          }`}
+                        >
+                          {corosConnected ? "管理" : "连接"}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={handleSyncDeviceProfile}
+                          disabled={syncingDeviceProfile || (!garminConnected && !corosConnected)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[11px] font-bold text-zinc-200 transition"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${syncingDeviceProfile ? "animate-spin" : ""}`} />
+                          <span>{syncingDeviceProfile ? "同步中..." : "同步手表最新 VO2max/心率"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("device")}
+                          className="text-[11px] font-bold text-[#FC4C02] hover:underline"
+                        >
+                          手表明细 →
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 12-Month Running Volume Bar Chart */}
+                    <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-white">12 个月跑量规划柱状图</div>
+                          <div className="text-[10px] text-zinc-400">
+                            年度累计目标 <strong className="text-[#FC4C02]">{annualPlanKm} km</strong> · 已设{" "}
+                            {races.length} 场赛事
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("training")}
+                          className="text-[11px] font-bold text-[#FC4C02] hover:underline shrink-0"
+                        >
+                          调整规划 →
+                        </button>
+                      </div>
+
+                      <div className="h-24 flex items-end gap-1.5 pt-2">
+                        {monthlyTargets.map((km, mIdx) => {
+                          const pct = Math.max(12, Math.round(((Number(km) || 0) / maxMonthTarget) * 100));
+                          return (
+                            <div key={mIdx} className="flex-1 flex flex-col items-center gap-1 group">
+                              <div className="w-full h-16 flex items-end">
+                                <div
+                                  title={`${mIdx + 1}月目标 ${km} km`}
+                                  className="w-full rounded-t-md bg-[#FC4C02] opacity-85 group-hover:opacity-100 transition-all"
+                                  style={{ height: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="text-[9px] text-zinc-400 font-mono">{mIdx + 1}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Inline Quick Weekly Target Save */}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+                        <div className="flex items-center gap-2 text-xs text-zinc-300">
+                          <Target className="w-3.5 h-3.5 text-[#FC4C02]" />
+                          <span>常规周目标:</span>
+                          <input
+                            type="number"
+                            min={5}
+                            max={300}
+                            value={weeklyTarget}
+                            onChange={(e) => setWeeklyTarget(Number(e.target.value) || 0)}
+                            className="w-16 px-2 py-1 rounded-lg bg-[#1c1c22] border border-white/15 text-xs font-bold text-white text-center"
+                          />
+                          <span className="text-[11px] text-zinc-400">km/周</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSaveWeeklyOnly}
+                          disabled={savingWeekly}
+                          className="px-2.5 py-1 rounded-lg bg-[#FC4C02] text-white text-[11px] font-bold hover:brightness-110 transition disabled:opacity-50"
+                        >
+                          {savingWeekly ? "保存中..." : "快捷保存"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── COLUMN 3: 4 档 Canova 评语授权与数据生命周期高危清理区 ── */}
+                  <div className="rgm-bento-card p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-emerald-500/15 text-emerald-400">
+                          <Shield className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-black text-white">4 档评语隐私 & 数据清理</h2>
+                          <p className="text-[11px] text-zinc-400">即时生效 · 精确控制教练与团友可见度</p>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        {critiqueVisSummary}
+                      </span>
+                    </div>
+
+                    {/* 4-Tier Visibility Selector */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: "self", label: "🔒 仅自己" },
+                        { value: "coach_mentor", label: "👨‍🏫 教练与师傅" },
+                        { value: "selected_clubs", label: "🏃 指定跑团" },
+                        { value: "all_clubs", label: "🌐 全部跑团" },
+                      ].map((opt) => {
+                        const selected = canovaCritiqueVisibility === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={savingVisibility}
+                            onClick={() => persistCanovaVisibility(opt.value, canovaCritiqueClubIds)}
+                            className={`px-3 py-2 rounded-xl text-xs font-bold border text-left transition ${
+                              selected
+                                ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-sm"
+                                : "bg-white/[0.03] border-white/10 text-zinc-300 hover:border-white/25"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {canovaCritiqueVisibility === "selected_clubs" && joinedClubs.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {joinedClubs.map((c: any) => {
+                          const cid = String(c.id || "");
+                          const active = canovaCritiqueClubIds.includes(cid);
+                          return (
+                            <button
+                              key={cid}
+                              type="button"
+                              disabled={savingVisibility}
+                              onClick={() => {
+                                const nextIds = active
+                                  ? canovaCritiqueClubIds.filter((x) => x !== cid)
+                                  : [...canovaCritiqueClubIds, cid];
+                                persistCanovaVisibility("selected_clubs", nextIds);
+                              }}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${
+                                active
+                                  ? "bg-[#FC4C02] text-white border-[#FC4C02]"
+                                  : "bg-white/[0.03] border-white/15 text-zinc-400"
+                              }`}
+                            >
+                              {active ? "✓ " : "+ "}
+                              {c.name || cid}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Instant GPS & Biometric Toggles */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        disabled={savingConfidentiality}
+                        onClick={() => persistConfidentialityToggle("hide_gps_route", !hideGpsRoute)}
+                        className="w-full p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 flex items-center justify-between gap-2 transition"
+                      >
+                        <div className="text-left">
+                          <div className="text-xs font-bold text-white">🗺️ GPS 轨迹地图保密</div>
+                          <div className="text-[10px] text-zinc-400">开启后团友动态隐藏起终点与路线地图</div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0 ${
+                            hideGpsRoute
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-white/10 text-zinc-300"
+                          }`}
+                        >
+                          {hideGpsRoute ? "🔒 保密中" : "🌐 团友可见"}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={savingConfidentiality}
+                        onClick={() => persistConfidentialityToggle("hide_biometrics", !hideBiometrics)}
+                        className="w-full p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 flex items-center justify-between gap-2 transition"
+                      >
+                        <div className="text-left">
+                          <div className="text-xs font-bold text-white">💓 生理心率与 HRV 保密</div>
+                          <div className="text-[10px] text-zinc-400">认证教练与 1v1 师傅仍可阅览完整数值</div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0 ${
+                            hideBiometrics
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-white/10 text-zinc-300"
+                          }`}
+                        >
+                          {hideBiometrics ? "🔒 保密中" : "🌐 团友可见"}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Danger Zone: Purge Cloud Data */}
+                    <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 space-y-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>数据生命周期高危操作区</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        可随时注销同步令牌或一键彻底抹除云端实名、GPS 轨迹与 Canova 历史记录（不可逆）。
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowPurgeConfirmModal(true)}
+                        className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>一键彻底清除个人云端训练数据</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom Action Strip */}
+                <div className="rgm-bento-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-xs text-zinc-400">
+                    💡 提示：4 档评语隐私、GPS/HRV 开关与周目标均已支持即时保存；如需增改赛事计划或编辑全部表单字段，可切至明细表单并提交保存。
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("profile")}
+                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-zinc-200 transition"
+                    >
+                      打开完整明细表单
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#FC4C02] hover:brightness-110 text-white text-xs font-bold transition shadow-lg shadow-[#FC4C02]/25"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{saving ? "保存中..." : "全量保存档案"}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ══════════════════════════════════════════════════════════════════ */}
           {/* TAB 1: 隐私设定 (Unified Personal Data & Privacy Center)            */}
           {/* ══════════════════════════════════════════════════════════════════ */}
@@ -2286,26 +2821,6 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
                 <span className="text-[11px] text-zinc-500 mt-1 block">欧洲码 (EUR)，如 40、41、42、42.5、43</span>
-              </div>
-
-              {/* 急救 / 医护资质认证 */}
-              <div className="sm:col-span-2">
-                <label className="text-xs text-zinc-400 block mb-1.5">
-                  🚑 急救 / 医护资质认证（选填 · 用于马拉松官兔与急救跑者资格加权）
-                </label>
-                <select
-                  value={firstAidCertType}
-                  onChange={(e) => setFirstAidCertType(e.target.value)}
-                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
-                >
-                  <option value="">暂未持有急救证书</option>
-                  <option value="red_cross">红十字会救护员证 (Red Cross CPR/AED)</option>
-                  <option value="aha">美国心脏协会 AHA HeartSaver 急救证</option>
-                  <option value="medical_pro">执业医师 / 护士医护专业资质</option>
-                </select>
-                <span className="text-[11px] text-zinc-500 mt-1 block">
-                  上海马拉松、北京马拉松等头部标牌赛事选拔官方配速员时对持有急救/医护资质的跑者给予优先录取权重
-                </span>
               </div>
             </div>
 

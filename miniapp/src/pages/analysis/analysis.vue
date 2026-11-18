@@ -135,9 +135,9 @@
         <!-- 恢复/休整期 · 历史巅峰双轨标识 -->
         <view
           v-if="scienceData?.canova_matrix?.recovery_phase_label"
-          style="margin: 14rpx 0 6rpx; padding: 12rpx 18rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.42);"
+          style="margin: 14rpx 0 6rpx; padding: 12rpx 18rpx; border-radius: 14rpx; background: var(--rgm-amber-tint); border: 1rpx solid var(--rgm-amber-line);"
         >
-          <text style="font-size: 22rpx; font-weight: 700; color: #d97706; line-height: 1.4;">
+          <text style="font-size: 22rpx; font-weight: 700; color: var(--rgm-amber); line-height: 1.4;">
             {{ scienceData.canova_matrix.recovery_phase_label }}
           </text>
         </view>
@@ -237,7 +237,7 @@
         </view>
         <text
           v-if="scienceData?.race_predictions?.endurance_note"
-          style="display: block; margin-top: 14rpx; font-size: 22rpx; line-height: 1.45; color: #9ca3af;"
+          style="display: block; margin-top: 14rpx; font-size: 22rpx; line-height: 1.45; color: var(--rgm-ink-2);"
         >
           {{ scienceData.race_predictions.endurance_note }}
         </text>

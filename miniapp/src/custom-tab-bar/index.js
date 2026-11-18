@@ -74,7 +74,7 @@ Component({
     // 默认仅展示普通跑者 4 个 Tab（首页 / 训练 / 跑团 / 我的）；教练或团长自动展示「教练」Tab
     list: ALL_TABS.filter(item => !item.coachOnly)
   },
-  pageLifetimes: {
+    pageLifetimes: {
     show() {
       this.syncTheme();
       this.syncSelected();
@@ -91,10 +91,15 @@ Component({
         const theme = (raw === 'volt' || raw === 'trail') ? 'volt' : 'dark';
         const fontScale = resolveFontScale();
         const isCoach = checkIsCoachOrOwner();
+        const teamBadgeCount = Number(wx.getStorageSync('rgm_team_feed_badge') || 0);
+        const showTeamDot = Number.isFinite(teamBadgeCount) && teamBadgeCount > 0;
         const baseList = ALL_TABS.filter(item => !item.coachOnly || isCoach);
+        const curTeam = (this.data.list || []).find(item => item.pagePath === '/pages/team/team');
+        const badgeChanged = Boolean(curTeam && curTeam.badgeDot) !== showTeamDot;
         if (
           this.data.theme !== theme ||
           this.data.isCoach !== isCoach ||
+          badgeChanged ||
           this.data.list.length !== baseList.length ||
           !this.data.list[0] ||
           !this.data.list[0].src
@@ -102,12 +107,14 @@ Component({
           // 明亮主题（经典竞技 volt）使用深色图标（static/tabbar/light），暗黑主题沿用原图标
           const list = baseList.map((item) => {
             const name = item.iconPath.replace('/static/tabbar/', '').replace('.png', '');
+            const badgeDot = item.pagePath === '/pages/team/team' ? showTeamDot : false;
             if (theme === 'dark') {
-              return Object.assign({}, item, { src: item.iconPath, activeSrc: item.selectedIconPath });
+              return Object.assign({}, item, { src: item.iconPath, activeSrc: item.selectedIconPath, badgeDot });
             }
             return Object.assign({}, item, {
               src: '/static/tabbar/light/' + name + '.png',
-              activeSrc: item.selectedIconPath
+              activeSrc: item.selectedIconPath,
+              badgeDot
             });
           });
           this.setData({ theme, fontScale, isCoach, list });

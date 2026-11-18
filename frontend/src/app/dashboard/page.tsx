@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
@@ -118,6 +118,16 @@ export default function DashboardPage() {
   const [orgReminder, setOrgReminder] = useState<OrgReminderInfo | null>(null);
   const [showOrgReminderModal, setShowOrgReminderModal] = useState<boolean>(false);
   const [personalReportModalOpen, setPersonalReportModalOpen] = useState<boolean>(false);
+
+  // Web 3.0 Onboarding Checklist & Hero Quick RPE states
+  const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(false);
+  const [quickRpeKey, setQuickRpeKey] = useState<string>("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOnboardingDismissed(localStorage.getItem("rgm_onboarding_dismissed") === "1");
+    }
+  }, []);
 
   function parseOrgReminder(orgs: any[]): OrgReminderInfo {
     if (!orgs || !orgs.length) return { hasReminder: false, type: "none" };
@@ -338,6 +348,13 @@ export default function DashboardPage() {
     setMonthActivities(dashboardData?.current_month_activities || dashboardData?.recent_activities || []);
   }
 
+  const syncAbortRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      syncAbortRef.current = true;
+    };
+  }, []);
+
   async function handleSync() {
     if (!user) return;
     const hasGarmin = Boolean(dashboardData?.user?.garmin_connected);
@@ -348,17 +365,42 @@ export default function DashboardPage() {
       return;
     }
 
+    syncAbortRef.current = false;
     setSyncing(true);
     try {
-      const res = await apiClient.post("/api/sync/trigger", { uid: user.id });
-      if (res.data?.success === false) {
-        showToast("同步提示: " + (res.data?.error || "设备连接中，请稍后再试"));
+      const res = await apiClient.post("/api/sync/trigger", {
+        uid: user.id,
+        async_mode: true,
+      });
+      let finalData = res.data;
+      if (finalData?.async_mode) {
+        const startedAt = Date.now();
+        while (!syncAbortRef.current && Date.now() - startedAt < 120000) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (syncAbortRef.current) break;
+          const stRes = await apiClient.get(`/api/sync/status/${user.id}`);
+          const st = stRes.data;
+          if (!st || st.status === "idle" || st.status === "done" || st.status === "failed") {
+            finalData = st?.detail || st;
+            break;
+          }
+        }
       }
-      await loadDashboardData(user.id);
+      if (!syncAbortRef.current) {
+        if (finalData?.success === false) {
+          showToast("同步提示: " + (finalData?.error || "设备连接中，请稍后再试"));
+        } else {
+          const cnt = Number(finalData?.synced_activities ?? finalData?.synced_count ?? 0);
+          showToast(cnt > 0 ? `同步完成，新增 ${cnt} 条跑步记录` : "同步完成，数据已是最新");
+        }
+        await loadDashboardData(user.id);
+      }
     } catch (e) {
       console.error("Sync error:", e);
     } finally {
-      setSyncing(false);
+      if (!syncAbortRef.current) {
+        setSyncing(false);
+      }
     }
   }
 
@@ -630,10 +672,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-7 py-7 space-y-6">
+      <div className="rgm-web3-page">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-7 py-6 space-y-6">
         {/* ── 顶部精简全息指挥栏（v2.1 双层防挤压结构：第1层独立展示问候语与长名字，第2层展示状态徽章，彻底杜绝末字符裁切与长名碰撞） ── */}
         <section className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#121215] border border-white/[0.08] rounded-[28px] px-6 py-5">
           <div className="min-w-0 flex-1 space-y-2.5">
@@ -755,6 +798,99 @@ export default function DashboardPage() {
             </span>
           </div>
         )}
+
+        {/* ── Web 3.0 W10.1 新手 4 步激活清单（全完成或手动收起后隐藏） ── */}
+        {!loading &&
+          !onboardingDismissed &&
+          (!(dashboardData?.user?.garmin_connected || dashboardData?.user?.coros_connected) ||
+            !activePlan ||
+            myClubs.length === 0) && (() => {
+            const watchDone = Boolean(
+              dashboardData?.user?.garmin_connected || dashboardData?.user?.coros_connected
+            );
+            const planDone = Boolean(activePlan);
+            const clubDone = myClubs.length > 0;
+            const nextStep = !watchDone
+              ? {
+                  label: "② 绑定运动手表",
+                  onClick: () => {
+                    setModalBrand("garmin");
+                    setGarminModalOpen(true);
+                  },
+                }
+              : !planDone
+              ? { label: "③ 生成 Canova 课表", href: "/dashboard/coach" }
+              : { label: "④ 加入或自建跑团", href: "/dashboard/team" };
+            const steps = [
+              { label: "登录账号", done: true },
+              { label: "绑定手表", done: watchDone },
+              { label: "生成周期课表", done: planDone },
+              { label: "加入跑团", done: clubDone },
+            ];
+            return (
+              <div className="rounded-2xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/35 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs sm:text-sm font-black text-[var(--rgm-text)]">
+                      新手 4 步激活清单（完成后自动隐藏）
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#FC4C02]/15 text-[#FC4C02] text-[10px] font-bold">
+                      {[true, watchDone, planDone, clubDone].filter(Boolean).length} / 4 已就绪
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+                    {steps.map((st, idx) => (
+                      <div key={st.label} className="flex items-center gap-1.5 text-xs font-bold">
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black border ${
+                            st.done
+                              ? "bg-emerald-500 text-white border-emerald-500"
+                              : "bg-[var(--rgm-card)] text-[#FC4C02] border-[#FC4C02]"
+                          }`}
+                        >
+                          {st.done ? "✓" : idx + 1}
+                        </span>
+                        <span className={st.done ? "text-emerald-500" : "text-[var(--rgm-text)]"}>
+                          {st.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {"href" in nextStep && nextStep.href ? (
+                    <Link
+                      href={nextStep.href}
+                      className="px-3.5 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-600 text-white text-xs font-bold transition shadow-md shadow-[#FC4C02]/20"
+                    >
+                      下一步：{nextStep.label} ›
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={nextStep.onClick}
+                      className="px-3.5 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-600 text-white text-xs font-bold transition shadow-md shadow-[#FC4C02]/20 cursor-pointer"
+                    >
+                      下一步：{nextStep.label} ›
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOnboardingDismissed(true);
+                      if (typeof window !== "undefined") {
+                        localStorage.setItem("rgm_onboarding_dismissed", "1");
+                      }
+                    }}
+                    className="px-2.5 py-2 rounded-xl bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[11px] font-semibold text-[var(--rgm-text-muted)] hover:text-[var(--rgm-text)] transition cursor-pointer"
+                  >
+                    收起
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
         {/* ══════════════════════════════════════════════════════════════════════════
             第一行核心区：左栏 (7 cols)「卡片 A：今日核心处方 Hero Card + 卡片 B：本周 7 日微周期胶囊阵列」
@@ -935,7 +1071,67 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between flex-wrap gap-3">
+                  <div className="pt-2 border-t border-white/[0.06] space-y-3">
+                    {/* Web 3.0 W1.2 跑后体感 RPE 快捷点选条（免打字直连 Canova AI 调课） */}
+                    <div className="rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="text-[11px] font-bold text-[var(--rgm-text-2)]">
+                          跑后体感 RPE 快捷点选（免打字直连 AI 调课）
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {[
+                            { key: "1-4", label: "1-4 轻松", rpe: 3, tag: "体感轻松，状态稳定" },
+                            { key: "5-7", label: "5-7 适中", rpe: 6, tag: "强度适中，正常完成" },
+                            { key: "8-9", label: "8-9 吃力", rpe: 8, tag: "略感吃力，心率偏高" },
+                            { key: "10", label: "10 极限", rpe: 10, tag: "极度疲惫或有酸痛" },
+                          ].map((opt) => {
+                            const active = quickRpeKey === opt.key;
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => setQuickRpeKey(active ? "" : opt.key)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                                  active
+                                    ? "bg-[#FC4C02] text-white border-[#FC4C02]"
+                                    : "bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border-[var(--rgm-border)] hover:border-[#FC4C02]/45"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const picked = [
+                            { key: "1-4", rpe: 3, tag: "体感轻松，状态稳定" },
+                            { key: "5-7", rpe: 6, tag: "强度适中，正常完成" },
+                            { key: "8-9", rpe: 8, tag: "略感吃力，心率偏高" },
+                            { key: "10", rpe: 10, tag: "极度疲惫或有酸痛" },
+                          ].find((x) => x.key === quickRpeKey);
+                          const prompt = picked
+                            ? `今天训练「${todayWorkout.title}」跑完后的体感是「${picked.tag}」（RPE ${picked.rpe}/10），请结合我的负荷与本周剩余课表给出调整建议。`
+                            : `今天课表是「${todayWorkout.title}」，请帮我评估今日配速执行与本周负荷控制建议。`;
+                          window.dispatchEvent(
+                            new CustomEvent("rgm-open-coach-chat", {
+                              detail: {
+                                prompt,
+                                reactionTag: picked?.tag,
+                                rpe: picked?.rpe,
+                              },
+                            })
+                          );
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-[var(--rgm-blue-tint)] border border-sky-500/35 text-sky-400 text-xs font-bold hover:opacity-90 transition shrink-0 cursor-pointer"
+                      >
+                        问 AI 教练 →
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <button
                         onClick={handleToggleTodayWorkout}
@@ -976,6 +1172,7 @@ export default function DashboardPage() {
                       {todayWorkout.plan_title || activePlan?.title || "科学周期训练计划"}
                       {planWeeks.length > 0 ? ` · 第 ${planWeekIdx}/${planWeeks.length} 周` : ""}
                     </span>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -1325,8 +1522,108 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* 卡片 D：周期跑量目标进度卡 */}
+            {/* 卡片 D：周期跑量目标进度卡（Web 3.0 W1.2 周/月/年三维圆环 + A赛倒计时） */}
             <div className="bg-[#121215] border border-white/[0.08] rounded-[28px] p-6 sm:p-7 space-y-4">
+              {/* 3-Dimension SVG Donut Rings + Upcoming Race Strip */}
+              <div className="grid grid-cols-3 gap-2 pb-2">
+                {[
+                  {
+                    label: "本周目标",
+                    cur: Number(weeklyProgress.current_week_km ?? 0),
+                    tgt: Number(weeklyProgress.target_week_km ?? 50),
+                    pct: Number(weeklyProgress.progress_pct ?? 0),
+                    color: "#FC4C02",
+                    unit: "km",
+                  },
+                  {
+                    label: `${currentMonthNow}月目标`,
+                    cur: Number(dashboardData?.progress?.current_month_km ?? 0),
+                    tgt: Number(dashboardData?.progress?.target_month_km ?? 200),
+                    pct: Number(dashboardData?.progress?.progress_pct ?? 0),
+                    color: "#10B981",
+                    unit: "km",
+                  },
+                  {
+                    label: "全年目标",
+                    cur: Math.round(Number(yearlyStats.total_km ?? 0)),
+                    tgt: Math.round(Number(yearlyStats.target_year_km ?? 2400)),
+                    pct: Number(yearlyStats.progress_pct ?? 0),
+                    color: "#38BDF8",
+                    unit: "km",
+                  },
+                ].map((ring) => {
+                  const r = 28;
+                  const circ = 2 * Math.PI * r;
+                  const dash = circ * Math.min(1, Math.max(0, ring.pct / 100));
+                  return (
+                    <div
+                      key={ring.label}
+                      className="flex flex-col items-center text-center p-2.5 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]"
+                    >
+                      <div className="relative w-[72px] h-[72px] flex items-center justify-center">
+                        <svg width="72" height="72" viewBox="0 0 72 72" className="-rotate-90">
+                          <circle
+                            cx="36"
+                            cy="36"
+                            r={r}
+                            fill="none"
+                            stroke="var(--rgm-card-3)"
+                            strokeWidth="6"
+                          />
+                          <circle
+                            cx="36"
+                            cy="36"
+                            r={r}
+                            fill="none"
+                            stroke={ring.color}
+                            strokeWidth="6"
+                            strokeLinecap="round"
+                            strokeDasharray={`${dash} ${circ}`}
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center tabular-nums">
+                          <span className="text-[11px] font-black text-[var(--rgm-text)] leading-none">
+                            {ring.cur}
+                          </span>
+                          <span className="text-[9px] text-[var(--rgm-text-muted)] mt-0.5">
+                            /{ring.tgt}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-bold text-[var(--rgm-text-2)] mt-1">
+                        {ring.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {upcomingRace && (
+                <Link
+                  href="/dashboard/profile?tab=training"
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/35 hover:border-[#FC4C02] transition"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-[#FC4C02] text-white text-[10px] font-black shrink-0">
+                        {upcomingRace.priority === 2 || upcomingRace.priority === "B" ? "B 级赛" : "A 级赛"}
+                      </span>
+                      <span className="text-xs font-extrabold text-[var(--rgm-text)] truncate">
+                        {upcomingRace.name}
+                      </span>
+                    </div>
+                    {upcomingRace.target_time && (
+                      <div className="text-[10px] text-[var(--rgm-text-2)] mt-0.5">
+                        目标 {upcomingRace.target_time} · {upcomingRace.race_date}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-lg font-black text-[#FC4C02] tabular-nums shrink-0">
+                    {upcomingRace.days_until != null ? `D-${upcomingRace.days_until}` : "备赛中"}
+                  </div>
+                </Link>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <div className="inline-flex p-1 rounded-xl bg-[#18181c] border border-white/[0.06]">
                   {(
@@ -2201,6 +2498,7 @@ export default function DashboardPage() {
           userId={user.id}
         />
       )}
+      </div>
     </div>
   );
 }

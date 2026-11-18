@@ -44,9 +44,10 @@ export default function ManualPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
+      <div className="rgm-web3-page">
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-10">
         {/* Hero Header */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#18181c] via-[#121215] to-[#0d0d10] border border-white/10 p-6 sm:p-10 shadow-2xl">
@@ -425,6 +426,7 @@ export default function ManualPage() {
           </Link>
         </div>
       </main>
+      </div>
     </div>
   );
 }

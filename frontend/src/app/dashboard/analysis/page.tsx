@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import TrainingTabSwitcher from "@/components/TrainingTabSwitcher";
 import PacerEvaluationCard from "@/components/PacerEvaluationCard";
+import PersonalShareCardModal from "@/components/PersonalShareCardModal";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import { Trophy, Zap, Heart, BatteryCharging, ArrowLeft, Compass, ShieldAlert, Flame } from "lucide-react";
@@ -28,6 +29,7 @@ export default function AnalysisPage() {
   const [healthTrend, setHealthTrend] = useState<any[]>([]);
   const [activeTaperKey, setActiveTaperKey] = useState<string>("taper_50");
   const [showCanovaZones, setShowCanovaZones] = useState<boolean>(false);
+  const [shareCardModalOpen, setShareCardModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     let queryTarget = "";
@@ -88,10 +90,11 @@ export default function AnalysisPage() {
     null;
 
   return (
-    <div className="min-h-screen bg-[#070708] text-white">
+    <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="rgm-web3-page">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Coach / Mentor Inspection Banner */}
         {isInspectingOther && (
           <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-emerald-500/15 via-cyan-500/10 to-transparent border border-emerald-500/35 rounded-2xl px-5 py-4">
@@ -134,10 +137,66 @@ export default function AnalysisPage() {
             {scienceData?.basic_status_only ? "跑友基本状态名片" : "身体数据与跑力"}
           </h1>
         ) : (
-          /* 与小程序「训练」页一致的三段切换：课表 / 诊断 / 身体数据与跑力 */
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-black">训练</h1>
-            <TrainingTabSwitcher active="analysis" />
+          /* 与小程序「训练」页一致的三段切换：课表 / 诊断 / 身体数据与跑力 + 战报工坊直达 */
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-black">训练</h1>
+              <TrainingTabSwitcher active="analysis" />
+            </div>
+            {!scienceData?.basic_status_only && (
+              <button
+                type="button"
+                onClick={() => setShareCardModalOpen(true)}
+                className="px-4 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-600 text-white text-xs font-bold transition shadow-md shadow-[#FC4C02]/25 cursor-pointer"
+              >
+                📸 生成 4K 炫跑战报海报
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Web 3.0 W1.4 4-KPI 生理与完赛预测总览条 */}
+        {!loading && scienceData && !scienceData.basic_status_only && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rgm-bento-card p-4">
+              <div className="text-[11px] font-bold text-[var(--rgm-text-muted)]">有效跑力 VDOT</div>
+              <div className="text-2xl font-black text-[#FC4C02] font-mono mt-1">
+                {scienceData?.vdot ?? "—"}
+              </div>
+              <div className="text-[11px] text-[var(--rgm-text-2)] mt-0.5">
+                {scienceData?.canova_matrix?.runner_type_label || "心率配速效率"}
+              </div>
+            </div>
+            <div className="rgm-bento-card p-4">
+              <div className="text-[11px] font-bold text-[var(--rgm-text-muted)]">耐力保持系数</div>
+              <div className="text-2xl font-black text-emerald-500 font-mono mt-1">
+                {scienceData?.canova_matrix?.endurance_retention_ratio ?? "—"}
+              </div>
+              <div className="text-[11px] text-[var(--rgm-text-2)] mt-0.5">专项有氧耐力评估</div>
+            </div>
+            <div className="rgm-bento-card p-4">
+              <div className="text-[11px] font-bold text-[var(--rgm-text-muted)]">全马完赛预测</div>
+              <div className="text-2xl font-black text-sky-500 font-mono mt-1">
+                {scienceData?.race_predictions?.marathon || "—"}
+              </div>
+              <div className="text-[11px] text-[var(--rgm-text-2)] mt-0.5">
+                半马预测 {scienceData?.race_predictions?.half_marathon || "—"}
+              </div>
+            </div>
+            <div className="rgm-bento-card p-4 flex flex-col justify-between">
+              <div>
+                <div className="text-[11px] font-bold text-[var(--rgm-text-muted)]">官方兔子潜能评估</div>
+                <div className="text-sm font-black text-[var(--rgm-text)] mt-1">
+                  {scienceData?.canova_matrix?.recovery_phase_label || "6 维配速稳健度模型"}
+                </div>
+              </div>
+              <a
+                href="#pacer"
+                className="text-[11px] font-bold text-[#FC4C02] hover:underline mt-1 inline-block"
+              >
+                直达官兔评估卡 ↓
+              </a>
+            </div>
           </div>
         )}
 
@@ -718,6 +777,13 @@ export default function AnalysisPage() {
           </>
         )}
       </main>
+      </div>
+
+      <PersonalShareCardModal
+        open={shareCardModalOpen}
+        onClose={() => setShareCardModalOpen(false)}
+        uid={activeRunnerUid || user?.id}
+      />
     </div>
   );
 }

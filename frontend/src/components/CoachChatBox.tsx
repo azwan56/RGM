@@ -30,6 +30,8 @@ interface ChatMessage {
 interface CoachChatBoxProps {
   uid: string;
   onPlanUpdated?: () => void;
+  mode?: "floating" | "docked";
+  hideFloatingOnXl?: boolean;
 }
 
 interface WindowRect {
@@ -63,8 +65,14 @@ const QUICK_QUESTIONS = [
   "🎯 根据我近期的训练配速与心率表现，目标比赛配速该如何卡控？",
 ];
 
-export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function CoachChatBox({
+  uid,
+  onPlanUpdated,
+  mode = "floating",
+  hideFloatingOnXl = false,
+}: CoachChatBoxProps) {
+  const isDocked = mode === "docked";
+  const [isOpen, setIsOpen] = useState(isDocked);
   const [isMaximized, setIsMaximized] = useState(false);
   const [rect, setRect] = useState<WindowRect>({ x: 0, y: 0, w: DEFAULT_W, h: DEFAULT_H });
   const [rectInitialized, setRectInitialized] = useState(false);
@@ -242,18 +250,41 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
     }
   }
 
-  // Pre-fetch lightweight context when uid changes or when dialog opens
+  // Pre-fetch lightweight context when uid changes or when dialog opens / docked
   useEffect(() => {
-    if (uid && isOpen && !contextData && !loadingContext) {
+    if (uid && (isOpen || isDocked) && !contextData && !loadingContext) {
       fetchCoachContext(uid);
     }
-  }, [uid, isOpen]);
+  }, [uid, isOpen, isDocked]);
 
   useEffect(() => {
-    if (isOpen && scrollContainerRef.current) {
+    if ((isOpen || isDocked) && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
-  }, [messages, sending, isOpen]);
+  }, [messages, sending, isOpen, isDocked]);
+
+  // Listen for cross-component "rgm-open-coach-chat" events (e.g. from Topbar CTA or Hero RPE pills)
+  const latestHandlerRef = useRef<any>(null);
+  latestHandlerRef.current = handleSendMessage;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOpenCoachChat = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail || {};
+      const isXl = window.innerWidth >= 1280;
+      if (isDocked && !isXl) return;
+      if (!isDocked && hideFloatingOnXl && isXl) return;
+      if (!isDocked) setIsOpen(true);
+      if (detail.reactionTag) setSelectedReaction(detail.reactionTag);
+      if (detail.rpe != null) setSelectedRpe(Number(detail.rpe));
+      if (detail.prompt) {
+        setTimeout(() => {
+          latestHandlerRef.current?.(detail.prompt, detail.reactionTag, detail.rpe);
+        }, 60);
+      }
+    };
+    window.addEventListener("rgm-open-coach-chat", onOpenCoachChat);
+    return () => window.removeEventListener("rgm-open-coach-chat", onOpenCoachChat);
+  }, [isDocked, hideFloatingOnXl]);
 
   async function fetchCoachContext(userId: string) {
     setLoadingContext(true);
@@ -428,18 +459,18 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
   const todayWorkout = pStat?.today_workout;
 
   // ── 1. 浮标状态 (Floating Launcher Badge) ──
-  if (!isOpen) {
+  if (!isDocked && !isOpen) {
     return (
-      <div className="fixed bottom-6 right-5 sm:right-6 z-50">
+      <div className={`fixed bottom-6 right-5 sm:right-6 z-50 ${hideFloatingOnXl ? "xl:hidden" : ""}`}>
         <button
           type="button"
           onClick={() => setIsOpen(true)}
           title="点击打开 Canova 科学教练对话舱（基于您的训练情况、训练计划与身体反应给出专业反馈）"
-          className="group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-full bg-gradient-to-r from-purple-600 via-indigo-600 to-[#FC4C02] text-white shadow-2xl shadow-purple-600/35 hover:scale-105 active:scale-95 transition-all duration-200 border border-white/20 cursor-pointer"
+          className="group flex items-center gap-3 pl-3 pr-4 py-2.5 rounded-full bg-[#FC4C02] hover:bg-orange-600 text-white shadow-2xl shadow-[#FC4C02]/35 hover:scale-105 active:scale-95 transition-all duration-200 border border-white/20 cursor-pointer"
         >
           <div className="relative w-9 h-9 rounded-full bg-black/25 flex items-center justify-center shrink-0">
             <Sparkles className="w-5 h-5 text-white" />
-            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-purple-700 animate-pulse" />
+            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#FC4C02] animate-pulse" />
           </div>
           <div className="text-left">
             <div className="text-xs font-black tracking-tight flex items-center gap-1 text-white">
@@ -455,7 +486,9 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
   }
 
   // Compute inline window style (draggable & resizable on desktop, full/tall sheet when maximized)
-  const windowStyle: React.CSSProperties = isMaximized
+  const windowStyle: React.CSSProperties | undefined = isDocked
+    ? undefined
+    : isMaximized
     ? {
         left: 16,
         top: 16,
@@ -469,14 +502,18 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
         height: rect.h,
       };
 
-  // ── 2. 弹出式可拖拽、可缩放对话框窗口 (Draggable & Resizable Floating Window) ──
+  // ── 2. 固定右栏或可拖拽浮动对话框窗口 ──
   return (
     <div
       style={windowStyle}
-      className="fixed z-50 flex flex-col bg-[#121215] border border-purple-500/45 rounded-3xl shadow-2xl overflow-hidden"
+      className={
+        isDocked
+          ? "w-full h-[calc(100vh-120px)] min-h-[620px] max-h-[820px] sticky top-20 flex flex-col bg-[var(--rgm-card)] border border-[var(--rgm-border)] border-t-[3px] border-t-sky-500 rounded-3xl shadow-xl overflow-hidden"
+          : "fixed z-50 flex flex-col bg-[#121215] border border-purple-500/45 rounded-3xl shadow-2xl overflow-hidden"
+      }
     >
       {/* 8-Direction Invisible Resize Handles (Edges + Corners) */}
-      {!isMaximized && (
+      {!isDocked && !isMaximized && (
         <>
           {/* Top / Bottom / Left / Right Edges */}
           <div
@@ -529,14 +566,14 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
         </>
       )}
 
-      {/* Draggable Dialog Top Header */}
+      {/* Draggable / Docked Top Header */}
       <div
-        onMouseDown={startMove}
-        onTouchStart={startMove}
-        onDoubleClick={handleToggleMaximize}
-        title="按住顶部标题栏可自由拖动窗口位置（双击可最大化/还原）"
+        onMouseDown={isDocked ? undefined : startMove}
+        onTouchStart={isDocked ? undefined : startMove}
+        onDoubleClick={isDocked ? undefined : handleToggleMaximize}
+        title={isDocked ? "Canova AI 教练在线诊断舱" : "按住顶部标题栏可自由拖动窗口位置（双击可最大化/还原）"}
         className={`px-4 py-3 bg-gradient-to-r from-purple-950/60 via-[#18181c] to-[#18181c] border-b border-white/10 flex items-center justify-between gap-2 shrink-0 select-none ${
-          isMaximized ? "cursor-default" : "cursor-move"
+          isDocked || isMaximized ? "cursor-default" : "cursor-move"
         }`}
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -545,13 +582,15 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <h2 className="text-sm font-black text-white truncate">Canova 科学教练对话舱</h2>
-              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
-                <Move className="w-2.5 h-2.5" /> 可拖拽 / 调尺寸
+              <h2 className="text-sm font-black text-white truncate">
+                {isDocked ? "Canova AI 教练舱" : "Canova 科学教练对话舱"}
+              </h2>
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                {isDocked ? "在线诊断" : <><Move className="w-2.5 h-2.5" /> 可拖拽 / 调尺寸</>}
               </span>
             </div>
             <p className="text-[11px] text-zinc-400 truncate">
-              按住标题栏拖动位置 · 拖拽四边或右下角调整大小
+              {isDocked ? "基于训练情况 · 周期课表 · 身体反应三支柱调课" : "按住标题栏拖动位置 · 拖拽四边或右下角调整大小"}
             </p>
           </div>
         </div>
@@ -566,22 +605,26 @@ export default function CoachChatBox({ uid, onPlanUpdated }: CoachChatBoxProps) 
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingContext ? "animate-spin text-purple-400" : ""}`} />
           </button>
-          <button
-            type="button"
-            onClick={handleToggleMaximize}
-            className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition cursor-pointer"
-            title={isMaximized ? "还原窗口尺寸" : "最大化窗口"}
-          >
-            {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsOpen(false)}
-            className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 border border-white/10 text-zinc-400 hover:text-rose-300 transition cursor-pointer"
-            title="收起为右下角浮标"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {!isDocked && (
+            <>
+              <button
+                type="button"
+                onClick={handleToggleMaximize}
+                className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition cursor-pointer"
+                title={isMaximized ? "还原窗口尺寸" : "最大化窗口"}
+              >
+                {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 border border-white/10 text-zinc-400 hover:text-rose-300 transition cursor-pointer"
+                title="收起为右下角浮标"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

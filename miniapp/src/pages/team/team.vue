@@ -14,40 +14,90 @@
       <view class="sbb-placeholder" />
     </view>
 
-    <!-- ── 大群精简条：仅在未选择跑团，或当前跑团隶属于该大群时展示在顶部，避免独立跑团被误认为隶属大群 ── -->
-    <view v-if="currentOrg && !activeSection && (!currentClub || currentClub.org_id === currentOrg.id)" class="org-compact-card" @click="openSection('org')">
+    <!-- ── 3-in-1 跑团极简顶栏（已入团） ── -->
+    <view v-if="currentClub && !activeSection" class="t3-topbar">
+      <view class="t3-club-picker" @click="openAllClubsModal">
+        <image class="t3-club-logo" :src="currentClub.logo_url || '/static/logo-square.png'" mode="aspectFill" />
+        <view class="t3-club-meta">
+          <view class="t3-club-name-row">
+            <text class="t3-club-name">{{ currentClub.name }}</text>
+            <RgmIcon name="chevron-down" :size="24" color="muted" />
+            <text v-if="userClubs.length > 1" class="t3-club-count">{{ userClubs.length }}团</text>
+          </view>
+          <view class="t3-sub-pills">
+            <view
+              v-if="currentOrg && (!currentClub.org_id || currentClub.org_id === currentOrg.id)"
+              class="t3-sub-pill"
+              :class="{ 'is-warn': currentOrg.status !== 'confirmed' }"
+              @click.stop="openSection('org')"
+            >
+              <view v-if="currentOrg.status !== 'confirmed'" class="t3-warn-dot" />
+              <text class="t3-sub-pill-txt">{{ currentOrg.name }} · {{ orgStatusShort }}</text>
+            </view>
+            <text v-else class="t3-sub-tag">{{ currentClub.org_id ? (currentClub.org_name || '大群分队') : '独立公开跑团' }}</text>
+            <text v-if="mentorshipData.my_mentees?.length > 0" class="t3-sub-tag">· 师徒 {{ mentorshipData.my_mentees.length }}/3</text>
+          </view>
+        </view>
+      </view>
+      <view class="t3-top-actions">
+        <!-- #ifdef MP-WEIXIN -->
+        <button
+          class="rgm-icon-btn t3-icon-reset"
+          open-type="share"
+          data-share-type="club"
+          :data-club-id="currentClub?.id"
+          :data-club-name="currentClub?.name"
+          :data-invite-code="currentClub?.invite_code || ''"
+        >
+          <RgmIcon name="share" :size="30" color="ink" />
+        </button>
+        <!-- #endif -->
+        <view class="rgm-icon-btn" @click="openReportModal">
+          <RgmIcon name="trophy" :size="30" color="brand" />
+        </view>
+        <view
+          v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev"
+          class="t3-role-pill is-coach"
+          @click="goToCockpitPage"
+        >
+          <text class="t3-role-pill-txt">教练台</text>
+        </view>
+        <view
+          v-if="isClubManager"
+          class="t3-role-pill"
+          @click="openSection('manage')"
+        >
+          <view v-if="clubNewMembersSummary.pending_setup_count > 0" class="t3-warn-dot" />
+          <text class="t3-role-pill-txt">管理</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- ── 已加入大群体但未加入任何下属跑团时：轻量顶部切换提示 ── -->
+    <view v-if="currentOrg && !currentClub && !activeSection" class="org-compact-card" @click="openSection('org')">
       <view class="occ-left">
-        <text class="occ-icon">🏛️</text>
+        <RgmIcon name="shield" :size="34" color="brand" />
         <view class="occ-meta">
           <view class="occ-title-row">
             <text class="occ-title">{{ currentOrg.name }} 大群</text>
-            <text v-if="currentClub?.org_id === currentOrg.id" class="occ-rel-pill">当前跑团上级大群</text>
+            <text class="occ-rel-pill">{{ orgStatusShort }}</text>
           </view>
           <text class="occ-desc">{{ orgStatusText }}</text>
         </view>
       </view>
-      <text class="occ-action" :class="{ warn: currentOrg.status !== 'confirmed' }">{{ currentOrg.status === 'confirmed' ? '大群详情 ›' : (currentOrg.status === 'expired' ? '查看 ›' : '去处理 ›') }}</text>
+      <text class="occ-action" :class="{ warn: currentOrg.status !== 'confirmed' }">{{ currentOrg.status === 'confirmed' ? '详情 ›' : '去处理 ›' }}</text>
     </view>
 
-    <!-- ── 🚩 已加入大群体但未加入任何下属跑团时 ── -->
     <view v-if="currentOrg && userClubs.length === 0 && !activeSection" class="subclubs-entry-section">
-      <view class="section-card choose-subclub-card">
+      <view class="rgm-card choose-subclub-card">
         <view class="csc-header-row" style="display: flex; align-items: center; justify-content: space-between;">
-          <view class="title-with-icon">
-            <text class="icon">🚩</text>
-            <text class="card-title">选择加入【{{ currentOrg.name }}】分队</text>
-          </view>
-          <view
-            style="padding: 8rpx 20rpx; border-radius: 999rpx; background: rgba(252, 76, 2, 0.15); border: 1rpx solid rgba(252, 76, 2, 0.45); color: #fc4c02; font-size: 22rpx; font-weight: 700;"
-            @click="openCreateClubModal"
-          >
-            ✨ 自建跑团
+          <text class="card-title">选择加入【{{ currentOrg.name }}】分队</text>
+          <view class="t3-role-pill is-brand" @click="openCreateClubModal">
+            <text class="t3-role-pill-txt">+ 自建跑团</text>
           </view>
         </view>
         <text class="csc-intro-text">已认证：{{ currentOrg.class_name }} {{ currentOrg.real_name }}</text>
-        <view v-if="orgSubClubs.length === 0" class="empty-clubs-text">
-          暂无分队
-        </view>
+        <view v-if="orgSubClubs.length === 0" class="empty-clubs-text">暂无分队</view>
         <view v-else class="subclubs-grid-list">
           <view v-for="sc in orgSubClubs" :key="sc.id" class="subclub-item-box">
             <image class="sc-logo-img" :src="sc.logo_url || '/static/logo-square.png'" mode="aspectFill" />
@@ -55,424 +105,245 @@
               <view class="sc-name-line">
                 <text class="sc-name-title">{{ sc.name }}</text>
                 <text class="mode-badge-pill" :class="sc.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
-                  {{ sc.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                  {{ sc.join_mode === 'invite' ? '需邀请码' : '自由入团' }}
                 </text>
-                <text class="sc-city-tag">📍 {{ sc.city || '上海' }}</text>
+                <text class="sc-city-tag">{{ sc.city || '上海' }}</text>
               </view>
-              <text v-if="sc.description" class="sc-desc-line">{{ sc.description }}</text>
-              <text class="sc-meta-line">团长: {{ sc.owner_name || '平台指定' }} · {{ sc.member_count || 1 }} 位团员</text>
+              <text class="sc-meta-line">团长: {{ sc.owner_name || '平台指定' }} · {{ sc.member_count || 1 }} 人</text>
             </view>
             <button class="sc-join-action-btn" :class="{ 'btn-invite-mode': sc.join_mode === 'invite' }" :loading="joiningClubId === sc.id" @click="handleJoinClubWithCheck(sc)">
-              {{ sc.join_mode === 'invite' ? '🔑 凭码加入' : '+ 自由加入' }}
+              {{ sc.join_mode === 'invite' ? '凭码加入' : '加入' }}
             </button>
           </view>
         </view>
       </view>
     </view>
 
-    <!-- ── 跑团快速切换横向标签栏 (仅在加入跑团后显示) ── -->
-    <view v-if="userClubs.length > 0 && !activeSection" class="clubs-switcher-wrap">
-      <scroll-view scroll-x class="clubs-switcher-scroll" :show-scrollbar="false">
-        <view class="clubs-switcher-inner">
-          <view
-            v-for="c in userClubs"
-            :key="c.id"
-            class="club-tab-pill"
-            :class="{ active: currentClub?.id === c.id }"
-            @click="handleSwitchClub(c)"
-          >
-            <image
-              class="tab-club-logo"
-              :src="c.logo_url || '/static/logo-square.png'"
-              mode="aspectFill"
-            />
-            <text class="tab-club-aff-icon">{{ c.org_id ? '🏛️' : '🌐' }}</text>
-            <text class="tab-club-name">{{ c.name }}</text>
-            <text v-if="currentClub?.id === c.id" class="tab-active-check">✓</text>
-          </view>
-          <view class="club-tab-pill tab-browse-btn" @click="openAllClubsModal">
-            <text class="tab-browse-icon">＋ 切换/发现</text>
-          </view>
-        </view>
-      </scroll-view>
-    </view>
-
     <!-- If user belongs to a club -->
     <view v-if="currentClub">
-      <!-- ── Header: Club Hero ── -->
-      <view v-if="!activeSection" class="club-hero-card">
-        <view class="hero-top">
-          <image class="club-logo" :src="currentClub.logo_url || '/static/logo-square.png'" mode="aspectFill" />
-          <view class="club-text">
-            <view class="name-row">
-              <text class="club-name">{{ currentClub.name }}</text>
-              <text class="role-tag" :class="'role-' + currentRole">
-                {{ currentRole === "owner" ? "👑 团长" : currentRole === "coach" ? "🧢 教练" : "🏃 团员" }}
-              </text>
-              <text v-if="mentorshipData.my_mentees?.length > 0" class="role-tag role-member">
-                🥋 师傅 ({{ mentorshipData.my_mentees.length }}/3)
-              </text>
-            </view>
-            <view class="hero-affiliation-row">
-              <view
-                v-if="currentClub.org_id"
-                class="hero-aff-pill is-org"
-                @click.stop="openSection('org')"
-              >
-                <text class="hap-txt">🏛️ {{ currentClub.org_name || currentOrg?.name || '大群' }} · 分队 ›</text>
-              </view>
-              <view v-else class="hero-aff-pill is-indep">
-                <text class="hap-txt">🌐 独立公开跑团</text>
-              </view>
-              <view class="hero-aff-pill" @click.stop="openAllClubsModal">
-                <text class="hap-txt">⇄ 切换跑团 ({{ userClubs.length }}) ›</text>
-              </view>
-            </view>
-            <text v-if="currentClub.description" class="club-desc">{{ currentClub.description }}</text>
-            <view class="hero-action-buttons-row">
-              <!-- #ifdef MP-WEIXIN -->
-              <button class="club-share-invite-btn primary-btn" open-type="share" data-share-type="club" :data-club-id="currentClub?.id" :data-club-name="currentClub?.name" :data-invite-code="currentClub?.invite_code || ''">
-                <text class="csib-icon">📤</text>
-                <text class="csib-text">邀请入团</text>
-              </button>
-              <!-- #endif -->
-              <button
-                class="club-share-invite-btn secondary-btn"
-                @click.stop="openReportModal"
-              >
-                <text class="csib-icon">📊</text>
-                <text class="csib-text">战报海报</text>
-              </button>
-              <button
-                class="club-share-invite-btn secondary-btn"
-                @click.stop="openCreateClubModal"
-              >
-                <text class="csib-icon">✨</text>
-                <text class="csib-text">自建跑团</text>
-              </button>
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <!-- ── 🚫 跑团访问权限已暂停阻断屏 ── -->
-      <view v-if="(currentClub.is_access_suspended || isCurrentClubSuspended) && activeSection !== 'org'" class="section-card club-suspended-block-card">
+      <!-- ── 跑团访问权限已暂停阻断屏 ── -->
+      <view v-if="(currentClub.is_access_suspended || isCurrentClubSuspended) && activeSection !== 'org'" class="rgm-card club-suspended-block-card">
         <view class="csb-icon-box">
-          <text class="csb-icon">🚫</text>
+          <RgmIcon name="lock" :size="48" color="red" />
         </view>
         <text class="csb-title">大群访问权限已暂停</text>
         <text class="csb-desc">
           跑团【{{ currentClub.name }}】隶属于【{{ currentClub.org_name || '大群' }}】。{{ currentSuspensionReason || '2周临时访问期已过，请补齐必填资料并等待管理员审核。' }}
         </text>
         <view class="csb-btn-row">
-          <button class="csb-btn primary" @click="goToProfilePage">
-            📝 立即前往个人中心补齐必填资料
-          </button>
-          <button v-if="userClubs.length > 1" class="csb-btn secondary" @click="openAllClubsModal">
-            ⇄ 切换至其他跑团
-          </button>
+          <button class="csb-btn primary" @click="goToProfilePage">前往个人中心补齐资料</button>
+          <button v-if="userClubs.length > 1" class="csb-btn secondary" @click="openAllClubsModal">切换至其他跑团</button>
         </view>
       </view>
 
       <!-- 正常访问内容容器 -->
       <view v-else>
-        <!-- ── 🏃 我的即将参加约跑待办提醒卡片 (Upcoming Group Run Banner) ── -->
-        <view v-if="nextUpcomingRun && !activeSection" class="upcoming-run-banner-card" @click="handleOpenMap(nextUpcomingRun)">
-          <view class="urb-header">
-            <view class="urb-badge">
-              <view class="urb-badge-pulse" />
-              <text class="urb-badge-text">🏃 即将参加的约跑</text>
-            </view>
-            <text class="urb-countdown">{{ getCountdownText(nextUpcomingRun.meet_time || nextUpcomingRun.start_date) }}</text>
-          </view>
-          <view class="urb-body">
-            <image class="urb-thumb" :src="nextUpcomingRun.cover_image || 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80'" mode="aspectFill" />
-            <view class="urb-info">
-              <text class="urb-title">{{ nextUpcomingRun.title }}</text>
-              <view class="urb-meta-row">
-                <text class="urb-icon">⏰</text>
-                <text class="urb-meta-text highlight">{{ formatMeetTime(nextUpcomingRun.meet_time || nextUpcomingRun.start_date) }}</text>
-              </view>
-              <view class="urb-meta-row">
-                <text class="urb-icon">📍</text>
-                <text class="urb-meta-text">{{ nextUpcomingRun.location || '跑团集合点' }}</text>
-              </view>
-            </view>
-          </view>
-          <view class="urb-actions-row">
-            <button class="urb-action-btn reminder-btn" @click.stop="handleAddToCalendar(nextUpcomingRun)">
-              🔔 设为手机日历提醒
-            </button>
-            <button class="urb-action-btn map-btn" @click.stop="handleOpenMap(nextUpcomingRun)">
-              📍 导航集合点 ›
-            </button>
-          </view>
-        </view>
-
         <template v-if="!activeSection">
-        <!-- ── 🥇 本月英雄榜预览：我的排名 + 前三名，点击进入完整榜单与动态 ── -->
-        <view class="section-card rank-teaser-card" @click="goToRankPage()">
-          <view class="rt-header">
-            <text class="rt-title">🥇 本月英雄榜</text>
-            <text class="rt-link">完整榜单 ›</text>
-          </view>
-          <view class="rt-my-row">
-            <template v-if="myRankItem">
-              <text class="rt-my-rank">我的排名 #{{ myRankItem.rank }}</text>
-              <text class="rt-my-meta">{{ myRankItem.distance_km }} km · 目标完成 {{ myRankItem.progress_pct || 0 }}%</text>
-            </template>
-            <text v-else class="rt-my-meta">本月暂无跑量记录</text>
-          </view>
-          <view v-if="topThree.length" class="rt-top-list">
-            <view v-for="item in topThree" :key="item.user_id" class="rt-top-item" :class="{ 'is-me': item.user_id === user?.id }">
-              <text class="rt-medal">{{ item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : '🥉' }}</text>
-              <image class="rt-avatar" :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
-              <text class="rt-name">{{ item.display_name }}</text>
-              <text class="rt-km">{{ item.distance_km }} km</text>
-            </view>
-          </view>
-          <text v-else class="rt-empty">本月暂无团员打卡数据</text>
-        </view>
-
-        <!-- ── 🥋 我的师徒（1对1传帮带 · 最多带3位徒弟 · 同大群可跨跑团） ── -->
-        <view class="section-card mentorship-card">
-          <view class="rt-header" style="margin-bottom: 16rpx; display: flex; align-items: center; justify-content: space-between; gap: 10rpx; flex-wrap: nowrap;">
-            <view style="display: flex; align-items: center; gap: 8rpx; flex-wrap: nowrap; min-width: 0; flex: 1;">
-              <text class="rt-title" style="white-space: nowrap; flex-shrink: 0; font-size: 27rpx;">🥋 师徒</text>
-              <text class="term-info" @click.stop="explainTerm('mentorship')">ⓘ</text>
-              <text style="font-size: 19rpx; font-weight: 600; padding: 3rpx 12rpx; border-radius: 999rpx; background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08)); color: var(--rgm-text-2, #a1a1aa); border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.14)); white-space: nowrap; flex-shrink: 0;">
-                徒弟 {{ mentorshipData.my_mentees?.length || 0 }}/{{ mentorshipData.max_mentees || 3 }}
-              </text>
-              <text v-if="currentOrg" style="font-size: 19rpx; font-weight: 600; color: var(--rgm-text-2, #a1a1aa); background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08)); border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.14)); padding: 3rpx 12rpx; border-radius: 999rpx; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210rpx;">
-                {{ currentOrg.name }}跨团
-              </text>
-            </view>
-            <text class="rt-link" style="white-space: nowrap; flex-shrink: 0;" @click="openMentorshipModal">+ 结对 ›</text>
-          </view>
-
-          <!-- 我的师傅（最多 1 位） -->
-          <view
-            v-if="mentorshipData.my_mentor"
-            style="display: flex; align-items: center; justify-content: space-between; padding: 16rpx 20rpx; border-radius: 18rpx; background: var(--rgm-card-2, #18181f); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.12)); margin-bottom: 16rpx;"
-          >
-            <view style="display: flex; align-items: center; gap: 16rpx;">
-              <image
-                :src="mentorshipData.my_mentor.avatar_url || '/static/logo-square.png'"
-                mode="aspectFill"
-                style="width: 68rpx; height: 68rpx; border-radius: 50%; border: 2rpx solid var(--rgm-line, rgba(255,255,255,0.2));"
-              />
-              <view style="display: flex; flex-direction: column; gap: 4rpx;">
-                <view style="display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap;">
-                  <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">
-                    我的师傅：{{ mentorshipData.my_mentor.display_name }}
-                  </text>
-                  <text style="font-size: 19rpx; color: var(--rgm-text-2, #a1a1aa); background: var(--rgm-tint-2, rgba(255,255,255,0.08)); padding: 2rpx 10rpx; border-radius: 8rpx; font-weight: 600;">
-                    {{ mentorshipData.my_mentor.club_name || '同大群戈友' }}
-                  </text>
-                </view>
-                <text style="font-size: 21rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  已共享数据 · VDOT {{ mentorshipData.my_mentor.vdot || '—' }}
-                </text>
+          <!-- ── 默认昵称轻引导条（原位 3 秒一键设置微信头像昵称） ── -->
+          <view v-if="needsWechatNickname && !teamNickBannerDismissed" class="team-nick-banner" @click="openTeamQuickNickModal">
+            <view class="tnb-left">
+              <RgmIcon name="users" :size="32" color="brand" />
+              <view class="tnb-texts">
+                <text class="tnb-title">完善微信昵称，让跑友认出你</text>
+                <text class="tnb-sub">当前显示「{{ user?.display_name || '默认跑者' }}」，3 秒一键换上微信昵称/头像</text>
               </view>
             </view>
-            <text
-              style="font-size: 21rpx; color: var(--rgm-text-3, #71717a); padding: 8rpx 12rpx; white-space: nowrap;"
-              @click.stop="handleUnbindMentorship(mentorshipData.my_mentor.mentor_uid, user?.id, mentorshipData.my_mentor.display_name)"
-            >
-              解绑
-            </text>
+            <view class="tnb-right">
+              <text class="tnb-cta">去设置 ›</text>
+              <text class="tnb-close" @click.stop="dismissTeamNickBanner">✕</text>
+            </view>
           </view>
 
-          <!-- 我的徒弟列表（最多 3 位，展示训练与休息数据摘要） -->
-          <view v-if="mentorshipData.my_mentees && mentorshipData.my_mentees.length > 0" style="display: flex; flex-direction: column; gap: 14rpx;">
-            <view
-              v-for="m in mentorshipData.my_mentees"
-              :key="m.mentee_uid"
-              style="padding: 20rpx; border-radius: 20rpx; background: var(--rgm-card-2, #18181f); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.09));"
-              @click="openMenteeDetailModal(m.mentee_uid)"
-            >
-              <view style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx;">
-                <view style="display: flex; align-items: center; gap: 14rpx;">
-                  <image
-                    :src="m.avatar_url || '/static/logo-square.png'"
-                    mode="aspectFill"
-                    style="width: 64rpx; height: 64rpx; border-radius: 50%; border: 2rpx solid var(--rgm-line, rgba(255,255,255,0.2));"
-                  />
-                  <view style="display: flex; flex-direction: column; gap: 2rpx;">
-                    <view style="display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap;">
-                      <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-text, #ffffff);">{{ m.display_name }}</text>
-                      <text style="font-size: 19rpx; color: var(--rgm-text-2, #a1a1aa); background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08)); padding: 2rpx 10rpx; border-radius: 8rpx; font-weight: 600;">
-                        {{ m.club_name || '同大群跨团' }}
-                      </text>
-                    </view>
-                    <text style="font-size: 21rpx; color: var(--rgm-text-2, #a1a1aa);">
-                      今日：{{ m.training?.today_workout?.type || '休息恢复' }} {{ m.training?.today_workout?.target_km ? m.training.today_workout.target_km + 'km' : '' }}
-                      · {{ m.training?.today_workout?.completed ? '✅ 已打卡' : '⏳ 待完成' }}
-                    </text>
+          <!-- ── 即将参加的约跑 · 登机牌票券 (Boarding Pass) ── -->
+          <view v-if="nextUpcomingRun" class="rgm-ticket t3-ticket" @click="handleOpenGroupRunSpace(nextUpcomingRun)">
+            <view class="t3-ticket-top">
+              <view class="t3-ticket-badge">
+                <view class="urb-badge-pulse" />
+                <text class="t3-ticket-badge-txt">跑团约跑 · {{ getCountdownText(nextUpcomingRun.meet_time || nextUpcomingRun.start_date) }}</text>
+              </view>
+              <text class="t3-link" @click.stop="openSection('events')">全部 ({{ events.length }}) ›</text>
+            </view>
+            <text class="t3-ticket-title">{{ nextUpcomingRun.title }}</text>
+            <view class="t3-ticket-meta">
+              <view class="t3-meta-item">
+                <RgmIcon name="calendar" :size="24" color="brand" />
+                <text class="t3-meta-txt highlight">{{ formatMeetTime(nextUpcomingRun.meet_time || nextUpcomingRun.start_date) }}</text>
+              </view>
+              <view class="t3-meta-item">
+                <RgmIcon name="pin" :size="24" color="muted" />
+                <text class="t3-meta-txt">{{ nextUpcomingRun.location || '跑团集合点' }}</text>
+              </view>
+            </view>
+            <view class="rgm-ticket-perf" />
+            <view class="t3-ticket-actions">
+              <view class="t3-ticket-pill" @click.stop="handleAddToCalendar(nextUpcomingRun)">
+                <RgmIcon name="bell" :size="24" color="ink" />
+                <text class="t3-ticket-pill-txt">日历提醒</text>
+              </view>
+              <view class="t3-ticket-pill" @click.stop="handleOpenMap(nextUpcomingRun)">
+                <RgmIcon name="compass" :size="24" color="ink" />
+                <text class="t3-ticket-pill-txt">导航集合点</text>
+              </view>
+              <view class="t3-ticket-pill is-primary">
+                <text class="t3-ticket-pill-txt is-primary">集结详情 ›</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 无近期已报名约跑时：单行约跑与活动入口条 -->
+          <view v-else class="rgm-card t3-events-strip" @click="openSection('events')">
+            <view class="t3-es-left">
+              <RgmIcon name="calendar" :size="30" color="brand" />
+              <text class="t3-es-title">跑团约跑与拉练活动</text>
+              <text class="t3-es-count">{{ events.length }} 场</text>
+            </view>
+            <text class="t3-link">{{ isClubManager ? '查看 / 发起 ›' : '去报名 ›' }}</text>
+          </view>
+
+          <!-- ── 本月英雄榜 · 领奖台视觉卡 (#2 / #1 / #3) ── -->
+          <view class="rgm-card t3-podium-card" @click="goToRankPage()">
+            <view class="t3-sec-head">
+              <text class="t3-sec-title">本月英雄榜</text>
+              <text class="t3-link">完整榜单 ›</text>
+            </view>
+
+            <view v-if="podiumSlots.length > 0" class="t3-podium-stage">
+              <view
+                v-for="slot in podiumSlots"
+                :key="slot.user_id"
+                class="t3-podium-col"
+                :class="[slot.tierClass, { 'is-me': slot.user_id === user?.id }]"
+              >
+                <image
+                  class="t3-podium-avatar"
+                  :src="slot.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  mode="aspectFill"
+                />
+                <text class="t3-podium-name">{{ slot.display_name }}</text>
+                <text class="t3-podium-km">{{ slot.distance_km }} <text class="t3-podium-unit">km</text></text>
+                <view class="t3-podium-pedestal">
+                  <text class="t3-podium-rank">#{{ slot.rank }}</text>
+                </view>
+              </view>
+            </view>
+            <text v-else class="rt-empty">本月暂无团员跑量记录</text>
+
+            <view v-if="myRankItem" class="t3-my-rank-strip">
+              <text class="t3-my-rank-pos">我的排名 #{{ myRankItem.rank }}</text>
+              <text class="t3-my-rank-meta">{{ myRankItem.distance_km }} km · 目标达成 {{ myRankItem.progress_pct || 0 }}%</text>
+            </view>
+          </view>
+
+          <!-- ── 打卡动态 2 行精选预览 ── -->
+          <view class="rgm-card t3-feed-card" @click="goToRankPage('feed')">
+            <view class="t3-sec-head">
+              <text class="t3-sec-title">打卡动态</text>
+              <text class="t3-link">全部动态 ›</text>
+            </view>
+            <view v-if="clubFeedPreview.length > 0" class="t3-feed-list">
+              <view v-for="act in clubFeedPreview" :key="act.id" class="t3-feed-row">
+                <image
+                  class="t3-feed-avatar"
+                  :src="act.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                  mode="aspectFill"
+                />
+                <view class="t3-feed-mid">
+                  <view class="t3-feed-top">
+                    <text class="t3-feed-author">{{ act.display_name || '团员' }}</text>
+                    <text v-if="act.ai_journal && act.ai_journal.length > 12" class="t3-feed-coach-tag">已点评</text>
                   </view>
+                  <text class="t3-feed-sub">{{ act.name || '跑步训练' }} · {{ formatFeedAgo(act.start_time || act.start_date_local) }}</text>
                 </view>
-                <view style="display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx;">
-                  <text
-                    style="font-size: 20rpx; font-weight: 700; padding: 4rpx 12rpx; border-radius: 999rpx; white-space: nowrap;"
-                    :style="m.rest_and_recovery?.status_code === 'danger'
-                      ? 'background: rgba(239,68,68,0.14); color: var(--rgm-red, #ef4444);'
-                      : m.rest_and_recovery?.status_code === 'tired'
-                        ? 'background: var(--rgm-tint-2, rgba(245,158,11,0.14)); color: var(--rgm-text-2, #fbbf24);'
-                        : 'background: rgba(34,197,94,0.12); color: var(--rgm-green, #22c55e);'"
-                  >
-                    {{ m.rest_and_recovery?.status_label || '状态良好' }} (TSB {{ m.rest_and_recovery?.tsb ?? 0 }})
-                  </text>
-                  <text style="font-size: 20rpx; color: var(--rgm-brand-text, #fc4c02); font-weight: 600; white-space: nowrap;">详情 ›</text>
-                </view>
-              </view>
-
-              <!-- 休息与恢复四维速览条 -->
-              <view style="display: flex; justify-content: space-between; gap: 10rpx; padding-top: 12rpx; border-top: 1rpx dashed var(--rgm-line, rgba(255,255,255,0.08));">
-                <text style="font-size: 20rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  💓 静息心率 <text style="color: var(--rgm-text, #ffffff); font-weight: 700;">{{ m.rest_and_recovery?.resting_hr ? m.rest_and_recovery.resting_hr + 'bpm' : '—' }}</text>
-                </text>
-                <text style="font-size: 20rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  🧬 HRV <text style="color: var(--rgm-text, #ffffff); font-weight: 700;">{{ m.rest_and_recovery?.hrv ? m.rest_and_recovery.hrv + 'ms' : '—' }}</text>
-                </text>
-                <text style="font-size: 20rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  😴 睡眠 <text style="color: var(--rgm-text, #ffffff); font-weight: 700;">{{ m.rest_and_recovery?.sleep_score ? m.rest_and_recovery.sleep_score + '分' : (m.rest_and_recovery?.sleep_hours ? m.rest_and_recovery.sleep_hours + 'h' : '—') }}</text>
-                </text>
-                <text style="font-size: 20rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  🔋 恢复 <text style="color: var(--rgm-green, #22c55e); font-weight: 700;">{{ m.rest_and_recovery?.recovery_pct ? m.rest_and_recovery.recovery_pct + '%' : '—' }}</text>
-                </text>
+                <text class="t3-feed-km">{{ ((act.distance_meters || 0) / 1000).toFixed(1) }} km</text>
               </view>
             </view>
+            <text v-else class="rt-empty">暂无最近打卡，去动态区晒出第一跑 ›</text>
           </view>
 
-          <!-- 空状态提示 + 快捷入口 -->
-          <view v-else-if="!mentorshipData.my_mentor" style="padding: 8rpx 6rpx 6rpx;">
-            <view style="display: flex; gap: 14rpx;">
-              <button
-                style="flex: 1; margin: 0; height: 68rpx; line-height: 68rpx; font-size: 23rpx; font-weight: 700; border-radius: 16rpx; background: var(--rgm-card-2, #1f1f26); color: var(--rgm-text, #ffffff); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.14));"
-                @click="openMentorshipModal"
+          <!-- ── 师徒传帮带 · 单行头像状态环 ── -->
+          <view class="rgm-card t3-mentor-card">
+            <view class="t3-sec-head">
+              <view class="t3-head-left">
+                <text class="t3-sec-title">师徒传帮带</text>
+                <text class="term-info" @click.stop="explainTerm('mentorship')">ⓘ</text>
+                <text class="t3-count-chip">徒弟 {{ mentorshipData.my_mentees?.length || 0 }}/{{ mentorshipData.max_mentees || 3 }}</text>
+              </view>
+              <text class="t3-link" @click="openMentorshipModal">+ 结对 ›</text>
+            </view>
+
+            <view v-if="mentorshipData.my_mentor || (mentorshipData.my_mentees && mentorshipData.my_mentees.length > 0)" class="t3-mentor-strip">
+              <view
+                v-if="mentorshipData.my_mentor"
+                class="t3-mentor-chip is-mentor"
+                @click="handleUnbindMentorship(mentorshipData.my_mentor.mentor_uid, user?.id, mentorshipData.my_mentor.display_name)"
               >
-                🔍 团内结对
-              </button>
+                <view class="t3-ring is-blue">
+                  <image class="t3-ring-img" :src="mentorshipData.my_mentor.avatar_url || '/static/logo-square.png'" mode="aspectFill" />
+                </view>
+                <view class="t3-mentor-meta">
+                  <text class="t3-mentor-name">{{ mentorshipData.my_mentor.display_name }}</text>
+                  <text class="t3-mentor-sub">师傅 · VDOT {{ mentorshipData.my_mentor.vdot || '—' }}</text>
+                </view>
+              </view>
+              <view
+                v-for="m in mentorshipData.my_mentees"
+                :key="m.mentee_uid"
+                class="t3-mentor-chip"
+                @click="openMenteeDetailModal(m.mentee_uid)"
+              >
+                <view
+                  class="t3-ring"
+                  :class="m.rest_and_recovery?.status_code === 'danger' ? 'is-red' : m.rest_and_recovery?.status_code === 'tired' ? 'is-amber' : 'is-green'"
+                >
+                  <image class="t3-ring-img" :src="m.avatar_url || '/static/logo-square.png'" mode="aspectFill" />
+                </view>
+                <view class="t3-mentor-meta">
+                  <text class="t3-mentor-name">{{ m.display_name }}</text>
+                  <text class="t3-mentor-sub">
+                    {{ m.training?.today_workout?.completed ? '已打卡' : (m.training?.today_workout?.target_km ? m.training.today_workout.target_km + 'km' : '休息日') }} · TSB {{ m.rest_and_recovery?.tsb ?? 0 }}
+                  </text>
+                </view>
+              </view>
+            </view>
+            <view v-else class="t3-mentor-empty-row">
+              <view class="t3-ticket-pill" @click="openMentorshipModal">
+                <RgmIcon name="search" :size="24" color="ink" />
+                <text class="t3-ticket-pill-txt">团内结对</text>
+              </view>
               <!-- #ifdef MP-WEIXIN -->
-              <button
-                open-type="share"
-                data-share-type="mentor"
-                style="flex: 1; margin: 0; height: 68rpx; line-height: 68rpx; font-size: 23rpx; font-weight: 700; border-radius: 16rpx; background: var(--rgm-brand-tint, rgba(252, 76, 2, 0.14)); color: var(--rgm-brand-text, #fc4c02); border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));"
-              >
-                📤 微信邀请
+              <button class="t3-ticket-pill is-primary t3-share-btn-reset" open-type="share" data-share-type="mentor">
+                <RgmIcon name="share" :size="24" color="brand" />
+                <text class="t3-ticket-pill-txt is-primary">微信邀请</text>
               </button>
               <!-- #endif -->
             </view>
           </view>
-        </view>
 
-        <!-- ── 功能菜单：原来平铺的长列表拆成子页面，按需进入 ── -->
-        <view class="section-card team-menu-card">
-          <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev" class="pm-item" @click="goToCockpitPage">
-            <text class="pm-icon">🧢</text>
-            <view class="pm-meta">
-              <text class="pm-title">教练工作台</text>
+          <!-- ── 次要功能精简捷径条（替代 8 行冗长菜单） ── -->
+          <view class="t3-utility-row">
+            <view class="t3-util-chip" @click="showPersonalReportModal = true">
+              <text class="t3-util-txt">个人战报</text>
             </view>
-            <text class="pm-status ok">进入</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view class="pm-item" @click="openSection('events')">
-            <text class="pm-icon">🏃</text>
-            <view class="pm-meta">
-              <text class="pm-title">约跑与活动</text>
+            <view v-if="isClubManager" class="t3-util-chip" @click="openNewMembersScope('club')">
+              <text class="t3-util-txt">新队员({{ clubNewMembersSummary.pending_setup_count }})</text>
             </view>
-            <text class="pm-status" :class="{ ok: events.length > 0 }">{{ events.length }} 场</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view class="pm-item" @click="goToRankPage('feed')">
-            <text class="pm-icon">🔥</text>
-            <view class="pm-meta">
-              <text class="pm-title">打卡动态</text>
+            <view v-if="isSuperAdmin" class="t3-util-chip" @click="openNewMembersScope('unaffiliated')">
+              <text class="t3-util-txt">自由跑友</text>
             </view>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view class="pm-item" @click="openReportModal">
-            <text class="pm-icon">📊</text>
-            <view class="pm-meta">
-              <text class="pm-title">跑团周报 / 月报</text>
+            <view class="t3-util-chip" @click="openSection('org')">
+              <text class="t3-util-txt">{{ currentOrg ? '大群管理' : '大群认证' }}</text>
             </view>
-            <text class="pm-status ok">海报</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view class="pm-item" @click="showPersonalReportModal = true">
-            <text class="pm-icon">🖼️</text>
-            <view class="pm-meta">
-              <text class="pm-title">个人周报 / 月报</text>
+            <view class="t3-util-chip" @click="openCreateClubModal">
+              <text class="t3-util-txt">+ 自建跑团</text>
             </view>
-            <text class="pm-status ok">生成</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev || isSuperAdmin" class="pm-item" @click="openNewMembersScope('club')">
-            <text class="pm-icon">🌱</text>
-            <view class="pm-meta">
-              <text class="pm-title">新队员管理</text>
-            </view>
-            <text
-              class="pm-status"
-              :class="clubNewMembersSummary.pending_setup_count > 0 ? 'warn' : 'ok'"
+            <view
+              v-if="currentClub && !currentClub.is_virtual_unaffiliated"
+              class="t3-util-chip is-danger"
+              @click="openLeaveClubConfirmModal"
             >
-              {{ clubNewMembersSummary.new_7d_count > 0 ? `近7天 +${clubNewMembersSummary.new_7d_count}人` : (clubNewMembersSummary.pending_setup_count > 0 ? `${clubNewMembersSummary.pending_setup_count}人待设` : `${clubNewMembersSummary.total_members}人就绪`) }}
-            </text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view v-if="isSuperAdmin" class="pm-item" @click="openNewMembersScope('unaffiliated')">
-            <text class="pm-icon">🌍</text>
-            <view class="pm-meta">
-              <text class="pm-title">未入团自由跑友 (超管)</text>
+              <text class="t3-util-txt is-danger">退出</text>
             </view>
-            <text
-              class="pm-status"
-              :class="unaffiliatedSummary.pending_setup_count > 0 ? 'warn' : 'ok'"
-            >
-              {{ unaffiliatedSummary.total_members > 0 ? `${unaffiliatedSummary.total_members}人 · 绑表${unaffiliatedSummary.watch_bound_count}` : '查看名册' }}
-            </text>
-            <text class="pm-arrow">›</text>
           </view>
-          <view v-if="isClubManager" class="pm-item" @click="openSection('manage')">
-            <text class="pm-icon">👑</text>
-            <view class="pm-meta">
-              <text class="pm-title">{{ managerTitle }}</text>
-            </view>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view
-            v-if="(currentRole === 'owner' || isOwnerOrDev || isSuperAdmin) && !currentClub?.is_virtual_unaffiliated"
-            class="pm-item"
-            @click="handleOpenMembersModal"
-          >
-            <text class="pm-icon">👥</text>
-            <view class="pm-meta">
-              <text class="pm-title">队员管理与移出</text>
-            </view>
-            <text class="pm-status ok">{{ members.length }}人</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view class="pm-item" :class="{ 'pm-item-last': currentClub?.is_virtual_unaffiliated }" @click="openSection('org')">
-            <text class="pm-icon">🏛️</text>
-            <view class="pm-meta">
-              <text class="pm-title">{{ currentOrg ? currentOrg.name + ' 大群' : '大群认证' }}</text>
-            </view>
-            <text v-if="currentOrg" class="pm-status" :class="{ ok: currentOrg.status === 'confirmed', warn: currentOrg.status !== 'confirmed' }">{{ orgStatusShort }}</text>
-            <text class="pm-arrow">›</text>
-          </view>
-          <view
-            v-if="currentClub && !currentClub.is_virtual_unaffiliated"
-            class="pm-item pm-item-last"
-            @click="openLeaveClubConfirmModal"
-          >
-            <text class="pm-icon">🚪</text>
-            <view class="pm-meta">
-              <text class="pm-title" style="color: #ef4444;">退出当前跑团</text>
-            </view>
-            <text class="pm-status warn">{{ currentRole === 'owner' ? '需先移交团长' : '防误触保护' }}</text>
-            <text class="pm-arrow">›</text>
-          </view>
-        </view>
         </template>
 
         <!-- 子页面：管理中心（团长 / 教练 / 大群管理员 · 聚焦高频分享、战报、约跑与邀请） -->
@@ -826,8 +697,8 @@
               <view class="gr-part-left">
                 <view style="display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap;">
                   <text class="gr-part-title">👥 参团跑友 ({{ evt.participant_count || 0 }}人{{ evt.max_participants > 0 ? ' / 限' + evt.max_participants + '人' : '' }})</text>
-                  <text style="font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 999rpx; background: rgba(208, 253, 62, 0.14); color: var(--rgm-accent, #d0fd3e);">
-                    {{ evt.visibility_mode === 'public' ? '🌐 公开战报' : evt.visibility_mode === 'club_members' ? '👥 全团可见' : '🔒 仅报名者可见' }}
+                  <text style="font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand-text);">
+                    {{ evt.visibility_mode === 'public' ? '公开战报' : evt.visibility_mode === 'club_members' ? '全团可见' : '仅报名者可见' }}
                   </text>
                 </view>
                 <view v-if="evt.participants && evt.participants.length > 0" class="gr-avatars-stack">
@@ -925,112 +796,35 @@
     </view>
     </view>
 
-    <!-- ── Unjoined State: Free / Solo Runner View + Club Options ── -->
+    <!-- ── Unjoined State (D1): 发现跑团 | 凭邀请码 | 自由独跑 ── -->
     <view v-else-if="!activeSection" class="unjoined-club-view">
-      <view class="unjoined-hero-box">
-        <view class="unjoined-badge">🤝 寻找跑团与队友</view>
-        <text class="unjoined-hero-title">想要与队友合练备战？</text>
-        <view class="unjoined-btn-row">
-          <button class="unjoined-action-btn secondary-invite" @click="showJoinModal = true">
-            🔑 邀请码入团
-          </button>
-          <button
-            class="unjoined-action-btn primary-join"
-            @click="openCreateClubModal"
-          >
-            ✨ 自建跑团 (满3人解锁)
-          </button>
+      <view class="d1-hero-card">
+        <view class="d1-hero-top">
+          <view class="d1-hero-titles">
+            <text class="d1-hero-title">跑团与训练伙伴</text>
+            <text class="d1-hero-sub">加入跑团与队友合练，或保持自由跑者独立训练</text>
+          </view>
+          <view class="t3-role-pill is-brand" @click="openCreateClubModal">
+            <text class="t3-role-pill-txt">+ 自建跑团</text>
+          </view>
+        </view>
+        <view class="rgm-seg-bar" style="margin-top: 20rpx;">
+          <view class="rgm-seg-item" :class="{ active: d1Mode === 'discover' }" @click="d1Mode = 'discover'">推荐跑团</view>
+          <view class="rgm-seg-item" :class="{ active: d1Mode === 'code' }" @click="d1Mode = 'code'">凭邀请码</view>
+          <view class="rgm-seg-item" :class="{ active: d1Mode === 'solo' }" @click="d1Mode = 'solo'">自由独跑</view>
         </view>
       </view>
 
-      <!-- 🌍 未入团自由跑友同伴 · 基本状态互看卡片 -->
-      <view class="section-card unaffiliated-peers-card">
-        <view class="card-header-row" style="margin-bottom: 14rpx;">
-          <view class="title-with-icon">
-            <text class="icon">🌍</text>
-            <text class="card-title">{{ isSuperAdmin ? '未入团自由跑友名册 (超管)' : '自由跑友同伴 · 基本状态互看' }}</text>
-          </view>
-          <view
-            class="mini-action-btn"
-            style="padding: 8rpx 20rpx; border-radius: 999rpx; background: var(--rgm-brand-tint, rgba(252,76,2,0.14)); border: 1rpx solid var(--rgm-brand-line, rgba(252,76,2,0.4)); color: var(--rgm-brand-text, #fc4c02); font-size: 22rpx; font-weight: 700;"
-            @click="openNewMembersScope('unaffiliated')"
-          >
-            查看全部 ({{ unaffiliatedSummary.total_members }}) ›
-          </view>
+      <!-- Tab 1: Discover Clubs -->
+      <view v-if="d1Mode === 'discover'" class="rgm-card all-clubs-sec">
+        <view class="t3-sec-head">
+          <text class="t3-sec-title">平台跑团列表</text>
+          <text class="t3-count-chip">{{ filteredClubs.length }}/{{ allClubs.length }} 团</text>
         </view>
 
-        <view
-          style="padding: 14rpx 18rpx; border-radius: 14rpx; background: var(--rgm-card-2, #18181f); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.08)); margin-bottom: 18rpx;"
-        >
-          <text style="font-size: 21rpx; color: var(--rgm-text-2, #a1a1aa); line-height: 1.45; display: block;">
-            🤝 未加入任何跑团的跑友之间可相互查看基本状态（绑表、目标设定与月跑量进度）；🔒 不在同一个跑团的用户之间不能相互查看具体运动记录。
-          </text>
-        </view>
-
-        <!-- 汇总小指标 -->
-        <view style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12rpx; margin-bottom: 18rpx;">
-          <view class="nm-kpi-tile" style="padding: 14rpx 16rpx;" @click="openNewMembersScope('unaffiliated')">
-            <text class="nm-kpi-val highlight" style="font-size: 30rpx;">{{ unaffiliatedSummary.total_members }}<text class="nm-kpi-unit">人</text></text>
-            <text class="nm-kpi-label" style="font-size: 20rpx;">🌍 自由跑友</text>
-          </view>
-          <view class="nm-kpi-tile" style="padding: 14rpx 16rpx;" @click="openNewMembersScope('unaffiliated')">
-            <text class="nm-kpi-val ok" style="font-size: 30rpx;">{{ unaffiliatedSummary.watch_bound_count }}<text class="nm-kpi-unit">人</text></text>
-            <text class="nm-kpi-label" style="font-size: 20rpx;">⌚ 已绑表</text>
-          </view>
-          <view class="nm-kpi-tile" style="padding: 14rpx 16rpx;" @click="openNewMembersScope('unaffiliated')">
-            <text class="nm-kpi-val" :class="unaffiliatedSummary.goal_set_count > 0 ? 'ok' : 'warn'" style="font-size: 30rpx;">{{ unaffiliatedSummary.goal_set_count }}<text class="nm-kpi-unit">人</text></text>
-            <text class="nm-kpi-label" style="font-size: 20rpx;">🎯 已设目标</text>
-          </view>
-        </view>
-
-        <!-- 前3位自由跑友同伴预览 -->
-        <view v-if="unaffiliatedPreviewList.length > 0" style="display: flex; flex-direction: column; gap: 12rpx;">
-          <view
-            v-for="m in unaffiliatedPreviewList"
-            :key="m.user_id"
-            style="display: flex; align-items: center; justify-content: space-between; padding: 14rpx 18rpx; border-radius: 16rpx; background: var(--rgm-card-2, #18181f); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.08));"
-            @click="openMemberRunnerAnalysis(m)"
-          >
-            <view style="display: flex; align-items: center; gap: 14rpx; min-width: 0; flex: 1;">
-              <image
-                class="nm-avatar"
-                style="width: 64rpx; height: 64rpx;"
-                :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
-                mode="aspectFill"
-              />
-              <view style="display: flex; flex-direction: column; gap: 4rpx; min-width: 0; flex: 1;">
-                <view style="display: flex; align-items: center; gap: 8rpx; flex-wrap: wrap;">
-                  <text style="font-size: 25rpx; font-weight: 700; color: var(--rgm-text, #fff);">{{ m.display_name || '自由跑友' }}</text>
-                  <text class="nm-status-tag" :class="m.watch_bound ? 'ok' : 'warn'" style="font-size: 18rpx;">
-                    {{ m.watch_bound ? (m.watch_status_label || '已绑表') : '未绑表' }}
-                  </text>
-                  <text class="nm-status-tag" :class="m.goal_set ? 'ok' : 'warn'" style="font-size: 18rpx;">
-                    {{ m.goal_set ? '已设目标' : '未设目标' }}
-                  </text>
-                </view>
-                <text style="font-size: 20rpx; color: var(--rgm-text-2, #a1a1aa);">
-                  本月 {{ m.month_km || 0 }} / {{ m.monthly_target_km || 200 }} km · 周目标 {{ m.weekly_target_km || 50 }} km
-                </text>
-              </view>
-            </view>
-            <text style="font-size: 21rpx; color: var(--rgm-text-2, #a1a1aa); margin-left: 10rpx;">基本状态 ›</text>
-          </view>
-        </view>
-      </view>
-
-      <!-- All Created Clubs List -->
-      <view class="section-card all-clubs-sec">
-        <view class="sec-title-row">
-          <view class="title-left">
-            <text class="sec-title">🏆 平台跑团列表</text>
-            <text class="count-tag">{{ filteredClubs.length }} / {{ allClubs.length }} 个跑团</text>
-          </view>
-        </view>
-
-        <!-- 跑团所在地搜索与城市快捷筛选 -->
         <view class="club-search-filter-box">
           <view class="club-search-bar">
-            <text class="csb-search-icon">🔍</text>
+            <RgmIcon name="search" :size="28" color="muted" />
             <input
               class="csb-input"
               type="text"
@@ -1039,8 +833,6 @@
             />
             <text v-if="clubSearchText" class="csb-clear-icon" @click="clubSearchText = ''">✕</text>
           </view>
-
-          <!-- 城市快捷标签横向滚动 -->
           <scroll-view scroll-x class="city-chips-scroll" :show-scrollbar="false">
             <view class="city-chips-row">
               <view
@@ -1061,12 +853,9 @@
         </view>
 
         <view v-else class="clubs-list-wrap">
-          <!-- 1. 大群下属分队分组（仅已加入大群的用户可见） -->
           <view v-if="filteredOrgClubs.length > 0" class="club-group-block org-group-block">
             <view class="cgb-header org-header">
-              <view class="cgb-title-row">
-                <text class="cgb-title">🏛️ {{ currentOrg?.name || filteredOrgClubs[0]?.org_name || '大群' }} · 下属分队 ({{ filteredOrgClubs.length }})</text>
-              </view>
+              <text class="cgb-title">{{ currentOrg?.name || filteredOrgClubs[0]?.org_name || '大群' }} · 下属分队 ({{ filteredOrgClubs.length }})</text>
             </view>
             <view v-for="club in filteredOrgClubs" :key="club.id" class="club-select-card is-org-subclub">
               <image class="csc-logo" :src="club.logo_url || '/static/logo-square.png'" mode="aspectFill" />
@@ -1075,31 +864,27 @@
                   <text class="csc-name">{{ club.name }}</text>
                 </view>
                 <view class="csc-badges-row">
-                  <text class="org-tag-pill">🏛️ {{ club.org_name || currentOrg?.name || '大群' }}分队</text>
+                  <text class="org-tag-pill">{{ club.org_name || currentOrg?.name || '大群' }}</text>
                   <text class="mode-badge-pill" :class="club.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
-                    {{ club.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                    {{ club.join_mode === 'invite' ? '需邀请码' : '自由入团' }}
                   </text>
-                  <text class="csc-city">📍 {{ club.city || "上海" }}</text>
+                  <text class="csc-city">{{ club.city || "上海" }}</text>
                 </view>
-                <text v-if="club.description" class="csc-desc">{{ club.description }}</text>
                 <view class="csc-meta-row">
                   <text class="csc-meta">团长: {{ club.owner_name || "平台指定" }}</text>
                   <text class="csc-dot">·</text>
-                  <text class="csc-meta highlight">{{ club.member_count || 1 }} 位成员</text>
+                  <text class="csc-meta highlight">{{ club.member_count || 1 }} 人</text>
                 </view>
               </view>
               <button class="csc-join-btn" :class="{ 'btn-invite-mode': club.join_mode === 'invite' }" :loading="joiningClubId === club.id" @click="handleJoinClubWithCheck(club)">
-                {{ club.join_mode === 'invite' ? '🔑 凭码加入' : '加入' }}
+                {{ club.join_mode === 'invite' ? '凭码' : '加入' }}
               </button>
             </view>
           </view>
 
-          <!-- 2. 独立公开跑团分组 -->
           <view v-if="filteredIndepClubs.length > 0" class="club-group-block indep-group-block">
             <view class="cgb-header indep-header">
-              <view class="cgb-title-row">
-                <text class="cgb-title">🌐 独立公开跑团 ({{ filteredIndepClubs.length }})</text>
-              </view>
+              <text class="cgb-title">独立公开跑团 ({{ filteredIndepClubs.length }})</text>
             </view>
             <view v-for="club in filteredIndepClubs" :key="club.id" class="club-select-card">
               <image class="csc-logo" :src="club.logo_url || '/static/logo-square.png'" mode="aspectFill" />
@@ -1108,27 +893,110 @@
                   <text class="csc-name">{{ club.name }}</text>
                 </view>
                 <view class="csc-badges-row">
-                  <text class="org-tag-pill free-tag">🌐 独立跑团</text>
+                  <text class="org-tag-pill free-tag">独立跑团</text>
                   <text class="mode-badge-pill" :class="club.join_mode === 'invite' ? 'mode-invite' : 'mode-free'">
-                    {{ club.join_mode === 'invite' ? '🔒 需邀请码' : '🟢 自由入团' }}
+                    {{ club.join_mode === 'invite' ? '需邀请码' : '自由入团' }}
                   </text>
-                  <text class="csc-city">📍 {{ club.city || "上海" }}</text>
+                  <text class="csc-city">{{ club.city || "上海" }}</text>
                 </view>
-                <text v-if="club.description" class="csc-desc">{{ club.description }}</text>
                 <view class="csc-meta-row">
                   <text class="csc-meta">团长: {{ club.owner_name || "平台指定" }}</text>
                   <text class="csc-dot">·</text>
-                  <text class="csc-meta highlight">{{ club.member_count || 1 }} 位成员</text>
+                  <text class="csc-meta highlight">{{ club.member_count || 1 }} 人</text>
                 </view>
               </view>
               <button class="csc-join-btn" :class="{ 'btn-invite-mode': club.join_mode === 'invite' }" :loading="joiningClubId === club.id" @click="handleJoinClubWithCheck(club)">
-                {{ club.join_mode === 'invite' ? '🔑 凭码加入' : '加入' }}
+                {{ club.join_mode === 'invite' ? '凭码' : '加入' }}
               </button>
             </view>
           </view>
         </view>
       </view>
 
+      <!-- Tab 2: Join by Invite Code -->
+      <view v-if="d1Mode === 'code'" class="rgm-card d1-code-card">
+        <view class="t3-sec-head">
+          <text class="t3-sec-title">凭邀请码加入跑团</text>
+          <text class="t3-link" @click="openCreateClubModal">+ 自建跑团 ›</text>
+        </view>
+        <view v-if="needsWechatNickname" class="join-wx-profile-card" style="margin-bottom: 20rpx;">
+          <view class="jwp-row">
+            <!-- #ifdef MP-WEIXIN -->
+            <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+              <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
+              <RgmIcon v-else name="camera" :size="32" color="muted" />
+              <text class="jwp-avatar-sub">微信头像</text>
+            </button>
+            <!-- #endif -->
+            <view class="jwp-input-col">
+              <text class="jwp-label">昵称 *</text>
+              <input
+                type="nickname"
+                class="jwp-nickname-input"
+                v-model="joinRunnerNickname"
+                placeholder="点击一键填入微信昵称"
+                @blur="onJoinNicknameBlur"
+              />
+            </view>
+          </view>
+        </view>
+        <text class="d1-field-label">跑团专属邀请码</text>
+        <input
+          class="d1-code-input"
+          type="text"
+          maxlength="12"
+          placeholder="输入 4~8 位跑团邀请码"
+          v-model="inviteCodeInput"
+        />
+        <button class="d1-primary-cta" :loading="joiningClub" @click="handleJoinClub">
+          验证并加入跑团
+        </button>
+        <view v-if="!currentOrg" class="d1-org-code-link" @click="openOrgJoinModal()">
+          <text class="t3-link">我是高校戈友，凭码实名加入大群 ›</text>
+        </view>
+      </view>
+
+      <!-- Tab 3: Solo Runner & Unaffiliated Peers -->
+      <view v-if="d1Mode === 'solo'" class="rgm-card unaffiliated-peers-card">
+        <view class="t3-sec-head">
+          <view class="t3-head-left">
+            <text class="t3-sec-title">{{ isSuperAdmin ? '未入团自由跑友名册' : '自由跑者同伴状态' }}</text>
+          </view>
+          <text class="t3-link" @click="openNewMembersScope('unaffiliated')">查看全部 ({{ unaffiliatedSummary.total_members }}) ›</text>
+        </view>
+        <view class="d1-kpi-grid">
+          <view class="nm-kpi-tile" @click="openNewMembersScope('unaffiliated')">
+            <text class="nm-kpi-val highlight">{{ unaffiliatedSummary.total_members }}<text class="nm-kpi-unit">人</text></text>
+            <text class="nm-kpi-label">自由跑友</text>
+          </view>
+          <view class="nm-kpi-tile" @click="openNewMembersScope('unaffiliated')">
+            <text class="nm-kpi-val ok">{{ unaffiliatedSummary.watch_bound_count }}<text class="nm-kpi-unit">人</text></text>
+            <text class="nm-kpi-label">已绑手表</text>
+          </view>
+          <view class="nm-kpi-tile" @click="openNewMembersScope('unaffiliated')">
+            <text class="nm-kpi-val" :class="unaffiliatedSummary.goal_set_count > 0 ? 'ok' : 'warn'">{{ unaffiliatedSummary.goal_set_count }}<text class="nm-kpi-unit">人</text></text>
+            <text class="nm-kpi-label">已设目标</text>
+          </view>
+        </view>
+        <view v-if="unaffiliatedPreviewList.length > 0" class="d1-peer-list">
+          <view v-for="m in unaffiliatedPreviewList" :key="m.user_id" class="d1-peer-row" @click="openMemberRunnerAnalysis(m)">
+            <image class="d1-peer-avatar" :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+            <view class="d1-peer-info">
+              <view class="d1-peer-top">
+                <text class="d1-peer-name">{{ m.display_name || '自由跑友' }}</text>
+                <text class="nm-status-tag" :class="m.watch_bound ? 'ok' : 'warn'">{{ m.watch_bound ? (m.watch_status_label || '已绑表') : '未绑表' }}</text>
+                <text class="nm-status-tag" :class="m.goal_set ? 'ok' : 'warn'">{{ m.goal_set ? '已设目标' : '未设目标' }}</text>
+              </view>
+              <text class="d1-peer-sub">本月 {{ m.month_km || 0 }}/{{ m.monthly_target_km || 200 }} km · 周目标 {{ m.weekly_target_km || 50 }} km</text>
+            </view>
+            <text class="t3-link">档案 ›</text>
+          </view>
+        </view>
+        <view class="d1-solo-actions">
+          <button class="src-btn outline" @click="goToIndexPage">首页打卡同步</button>
+          <button class="src-btn primary" @click="goToCoachPage">AI 教练排课</button>
+        </view>
+      </view>
     </view>
 
     <!-- 子页面：新队员管理 & 未入团自由跑友名册（加入/注册时间、手表绑定状态、周/月目标设定状态） -->
@@ -1449,57 +1317,29 @@
       </view>
     </view>
 
-    <!-- ── 🏛️ 未加入大组织认证入口 (选填，支持多大群体) ── -->
-    <!-- 未加入大群：在「大群」子页面显示；未加入跑团的用户也在首页跑团列表下方看到 -->
-    <view v-if="!currentOrg && (activeSection === 'org' || (!activeSection && !currentClub))" class="grand-org-prompt-card">
+    <!-- 未加入大群：在「大群」子页面显示；未加入跑团的用户在「发现跑团」下看到 -->
+    <view v-if="!currentOrg && (activeSection === 'org' || (!activeSection && !currentClub && d1Mode === 'discover'))" class="grand-org-prompt-card">
       <view class="gop-badge-row">
-        <text class="gop-badge">🏛️ 大群认证</text>
+        <text class="gop-badge">大群认证</text>
         <text class="gop-code-pill" :class="targetDefaultOrg?.join_mode === 'free' ? 'pill-free' : 'pill-invite'">
-          {{ targetDefaultOrg?.join_mode === 'free' ? '🟢 自由入会' : '🔒 需邀请码' }}
+          {{ targetDefaultOrg?.join_mode === 'free' ? '自由入会' : '需邀请码' }}
         </text>
       </view>
       <text class="gop-title">加入【{{ targetDefaultOrg?.name || '高校戈友' }}】大群</text>
       <view class="gop-btn-group">
         <button class="gop-join-btn" :class="{ 'btn-free-mode': targetDefaultOrg?.join_mode === 'free' }" @click="openOrgJoinModal()">
-          {{ targetDefaultOrg?.join_mode === 'free' ? '🟢 实名加入' : '🔑 凭码认证加入' }}
+          {{ targetDefaultOrg?.join_mode === 'free' ? '实名加入' : '凭码认证加入' }}
         </button>
       </view>
     </view>
 
-
-    <!-- 未加入跑团：介绍类卡片放在跑团列表和大群提示之后 -->
-    <view v-if="!currentClub && !activeSection" class="unjoined-extra">
-      <view class="section-card unjoined-highlights">
-        <text class="unjoined-sec-title">加入跑团即可解锁：</text>
-        <view class="unjoined-highlight-item">
-          <text class="uh-icon">🥇</text>
-          <view class="uh-content">
-            <text class="uh-title">跑团月度跑量英雄榜</text>
-          </view>
-        </view>
-        <view class="unjoined-highlight-item">
-          <text class="uh-icon">🏆</text>
-          <view class="uh-content">
-            <text class="uh-title">专属跑量挑战赛与活动</text>
-          </view>
-        </view>
-        <view class="unjoined-highlight-item">
-          <text class="uh-icon">💬</text>
-          <view class="uh-content">
-            <text class="uh-title">跑友圈动态与 Canova教练互动</text>
-          </view>
-        </view>
-        <view class="unjoined-highlight-item">
-          <text class="uh-icon">🧢</text>
-          <view class="uh-content">
-            <text class="uh-title">全队体能罗盘</text>
-          </view>
-        </view>
-      </view>
-      <!-- ── 🚀 新手设定引导入口卡片 (快速一键配齐资料、跑团与手表) ── -->
+    <!-- 自由独跑页底部保留新手4步设定向导入口 -->
+    <view v-if="!currentClub && !activeSection && d1Mode === 'solo'" class="unjoined-extra">
       <view class="onboard-guide-banner" @click="goToOnboarding">
         <view class="ogb-left">
-          <view class="ogb-icon-circle">🚀</view>
+          <view class="ogb-icon-circle">
+            <RgmIcon name="zap" :size="30" color="brand" />
+          </view>
           <view class="ogb-meta">
             <view class="ogb-title-row">
               <text class="ogb-title">新手设定向导</text>
@@ -1511,26 +1351,6 @@
           <text class="ogb-action-txt">开始设定 ›</text>
         </view>
       </view>
-
-      <!-- ── 🏃 自由跑者独立训练模式专属卡片 ── -->
-      <view class="solo-runner-card">
-        <view class="src-top-row">
-          <view class="src-badge-box">
-            <text class="src-badge-icon">🏃</text>
-            <text class="src-badge-text">自由跑者独立训练中</text>
-          </view>
-        </view>
-        <text class="src-title">无需入团，全功能开放</text>
-        <view class="src-actions-row">
-          <button class="src-btn outline" @click="goToIndexPage">
-            ⌚ 首页打卡与手表同步
-          </button>
-          <button class="src-btn primary" @click="goToCoachPage">
-            💬 咨询 Canova教练
-          </button>
-        </view>
-      </view>
-
     </view>
 
     <!-- ── Member & Coach Management Modal (跑团成员与指定教练管理) ── -->
@@ -1599,163 +1419,127 @@
       </view>
     </view>
 
-    <!-- ── 🛡️ 防误触：团长移出队员二次确认弹窗 (Anti-Misoperation Remove Member Modal) ── -->
+    <!-- ── E4 防误触：团长移出队员二次确认弹窗 ── -->
     <view v-if="showRemoveMemberConfirmModal && targetMemberToRemove" class="modal-mask" @touchmove.stop.prevent>
-      <view class="modal-content" style="max-width: 640rpx; border: 2rpx solid rgba(239, 68, 68, 0.45);" @click.stop>
-        <view class="modal-header" style="border-bottom: 1rpx solid rgba(239, 68, 68, 0.2); padding-bottom: 20rpx;">
-          <view style="display: flex; align-items: center; gap: 10rpx;">
-            <text style="font-size: 34rpx;">⚠️</text>
-            <text class="modal-title" style="color: #ef4444;">防误触 · 移出跑团成员确认</text>
+      <view class="modal-content danger-modal-shell" @click.stop>
+        <view class="modal-header danger-modal-header">
+          <view class="danger-title-row">
+            <RgmIcon name="alert" :size="32" color="red" />
+            <text class="modal-title danger-title">移出跑团成员确认</text>
           </view>
           <text class="close-btn" @click="closeRemoveMemberConfirmModal">✕</text>
         </view>
 
-        <view style="padding: 24rpx 0; display: flex; flex-direction: column; gap: 20rpx;">
-          <!-- 被移出队员身份核对卡 -->
-          <view style="display: flex; align-items: center; gap: 20rpx; padding: 20rpx; border-radius: 20rpx; background: rgba(239, 68, 68, 0.08); border: 1rpx solid rgba(239, 68, 68, 0.28);">
+        <view class="danger-modal-body">
+          <view class="danger-target-card">
             <image
               :src="targetMemberToRemove.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
               mode="aspectFill"
-              style="width: 88rpx; height: 88rpx; border-radius: 50%; border: 2rpx solid rgba(239, 68, 68, 0.45); flex-shrink: 0;"
+              class="danger-target-avatar"
             />
-            <view style="display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0;">
-              <view style="display: flex; align-items: center; gap: 10rpx; flex-wrap: wrap;">
-                <text style="font-size: 30rpx; font-weight: 800; color: var(--rgm-text, #0f172a);">
-                  {{ targetMemberToRemove.display_name || '该成员' }}
-                </text>
-                <text style="font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 999rpx; background: rgba(239, 68, 68, 0.16); color: #ef4444; font-weight: 700;">
-                  {{ targetMemberToRemove.role === 'coach' ? '🧢 教练' : '🏃 队员' }}
-                </text>
+            <view class="danger-target-info">
+              <view class="danger-target-name-row">
+                <text class="danger-target-name">{{ targetMemberToRemove.display_name || '该成员' }}</text>
+                <text class="danger-role-pill">{{ targetMemberToRemove.role === 'coach' ? '教练' : '队员' }}</text>
               </view>
-              <text style="font-size: 22rpx; color: var(--rgm-text-2, #475569);">
-                加入时间：{{ (targetMemberToRemove.joined_at_display || targetMemberToRemove.joined_at || '近期').substring(0, 16) }} · 本月 {{ targetMemberToRemove.month_km || 0 }} km
+              <text class="danger-target-meta">
+                加入 {{ (targetMemberToRemove.joined_at_display || targetMemberToRemove.joined_at || '近期').substring(0, 16) }} · 本月 {{ targetMemberToRemove.month_km || 0 }} km
               </text>
             </view>
           </view>
 
-          <!-- 影响说明 -->
-          <view style="padding: 20rpx; border-radius: 18rpx; background: var(--rgm-card-2, #f8fafc); border: 1rpx solid var(--rgm-line, #e2e8f0); display: flex; flex-direction: column; gap: 10rpx;">
-            <text style="font-size: 23rpx; font-weight: 700; color: var(--rgm-text, #0f172a);">📌 移出说明（请仔细核对）：</text>
-            <text style="font-size: 22rpx; color: var(--rgm-text-2, #475569); line-height: 1.55;">
-              1. 移出后，【{{ targetMemberToRemove.display_name || '该成员' }}】将离开跑团【{{ currentClub?.name }}】，不再参与本团排行榜与打卡动态。
-            </text>
-            <text style="font-size: 22rpx; color: #059669; font-weight: 600; line-height: 1.55;">
-              2. 🛡️ 该跑友个人的所有历史跑步记录、手表绑定与跑力档案 100% 完整保留，不受任何影响。
-            </text>
+          <view class="danger-info-box">
+            <text class="danger-info-head">操作影响说明</text>
+            <text class="danger-info-line">1. 移出后将离开【{{ currentClub?.name }}】，不再参与本团榜单与动态。</text>
+            <text class="danger-info-safe">2. 个人历史跑步数据、手表连接与跑力档案 100% 完整保留。</text>
           </view>
 
-          <!-- 二次防误触勾选框 -->
           <view
-            style="display: flex; align-items: center; gap: 14rpx; padding: 18rpx 20rpx; border-radius: 16rpx; cursor: pointer;"
-            :style="removeMemberChecked
-              ? 'background: rgba(239, 68, 68, 0.12); border: 2rpx solid #ef4444;'
-              : 'background: var(--rgm-card-2, #f1f5f9); border: 2rpx dashed #94a3b8;'"
+            class="danger-check-row"
+            :class="{ checked: removeMemberChecked }"
             @click="removeMemberChecked = !removeMemberChecked"
           >
-            <text style="font-size: 32rpx;">{{ removeMemberChecked ? '☑️' : '⬜' }}</text>
-            <text style="font-size: 24rpx; font-weight: 700; color: var(--rgm-text, #0f172a); line-height: 1.4;">
+            <view class="danger-checkbox" :class="{ checked: removeMemberChecked }">
+              <RgmIcon v-if="removeMemberChecked" name="check" :size="22" color="#ffffff" />
+            </view>
+            <text class="danger-check-label">
               我已核对【{{ targetMemberToRemove.display_name || '该成员' }}】身份，确认将其移出本跑团
             </text>
           </view>
         </view>
 
-        <view style="display: flex; gap: 18rpx; margin-top: 8rpx;">
-          <button
-            style="flex: 1; height: 80rpx; line-height: 80rpx; border-radius: 18rpx; font-size: 26rpx; font-weight: 700; background: var(--rgm-card-2, #e2e8f0); color: var(--rgm-text, #334155); margin: 0;"
-            @click="closeRemoveMemberConfirmModal"
-          >
-            取消，保留队员
-          </button>
+        <view class="danger-footer-row">
+          <button class="danger-cancel-btn" @click="closeRemoveMemberConfirmModal">取消，保留队员</button>
           <button
             :disabled="!removeMemberChecked || removeMemberCountdown > 0 || removingMemberLoading"
             :loading="removingMemberLoading"
-            style="flex: 1.3; height: 80rpx; line-height: 80rpx; border-radius: 18rpx; font-size: 26rpx; font-weight: 800; margin: 0;"
-            :style="(!removeMemberChecked || removeMemberCountdown > 0)
-              ? 'background: #94a3b8; color: #ffffff; opacity: 0.65;'
-              : 'background: #ef4444; color: #ffffff; box-shadow: 0 8rpx 20rpx rgba(239, 68, 68, 0.35);'"
+            class="danger-confirm-btn"
+            :class="{ disabled: !removeMemberChecked || removeMemberCountdown > 0 }"
             @click="confirmRemoveMemberExecution"
           >
-            {{ removeMemberCountdown > 0 ? `请核对 (${removeMemberCountdown}s)` : (removeMemberChecked ? '确认移出该队员' : '请先勾选上方确认') }}
+            {{ removeMemberCountdown > 0 ? `请核对 (${removeMemberCountdown}s)` : (removeMemberChecked ? '确认移出该队员' : '请先勾选确认') }}
           </button>
         </view>
       </view>
     </view>
 
-    <!-- ── 🛡️ 防误触：队员主动退出跑团二次确认弹窗 (Anti-Misoperation Leave Club Modal) ── -->
+    <!-- ── E4 防误触：队员主动退出跑团二次确认弹窗 ── -->
     <view v-if="showLeaveClubConfirmModal && currentClub" class="modal-mask" @touchmove.stop.prevent>
-      <view class="modal-content" style="max-width: 640rpx; border: 2rpx solid rgba(239, 68, 68, 0.45);" @click.stop>
-        <view class="modal-header" style="border-bottom: 1rpx solid rgba(239, 68, 68, 0.2); padding-bottom: 20rpx;">
-          <view style="display: flex; align-items: center; gap: 10rpx;">
-            <text style="font-size: 34rpx;">🚪</text>
-            <text class="modal-title" style="color: #ef4444;">防误触 · 退出跑团确认</text>
+      <view class="modal-content danger-modal-shell" @click.stop>
+        <view class="modal-header danger-modal-header">
+          <view class="danger-title-row">
+            <RgmIcon name="alert" :size="32" color="red" />
+            <text class="modal-title danger-title">退出跑团确认</text>
           </view>
           <text class="close-btn" @click="closeLeaveClubConfirmModal">✕</text>
         </view>
 
-        <view style="padding: 24rpx 0; display: flex; flex-direction: column; gap: 20rpx;">
-          <!-- 即将退出的跑团信息卡 -->
-          <view style="display: flex; align-items: center; gap: 20rpx; padding: 20rpx; border-radius: 20rpx; background: rgba(239, 68, 68, 0.08); border: 1rpx solid rgba(239, 68, 68, 0.28);">
+        <view class="danger-modal-body">
+          <view class="danger-target-card">
             <image
               :src="currentClub.logo_url || '/static/logo-square.png'"
               mode="aspectFill"
-              style="width: 88rpx; height: 88rpx; border-radius: 20rpx; border: 2rpx solid rgba(239, 68, 68, 0.45); flex-shrink: 0;"
+              class="danger-target-avatar is-square"
             />
-            <view style="display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0;">
-              <text style="font-size: 30rpx; font-weight: 800; color: var(--rgm-text, #0f172a);">
-                {{ currentClub.name }}
-              </text>
-              <text style="font-size: 22rpx; color: var(--rgm-text-2, #475569);">
-                📍 {{ currentClub.city || '上海' }} · 当前身份：{{ currentRole === 'coach' ? '🧢 认证教练' : '🏃 跑团成员' }}
+            <view class="danger-target-info">
+              <text class="danger-target-name">{{ currentClub.name }}</text>
+              <text class="danger-target-meta">
+                {{ currentClub.city || '上海' }} · 当前身份：{{ currentRole === 'coach' ? '认证教练' : '跑团成员' }}
               </text>
             </view>
           </view>
 
-          <!-- 退出跑团说明 -->
-          <view style="padding: 20rpx; border-radius: 18rpx; background: var(--rgm-card-2, #f8fafc); border: 1rpx solid var(--rgm-line, #e2e8f0); display: flex; flex-direction: column; gap: 10rpx;">
-            <text style="font-size: 23rpx; font-weight: 700; color: var(--rgm-text, #0f172a);">📌 退出跑团说明：</text>
-            <text style="font-size: 22rpx; color: var(--rgm-text-2, #475569); line-height: 1.55;">
-              1. 退出后，您将离开【{{ currentClub.name }}】的月度英雄榜、跑友圈打卡动态与跑团约跑活动。
-            </text>
-            <text style="font-size: 22rpx; color: #059669; font-weight: 600; line-height: 1.55;">
-              2. 🛡️ 您的所有个人跑步记录、手表连接、VDOT 跑力与个人训练计划 100% 完整保留，绝不丢失。
-            </text>
-            <text style="font-size: 22rpx; color: var(--rgm-text-2, #475569); line-height: 1.55;">
-              3. 若本跑团开启了邀请码准入，后续重新加入需再次输入邀请码。
-            </text>
+          <view class="danger-info-box">
+            <text class="danger-info-head">退出影响说明</text>
+            <text class="danger-info-line">1. 退出后将离开【{{ currentClub.name }}】英雄榜、动态与约跑活动。</text>
+            <text class="danger-info-safe">2. 个人历史跑步数据、手表连接、VDOT 与个人课表 100% 完整保留。</text>
+            <text class="danger-info-line">3. 若跑团开启邀请码准入，后续重新加入需再次输入邀请码。</text>
           </view>
 
-          <!-- 二次防误触勾选框 -->
           <view
-            style="display: flex; align-items: center; gap: 14rpx; padding: 18rpx 20rpx; border-radius: 16rpx; cursor: pointer;"
-            :style="leaveClubChecked
-              ? 'background: rgba(239, 68, 68, 0.12); border: 2rpx solid #ef4444;'
-              : 'background: var(--rgm-card-2, #f1f5f9); border: 2rpx dashed #94a3b8;'"
+            class="danger-check-row"
+            :class="{ checked: leaveClubChecked }"
             @click="leaveClubChecked = !leaveClubChecked"
           >
-            <text style="font-size: 32rpx;">{{ leaveClubChecked ? '☑️' : '⬜' }}</text>
-            <text style="font-size: 24rpx; font-weight: 700; color: var(--rgm-text, #0f172a); line-height: 1.4;">
+            <view class="danger-checkbox" :class="{ checked: leaveClubChecked }">
+              <RgmIcon v-if="leaveClubChecked" name="check" :size="22" color="#ffffff" />
+            </view>
+            <text class="danger-check-label">
               我已了解退出影响，确认主动退出【{{ currentClub.name }}】
             </text>
           </view>
         </view>
 
-        <view style="display: flex; gap: 18rpx; margin-top: 8rpx;">
-          <button
-            style="flex: 1; height: 80rpx; line-height: 80rpx; border-radius: 18rpx; font-size: 26rpx; font-weight: 700; background: var(--rgm-card-2, #e2e8f0); color: var(--rgm-text, #334155); margin: 0;"
-            @click="closeLeaveClubConfirmModal"
-          >
-            我再想想
-          </button>
+        <view class="danger-footer-row">
+          <button class="danger-cancel-btn" @click="closeLeaveClubConfirmModal">我再想想</button>
           <button
             :disabled="!leaveClubChecked || leaveClubCountdown > 0 || leavingClubLoading"
             :loading="leavingClubLoading"
-            style="flex: 1.3; height: 80rpx; line-height: 80rpx; border-radius: 18rpx; font-size: 26rpx; font-weight: 800; margin: 0;"
-            :style="(!leaveClubChecked || leaveClubCountdown > 0)
-              ? 'background: #94a3b8; color: #ffffff; opacity: 0.65;'
-              : 'background: #ef4444; color: #ffffff; box-shadow: 0 8rpx 20rpx rgba(239, 68, 68, 0.35);'"
+            class="danger-confirm-btn"
+            :class="{ disabled: !leaveClubChecked || leaveClubCountdown > 0 }"
             @click="confirmLeaveClubExecution"
           >
-            {{ leaveClubCountdown > 0 ? `请核对 (${leaveClubCountdown}s)` : (leaveClubChecked ? '确认退出跑团' : '请先勾选上方确认') }}
+            {{ leaveClubCountdown > 0 ? `请核对 (${leaveClubCountdown}s)` : (leaveClubChecked ? '确认退出跑团' : '请先勾选确认') }}
           </button>
         </view>
       </view>
@@ -2115,9 +1899,9 @@
                     borderRadius: '14rpx',
                     fontSize: '22rpx',
                     fontWeight: eventVisibilityMode === vOpt.val ? '700' : '500',
-                    background: eventVisibilityMode === vOpt.val ? 'var(--rgm-accent, #d0fd3e)' : 'var(--rgm-card-2, #1c1f2b)',
-                    color: eventVisibilityMode === vOpt.val ? 'var(--rgm-accent-fg, #0b0d13)' : 'var(--rgm-text-2, #94a3b8)',
-                    border: '1rpx solid ' + (eventVisibilityMode === vOpt.val ? 'var(--rgm-accent, #d0fd3e)' : 'var(--rgm-line, rgba(255,255,255,0.12))')
+                    background: eventVisibilityMode === vOpt.val ? 'var(--rgm-brand)' : 'var(--rgm-card-2)',
+                    color: eventVisibilityMode === vOpt.val ? '#ffffff' : 'var(--rgm-text-2)',
+                    border: '1rpx solid ' + (eventVisibilityMode === vOpt.val ? 'var(--rgm-brand)' : 'var(--rgm-line)')
                   }"
                 >
                   {{ vOpt.label }}
@@ -2231,7 +2015,7 @@
               </button>
               <!-- #endif -->
               <view class="jwp-input-col">
-                <text class="jwp-label">您的跑团昵称 *</text>
+                <text class="jwp-label">昵称 *</text>
                 <input
                   type="nickname"
                   class="jwp-nickname-input"
@@ -2299,7 +2083,7 @@
               </button>
               <!-- #endif -->
               <view class="jwp-input-col">
-                <text class="jwp-label">跑团昵称 *</text>
+                <text class="jwp-label">昵称 *</text>
                 <input
                   type="nickname"
                   class="jwp-nickname-input"
@@ -2517,19 +2301,26 @@
           </view>
         </scroll-view>
 
-        <!-- 底部快捷操作栏：输入邀请码 / 自建跑团 -->
-        <view style="display: flex; gap: 16rpx; padding: 20rpx 28rpx 28rpx; border-top: 1rpx solid var(--rgm-line, rgba(255,255,255,0.08));">
+        <!-- 底部快捷操作栏：输入邀请码 / 自建跑团 / 退出 -->
+        <view style="display: flex; gap: 14rpx; padding: 20rpx 28rpx 28rpx; border-top: 1rpx solid var(--rgm-line, rgba(255,255,255,0.08));">
           <button
-            style="flex: 1; min-width: 0; margin: 0; padding: 0 16rpx; height: 76rpx; line-height: 1.25; display: flex; align-items: center; justify-content: center; font-size: 26rpx; font-weight: 600; border-radius: 20rpx; background: var(--rgm-card-2, #1f1f24); color: var(--rgm-text, #ffffff); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.12)); white-space: nowrap;"
+            style="flex: 1; min-width: 0; margin: 0; padding: 0 12rpx; height: 76rpx; line-height: 1.25; display: flex; align-items: center; justify-content: center; font-size: 24rpx; font-weight: 600; border-radius: 20rpx; background: var(--rgm-card-2, #1f1f24); color: var(--rgm-ink, #ffffff); border: 1rpx solid var(--rgm-line, rgba(255,255,255,0.12)); white-space: nowrap;"
             @click="showAllClubsModal = false; showJoinModal = true;"
           >
-            🔑 邀请码入团
+            邀请码入团
           </button>
           <button
-            style="flex: 1; min-width: 0; margin: 0; padding: 0 16rpx; height: 76rpx; line-height: 1.25; display: flex; align-items: center; justify-content: center; font-size: 25rpx; font-weight: 700; border-radius: 20rpx; background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%)); color: #ffffff; border: none; white-space: nowrap;"
+            style="flex: 1; min-width: 0; margin: 0; padding: 0 12rpx; height: 76rpx; line-height: 1.25; display: flex; align-items: center; justify-content: center; font-size: 24rpx; font-weight: 700; border-radius: 20rpx; background: var(--rgm-brand-grad, linear-gradient(135deg, #fc4c02 0%, #ff6b22 100%)); color: #ffffff; border: none; white-space: nowrap;"
             @click="showAllClubsModal = false; openCreateClubModal();"
           >
-            ✨ 自建跑团 (满3人解锁)
+            + 自建跑团
+          </button>
+          <button
+            v-if="currentClub && !currentClub.is_virtual_unaffiliated"
+            style="flex: 0.72; min-width: 0; margin: 0; padding: 0 10rpx; height: 76rpx; line-height: 1.25; display: flex; align-items: center; justify-content: center; font-size: 23rpx; font-weight: 600; border-radius: 20rpx; background: var(--rgm-red-tint); color: var(--rgm-red); border: 1rpx solid var(--rgm-red-line); white-space: nowrap;"
+            @click="showAllClubsModal = false; openLeaveClubConfirmModal();"
+          >
+            退团
           </button>
         </view>
       </view>
@@ -3525,7 +3316,7 @@
               </button>
               <!-- #endif -->
               <view class="jwp-input-col">
-                <text class="jwp-label">跑团昵称 *</text>
+                <text class="jwp-label">昵称 *</text>
                 <input
                   type="nickname"
                   class="jwp-nickname-input"
@@ -4664,18 +4455,57 @@
       @close="showPersonalReportModal = false"
     />
 
+    <!-- 原位 3 秒完善微信头像与昵称弹窗 -->
+    <view v-if="showTeamQuickNickModal" class="modal-mask" @click="closeTeamQuickNickModal" @touchmove.stop.prevent>
+      <view class="modal-content quick-nick-modal" @click.stop>
+        <view class="qn-header">
+          <text class="qn-title">✨ 完善个人名片</text>
+          <text class="qn-close" @click="closeTeamQuickNickModal">✕</text>
+        </view>
+        <text class="qn-desc">在跑团排行榜与打卡动态中展示你的专属昵称和头像</text>
+        <view class="qn-form-row">
+          <button class="qn-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+            <image
+              class="qn-avatar-img"
+              :src="joinRunnerAvatar || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              mode="aspectFill"
+            />
+            <text class="qn-avatar-tip">换头像</text>
+          </button>
+          <view class="qn-input-col">
+            <text class="qn-label">微信昵称（点击自动带入）</text>
+            <input
+              type="nickname"
+              class="qn-input"
+              v-model="joinRunnerNickname"
+              placeholder="点击获取微信昵称或输入"
+              @blur="onJoinNicknameBlur"
+              @change="onJoinNicknameBlur"
+            />
+          </view>
+        </view>
+        <view class="qn-footer">
+          <button class="qn-btn cancel" @click="closeTeamQuickNickModal">暂不设置</button>
+          <button class="qn-btn save" :loading="savingTeamQuickNick" :disabled="savingTeamQuickNick" @click="saveTeamQuickProfile">
+            ✓ 保存名片
+          </button>
+        </view>
+      </view>
+    </view>
+
     <!-- 微信隐私保护指引授权弹窗 -->
     <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
-import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import { currentTheme, themeClass, applySystemTheme, syncTabBarTheme } from "../../utils/theme";
 import { explainTerm } from "../../utils/glossary";
 import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import MapPinPickerModal from "../../components/MapPinPickerModal.vue";
 import PersonalReportModal from "../../components/PersonalReportModal.vue";
 import PageSkeleton from "../../components/PageSkeleton.vue";
+import RgmIcon from "../../components/RgmIcon.vue";
 import { trackClick, trackModal, trackSubView, trackFunnelStep } from "../../utils/telemetry";
 import { isGroupRunPostStage, buildGroupRunSharePayload } from "../../utils/groupRun";
 import { ref, computed, watch } from "vue";
@@ -4799,6 +4629,66 @@ function isGenericRunnerName(raw?: string): boolean {
 }
 
 const needsWechatNickname = computed(() => isGenericRunnerName(user.value?.display_name));
+const teamNickBannerDismissed = ref(Boolean(uni.getStorageSync("rgm_team_nick_banner_dismissed")));
+const showTeamQuickNickModal = ref(false);
+const savingTeamQuickNick = ref(false);
+
+function dismissTeamNickBanner() {
+  teamNickBannerDismissed.value = true;
+  try {
+    uni.setStorageSync("rgm_team_nick_banner_dismissed", "1");
+  } catch (_) {}
+}
+
+function openTeamQuickNickModal() {
+  joinRunnerNickname.value = isGenericRunnerName(user.value?.display_name) ? "" : (user.value?.display_name || "");
+  joinRunnerAvatar.value = user.value?.avatar_url || "";
+  showTeamQuickNickModal.value = true;
+  setTabBarHidden(true, "team_quick_nick");
+  trackClick("team_open_quick_nick_modal", "跑团页打开原位头像昵称设置");
+}
+
+function closeTeamQuickNickModal() {
+  showTeamQuickNickModal.value = false;
+  setTabBarHidden(false, "team_quick_nick");
+}
+
+async function saveTeamQuickProfile() {
+  const uid = user.value?.id || getStoredUser()?.id;
+  if (!uid) return;
+  const cleanName = joinRunnerNickname.value.trim();
+  const cleanAvatar = joinRunnerAvatar.value.trim();
+  if (!cleanName && !cleanAvatar) {
+    uni.showToast({ title: "请输入昵称或选择头像", icon: "none" });
+    return;
+  }
+  savingTeamQuickNick.value = true;
+  try {
+    let finalAvatar = cleanAvatar;
+    if (finalAvatar && (finalAvatar.startsWith("wxfile://") || finalAvatar.startsWith("http://tmp") || finalAvatar.startsWith("https://tmp"))) {
+      try {
+        const up = await uploadAvatarFile(uid, finalAvatar);
+        if (up) finalAvatar = up;
+      } catch (_) {}
+    }
+    const payload: Record<string, any> = {};
+    if (cleanName) payload.display_name = cleanName;
+    if (finalAvatar) payload.avatar_url = finalAvatar;
+    await request(`/api/profile/${uid}`, "PUT", payload);
+    if (user.value) {
+      if (cleanName) user.value.display_name = cleanName;
+      if (finalAvatar) user.value.avatar_url = finalAvatar;
+      uni.setStorageSync("rgm_user", JSON.stringify(user.value));
+    }
+    closeTeamQuickNickModal();
+    uni.showToast({ title: "名片已更新 ✓", icon: "success" });
+    await loadClubData();
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "保存失败，请重试", icon: "none" });
+  } finally {
+    savingTeamQuickNick.value = false;
+  }
+}
 
 function onJoinNicknameBlur(e: any) {
   const val = e?.detail?.value;
@@ -6428,9 +6318,35 @@ const isOrgAdmin = computed(() => {
 // ── 跑团首页拆分：页内子页面（共用同一份数据与弹窗，避免拆文件带来的状态同步问题） ──
 type TeamSection = "" | "events" | "manage" | "org" | "new_members";
 const activeSection = ref<TeamSection>("");
+const d1Mode = ref<"discover" | "code" | "solo">("discover");
+const clubFeedPreview = ref<any[]>([]);
 const leaderboard = ref<any[]>([]);
 const myRankItem = computed(() => leaderboard.value.find((i: any) => i.user_id === user.value?.id) || null);
 const topThree = computed(() => leaderboard.value.filter((i: any) => i.rank <= 3).slice(0, 3));
+const podiumSlots = computed(() => {
+  const list = topThree.value;
+  if (!list.length) return [];
+  const r1 = list.find((i: any) => i.rank === 1) || list[0];
+  const r2 = list.find((i: any) => i.rank === 2) || (list.length > 1 ? list[1] : null);
+  const r3 = list.find((i: any) => i.rank === 3) || (list.length > 2 ? list[2] : null);
+  const slots: any[] = [];
+  if (r2) slots.push({ ...r2, tierClass: "tier-2" });
+  if (r1) slots.push({ ...r1, tierClass: "tier-1" });
+  if (r3) slots.push({ ...r3, tierClass: "tier-3" });
+  return slots;
+});
+function formatFeedAgo(iso?: string): string {
+  if (!iso) return "近期";
+  const ts = new Date(String(iso).replace(" ", "T")).getTime();
+  if (isNaN(ts)) return String(iso).substring(5, 10);
+  const diffMin = Math.max(1, Math.floor((Date.now() - ts) / 60000));
+  if (diffMin < 60) return `${diffMin}分钟前`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}小时前`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}天前`;
+  return String(iso).substring(5, 10);
+}
 const isClubManager = computed(
   () =>
     currentRole.value === "owner" ||
@@ -6853,14 +6769,25 @@ async function loadClubData(preferredClubId?: string) {
     if (userOrgs.value.length > 0) {
       currentOrg.value = userOrgs.value[0];
       const orgId = currentOrg.value.id;
-      // Non-blocking background fetch for org sub-clubs and org members
-      Promise.all([
-        request(`/api/org/${orgId}/sub-clubs?user_id=${uid}`).catch(() => ({ sub_clubs: [] })),
-        request(`/api/org/${orgId}/members?operator_uid=${uid}`).catch(() => ({ members: [] })),
-      ]).then(([subRes, memRes]) => {
-        orgSubClubs.value = subRes?.sub_clubs || [];
-        orgMembers.value = memRes?.members || [];
-      });
+      const orgStatus = String(currentOrg.value.status || "").toLowerCase();
+      const canFetchOrgDetails =
+        currentOrg.value.is_valid !== false &&
+        orgStatus !== "expired" &&
+        orgStatus !== "suspended" &&
+        orgStatus !== "rejected";
+      if (canFetchOrgDetails) {
+        // Non-blocking background fetch for org sub-clubs and org members
+        Promise.all([
+          request(`/api/org/${orgId}/sub-clubs?user_id=${uid}`).catch(() => ({ sub_clubs: [] })),
+          request(`/api/org/${orgId}/members?operator_uid=${uid}`).catch(() => ({ members: [] })),
+        ]).then(([subRes, memRes]) => {
+          orgSubClubs.value = subRes?.sub_clubs || [];
+          orgMembers.value = memRes?.members || [];
+        });
+      } else {
+        orgSubClubs.value = [];
+        orgMembers.value = [];
+      }
     } else {
       currentOrg.value = null;
       orgSubClubs.value = [];
@@ -6905,14 +6832,15 @@ async function loadClubData(preferredClubId?: string) {
         currentSuspensionReason.value = "";
       }
 
-      // Load events, members, coach cockpit with user_id
+      // Load events, members, coach cockpit, leaderboard, and 2-row feed preview with user_id
       try {
-        const [evtRes, memRes, coachRes, lbRes] = await Promise.all([
+        const [evtRes, memRes, coachRes, lbRes, feedRes] = await Promise.all([
           request(`/api/team/${clubId}/events?user_id=${uid}`).catch((e: any) => ({ error: e })),
           request(`/api/team/${clubId}/members?user_id=${uid}`).catch((e: any) => ({ error: e })),
           request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`).catch((e: any) => ({ error: e })),
           // 首页排名预览（我的排名 + 前三名）
           request(`/api/team/${clubId}/leaderboard?user_id=${uid}`).catch((e: any) => ({ error: e })),
+          request(`/api/team/${clubId}/feed?uid=${uid}`).catch(() => ({ feed: [] })),
         ]);
 
         if (evtRes?.error && (evtRes.error?.statusCode === 403 || String(evtRes.error?.message).includes("暂停"))) {
@@ -6927,6 +6855,7 @@ async function loadClubData(preferredClubId?: string) {
           newMembersData.value = null;
           coachCockpit.value = coachRes || null;
           leaderboard.value = lbRes?.error ? [] : (lbRes?.leaderboard || []);
+          clubFeedPreview.value = (feedRes?.feed || []).slice(0, 2);
           if (
             activeSection.value === "new_members" ||
             currentRole.value === "owner" ||
@@ -6951,6 +6880,7 @@ async function loadClubData(preferredClubId?: string) {
       newMembersData.value = null;
       coachCockpit.value = null;
       leaderboard.value = [];
+      clubFeedPreview.value = [];
     }
 
     // 异步刷新师徒结对概览（支持同大群跨跑团）
@@ -9456,7 +9386,11 @@ function handleAddToCalendar(evt: any) {
 
 onShow(() => {
   applySystemTheme(currentTheme.value);
+  try {
+    uni.setStorageSync("rgm_team_feed_badge", 0);
+  } catch (_) {}
   syncTabBarIndex(2);
+  syncTabBarTheme();
   // 从【我的】等页面点击“自建跑团”跳回时，自动弹出自建跑团弹窗
   const pendingCreateClub = uni.getStorageSync("team_open_create_club");
   if (pendingCreateClub) {
@@ -9712,7 +9646,7 @@ onShareAppMessage((res: any) => {
     };
   }
 
-  if (shareType === "club" || (!shareType && currentClub.value)) {
+  if (shareType === "club") {
     const club = {
       id: dataset.clubId || dataset["club-id"] || currentClub.value?.id,
       name: dataset.clubName || dataset["club-name"] || currentClub.value?.name,
@@ -9723,7 +9657,7 @@ onShareAppMessage((res: any) => {
     return getClubShareAppMessage(club, inviter, user.value?.id);
   }
 
-  if (shareType === "org" || (!shareType && currentOrg.value)) {
+  if (shareType === "org") {
     const org = {
       id: dataset.orgId || dataset["org-id"] || currentOrg.value?.id,
       name: dataset.orgName || dataset["org-name"] || currentOrg.value?.name,
@@ -9738,12 +9672,6 @@ onShareAppMessage((res: any) => {
 });
 
 onShareTimeline(() => {
-  if (currentClub.value) {
-    return getClubShareTimeline(currentClub.value);
-  }
-  if (currentOrg.value) {
-    return getOrgShareTimeline(currentOrg.value);
-  }
   return getUnifiedShareTimeline();
 });
 </script>
@@ -16563,5 +16491,920 @@ onShareTimeline(() => {
   border: 1rpx solid rgba(239, 68, 68, 0.35);
   padding: 0 22rpx;
 }
+
+.team-nick-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 20rpx;
+  border-radius: 22rpx;
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.14), rgba(245, 158, 11, 0.08));
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+}
+
+.tnb-left {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  min-width: 0;
+  flex: 1;
+}
+
+.tnb-icon {
+  font-size: 34rpx;
+  flex-shrink: 0;
+}
+
+.tnb-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+}
+
+.tnb-title {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--rgm-text, #ffffff);
+}
+
+.tnb-sub {
+  font-size: 20rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tnb-right {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  flex-shrink: 0;
+}
+
+.tnb-cta {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text, #fc4c02);
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(252, 76, 2, 0.16);
+}
+
+.tnb-close {
+  font-size: 26rpx;
+  color: var(--rgm-text-3, #71717a);
+  padding: 6rpx;
+}
+
+.quick-nick-modal {
+  margin-top: 80rpx;
+}
+
+.qn-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.qn-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--rgm-text, #ffffff);
+}
+
+.qn-close {
+  font-size: 30rpx;
+  color: var(--rgm-text-3, #71717a);
+  padding: 6rpx 10rpx;
+}
+
+.qn-desc {
+  display: block;
+  font-size: 22rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+  margin-bottom: 26rpx;
+  line-height: 1.45;
+}
+
+.qn-form-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin-bottom: 30rpx;
+}
+
+.qn-avatar-btn {
+  width: 112rpx;
+  height: 112rpx;
+  padding: 0;
+  margin: 0;
+  border-radius: 56rpx;
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.qn-avatar-btn::after {
+  border: none;
+}
+
+.qn-avatar-img {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 56rpx;
+  border: 2rpx solid rgba(252, 76, 2, 0.5);
+}
+
+.qn-avatar-tip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32rpx;
+  line-height: 32rpx;
+  font-size: 18rpx;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.65);
+  text-align: center;
+}
+
+.qn-input-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.qn-label {
+  font-size: 21rpx;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+
+.qn-input {
+  height: 76rpx;
+  padding: 0 20rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.06));
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.14));
+  color: var(--rgm-text, #ffffff);
+  font-size: 26rpx;
+}
+
+.qn-footer {
+  display: flex;
+  gap: 16rpx;
+}
+
+.qn-btn {
+  flex: 1;
+  margin: 0;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 18rpx;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.qn-btn::after {
+  border: none;
+}
+
+.qn-btn.cancel {
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-text-2, #d4d4d8);
+}
+
+.qn-btn.save {
+  flex: 1.5;
+  background: linear-gradient(135deg, #fc4c02, #f97316);
+  color: #ffffff;
+}
+
+/* ── Minimalist Obsidian / Volt Light Team Page Styles ── */
+.t3-topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+  margin-bottom: 20rpx;
+  padding: 6rpx 2rpx;
+}
+.t3-club-picker {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
+  min-width: 0;
+  flex: 1;
+}
+.t3-club-logo {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--rgm-line);
+  background: var(--rgm-card-2);
+  flex-shrink: 0;
+}
+.t3-club-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+  flex: 1;
+}
+.t3-club-name-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+.t3-club-name {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t3-club-count {
+  font-size: 18rpx;
+  font-weight: 700;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-tint-2);
+  color: var(--rgm-ink-2);
+  flex-shrink: 0;
+}
+.t3-sub-pills {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+.t3-sub-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-sub-pill.is-warn {
+  border-color: var(--rgm-amber-line);
+  background: var(--rgm-amber-tint);
+}
+.t3-sub-pill-txt {
+  font-size: 19rpx;
+  font-weight: 600;
+  color: var(--rgm-ink-2);
+  max-width: 240rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t3-sub-tag {
+  font-size: 20rpx;
+  color: var(--rgm-ink-3);
+  white-space: nowrap;
+}
+.t3-top-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+.t3-icon-reset {
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+}
+.t3-icon-reset::after { border: none; }
+.t3-role-pill {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-role-pill.is-coach {
+  background: var(--rgm-brand-tint);
+  border-color: var(--rgm-brand-line);
+}
+.t3-role-pill.is-coach .t3-role-pill-txt {
+  color: var(--rgm-brand-text);
+}
+.t3-role-pill.is-brand {
+  background: var(--rgm-brand);
+  border-color: var(--rgm-brand);
+}
+.t3-role-pill.is-brand .t3-role-pill-txt {
+  color: #ffffff;
+}
+.t3-role-pill-txt {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+  white-space: nowrap;
+}
+.t3-warn-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: var(--rgm-amber);
+}
+
+.t3-ticket {
+  margin-bottom: 20rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+.t3-ticket-top {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.t3-ticket-badge {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+}
+.t3-ticket-badge-txt {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+}
+.t3-ticket-title {
+  font-size: 32rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+}
+.t3-ticket-meta {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 18rpx;
+}
+.t3-meta-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+}
+.t3-meta-txt {
+  font-size: 22rpx;
+  color: var(--rgm-ink-2);
+}
+.t3-meta-txt.highlight {
+  color: var(--rgm-ink);
+  font-weight: 600;
+}
+.t3-ticket-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+.t3-ticket-pill {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  height: 64rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-ticket-pill.is-primary {
+  background: var(--rgm-brand-tint);
+  border-color: var(--rgm-brand-line);
+}
+.t3-ticket-pill-txt {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+}
+.t3-ticket-pill-txt.is-primary {
+  color: var(--rgm-brand-text);
+}
+.t3-share-btn-reset {
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+.t3-share-btn-reset::after { border: none; }
+
+.t3-events-strip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22rpx 26rpx;
+  margin-bottom: 20rpx;
+}
+.t3-es-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+.t3-es-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+}
+.t3-es-count {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-tint-2);
+  color: var(--rgm-ink-2);
+}
+
+.t3-sec-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
+}
+.t3-head-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10rpx;
+}
+.t3-sec-title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+}
+.t3-link {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+  white-space: nowrap;
+}
+.t3-count-chip {
+  font-size: 19rpx;
+  font-weight: 600;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-tint-2);
+  color: var(--rgm-ink-2);
+}
+
+/* Visual #2 / #1 / #3 Podium */
+.t3-podium-card { margin-bottom: 20rpx; }
+.t3-podium-stage {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 16rpx;
+  padding-top: 8rpx;
+  margin-bottom: 16rpx;
+}
+.t3-podium-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+.t3-podium-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  border: 3rpx solid var(--rgm-line);
+  background: var(--rgm-card-2);
+}
+.t3-podium-col.tier-1 .t3-podium-avatar {
+  width: 78rpx;
+  height: 78rpx;
+  border-color: var(--rgm-brand);
+}
+.t3-podium-name {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t3-podium-col.is-me .t3-podium-name { color: var(--rgm-brand-text); }
+.t3-podium-km {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+  font-variant-numeric: tabular-nums;
+}
+.t3-podium-unit {
+  font-size: 18rpx;
+  font-weight: 600;
+  color: var(--rgm-ink-3);
+}
+.t3-podium-pedestal {
+  width: 100%;
+  border-radius: 16rpx 16rpx 8rpx 8rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-podium-col.tier-1 .t3-podium-pedestal {
+  height: 74rpx;
+  background: var(--rgm-brand-tint);
+  border-color: var(--rgm-brand-line);
+}
+.t3-podium-col.tier-2 .t3-podium-pedestal { height: 52rpx; }
+.t3-podium-col.tier-3 .t3-podium-pedestal { height: 40rpx; }
+.t3-podium-rank {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: var(--rgm-ink-2);
+}
+.t3-podium-col.tier-1 .t3-podium-rank { color: var(--rgm-brand-text); }
+.t3-my-rank-strip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14rpx 20rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+}
+.t3-my-rank-pos {
+  font-size: 25rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text);
+}
+.t3-my-rank-meta {
+  font-size: 22rpx;
+  color: var(--rgm-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 2-Row Feed Preview */
+.t3-feed-card { margin-bottom: 20rpx; }
+.t3-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+.t3-feed-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-feed-avatar {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.t3-feed-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.t3-feed-top {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8rpx;
+}
+.t3-feed-author {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+}
+.t3-feed-coach-tag {
+  font-size: 18rpx;
+  font-weight: 700;
+  padding: 2rpx 8rpx;
+  border-radius: 8rpx;
+  background: var(--rgm-green-tint);
+  color: var(--rgm-green);
+}
+.t3-feed-sub {
+  font-size: 20rpx;
+  color: var(--rgm-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t3-feed-km {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: var(--rgm-ink);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Single-Row Mentorship Avatar Ring Strip */
+.t3-mentor-card { margin-bottom: 20rpx; }
+.t3-mentor-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+.t3-mentor-chip {
+  flex: 1;
+  min-width: 260rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+  padding: 12rpx 14rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-ring {
+  width: 60rpx;
+  height: 60rpx;
+  border-radius: 50%;
+  padding: 3rpx;
+  flex-shrink: 0;
+  border: 3rpx solid var(--rgm-green);
+}
+.t3-ring.is-amber { border-color: var(--rgm-amber); }
+.t3-ring.is-red { border-color: var(--rgm-red); }
+.t3-ring.is-blue { border-color: var(--rgm-blue); }
+.t3-ring-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.t3-mentor-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  min-width: 0;
+}
+.t3-mentor-name {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--rgm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t3-mentor-sub {
+  font-size: 20rpx;
+  color: var(--rgm-ink-3);
+}
+.t3-mentor-empty-row {
+  display: flex;
+  flex-direction: row;
+  gap: 14rpx;
+}
+
+/* Subtle 1-Line Utility Row */
+.t3-utility-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: 24rpx;
+}
+.t3-util-chip {
+  flex: 1;
+  min-width: 120rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60rpx;
+  padding: 0 14rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+}
+.t3-util-chip.is-danger {
+  background: var(--rgm-red-tint);
+  border-color: var(--rgm-red-line);
+}
+.t3-util-txt {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--rgm-ink-2);
+  white-space: nowrap;
+}
+.t3-util-txt.is-danger { color: var(--rgm-red); }
+
+/* D1 Unjoined Mode */
+.d1-hero-card {
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+  border-radius: 28rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+}
+.d1-hero-top {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.d1-hero-titles { display: flex; flex-direction: column; gap: 4rpx; }
+.d1-hero-title { font-size: 32rpx; font-weight: 800; color: var(--rgm-ink); }
+.d1-hero-sub { font-size: 22rpx; color: var(--rgm-ink-2); }
+.d1-code-card { margin-bottom: 20rpx; }
+.d1-field-label { display: block; font-size: 22rpx; font-weight: 700; color: var(--rgm-ink-2); margin-bottom: 10rpx; }
+.d1-code-input {
+  height: 84rpx;
+  padding: 0 24rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  color: var(--rgm-ink);
+  font-size: 30rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  margin-bottom: 20rpx;
+}
+.d1-primary-cta {
+  width: 100%;
+  height: 82rpx;
+  line-height: 82rpx;
+  border-radius: 20rpx;
+  background: var(--rgm-brand);
+  color: #ffffff;
+  font-size: 27rpx;
+  font-weight: 700;
+  margin: 0;
+}
+.d1-primary-cta::after { border: none; }
+.d1-org-code-link { margin-top: 20rpx; text-align: center; }
+.d1-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12rpx; margin-bottom: 18rpx; }
+.d1-peer-list { display: flex; flex-direction: column; gap: 12rpx; margin-bottom: 18rpx; }
+.d1-peer-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.d1-peer-avatar { width: 58rpx; height: 58rpx; border-radius: 50%; flex-shrink: 0; }
+.d1-peer-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.d1-peer-top { display: flex; flex-direction: row; align-items: center; gap: 8rpx; flex-wrap: wrap; }
+.d1-peer-name { font-size: 24rpx; font-weight: 700; color: var(--rgm-ink); }
+.d1-peer-sub { font-size: 20rpx; color: var(--rgm-ink-3); }
+.d1-solo-actions { display: flex; gap: 14rpx; }
+
+/* E4 Danger Confirmation Modals */
+.danger-modal-shell {
+  max-width: 640rpx;
+  border: 2rpx solid var(--rgm-red-line);
+  background: var(--rgm-card);
+}
+.danger-modal-header {
+  border-bottom: 1rpx solid var(--rgm-red-line);
+  padding-bottom: 20rpx;
+}
+.danger-title-row { display: flex; flex-direction: row; align-items: center; gap: 10rpx; }
+.danger-title { color: var(--rgm-red); }
+.danger-modal-body { padding: 24rpx 0; display: flex; flex-direction: column; gap: 18rpx; }
+.danger-target-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 18rpx;
+  padding: 18rpx;
+  border-radius: 20rpx;
+  background: var(--rgm-red-tint);
+  border: 1rpx solid var(--rgm-red-line);
+}
+.danger-target-avatar {
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 50%;
+  border: 2rpx solid var(--rgm-red-line);
+  flex-shrink: 0;
+}
+.danger-target-avatar.is-square { border-radius: 20rpx; }
+.danger-target-info { display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0; }
+.danger-target-name-row { display: flex; flex-direction: row; align-items: center; gap: 10rpx; flex-wrap: wrap; }
+.danger-target-name { font-size: 29rpx; font-weight: 800; color: var(--rgm-ink); }
+.danger-role-pill {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-red-tint);
+  color: var(--rgm-red);
+}
+.danger-target-meta { font-size: 22rpx; color: var(--rgm-ink-2); }
+.danger-info-box {
+  padding: 18rpx;
+  border-radius: 18rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.danger-info-head { font-size: 23rpx; font-weight: 700; color: var(--rgm-ink); }
+.danger-info-line { font-size: 22rpx; color: var(--rgm-ink-2); line-height: 1.5; }
+.danger-info-safe { font-size: 22rpx; color: var(--rgm-green); font-weight: 600; line-height: 1.5; }
+.danger-check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx dashed var(--rgm-line);
+}
+.danger-check-row.checked {
+  background: var(--rgm-red-tint);
+  border: 2rpx solid var(--rgm-red);
+}
+.danger-checkbox {
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 8rpx;
+  border: 2rpx solid var(--rgm-ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.danger-checkbox.checked {
+  background: var(--rgm-red);
+  border-color: var(--rgm-red);
+}
+.danger-check-label { font-size: 23rpx; font-weight: 700; color: var(--rgm-ink); line-height: 1.4; flex: 1; }
+.danger-footer-row { display: flex; flex-direction: row; gap: 16rpx; margin-top: 8rpx; }
+.danger-cancel-btn {
+  flex: 1;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 18rpx;
+  font-size: 25rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  color: var(--rgm-ink-2);
+  border: 1rpx solid var(--rgm-line);
+  margin: 0;
+}
+.danger-cancel-btn::after { border: none; }
+.danger-confirm-btn {
+  flex: 1.3;
+  height: 78rpx;
+  line-height: 78rpx;
+  border-radius: 18rpx;
+  font-size: 25rpx;
+  font-weight: 800;
+  background: var(--rgm-red);
+  color: #ffffff;
+  margin: 0;
+}
+.danger-confirm-btn.disabled {
+  background: var(--rgm-track);
+  color: var(--rgm-ink-3);
+  opacity: 0.7;
+}
+.danger-confirm-btn::after { border: none; }
 
 </style>

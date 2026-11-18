@@ -1,129 +1,68 @@
 <template>
-  <view class="coach-page" :class="themeClass">
-    <!-- Header -->
-    <view class="coach-header">
-      <view class="header-left">
-        <view class="title-row">
-          <text class="title-icon">⚡</text>
-          <text class="page-title">训练</text>
-          <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
+  <view class="coach-page coach-v3" :class="[themeClass, { 'has-preview-bar': isPreviewPlan }]">
+    <!-- ── 极简顶栏二合一：[ 课表 | 体能 ] + 对话气泡 + 定制滑块 ── -->
+    <view class="c3-topbar">
+      <view class="rgm-seg-bar c3-seg">
+        <view class="rgm-seg-item" :class="{ active: activeTab === 'plan' }" @click="activeTab = 'plan'">
+          <text>课表</text>
+        </view>
+        <view class="rgm-seg-item" :class="{ active: activeTab === 'analysis' }" @click="activeTab = 'analysis'">
+          <text>体能</text>
         </view>
       </view>
 
-      <view style="display: flex; align-items: center; gap: 12rpx;">
-        <button class="re-analyze-btn" @click="openCoachChatModal">
-          <text class="btn-text">💬 问教练</text>
-        </button>
-        <button v-if="activeTab === 'analysis'" class="re-analyze-btn" :loading="loading" :disabled="loading" @click="handleReAnalyze">
-          <text class="btn-text">{{ loading ? "测算中..." : "🔄 重算" }}</text>
-        </button>
-      </view>
-    </view>
-
-    <!-- ── 分段切换：课表 / 教练诊断 / 身体数据 ── -->
-    <view class="coach-tab-bar">
-      <view
-        class="coach-tab-item"
-        :class="{ active: activeTab === 'plan' }"
-        @click="activeTab = 'plan'"
-      >
-        <text class="tab-icon">📅</text>
-        <text class="tab-title">课表</text>
-      </view>
-      <view
-        class="coach-tab-item"
-        :class="{ active: activeTab === 'analysis' }"
-        @click="activeTab = 'analysis'"
-      >
-        <text class="tab-icon">🎯</text>
-        <text class="tab-title">诊断</text>
-      </view>
-      <view class="coach-tab-item" @click="goToBodyData">
-        <text class="tab-icon">📊</text>
-        <text class="tab-title">数据 ›</text>
+      <view class="c3-top-actions">
+        <view class="rgm-icon-btn" @click="openCoachChatModal">
+          <RgmIcon name="chat" :size="32" color="blue" />
+        </view>
+        <view class="rgm-icon-btn" :class="{ active: showPlanConfig }" @click="showPlanConfig = !showPlanConfig">
+          <RgmIcon name="sliders" :size="32" :color="showPlanConfig ? 'brand' : 'text2'" />
+        </view>
       </view>
     </view>
 
     <!-- ── PLAN TAB CONTENT ── -->
     <view v-if="activeTab === 'plan'" class="plan-tab-section">
-      <!-- 夜间未佩戴手表 · 恢复数据缺失预警横幅（精简一行 + ⓘ 隐藏说明） -->
+      <!-- 夜间未佩戴手表单行提示 -->
       <view
         v-if="recoveryDataAvailability?.night_wear_missing || analysis?.recovery_data_availability?.night_wear_missing"
-        style="margin: 0 0 18rpx 0; padding: 14rpx 20rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
+        class="c3-wear-warn"
         @click.stop="explainTerm('watch_wear')"
       >
-        <text style="font-size: 23rpx; font-weight: 700; color: #b45309;">
-          ⚠️ {{ recoveryDataAvailability?.recovery_status_label || analysis?.recovery_data_availability?.recovery_status_label || '夜间未佩戴 · 恢复数据缺失' }}
-        </text>
-        <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 12rpx;">ⓘ 详情</text>
+        <view class="c3-wear-left">
+          <RgmIcon name="alert" :size="24" color="amber" />
+          <text class="c3-wear-txt">{{ recoveryDataAvailability?.recovery_status_label || analysis?.recovery_data_availability?.recovery_status_label || '夜间未佩戴 · 恢复数据缺失' }}</text>
+        </view>
+        <text class="c3-wear-more">ⓘ</text>
       </view>
-      <!-- Top Bar -->
-      <view class="plan-top-bar">
-        <view class="plan-title-box">
-          <view style="display: flex; align-items: center; gap: 8rpx;">
-            <text class="plan-main-title">{{ plan ? plan.title : '周期训练课表' }}</text>
+
+      <!-- 原目标已完赛提示条 -->
+      <view v-if="plan && isTargetRaceCompleted && recommendedRace" class="c3-switch-banner">
+        <view class="c3-sb-row">
+          <text class="c3-sb-title">{{ plan.target_race_name }} 已完赛</text>
+          <view class="c3-sb-actions">
+            <text class="c3-sb-link" @click="openCompletedTargetRaceShareCard">喜报卡 ›</text>
+            <text class="c3-sb-cta" @click="handleApplyRecommendedRace">切换 {{ recommendedRace.name }} ›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 定制滑块抽屉（含回退、周月报与周期参数表单，默认收起） -->
+      <view v-if="showPlanConfig || !plan" class="rgm-card c3-config-drawer">
+        <view class="c3-cd-head">
+          <view class="c3-cd-title-row">
+            <text class="c3-cd-title">计划定制与工具</text>
             <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
           </view>
-          <view v-if="plan" class="plan-status-pills-row">
-            <text class="plan-status-pill">{{ plan.weeks_count }}周周期</text>
+          <view class="c3-cd-tools">
             <text
-              v-if="plan.review_status === 'published' || plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review)"
-              class="plan-coach-verified-pill"
-            >
-              🧢 {{ plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.reviewed_by_name) || '教练' }}已审
-            </text>
+              v-if="planBackups.length > 0 && !isPreviewPlan"
+              class="c3-cd-pill"
+              @click="handleRollbackUserPlan"
+            >{{ rollingBackPlan ? '回退中' : '回退上版' }}</text>
+            <text class="c3-cd-pill" @click="showCoachPersonalReport = true">周/月报</text>
+            <text class="c3-cd-pill" @click="goToBodyData">体能档案 ›</text>
           </view>
-        </view>
-        <view style="display: flex; align-items: center; gap: 10rpx; flex-shrink: 0;">
-          <button
-            v-if="planBackups.length > 0 && !isPreviewPlan"
-            class="plan-config-toggle-btn"
-            :loading="rollingBackPlan"
-            @click="handleRollbackUserPlan"
-          >
-            <text class="btn-text">↩ 回退</text>
-          </button>
-          <button
-            class="plan-config-toggle-btn"
-            @click="showCoachPersonalReport = true"
-          >
-            <text class="btn-text">📊 周报/月报</text>
-          </button>
-          <button class="plan-config-toggle-btn" @click="showPlanConfig = !showPlanConfig">
-            <text class="btn-text">{{ showPlanConfig ? '收起' : (plan ? '⚙️ 定制' : '✨ 定制') }}</text>
-          </button>
-        </view>
-      </view>
-
-      <!-- 🏆 Target Race Completed Switch Banner -->
-      <view v-if="plan && isTargetRaceCompleted && recommendedRace" class="plan-switch-banner">
-        <view class="banner-top-row">
-          <text class="banner-badge">🏆 原目标已完赛</text>
-          <text class="banner-sub">建议切换至核心 A 标</text>
-        </view>
-        <text class="banner-desc">
-          「{{ plan.target_race_name }}」已完赛，建议切换下一核心目标「{{ recommendedRace.name }}」（{{ recommendedRace.race_date }}）。
-        </text>
-        <view style="display:flex; gap:14rpx; margin-top:8rpx;">
-          <button
-            class="banner-switch-btn"
-            style="flex:0.85; background:var(--rgm-brand-tint, rgba(251,191,36,0.18)); border:1rpx solid var(--rgm-brand-line, #fbbf24); color:var(--rgm-brand-text, #fbbf24);"
-            @click="openCompletedTargetRaceShareCard"
-          >
-            📸 生成完赛分享卡
-          </button>
-          <button class="banner-switch-btn" style="flex:1.15;" @click="handleApplyRecommendedRace">
-            切换为「{{ recommendedRace.name }}」 ➔
-          </button>
-        </view>
-      </view>
-
-      <!-- Plan Setup Panel -->
-      <view v-if="showPlanConfig || !plan" class="plan-setup-card">
-        <view class="card-title-row">
-          <text class="section-icon">🎯</text>
-          <text class="card-title">计划参数</text>
-          <text class="term-info" @click.stop="explainTerm('canova_model')">ⓘ</text>
         </view>
 
         <!-- Goal Type Toggle -->
@@ -133,21 +72,20 @@
             :class="{ active: planGoalType === 'race_prep' }"
             @click="planGoalType = 'race_prep'"
           >
-            <text class="goal-btn-title">🏅 赛事备战</text>
+            <text class="goal-btn-title">赛事备战</text>
           </view>
           <view
             class="goal-type-btn"
             :class="{ active: planGoalType === 'fitness_maintenance' }"
             @click="planGoalType = 'fitness_maintenance'"
           >
-            <text class="goal-btn-title">🏔️ 日常进阶</text>
+            <text class="goal-btn-title">日常进阶</text>
           </view>
         </view>
 
-        <!-- If Race: Quick Select & Inputs -->
         <view v-if="planGoalType === 'race_prep'" class="race-setup-inputs">
           <view v-if="userRaces.length" class="registered-races-row">
-            <text class="registered-label">🚩 已登记赛事：</text>
+            <text class="registered-label">已登记赛事</text>
             <view class="registered-chips">
               <view
                 v-for="r in userRaces"
@@ -160,9 +98,9 @@
                 }"
                 @click="handleSelectPlanRace(r)"
               >
-                <text class="reg-chip-tier tier-done" v-if="r.status === 'completed' || r.is_completed">🏁 已完赛</text>
-                <text class="reg-chip-tier tier-a" v-else-if="r.priority == 1 || r.priority === 'A'">⭐ A标核心</text>
-                <text class="reg-chip-tier tier-b" v-else-if="r.priority == 2 || r.priority === 'B'">⚡ B标代练</text>
+                <text class="reg-chip-tier tier-done" v-if="r.status === 'completed' || r.is_completed">已完赛</text>
+                <text class="reg-chip-tier tier-a" v-else-if="r.priority == 1 || r.priority === 'A'">A标</text>
+                <text class="reg-chip-tier tier-b" v-else-if="r.priority == 2 || r.priority === 'B'">B标</text>
                 <text class="reg-chip-name">{{ r.name }}</text>
               </view>
             </view>
@@ -180,7 +118,6 @@
           </view>
         </view>
 
-        <!-- If Non-Race: Focus Options -->
         <view v-else class="maintenance-options-row">
           <text class="input-label">专项强化方向</text>
           <view class="maint-chips-grid">
@@ -196,7 +133,6 @@
           </view>
         </view>
 
-        <!-- Weeks & Days Wheel Picker + Stepper -->
         <view class="picker-row">
           <view class="picker-col">
             <text class="input-label">周期总周数</text>
@@ -239,492 +175,295 @@
           </view>
         </view>
 
-        <!-- Goal Anchor Hint in Miniapp (Clickable to open unified GoalSheetModal) -->
         <view class="goal-anchor-box" @click="openCoachGoalSheet('week')">
-          <text class="anchor-icon">🎯</text>
+          <RgmIcon name="gauge" :size="26" color="brand" />
           <text class="anchor-text">周目标基准：{{ userGoal?.next_weekly_target || userGoal?.weekly_target || 50 }} km/周</text>
-          <text style="margin-left: auto; font-size: 22rpx; font-weight: 700; color: #fc4c02;">调整 ›</text>
+          <text class="c3-anchor-edit">调整 ›</text>
         </view>
 
         <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
-          <text class="btn-text">{{ generatingPlan ? '推演中...' : '✨ 生成课表预览' }}</text>
+          <text class="btn-text">{{ generatingPlan ? '推演中...' : '生成新课表预览' }}</text>
         </button>
       </view>
 
-      <!-- Active Plan Details -->
-      <view v-if="plan && plan.schedule_data" class="plan-body">
-        <!-- Pending Confirmation Banner for Newly Generated Preview Plan -->
-        <view
-          v-if="isPreviewPlan"
-          style="margin-bottom:24rpx;padding:20rpx 22rpx;border-radius:22rpx;background:var(--rgm-brand-tint, rgba(245,158,11,0.18));border:2rpx solid var(--rgm-brand-line, rgba(245,158,11,0.5));"
-        >
-          <view style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8rpx;">
-            <text style="font-size:25rpx;font-weight:800;color:var(--rgm-brand-text, #fbbf24);">🛡️ 预览待确认（未写入）</text>
-            <text style="font-size:20rpx;font-weight:700;padding:4rpx 14rpx;border-radius:999rpx;background:var(--rgm-tint-2, rgba(245,158,11,0.25));color:var(--rgm-text, #fde68a);">预览</text>
+      <!-- Active Plan Body (L1 Tabs-1: 首卡目标微环 + 次卡8周阶梯柱 + 7日紧凑课表) -->
+      <view v-if="plan && plan.schedule_data" class="c3-plan-body">
+        <!-- 首卡：备赛目标 + 右侧空心进度环 -->
+        <view class="rgm-card c3-goal-hero">
+          <view class="c3-gh-left">
+            <view class="c3-gh-top">
+              <text class="c3-tier-tag">{{ heroTargetRaceInfo.tier }}</text>
+              <text class="c3-race-title">{{ heroTargetRaceInfo.name }}</text>
+              <text v-if="heroTargetRaceInfo.daysBadge" class="c3-days-pill">{{ heroTargetRaceInfo.daysBadge }}</text>
+            </view>
+            <view class="c3-gh-sub-row">
+              <view class="c3-green-dot" />
+              <text class="c3-gh-sub">
+                {{ heroTargetRaceInfo.phase }}
+                {{ heroTargetRaceInfo.targetTime ? ` · ${heroTargetRaceInfo.targetTime}` : '' }}
+                {{ (plan.review_status === 'published' || plan.reviewed_by_name) ? ' · 教练已审' : '' }}
+              </text>
+            </view>
           </view>
-          <text style="font-size:22rpx;color:var(--rgm-text-2, #fde68a);line-height:1.45;display:block;margin-bottom:14rpx;">
-            请审阅下方各周安排，点击「确认启用」后正式覆盖原计划。
-          </text>
-          <view style="display:flex;gap:16rpx;">
-            <button
-              style="flex:1;margin:0;height:68rpx;line-height:68rpx;border-radius:16rpx;font-size:24rpx;font-weight:700;background:var(--rgm-card, rgba(255,255,255,0.12));color:var(--rgm-text, #e4e4e7);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.2));"
-              @click="handleDiscardGeneratedPlan"
-            >
-              ✕ 放弃
-            </button>
-            <button
-              style="flex:1.6;margin:0;height:68rpx;line-height:68rpx;border-radius:16rpx;font-size:24rpx;font-weight:800;background:linear-gradient(135deg, #10b981, #059669);color:#ffffff;"
-              :loading="confirmingPlan"
-              @click="handleConfirmGeneratedPlan"
-            >
-              ✅ 确认启用
-            </button>
-          </view>
-        </view>
-        <!-- Baseline Snapshot Card -->
-        <view v-if="plan.schedule_data.current_fitness_snapshot" class="snapshot-card">
-          <view class="snap-item">
-            <text class="snap-label">跑者组别</text>
-            <text class="snap-val">{{ (plan.schedule_data.current_fitness_snapshot.age && plan.schedule_data.current_fitness_snapshot.age >= 50) ? '大师组' : plan.schedule_data.current_fitness_snapshot.age ? `${plan.schedule_data.current_fitness_snapshot.age} 岁` : '—' }}</text>
-            <text class="snap-sub">{{ (plan.schedule_data.current_fitness_snapshot.age && plan.schedule_data.current_fitness_snapshot.age >= 50) ? '72-96h 恢复律' : '正常恢复' }}</text>
-          </view>
-          <view class="snap-item">
-            <text class="snap-label">VO2Max</text>
-            <text class="snap-val text-purple">{{ plan.schedule_data.current_fitness_snapshot.vo2max || '—' }}</text>
-            <text class="snap-sub">{{ plan.schedule_data.current_fitness_snapshot.vo2max_source === 'watch' ? '手表实测' : '生理基准' }}</text>
-          </view>
-          <view class="snap-item">
-            <text class="snap-label">体能 / 状态 <text class="term-info" @click.stop="explainTerm('fitness')">ⓘ</text></text>
-            <text class="snap-val text-cyan">{{ plan.schedule_data.current_fitness_snapshot.ctl || 0 }} / {{ plan.schedule_data.current_fitness_snapshot.tsb || 0 }}</text>
-          </view>
-          <view class="snap-item">
-            <text class="snap-label">18m最长跑</text>
-            <text class="snap-val text-amber">{{ plan.schedule_data.current_fitness_snapshot.max_long_run_18m_km || '—' }} km</text>
+          <view class="c3-ring-outer" :style="activeWeekRingStyle">
+            <view class="c3-ring-hole">
+              <text class="c3-ring-pct">{{ activeWeekCompliancePct }}%</text>
+            </view>
           </view>
         </view>
 
-        <!-- Coach Review Note Box -->
-        <view
-          v-if="plan.coach_review_note || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.coach_review_note)"
-          class="coach-review-note-box"
-        >
-          <text class="crn-icon">👨‍🏫</text>
-          <view class="crn-content">
-            <text class="crn-title">教练【{{ plan.reviewed_by_name || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.reviewed_by_name) || '跑团教练' }}】执行叮嘱：</text>
-            <text class="crn-text">{{ plan.coach_review_note || (plan.schedule_data && plan.schedule_data.coach_review && plan.schedule_data.coach_review.coach_review_note) }}</text>
+        <!-- 次卡：8 周周期负荷阶梯柱（点选周次） -->
+        <view class="rgm-card c3-ladder-card">
+          <view class="c3-ladder-head">
+            <text class="c3-ladder-title">周期负荷阶梯</text>
+            <view class="c3-ladder-right">
+              <text class="c3-ladder-km">W{{ selectedWeekIdx }} · {{ activeMiniWeek?.weekly_mileage_km || 0 }} km</text>
+              <text class="c3-sync-chip" @click="handleSyncToGoals">{{ syncingGoal ? '同步中' : '同步目标' }}</text>
+            </view>
           </view>
-        </view>
 
-        <!-- Canova Overview Quote & Macro Roadmap -->
-        <view v-if="plan.overview_summary || (plan.schedule_data && plan.schedule_data.macro_roadmap)" class="overview-box">
-          <view v-if="plan.overview_summary" style="display:flex;align-items:flex-start;gap:12rpx;">
-            <text class="overview-icon">🎯</text>
-            <text class="overview-text">{{ plan.overview_summary }}</text>
-          </view>
-          <view v-if="plan.schedule_data && plan.schedule_data.macro_roadmap" style="margin-top:14rpx;padding:16rpx;background:var(--rgm-card-2, rgba(0,0,0,0.28));border-radius:16rpx;border:1rpx solid var(--rgm-line-solid, rgba(175,82,222,0.3));">
-            <text style="font-size:22rpx;font-weight:800;color:var(--rgm-brand-text, #d8b4fe);display:block;margin-bottom:6rpx;">🗺️ 阶段宏观周期大纲 (教练规划)：</text>
-            <text style="font-size:22rpx;color:var(--rgm-text-2, #e4e4e7);line-height:1.5;white-space:pre-wrap;">{{ plan.schedule_data.macro_roadmap }}</text>
-          </view>
-        </view>
-
-        <!-- Horizontal Week Scroll -->
-        <scroll-view
-          scroll-x
-          class="week-scroll-view"
-          show-scrollbar="false"
-          :scroll-into-view="scrollIntoWeek"
-          :scroll-with-animation="true"
-        >
-          <view class="week-chips-row">
+          <view class="c3-ladder-bars">
             <view
-              v-for="w in (plan.schedule_data.weeks || [])"
-              :key="w.week_index"
-              :id="'week-chip-' + w.week_index"
-              class="week-chip"
-              :class="{
-                active: selectedWeekIdx === w.week_index,
-                'is-current-week': currentWeekIndex === w.week_index
-              }"
-              @click="selectWeek(w.week_index)"
+              v-for="wk in planWeeksLadder"
+              :key="wk.week_index"
+              class="c3-ladder-col"
+              @click="selectWeek(wk.week_index)"
             >
-              <view class="chip-title-row">
-                <text class="week-chip-title">第 {{ w.week_index }} 周</text>
-                <text v-if="currentWeekIndex === w.week_index" class="current-week-tag">本周</text>
-              </view>
-              <text class="week-chip-sub">{{ w.weekly_mileage_km || 0 }}km · {{ (w.phase || '训练').split(' ')[0] }}</text>
-            </view>
-          </view>
-        </scroll-view>
-
-        <!-- Active Week Card Header -->
-        <view v-if="activeMiniWeek" class="active-week-header">
-          <view class="active-week-left">
-            <view class="active-week-title-row">
-              <text class="active-week-title">{{ activeMiniWeek.week_title || `第 ${activeMiniWeek.week_index} 周` }}</text>
-              <text class="phase-tag">{{ activeMiniWeek.phase }}</text>
-            </view>
-            <text class="focus-text">重点：{{ activeMiniWeek.key_focus }}</text>
-            <text class="week-summary-banner-line">
-              📊 {{ activeMiniWeek.summary_banner_text || `周跑量：${activeMiniWeek.weekly_mileage_km || 0}公里。执行：${activeMiniWeek.actual_mileage_km || 0}公里，完成度${activeMiniWeek.compliance_rate || 0}%；力量：${activeMiniWeek.strength_sessions_done || 0}次。` }}
-            </text>
-          </view>
-          <view class="active-week-right">
-            <text class="mileage-val">{{ activeMiniWeek.weekly_mileage_km || 0 }} km</text>
-            <text class="mileage-label">周跑量</text>
-          </view>
-        </view>
-
-        <!-- Week Alignment & Sync Bar in Miniapp -->
-        <view v-if="activeMiniWeek" class="week-alignment-bar">
-          <view class="align-pill" :class="getAlignmentPillClass(activeMiniWeek)">
-            <text class="align-icon">{{ getAlignmentIcon(activeMiniWeek) }}</text>
-            <text class="align-status-title">{{ getAlignmentLabel(activeMiniWeek) }}</text>
-            <text class="align-status-detail">课表 {{ activeMiniWeek.weekly_mileage_km || 0 }}k / 目标 {{ userGoal?.weekly_target || 50 }}k ({{ getAlignmentRatio(activeMiniWeek) }}%)</text>
-          </view>
-          <button class="sync-goal-mini-btn" :loading="syncingGoal" @click="handleSyncToGoals">
-            <text class="sync-mini-btn-text">同步</text>
-          </button>
-        </view>
-
-        <!-- 7 Daily Workout Cards -->
-        <view v-if="activeMiniWeek" class="daily-cards-list">
-          <view
-            v-for="(day, dIdx) in (activeMiniWeek.days || [])"
-            :key="dIdx"
-            class="daily-card"
-            :class="[getWorkoutBorderClass(day.workout_type), { 'is-completed': day.completed, 'is-missed': isDayMissed(day) }]"
-          >
-            <view class="daily-card-top">
-              <view class="day-date-box">
-                <text class="day-name">{{ day.day_of_week }}</text>
-                <text class="day-date">{{ day.date ? day.date.substring(5) : '' }}</text>
-                <text v-if="day.swapped_from" class="swap-pill">🔁 与{{ day.swapped_from }}对换</text>
-              </view>
-              <view class="badge-group">
-                <text v-if="day.feeling_tag" class="rpe-pill" style="background:rgba(16,185,129,0.16);color:#10b981;border:1rpx solid rgba(16,185,129,0.35);">{{ day.feeling_tag }}</text>
-                <text v-if="day.rpe != null" class="rpe-pill">RPE {{ day.rpe }}</text>
-                <text
-                  v-if="day.recovery_pct != null"
-                  class="rec-pill"
-                  :class="day.recovery_pct >= 67 ? 'rec-good' : day.recovery_pct >= 34 ? 'rec-mid' : 'rec-low'"
-                >恢复 {{ day.recovery_pct }}%</text>
-                <text v-if="isDayMissed(day)" class="missed-badge">✗ 缺跑</text>
-                <text v-if="day.completed && day.actual_distance_km" class="actual-km-badge">实跑 {{ day.actual_distance_km }}k</text>
-                <text class="type-badge" :class="getWorkoutBadgeClass(day.workout_type)">
-                  {{ getWorkoutTypeLabel(day.workout_type) }}
-                </text>
-              </view>
-            </view>
-
-            <view class="daily-card-body">
-              <text class="workout-title">{{ day.title }}</text>
-              <view v-if="day.workout_type !== 'rest'" class="dist-row">
-                <text class="dist-val">{{ day.distance_km || 0 }}</text>
-                <text class="dist-unit">km</text>
-              </view>
-
-              <!-- Pace & Heart Rate & Biometrics -->
-              <view class="metrics-row" style="flex-wrap:wrap;">
-                <text v-if="day.workout_type !== 'rest' && day.target_pace && day.target_pace !== '—'" class="metric-pill">⏱️ {{ day.target_pace }}</text>
-                <text v-if="day.workout_type !== 'rest' && day.target_hr_zone && day.target_hr_zone !== '—'" class="metric-pill hr-pill">❤️ {{ day.target_hr_zone }}</text>
-                <text v-if="day.biometrics_text" class="metric-pill" :class="{ 'bio-warn-pill': day.low_hrv_alert }">💓 指标 {{ day.biometrics_text }}</text>
-                <text v-if="day.actual_execution_text" class="metric-pill exec-pill">🏃 执行: {{ day.actual_execution_text }}</text>
-              </view>
-
-              <text class="workout-desc">{{ day.description }}</text>
-
-              <!-- Athlete Self-Feel Notes & Photos -->
-              <view
-                v-if="day.feeling_tag || day.athlete_notes || (day.workout_photos && day.workout_photos.length)"
-                class="athlete-notes-box"
-              >
-                <view style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4rpx;">
-                  <text class="athlete-notes-title">💬 训练感受与备注：</text>
-                  <text v-if="day.feeling_tag" style="font-size:20rpx;font-weight:700;color:#10b981;">{{ day.feeling_tag }}</text>
-                </view>
-                <text v-if="day.athlete_notes" class="athlete-notes-content">{{ day.athlete_notes }}</text>
+              <view class="c3-ladder-stage">
                 <view
-                  v-if="day.workout_photos && day.workout_photos.length"
-                  style="display:flex;flex-wrap:wrap;gap:12rpx;margin-top:10rpx;"
-                >
-                  <image
-                    v-for="(pUrl, pIdx) in day.workout_photos"
-                    :key="pIdx"
-                    :src="pUrl"
-                    mode="aspectFill"
-                    style="width:112rpx;height:112rpx;border-radius:14rpx;border:1rpx solid rgba(255,255,255,0.15);"
-                    @click.stop="previewCoachWorkoutPhotos(day.workout_photos, Number(pIdx))"
-                  />
-                </view>
+                  class="c3-ladder-bar"
+                  :class="wk.kind"
+                  :style="{ height: wk.barHeightRpx + 'rpx' }"
+                />
               </view>
-
-              <!-- Coach Notes -->
-              <view v-if="day.coach_notes" class="coach-notes-box">
-                <text class="coach-notes-title">👨‍🏫 跑团教练批注：</text>
-                <text class="coach-notes-content">{{ day.coach_notes }}</text>
-              </view>
+              <text class="c3-ladder-lbl" :class="{ active: wk.week_index === selectedWeekIdx }">W{{ wk.week_index }}</text>
             </view>
+          </view>
 
-            <!-- Card Bottom Actions -->
-            <view class="daily-card-actions">
-              <button
-                class="action-complete-btn"
-                :class="{ completed: day.completed, missed: isDayMissed(day) }"
-                @click="handleToggleComplete(activeMiniWeek.week_index, dIdx, day)"
-              >
-                <text class="btn-text">
-                  {{ day.completed ? (day.actual_distance_km ? `✅ 已打卡 ${day.actual_distance_km}k` : '✅ 已完成') : (isDayMissed(day) ? '❌ 补卡' : '打卡') }}
-                </text>
-              </button>
-              <button
-                class="action-edit-btn"
-                @click="openEditWorkoutModal(activeMiniWeek.week_index, dIdx, day)"
-              >
-                <text class="btn-text">{{ day.completed ? '📝 感受/备注/照片' : '📝 记录/调休' }}</text>
-              </button>
-            </view>
+          <!-- 1 行教练叮嘱 / 复盘高亮条（若有） -->
+          <view
+            v-if="activeMiniWeek?.coach_weekly_diagnosis || plan.coach_review_note"
+            class="rgm-coach-box c3-coach-line"
+          >
+            <RgmIcon name="chat" :size="24" color="blue" />
+            <text class="c3-coach-line-txt">
+              {{ activeMiniWeek?.coach_weekly_diagnosis || plan.coach_review_note }}
+            </text>
           </view>
         </view>
 
-        <!-- ── Weekly Summary & Injury Self-Report Box (默认折叠，教练评语常驻) ── -->
-        <view v-if="activeMiniWeek" style="margin-top:20rpx;padding:24rpx;border-radius:24rpx;background:var(--rgm-card, rgba(255,255,255,0.03));border:1rpx solid var(--rgm-line, rgba(255,255,255,0.1));">
-          <view
-            style="display:flex;align-items:center;justify-content:space-between;"
-            @click="showWeekSummaryForm = !showWeekSummaryForm"
-          >
-            <view style="display:flex;flex-direction:column;gap:4rpx;">
-              <text style="font-size:26rpx;font-weight:800;color:var(--rgm-text, #ffffff);">📝 第 {{ activeMiniWeek.week_index }} 周反馈</text>
-              <text v-if="weekInjuryNote || weekAthleteSummary || weekTravelNote" style="font-size:20rpx;color:var(--rgm-text-2, #a1a1aa);">
-                已填反馈
-              </text>
+        <!-- 全周 7 日紧凑课表同屏一览 -->
+        <view v-if="activeMiniWeek" class="c3-week-days">
+          <template v-for="(day, dIdx) in (activeMiniWeek.days || [])" :key="dIdx">
+            <!-- 今日课表：高对比翡翠绿聚焦卡 -->
+            <view
+              v-if="isTodayWorkout(day)"
+              class="c3-day-today"
+              :class="{ completed: day.completed }"
+              @click="openEditWorkoutModal(activeMiniWeek.week_index, Number(dIdx), day)"
+            >
+              <view class="c3-dt-left">
+                <view class="c3-dt-top">
+                  <text class="c3-dt-badge">{{ day.day_of_week }} · {{ getWorkoutTypeLabel(day.workout_type) }}</text>
+                  <text v-if="day.target_pace && day.target_pace !== '—'" class="c3-dt-pace">
+                    {{ day.target_pace }}{{ day.target_hr_zone && day.target_hr_zone !== '—' ? ` · ${day.target_hr_zone}` : '' }}
+                  </text>
+                </view>
+                <text class="c3-dt-km">
+                  {{ day.workout_type === 'rest' ? day.title : `${day.distance_km || 0} km` }}
+                </text>
+                <text class="c3-dt-sub">{{ day.title }}</text>
+              </view>
+              <view
+                class="c3-dt-check"
+                :class="{ checked: day.completed }"
+                @click.stop="handleToggleComplete(activeMiniWeek.week_index, Number(dIdx), day)"
+              >
+                <RgmIcon name="check" :size="34" :color="day.completed ? 'white' : 'green'" :stroke-width="2.4" />
+              </view>
             </view>
-            <text style="font-size:22rpx;font-weight:700;color:var(--rgm-brand-text, #f97316);background:var(--rgm-brand-tint, rgba(249,115,22,0.14));padding:8rpx 20rpx;border-radius:999rpx;white-space:nowrap;flex-shrink:0;">
-              {{ showWeekSummaryForm ? '收起 ▴' : '填写 ▾' }}
-            </text>
+
+            <!-- 其他日（已完赛 / 休息 / 未来）：单行紧凑条 -->
+            <view
+              v-else
+              class="rgm-card c3-day-row"
+              :class="{ completed: day.completed, missed: isDayMissed(day), isrest: day.workout_type === 'rest' }"
+              @click="openEditWorkoutModal(activeMiniWeek.week_index, Number(dIdx), day)"
+            >
+              <view class="c3-dr-left">
+                <text class="c3-dr-day">{{ day.day_of_week }}</text>
+                <view class="c3-dr-dot" :class="getWorkoutBadgeClass(day.workout_type)" />
+                <text class="c3-dr-type" :class="getWorkoutBadgeClass(day.workout_type)">{{ getWorkoutTypeLabel(day.workout_type) }}</text>
+                <text class="c3-dr-title">
+                  {{ day.workout_type === 'rest' ? day.title : `${day.distance_km || 0} km${day.target_pace && day.target_pace !== '—' ? ' · ' + day.target_pace : ''}` }}
+                </text>
+              </view>
+              <view class="c3-dr-right">
+                <text v-if="day.completed && day.actual_distance_km" class="c3-dr-actual">{{ day.actual_distance_km }}k</text>
+                <RgmIcon v-else-if="day.completed" name="check" :size="24" color="green" :stroke-width="2.4" />
+                <text v-else-if="isDayMissed(day)" class="c3-dr-missed">补卡</text>
+                <text v-else-if="day.rpe != null" class="c3-dr-rpe">RPE {{ day.rpe }}</text>
+                <RgmIcon v-else name="chevron-right" :size="22" color="muted" />
+              </view>
+            </view>
+          </template>
+        </view>
+
+        <!-- 周反馈与伤痛报备折叠条 -->
+        <view v-if="activeMiniWeek" class="rgm-card c3-feedback-box">
+          <view class="c3-fb-head" @click="showWeekSummaryForm = !showWeekSummaryForm">
+            <text class="c3-fb-title">第 {{ activeMiniWeek.week_index }} 周小结与伤痛报备</text>
+            <text class="c3-fb-toggle">{{ showWeekSummaryForm ? '收起 ▴' : (weekInjuryNote || weekAthleteSummary ? '已填 · 改 ▾' : '填写 ▾') }}</text>
           </view>
-
-          <view v-if="activeMiniWeek.coach_weekly_diagnosis" style="margin-top:16rpx;padding:16rpx;border-radius:16rpx;background:rgba(168,85,247,0.12);border:1rpx solid rgba(168,85,247,0.3);">
-            <text style="font-size:21rpx;font-weight:800;color:var(--rgm-purple, #d8b4fe);display:block;margin-bottom:4rpx;">🧢 教练复盘：</text>
-            <text style="font-size:21rpx;color:var(--rgm-text, #f3e8ff);line-height:1.4;">{{ activeMiniWeek.coach_weekly_diagnosis }}</text>
-          </view>
-
-          <view v-if="showWeekSummaryForm" style="margin-top:18rpx;padding-top:18rpx;border-top:1rpx solid var(--rgm-line, rgba(255,255,255,0.08));">
-            <view class="modal-input-group" style="margin-bottom:14rpx;">
-              <text class="modal-label" style="color:var(--rgm-red, #fda4af);">🚨 伤痛上报 (无则填无)</text>
-              <input v-model="weekInjuryNote" class="modal-input" placeholder="如：无，或右脚跟腱跑后轻微酸胀" />
+          <view v-if="showWeekSummaryForm" class="c3-fb-form">
+            <view class="modal-input-group">
+              <text class="modal-label">伤痛上报（无则留空或填无）</text>
+              <input v-model="weekInjuryNote" class="modal-input" placeholder="如：右脚跟腱跑后轻微酸胀" />
             </view>
-
-            <view class="modal-input-group" style="margin-bottom:14rpx;">
-              <text class="modal-label" style="color:var(--rgm-amber, #fcd34d);">💬 本周小结</text>
-              <input v-model="weekAthleteSummary" class="modal-input" placeholder="如：周二间歇完成顺利，周末长距离后程略掉速" />
+            <view class="modal-input-group">
+              <text class="modal-label">本周训练小结</text>
+              <input v-model="weekAthleteSummary" class="modal-input" placeholder="如：周二间歇顺畅，周末拉练后程稳" />
             </view>
-
-            <view class="modal-input-group" style="margin-bottom:16rpx;">
-              <text class="modal-label">✈️ 出差/请假/比赛报备</text>
-              <input v-model="weekTravelNote" class="modal-input" placeholder="如：下周三至周五出差，仅能安排晨跑" />
+            <view class="modal-input-group">
+              <text class="modal-label">出差 / 比赛行程报备</text>
+              <input v-model="weekTravelNote" class="modal-input" placeholder="如：下周三出差仅晨跑" />
             </view>
-
             <button class="primary-btn" :loading="savingWeekSummary" @click="handleSaveRunnerWeekSummary">
-              <text class="btn-text">{{ savingWeekSummary ? '提交中...' : '💾 提交周反馈' }}</text>
+              <text class="btn-text">{{ savingWeekSummary ? '提交中...' : '提交周反馈' }}</text>
             </button>
           </view>
         </view>
       </view>
     </view>
 
-    <!-- ── ANALYSIS TAB CONTENT ── -->
+    <!-- ── ANALYSIS TAB CONTENT (体能切页) ── -->
     <view v-else class="analysis-tab-section">
-      <!-- ── ATHLETE PROFILE & TSB FORM CARD ── -->
+      <!-- 直达完整 A1 跑力与 30 天生理趋势页 -->
+      <view class="rgm-card c3-body-shortcut" @click="goToBodyData">
+        <view class="c3-bs-left">
+          <RgmIcon name="gauge" :size="34" color="purple" />
+          <view class="c3-bs-text">
+            <text class="c3-bs-title">完整 VDOT 雷达与 30 天生理趋势</text>
+            <text class="c3-bs-sub">查看 HRV、静息心率、官兔雷达与赛后评估</text>
+          </view>
+        </view>
+        <RgmIcon name="chevron-right" :size="26" color="muted" />
+      </view>
+
+      <!-- Athlete Profile & TSB Card -->
       <view class="profile-card">
-      <view class="profile-top">
-        <view class="profile-name-box">
-          <text class="profile-name">{{ athleteInfo.name || "跑者" }}</text>
-          <text class="profile-meta">
-            {{ athleteInfo.gender === 'female' ? '♀ 女' : '♂ 男' }} · 
-            {{ (athleteInfo.age && athleteInfo.age >= 50) ? '大师组' : athleteInfo.age ? `${athleteInfo.age} 岁` : '未录入年龄' }} · 
-            跑龄 {{ athleteInfo.years_running || 2 }} 年
-          </text>
-        </view>
-        <view class="tsb-badge" :class="tsbClass">
-          <text class="tsb-badge-text">{{ tsbMetrics.status || "平衡稳健" }}</text>
-        </view>
-      </view>
-
-      <view class="tsb-grid">
-        <view class="tsb-item">
-          <text class="tsb-label">体能 CTL</text>
-          <text class="tsb-val text-cyan">{{ tsbMetrics.ctl || 0 }}</text>
-        </view>
-        <view class="tsb-item">
-          <text class="tsb-label">疲劳 ATL</text>
-          <text class="tsb-val text-amber">{{ tsbMetrics.atl || 0 }}</text>
-        </view>
-        <view class="tsb-item">
-          <text class="tsb-label">状态 TSB <text class="term-info" @click.stop="explainTerm('tsb')">ⓘ</text></text>
-          <text class="tsb-val" :class="tsbMetrics.tsb >= 0 ? 'text-green' : 'text-purple'">
-            {{ tsbMetrics.tsb > 0 ? `+${tsbMetrics.tsb}` : (tsbMetrics.tsb || 0) }}
-          </text>
-        </view>
-      </view>
-
-      <view v-if="tsbMetrics.risk_warning" class="risk-box">
-        <text class="risk-icon">⚠️</text>
-        <text class="risk-text">{{ tsbMetrics.risk_warning }}</text>
-      </view>
-      <view
-        v-if="recoveryDataAvailability?.night_wear_missing || analysis?.recovery_data_availability?.night_wear_missing"
-        style="margin-top: 14rpx; padding: 12rpx 18rpx; border-radius: 14rpx; background: rgba(245, 158, 11, 0.14); border: 1rpx solid rgba(245, 158, 11, 0.45); display: flex; align-items: center; justify-content: space-between;"
-        @click.stop="explainTerm('watch_wear')"
-      >
-        <text style="font-size: 22rpx; font-weight: 700; color: #b45309;">
-          ⚠️ 夜间未佩戴 · 恢复数据缺失
-        </text>
-        <text style="font-size: 21rpx; font-weight: 700; color: #b45309; flex-shrink: 0; margin-left: 12rpx;">ⓘ 详情</text>
-      </view>
-    </view>
-
-    <!-- ── TARGET RACE CUSTOMIZATION CARD (紧凑条 + 按需展开，消除与课表页重复表单) ── -->
-    <view class="race-setup-card">
-      <view
-        style="display:flex;align-items:center;justify-content:space-between;"
-        @click="showAnalysisRaceSetup = !showAnalysisRaceSetup"
-      >
-        <view style="display:flex;flex-direction:column;gap:4rpx;">
-          <view class="card-title-row" style="margin-bottom:0;">
-            <text class="section-icon">🎯</text>
-            <text class="card-title">备赛：{{ targetRace || '未设定' }}</text>
+        <view class="profile-top">
+          <view class="profile-name-box">
+            <text class="profile-name">{{ athleteInfo.name || "跑者" }}</text>
+            <text class="profile-meta">
+              {{ athleteInfo.gender === 'female' ? '女' : '男' }} ·
+              {{ (athleteInfo.age && athleteInfo.age >= 50) ? '大师组' : athleteInfo.age ? `${athleteInfo.age} 岁` : '未录入年龄' }} ·
+              跑龄 {{ athleteInfo.years_running || 2 }} 年
+            </text>
           </view>
-          <text style="font-size:22rpx;color:#a1a1aa;">
-            目标 {{ targetTime || '—' }} · {{ raceType === 'half' ? '半马' : raceType === 'trail' ? '越野' : raceType === '10k' ? '10K' : '全马' }}
-          </text>
-        </view>
-        <text style="font-size:22rpx;font-weight:700;color:#f97316;background:rgba(249,115,22,0.14);padding:8rpx 20rpx;border-radius:999rpx;">
-          {{ showAnalysisRaceSetup ? '收起 ▴' : '切换 ▾' }}
-        </text>
-      </view>
-
-      <view v-if="showAnalysisRaceSetup" style="margin-top:20rpx;padding-top:20rpx;border-top:1rpx solid rgba(255,255,255,0.08);">
-        <!-- Registered User Races Quick Selector -->
-        <view v-if="userRaces.length" class="registered-races-row">
-          <text class="registered-label">🚩 已登记赛事：</text>
-          <view class="registered-chips">
-            <view
-              v-for="r in userRaces"
-              :key="r.id || r.name"
-              class="reg-chip"
-              :class="{ active: targetRace === r.name || targetRace.includes(r.name) || r.name.includes(targetRace) }"
-              @click="handleSelectRegisteredRace(r)"
-            >
-              <text class="reg-chip-tier" :class="`tier-${r.priority == 1 || r.priority === 'A' ? 'a' : r.priority == 2 || r.priority === 'B' ? 'b' : 'c'}`">
-                {{ r.priority == 1 || r.priority === 'A' ? 'A标' : r.priority == 2 || r.priority === 'B' ? 'B标' : 'C标' }}
-              </text>
-              <text class="reg-chip-name">{{ r.name }}</text>
-              <text v-if="r.days_left !== undefined" class="reg-chip-days">{{ r.days_left }}天</text>
-            </view>
+          <view class="tsb-badge" :class="tsbClass">
+            <text class="tsb-badge-text">{{ tsbMetrics.status || "平衡稳健" }}</text>
           </view>
         </view>
 
-        <view class="inputs-row">
-          <view class="input-col flex-2">
-            <text class="input-label">目标赛事</text>
-            <input
-              v-model="targetRace"
-              placeholder="如: 上海马拉松 / 武功山 50K"
-              class="setup-input"
-              @input="onRaceNameInput"
-            />
+        <view class="tsb-grid">
+          <view class="tsb-item">
+            <text class="tsb-label">体能 CTL</text>
+            <text class="tsb-val text-cyan">{{ tsbMetrics.ctl || 0 }}</text>
           </view>
-          <view class="input-col flex-1">
-            <text class="input-label">目标时间</text>
-            <input
-              v-model="targetTime"
-              placeholder="3:15:00"
-              class="setup-input"
-            />
+          <view class="tsb-item">
+            <text class="tsb-label">疲劳 ATL</text>
+            <text class="tsb-val text-amber">{{ tsbMetrics.atl || 0 }}</text>
+          </view>
+          <view class="tsb-item">
+            <text class="tsb-label">状态 TSB <text class="term-info" @click.stop="explainTerm('tsb')">ⓘ</text></text>
+            <text class="tsb-val" :class="tsbMetrics.tsb >= 0 ? 'text-green' : 'text-purple'">
+              {{ tsbMetrics.tsb > 0 ? `+${tsbMetrics.tsb}` : (tsbMetrics.tsb || 0) }}
+            </text>
           </view>
         </view>
 
-        <!-- Race Category Pills -->
-        <view class="race-type-pills-row">
-          <text class="input-label">专项分类：</text>
-          <view class="type-pills">
-            <view
-              class="type-pill"
-              :class="{ active: raceType === 'marathon' }"
-              @click="setCategory('marathon')"
-            >
-              <text class="pill-text">🏅 全马</text>
+        <view v-if="tsbMetrics.risk_warning" class="risk-box">
+          <RgmIcon name="alert" :size="24" color="amber" />
+          <text class="risk-text">{{ tsbMetrics.risk_warning }}</text>
+        </view>
+      </view>
+
+      <!-- 备赛诊断开关 + 重算按钮 -->
+      <view class="race-setup-card">
+        <view class="c3-race-setup-head" @click="showAnalysisRaceSetup = !showAnalysisRaceSetup">
+          <view class="c3-rs-left">
+            <text class="card-title">诊断目标：{{ targetRace || '未设定' }}</text>
+            <text class="c3-rs-sub">
+              目标 {{ targetTime || '—' }} · {{ raceType === 'half' ? '半马' : raceType === 'trail' ? '越野' : raceType === '10k' ? '10K' : '全马' }}
+            </text>
+          </view>
+          <view class="c3-rs-right">
+            <text class="c3-reanalyze-pill" @click.stop="handleReAnalyze">{{ loading ? '测算中...' : '重算' }}</text>
+            <text class="c3-switch-pill">{{ showAnalysisRaceSetup ? '收起 ▴' : '切换 ▾' }}</text>
+          </view>
+        </view>
+
+        <view v-if="showAnalysisRaceSetup" class="c3-rs-expand">
+          <view v-if="userRaces.length" class="registered-races-row">
+            <text class="registered-label">已登记赛事</text>
+            <view class="registered-chips">
+              <view
+                v-for="r in userRaces"
+                :key="r.id || r.name"
+                class="reg-chip"
+                :class="{ active: targetRace === r.name || targetRace.includes(r.name) || r.name.includes(targetRace) }"
+                @click="handleSelectRegisteredRace(r)"
+              >
+                <text class="reg-chip-tier" :class="`tier-${r.priority == 1 || r.priority === 'A' ? 'a' : r.priority == 2 || r.priority === 'B' ? 'b' : 'c'}`">
+                  {{ r.priority == 1 || r.priority === 'A' ? 'A标' : r.priority == 2 || r.priority === 'B' ? 'B标' : 'C标' }}
+                </text>
+                <text class="reg-chip-name">{{ r.name }}</text>
+                <text v-if="r.days_left !== undefined" class="reg-chip-days">{{ r.days_left }}天</text>
+              </view>
             </view>
-            <view
-              class="type-pill"
-              :class="{ active: raceType === 'half' }"
-              @click="setCategory('half')"
-            >
-              <text class="pill-text">⚡ 半马</text>
+          </view>
+
+          <view class="inputs-row">
+            <view class="input-col flex-2">
+              <text class="input-label">目标赛事</text>
+              <input v-model="targetRace" placeholder="如: 上海马拉松" class="setup-input" @input="onRaceNameInput" />
             </view>
-            <view
-              class="type-pill"
-              :class="{ active: raceType === 'trail' }"
-              @click="setCategory('trail')"
-            >
-              <text class="pill-text">🏔️ 越野</text>
+            <view class="input-col flex-1">
+              <text class="input-label">目标时间</text>
+              <input v-model="targetTime" placeholder="3:15:00" class="setup-input" />
             </view>
-            <view
-              class="type-pill"
-              :class="{ active: raceType === '10k' || raceType === '5k' }"
-              @click="setCategory('10k')"
-            >
-              <text class="pill-text">🏃 10K</text>
+          </view>
+
+          <view class="race-type-pills-row">
+            <text class="input-label">专项分类</text>
+            <view class="type-pills">
+              <view class="type-pill" :class="{ active: raceType === 'marathon' }" @click="setCategory('marathon')"><text class="pill-text">全马</text></view>
+              <view class="type-pill" :class="{ active: raceType === 'half' }" @click="setCategory('half')"><text class="pill-text">半马</text></view>
+              <view class="type-pill" :class="{ active: raceType === 'trail' }" @click="setCategory('trail')"><text class="pill-text">越野</text></view>
+              <view class="type-pill" :class="{ active: raceType === '10k' || raceType === '5k' }" @click="setCategory('10k')"><text class="pill-text">10K</text></view>
             </view>
           </view>
         </view>
       </view>
-    </view>
 
-    <!-- Main Content -->
-    <view v-if="analysis" class="content-box">
-      <!-- ── CARD 1: 当前阶段与核心评价 ── -->
-      <view class="hero-card">
-        <view class="phase-badge" @click.stop="explainTerm('canova_model')">
-          <text class="sparkle">✨</text>
-          <text class="phase-text">阶段：{{ analysis.periodization_phase || "专项准备期" }} ⓘ</text>
+      <!-- Main Diagnosis Cards -->
+      <view v-if="analysis" class="content-box">
+        <view class="hero-card">
+          <view class="phase-badge" @click.stop="explainTerm('canova_model')">
+            <text class="phase-text">阶段：{{ analysis.periodization_phase || "专项准备期" }} ⓘ</text>
+          </view>
+          <text class="summary-title">{{ analysis.summary }}</text>
+          <text class="fitness-detail">{{ analysis.fitness_status }}</text>
         </view>
 
-        <text class="summary-title">{{ analysis.summary }}</text>
-        <text class="fitness-detail">{{ analysis.fitness_status }}</text>
-      </view>
-
-      <!-- ── CARD 1.2: 多赛事宏观统筹与战术推演 (Multi-Race Strategy) ── -->
-      <view v-if="analysis.multi_race_strategy" class="section-card multi-race-card">
-        <view class="multi-race-header">
-          <view class="multi-race-header-titles">
-            <view class="card-title-row">
-              <text class="section-icon">📅</text>
-              <text class="card-title">多赛事统筹</text>
-            </view>
-          </view>
-          <view class="total-races-badge">
-            <text class="sparkle-icon">✨</text>
-            <text class="total-races-text">{{ (analysis.multi_race_strategy.race_timeline_advice || []).length }} 场赛事</text>
-          </view>
-        </view>
-
-        <!-- Macrocycle Overview -->
-        <view class="macrocycle-box">
-          <view class="macrocycle-header">
-            <text class="macrocycle-icon">🏆</text>
-            <text class="macrocycle-label">赛季宏观周期统筹：</text>
-          </view>
-          <text class="macrocycle-text">{{ analysis.multi_race_strategy.macro_cycle_overview }}</text>
-        </view>
-
-        <!-- Timeline Section -->
-        <view class="timeline-section">
-          <view class="timeline-section-header">
-            <text class="timeline-section-title">赛事日历与专项执行规程</text>
+        <!-- Multi-Race Strategy (长文默认折叠，仅留2行摘要) -->
+        <view v-if="analysis.multi_race_strategy" class="section-card multi-race-card">
+          <view class="multi-race-header">
+            <text class="card-title">多赛事统筹</text>
+            <text class="total-races-text">{{ (analysis.multi_race_strategy.race_timeline_advice || []).length }} 场备赛</text>
           </view>
 
-          <!-- Race Timeline List -->
           <view class="race-timeline-list">
             <view
               v-for="(r, idx) in (analysis.multi_race_strategy.race_timeline_advice || [])"
@@ -736,353 +475,242 @@
                 <view class="race-title-row">
                   <view class="race-title-left">
                     <view class="race-tier-badge" :class="`badge-${(r.tier || 'B').toLowerCase()}`">
-                      <text class="badge-text">{{ r.tactical_role || `${r.tier || 'B'} 标` }}</text>
+                      <text class="badge-text">{{ (r.tier || 'B').toUpperCase() }} 标</text>
                     </view>
                     <text class="race-item-name">{{ r.race_name }}</text>
                   </view>
                   <text v-if="r.days_left !== undefined" class="race-days-countdown">
-                    倒计时 <text class="days-num">{{ r.days_left }}</text> 天
+                    <text class="days-num">{{ r.days_left }}</text> 天
                   </text>
                 </view>
 
-                <!-- Interactive A/B/C Priority Switcher -->
                 <view class="priority-switch-row">
-                  <view class="priority-left-group">
-                    <text class="switch-tip-lbl">调整级别:</text>
-                    <view class="priority-btns">
-                      <button
-                        class="p-btn p-btn-a"
-                        :class="{ active: (r.tier || '').toUpperCase() === 'A' }"
-                        :disabled="updatingPriority === (r.id || r.race_name)"
-                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'A')"
-                      >A 标 (核心)</button>
-                      <button
-                        class="p-btn p-btn-b"
-                        :class="{ active: (r.tier || '').toUpperCase() === 'B' }"
-                        :disabled="updatingPriority === (r.id || r.race_name)"
-                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'B')"
-                      >B 标 (代练)</button>
-                      <button
-                        class="p-btn p-btn-c"
-                        :class="{ active: (r.tier || '').toUpperCase() === 'C' }"
-                        :disabled="updatingPriority === (r.id || r.race_name)"
-                        @click.stop="handleUpdatePriority(r.id || r.race_name, 'C')"
-                      >C 标 (拉练)</button>
-                    </view>
+                  <view class="priority-btns">
+                    <button
+                      class="p-btn p-btn-a"
+                      :class="{ active: (r.tier || '').toUpperCase() === 'A' }"
+                      :disabled="updatingPriority === (r.id || r.race_name)"
+                      @click.stop="handleUpdatePriority(r.id || r.race_name, 'A')"
+                    >A标</button>
+                    <button
+                      class="p-btn p-btn-b"
+                      :class="{ active: (r.tier || '').toUpperCase() === 'B' }"
+                      :disabled="updatingPriority === (r.id || r.race_name)"
+                      @click.stop="handleUpdatePriority(r.id || r.race_name, 'B')"
+                    >B标</button>
+                    <button
+                      class="p-btn p-btn-c"
+                      :class="{ active: (r.tier || '').toUpperCase() === 'C' }"
+                      :disabled="updatingPriority === (r.id || r.race_name)"
+                      @click.stop="handleUpdatePriority(r.id || r.race_name, 'C')"
+                    >C标</button>
                   </view>
-
                   <button
                     class="set-target-btn"
                     :class="{ 'is-active-target': isCurrentTarget(r) }"
                     @click.stop="handleSelectTargetRace(r)"
                   >
-                    {{ isCurrentTarget(r) ? "🎯 当前主备赛" : "设为主目标" }}
+                    {{ isCurrentTarget(r) ? "主备赛" : "设为主目标" }}
                   </button>
                 </view>
               </view>
 
-              <!-- Two Execution Boxes: Pacing Strategy & Taper/Recovery Rules -->
-              <view class="race-execution-boxes">
-                <view class="exec-box">
-                  <view class="exec-box-title">
-                    <text class="exec-icon">🎯</text>
-                    <text class="exec-label">目标配速与心率战术</text>
-                  </view>
-                  <text class="exec-desc">{{ r.pacing_strategy }}</text>
-                </view>
-
-                <view class="exec-box">
-                  <view class="exec-box-title">
-                    <text class="exec-icon">⏳</text>
-                    <text class="exec-label">减量规程与超量恢复</text>
-                  </view>
-                  <text class="exec-desc">{{ r.taper_recovery_rule }}</text>
-                </view>
+              <view class="c3-strategy-compact" @click="toggleStrategyExpand(String(r.id || r.race_name || idx))">
+                <text class="c3-strategy-txt" :class="{ clamped: !expandedStrategyIds[String(r.id || r.race_name || idx)] }">
+                  配速：{{ r.pacing_strategy }}
+                </text>
+                <text v-if="expandedStrategyIds[String(r.id || r.race_name || idx)]" class="c3-strategy-taper">
+                  减量：{{ r.taper_recovery_rule }}
+                </text>
+                <text class="c3-strategy-more">{{ expandedStrategyIds[String(r.id || r.race_name || idx)] ? '收起 ▴' : '展开战术 ▾' }}</text>
               </view>
             </view>
           </view>
         </view>
 
-        <!-- Conflict & Strategic Diagnostics Banner -->
-        <view v-if="analysis.multi_race_strategy.conflict_resolution" class="conflict-box">
-          <view class="conflict-title-row">
-            <text class="conflict-icon">⚠️</text>
-            <text class="conflict-title">战术规避与周期协同要点：</text>
-          </view>
-          <text class="conflict-desc">{{ analysis.multi_race_strategy.conflict_resolution }}</text>
-        </view>
-      </view>
-
-      <!-- ── CARD 1.5: CANOVA 比赛专项刺激区间 ── -->
-      <view v-if="analysis.race_zones" class="section-card">
-        <view class="card-title-row">
-          <text class="section-icon">⚡</text>
+        <!-- Canova 专项配速区间 -->
+        <view v-if="analysis.race_zones" class="section-card">
           <text class="card-title">专项配速区间 ({{ targetRace }})</text>
-        </view>
-
-        <view class="zones-list">
-          <view
-            v-for="(z, key) in analysis.race_zones"
-            :key="key"
-            class="zone-item"
-          >
-            <view class="zone-header">
-              <text class="zone-name">{{ z.name }}</text>
-              <text class="zone-range">{{ z.range }}</text>
+          <view class="zones-list">
+            <view v-for="(z, key) in analysis.race_zones" :key="key" class="zone-item">
+              <view class="zone-header">
+                <text class="zone-name">{{ z.name }}</text>
+                <text class="zone-range">{{ z.range }}</text>
+              </view>
             </view>
           </view>
         </view>
-      </view>
 
-      <!-- ── CARD 2: 本周核心关键课 ── -->
-      <view class="section-card workout-card">
-        <view class="card-title-row">
-          <text class="section-icon">🎯</text>
+        <!-- 本周关键课 & 恢复指导 & 要点 -->
+        <view class="section-card workout-card">
           <text class="card-title">本周关键课</text>
+          <view class="workout-box">
+            <text class="workout-text">{{ formatWorkout(analysis.focus_workout_of_the_week) }}</text>
+          </view>
         </view>
-        <view class="workout-box">
-          <text class="workout-text">{{ formatWorkout(analysis.focus_workout_of_the_week) }}</text>
-        </view>
-      </view>
 
-      <!-- ── CARD 3: 生理恢复与超量恢复指导 ── -->
-      <view class="section-card recovery-card">
-        <view class="card-title-row">
-          <text class="section-icon">🌿</text>
+        <view class="section-card recovery-card">
           <text class="card-title">恢复指导</text>
-        </view>
-        <view class="recovery-box">
-          <text class="recovery-text">{{ formatAdvice(analysis.recovery_advice) }}</text>
-        </view>
-      </view>
-
-      <!-- ── CARD 4: Canova 专项训练执行要点 ── -->
-      <view class="section-card">
-        <view class="card-title-row">
-          <text class="section-icon">📋</text>
-          <text class="card-title">执行要点</text>
-        </view>
-
-        <view class="suggestions-list">
-          <view
-            v-for="(item, idx) in (analysis.key_suggestions || [])"
-            :key="idx"
-            class="sugg-item"
-          >
-            <text class="sugg-badge">重点 0{{ idx + 1 }}</text>
-            <text class="sugg-text">{{ item }}</text>
+          <view class="recovery-box">
+            <text class="recovery-text">{{ formatAdvice(analysis.recovery_advice) }}</text>
           </view>
         </view>
       </view>
+
+      <view v-else class="empty-card">
+        <RgmIcon name="zap" :size="48" color="brand" />
+        <text class="empty-title">Canova 教练就绪</text>
+        <text class="empty-desc">配置目标赛事后即可生成训练诊断</text>
+        <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成训练诊断</button>
+      </view>
     </view>
 
-    <!-- Empty / Fallback State -->
-    <view v-else class="empty-card">
-      <text class="empty-icon">⚡</text>
-      <text class="empty-title">Canova教练就绪</text>
-      <text class="empty-desc">配置目标赛事后即可生成训练诊断</text>
-      <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成训练诊断</button>
-    </view>
-    </view>
-
-    <!-- ── EDIT WORKOUT & RUNNER DAILY SELF-REPORT MODAL ── -->
-    <view v-if="editModalOpen" class="modal-mask">
+    <!-- ── A6 训练体感记录与调休弹窗 ── -->
+    <view v-if="editModalOpen" class="modal-mask" @touchmove.stop.prevent>
       <view class="modal-card">
         <view class="modal-header">
-          <text class="modal-title">训练记录与调休</text>
+          <text class="modal-title">训练体感打卡与调休</text>
           <text class="modal-close" @click="editModalOpen = false">✕</text>
         </view>
 
         <scroll-view scroll-y class="modal-scroll-body">
-          <!-- Feeling Tag Quick Selector -->
-          <view class="modal-input-group">
-            <text class="modal-label" style="color:var(--rgm-green, #10b981);font-weight:800;">😊 当日训练感受标签</text>
-            <view style="display:grid;grid-template-columns:repeat(3,1fr);gap:10rpx;margin-top:8rpx;">
-              <view
-                v-for="tag in COACH_FEELING_TAGS"
-                :key="tag"
-                @click="editFeelingTag = editFeelingTag === tag ? '' : tag"
-                style="padding:12rpx 8rpx;border-radius:14rpx;text-align:center;font-size:21rpx;font-weight:700;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.12));"
-                :style="editFeelingTag === tag ? 'background:rgba(16,185,129,0.16);border-color:var(--rgm-green, #10b981);color:var(--rgm-green, #10b981);' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text, #d4d4d8);'"
-              >
-                <text>{{ tag }}</text>
-              </view>
-            </view>
-          </view>
-
           <!-- RPE 1-10 Selector -->
           <view class="modal-input-group">
-            <text class="modal-label" style="color:var(--rgm-brand-text, #fb923c);font-weight:800;">🔥 当日训练主观疲劳度 RPE (1=轻松 ~ 10=极限)</text>
-            <view style="display:flex;flex-wrap:wrap;gap:8rpx;margin-top:8rpx;">
+            <text class="modal-label">主观疲劳度 RPE (1轻松 ~ 10极限)</text>
+            <view class="c3-rpe-grid">
               <view
                 v-for="num in [1,2,3,4,5,6,7,8,9,10]"
                 :key="num"
+                class="c3-rpe-pill"
+                :class="{
+                  active: Number(editRpe) === num,
+                  easy: Number(editRpe) === num && num <= 3,
+                  mod: Number(editRpe) === num && num >= 4 && num <= 6,
+                  hard: Number(editRpe) === num && num >= 7 && num <= 8,
+                  max: Number(editRpe) === num && num >= 9
+                }"
                 @click="editRpe = editRpe === String(num) ? '' : String(num)"
-                style="width:52rpx;height:52rpx;border-radius:12rpx;display:flex;align-items:center;justify-content:center;font-size:22rpx;font-weight:800;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.12));"
-                :style="Number(editRpe) === num ? (num >= 8 ? 'background:#f43f5e;color:#fff;' : num >= 5 ? 'background:#f59e0b;color:#000;' : 'background:#10b981;color:#000;') : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);'"
               >
                 <text>{{ num }}</text>
               </view>
             </view>
           </view>
 
+          <!-- Feeling Tag Quick Selector -->
+          <view class="modal-input-group">
+            <text class="modal-label">快捷体感标签</text>
+            <view class="c3-feel-grid">
+              <view
+                v-for="tag in COACH_FEELING_TAGS"
+                :key="tag"
+                class="c3-feel-chip"
+                :class="{ active: editFeelingTag === tag }"
+                @click="editFeelingTag = editFeelingTag === tag ? '' : tag"
+              >
+                <text>{{ tag }}</text>
+              </view>
+            </view>
+          </view>
+
           <view class="modal-row">
             <view class="modal-input-group flex-1">
-              <text class="modal-label">🏃 计划执行情况</text>
-              <input v-model="editExecutionText" class="modal-input" placeholder="如 15km*602, hr132" />
+              <text class="modal-label">执行情况</text>
+              <input v-model="editExecutionText" class="modal-input" placeholder="如 15km, hr132" />
             </view>
             <view class="modal-input-group flex-1">
-              <text class="modal-label">💬 训练感受与备注</text>
-              <input v-model="editAthleteNotes" class="modal-input" placeholder="如 体感轻快 / 小腿微酸" />
+              <text class="modal-label">训练备注</text>
+              <input v-model="editAthleteNotes" class="modal-input" placeholder="如 体感轻快" />
             </view>
           </view>
 
           <!-- Workout Photos Uploader (Max 3) -->
           <view class="modal-input-group">
-            <view style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8rpx;">
-              <text class="modal-label" style="margin-bottom:0;color:var(--rgm-brand-text, #38bdf8);font-weight:800;">📸 打卡照片（最多 3 张）</text>
-              <text style="font-size:20rpx;color:var(--rgm-text-2, #a1a1aa);">{{ editWorkoutPhotos.length + editNewPhotosPreview.length }}/3</text>
+            <view class="c3-photo-head">
+              <text class="modal-label">打卡照片（{{ editWorkoutPhotos.length + editNewPhotosPreview.length }}/3）</text>
             </view>
-            <view style="display:flex;flex-wrap:wrap;gap:14rpx;">
-              <view
-                v-for="(url, idx) in editWorkoutPhotos"
-                :key="'saved_' + idx"
-                style="width:140rpx;height:140rpx;border-radius:16rpx;position:relative;overflow:hidden;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.15));"
-              >
-                <image
-                  :src="url"
-                  mode="aspectFill"
-                  style="width:100%;height:100%;"
-                  @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], Number(idx))"
-                />
-                <view
-                  @click.stop="editWorkoutPhotos.splice(Number(idx), 1)"
-                  style="position:absolute;top:6rpx;right:6rpx;width:36rpx;height:36rpx;border-radius:50%;background:rgba(0,0,0,0.7);color:#fff;font-size:20rpx;display:flex;align-items:center;justify-content:center;"
-                >✕</view>
+            <view class="c3-photo-grid">
+              <view v-for="(url, idx) in editWorkoutPhotos" :key="'saved_' + idx" class="c3-photo-item">
+                <image :src="url" mode="aspectFill" class="c3-photo-img" @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], Number(idx))" />
+                <view class="c3-photo-del" @click.stop="editWorkoutPhotos.splice(Number(idx), 1)">✕</view>
               </view>
-
-              <view
-                v-for="(pUrl, nIdx) in editNewPhotosPreview"
-                :key="'new_' + nIdx"
-                style="width:140rpx;height:140rpx;border-radius:16rpx;position:relative;overflow:hidden;border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.15));"
-              >
-                <image
-                  :src="pUrl"
-                  mode="aspectFill"
-                  style="width:100%;height:100%;"
-                  @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], editWorkoutPhotos.length + Number(nIdx))"
-                />
-                <view
-                  @click.stop="removeCoachNewPhoto(Number(nIdx))"
-                  style="position:absolute;top:6rpx;right:6rpx;width:36rpx;height:36rpx;border-radius:50%;background:rgba(0,0,0,0.7);color:#fff;font-size:20rpx;display:flex;align-items:center;justify-content:center;"
-                >✕</view>
+              <view v-for="(pUrl, nIdx) in editNewPhotosPreview" :key="'new_' + nIdx" class="c3-photo-item">
+                <image :src="pUrl" mode="aspectFill" class="c3-photo-img" @click="previewCoachWorkoutPhotos([...editWorkoutPhotos, ...editNewPhotosPreview], editWorkoutPhotos.length + Number(nIdx))" />
+                <view class="c3-photo-del" @click.stop="removeCoachNewPhoto(Number(nIdx))">✕</view>
               </view>
-
-              <view
-                v-if="editWorkoutPhotos.length + editNewPhotosPreview.length < 3"
-                @click="handleChooseCoachWorkoutPhoto"
-                style="width:140rpx;height:140rpx;border-radius:16rpx;background:var(--rgm-card-2, rgba(255,255,255,0.04));border:2rpx dashed var(--rgm-line-solid, rgba(255,255,255,0.22));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6rpx;"
-              >
-                <text style="font-size:34rpx;">📷</text>
-                <text style="font-size:19rpx;color:var(--rgm-text-2, #a1a1aa);font-weight:600;">添加照片</text>
+              <view v-if="editWorkoutPhotos.length + editNewPhotosPreview.length < 3" class="c3-photo-add" @click="handleChooseCoachWorkoutPhoto">
+                <RgmIcon name="camera" :size="32" color="muted" />
+                <text class="c3-photo-add-txt">添加</text>
               </view>
             </view>
           </view>
 
-          <!-- Morning Biometrics -->
+          <!-- Day Swap & Toggles -->
           <view class="modal-input-group">
-            <text class="modal-label">💓 晨起身体指标 (HRV / 静息心率 / 恢复%)</text>
-            <view class="modal-row">
-              <view class="flex-1">
-                <input v-model="editHrv" type="number" class="modal-input" placeholder="HRV (如 39)" />
-              </view>
-              <view class="flex-1">
-                <input v-model="editRestingHr" type="number" class="modal-input" placeholder="静心 (如 50)" />
-              </view>
-              <view class="flex-1">
-                <input v-model="editRecoveryPct" type="number" class="modal-input" placeholder="恢复% (如 78)" />
-              </view>
+            <view class="c3-swap-head">
+              <text class="modal-label">与本周其他天对换课表</text>
+              <text v-if="editIsSwapped" class="c3-undo-swap" @click="handleUndoSwapWorkout">恢复原课表</text>
             </view>
-          </view>
-
-          <!-- Day Swap & Strength Toggle -->
-          <view class="modal-input-group">
-            <view style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8rpx;">
-              <text class="modal-label" style="color:var(--rgm-text, #93c5fd);">🔁 与本周其他天对换课表</text>
+            <view class="c3-swap-chips">
+              <view class="c3-swap-chip" :class="{ active: editSwapDayIdx === -1 }" @click="editSwapDayIdx = -1"><text>不对换</text></view>
               <view
-                v-if="editIsSwapped"
-                @click="handleUndoSwapWorkout"
-                style="padding:8rpx 18rpx;border-radius:12rpx;background:rgba(244,63,94,0.16);border:1rpx solid rgba(244,63,94,0.5);color:var(--rgm-red, #fda4af);font-size:21rpx;font-weight:800;"
-              >
-                <text>↩️ 取消对换 · 恢复原课表{{ editSwappedFrom ? `（原与${editSwappedFrom}对换）` : '' }}</text>
-              </view>
-            </view>
-            <view style="display:flex;flex-wrap:wrap;gap:8rpx;margin-top:8rpx;">
-              <view
-                @click="editSwapDayIdx = -1"
-                style="padding:8rpx 14rpx;border-radius:10rpx;font-size:20rpx;font-weight:700;"
-                :style="editSwapDayIdx === -1 ? 'background:#3b82f6;color:#fff;' : 'background:var(--rgm-card-2, rgba(255,255,255,0.06));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, transparent);'"
-              >
-                <text>不对换</text>
-              </view>
-              <view
-                v-for="(lbl, sIdx) in ['周一','周二','周三','周四','周五','周六','周日']"
+                v-for="(lbl, sIdx) in ['一','二','三','四','五','六','日']"
                 :key="sIdx"
                 v-show="sIdx !== editDayIdx"
+                class="c3-swap-chip"
+                :class="{ active: editSwapDayIdx === sIdx }"
                 @click="editSwapDayIdx = sIdx"
-                style="padding:8rpx 14rpx;border-radius:10rpx;font-size:20rpx;font-weight:700;"
-                :style="editSwapDayIdx === sIdx ? 'background:#3b82f6;color:#fff;' : 'background:var(--rgm-card-2, rgba(255,255,255,0.06));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, transparent);'"
               >
-                <text>换{{ lbl }}</text>
+                <text>换周{{ lbl }}</text>
               </view>
             </view>
           </view>
 
-          <view style="display:flex;align-items:center;gap:16rpx;margin-bottom:16rpx;">
-            <view
-              @click="editCompleted = !editCompleted"
-              style="flex:1;padding:14rpx;border-radius:14rpx;text-align:center;font-size:22rpx;font-weight:800;"
-              :style="editCompleted ? 'background:rgba(16,185,129,0.16);color:var(--rgm-green, #6ee7b7);border:1rpx solid rgba(16,185,129,0.5);' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));'"
-            >
-              <text>{{ editCompleted ? '✅ 今日跑步课已完成' : '⬜ 标记跑步已完成' }}</text>
+          <view class="c3-toggle-row">
+            <view class="c3-toggle-pill" :class="{ on: editCompleted }" @click="editCompleted = !editCompleted">
+              <text>{{ editCompleted ? '跑步已完成 ✓' : '标记跑步完成' }}</text>
             </view>
-            <view
-              @click="editStrengthDone = !editStrengthDone"
-              style="flex:1;padding:14rpx;border-radius:14rpx;text-align:center;font-size:22rpx;font-weight:800;"
-              :style="editStrengthDone ? 'background:var(--rgm-brand-tint, rgba(168,85,247,0.25));color:var(--rgm-brand-text, #d8b4fe);border:1rpx solid var(--rgm-brand-line, rgba(168,85,247,0.5));' : 'background:var(--rgm-card-2, rgba(255,255,255,0.05));color:var(--rgm-text-2, #a1a1aa);border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));'"
-            >
-              <text>{{ editStrengthDone ? '💪 今日力量已打卡' : '⬜ 标记力量已打卡' }}</text>
+            <view class="c3-toggle-pill" :class="{ on: editStrengthDone }" @click="editStrengthDone = !editStrengthDone">
+              <text>{{ editStrengthDone ? '力量已完成 ✓' : '标记力量完成' }}</text>
             </view>
-          </view>
-
-          <view
-            v-if="isEditingStartedWeek"
-            style="margin-bottom:14rpx;padding:14rpx 18rpx;border-radius:14rpx;background:var(--rgm-brand-tint, rgba(245,158,11,0.12));border:1rpx solid var(--rgm-brand-line, rgba(245,158,11,0.35));"
-          >
-            <text style="font-size:21rpx;color:var(--rgm-brand-text, #fbbf24);font-weight:700;line-height:1.45;display:block;">
-              🔒 第 {{ editWeekIdx }} 周已开始，课表处方已锁定；仍可记录打卡、体感或调休对换。
-            </text>
-          </view>
-
-          <view class="modal-input-group">
-            <text class="modal-label">课目标题 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
-            <input v-model="editTitle" :disabled="isEditingStartedWeek" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" placeholder="输入课目标题" />
           </view>
 
           <view class="modal-row">
             <view class="modal-input-group flex-1">
-              <text class="modal-label">计划跑量 (km) {{ isEditingStartedWeek ? '🔒' : '' }}</text>
-              <input v-model="editDistanceKm" :disabled="isEditingStartedWeek" type="digit" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" />
+              <text class="modal-label">晨起 HRV</text>
+              <input v-model="editHrv" type="number" class="modal-input" placeholder="如 62" />
             </view>
             <view class="modal-input-group flex-1">
-              <text class="modal-label">目标配速 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
-              <input v-model="editTargetPace" :disabled="isEditingStartedWeek" class="modal-input" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" placeholder="如 5:15 - 5:25 /km" />
+              <text class="modal-label">静息心率</text>
+              <input v-model="editRestingHr" type="number" class="modal-input" placeholder="如 48" />
+            </view>
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">恢复%</text>
+              <input v-model="editRecoveryPct" type="number" class="modal-input" placeholder="如 86" />
             </view>
           </view>
 
+          <view v-if="isEditingStartedWeek" class="c3-locked-note">
+            <RgmIcon name="lock" :size="22" color="amber" />
+            <text class="c3-locked-txt">第 {{ editWeekIdx }} 周已开始，处方已锁定；仍可记录体感或调休。</text>
+          </view>
+
           <view class="modal-input-group">
-            <text class="modal-label">课表安排与热身冷身说明 {{ isEditingStartedWeek ? '🔒' : '' }}</text>
-            <textarea v-model="editDescription" :disabled="isEditingStartedWeek" class="modal-textarea" :style="isEditingStartedWeek ? 'opacity:0.55;' : ''" maxlength="300" />
+            <text class="modal-label">课目标题</text>
+            <input v-model="editTitle" :disabled="isEditingStartedWeek" class="modal-input" :class="{ disabled: isEditingStartedWeek }" />
+          </view>
+          <view class="modal-row">
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">计划跑量 (km)</text>
+              <input v-model="editDistanceKm" :disabled="isEditingStartedWeek" type="digit" class="modal-input" :class="{ disabled: isEditingStartedWeek }" />
+            </view>
+            <view class="modal-input-group flex-1">
+              <text class="modal-label">目标配速</text>
+              <input v-model="editTargetPace" :disabled="isEditingStartedWeek" class="modal-input" :class="{ disabled: isEditingStartedWeek }" />
+            </view>
+          </view>
+          <view class="modal-input-group">
+            <text class="modal-label">课表说明</text>
+            <textarea v-model="editDescription" :disabled="isEditingStartedWeek" class="modal-textarea" :class="{ disabled: isEditingStartedWeek }" maxlength="300" />
           </view>
         </scroll-view>
 
@@ -1093,83 +721,66 @@
       </view>
     </view>
 
-    <!-- ── 底部运动生理算法免责声明 ── -->
     <view class="ai-legal-disclaimer">
       <text class="ai-legal-text">基于运动生理模型推算，仅供参考，不作医疗诊断依据。</text>
     </view>
 
-    <!-- 个人打卡 & 已完赛赛事分享朋友圈卡片弹窗 -->
     <PersonalShareCardModal
       :visible="showCoachShareCard"
       :race-id="activeCoachShareRaceId"
       @close="showCoachShareCard = false"
     />
 
-    <!-- 个人跑步周报与月报弹窗 -->
     <PersonalReportModal
       :visible="showCoachPersonalReport"
       @close="showCoachPersonalReport = false"
     />
 
-    <!-- 💬 AI 科学教练实时问答抽屉 -->
-    <view
-      v-if="showCoachChatModal"
-      class="modal-overlay"
-      @click="showCoachChatModal = false"
-      @touchmove.stop.prevent
-    >
-      <view
-        class="modal-card"
-        style="max-height: 82vh; display: flex; flex-direction: column;"
-        @click.stop
-      >
+    <!-- AI 科学教练实时问答抽屉 -->
+    <view v-if="showCoachChatModal" class="modal-overlay" @click="showCoachChatModal = false" @touchmove.stop.prevent>
+      <view class="modal-card c3-chat-drawer" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">💬 咨询 Canova 科学教练</text>
+          <text class="modal-title">问 Canova 科学教练</text>
           <text class="modal-close" @click="showCoachChatModal = false">✕</text>
         </view>
 
-        <view style="padding: 12rpx 24rpx; display: flex; flex-wrap: wrap; gap: 10rpx; border-bottom: 1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.08));">
+        <view class="c3-chat-presets">
           <view
-            v-for="qp in ['今天状态偏累怎么调课？', '如何提升马拉松有氧配速？', '本周长距离该怎么配速？']"
+            v-for="qp in ['累了怎么调课？', '周日LSD配速建议', '如何提速有氧配速？']"
             :key="qp"
-            style="padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-brand-tint, rgba(252,76,2,0.14)); border: 1rpx solid var(--rgm-brand-line, rgba(252,76,2,0.35));"
+            class="c3-chat-preset-pill"
             @click="sendCoachChatMessage(qp)"
           >
-            <text style="font-size: 21rpx; color: var(--rgm-brand-text, #fb923c); font-weight: 700;">{{ qp }}</text>
+            <text class="c3-chat-preset-txt">{{ qp }}</text>
           </view>
         </view>
 
-        <scroll-view scroll-y style="flex: 1; min-height: 360rpx; max-height: 52vh; padding: 20rpx 24rpx; box-sizing: border-box;">
+        <scroll-view scroll-y class="c3-chat-scroll">
           <view
             v-for="(msg, mIdx) in coachChatMessages"
             :key="mIdx"
-            :style="msg.role === 'user' ? 'display:flex;justify-content:flex-end;margin-bottom:18rpx;' : 'display:flex;justify-content:flex-start;margin-bottom:18rpx;'"
+            class="c3-chat-row"
+            :class="{ user: msg.role === 'user' }"
           >
-            <view
-              :style="msg.role === 'user'
-                ? 'max-width:84%;padding:16rpx 22rpx;border-radius:20rpx 20rpx 6rpx 20rpx;background:#fc4c02;color:#fff;'
-                : 'max-width:90%;padding:18rpx 22rpx;border-radius:20rpx 20rpx 20rpx 6rpx;background:var(--rgm-card-2, rgba(255,255,255,0.07));border:1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.1));color:var(--rgm-text, #f4f4f5);'"
-            >
-              <text style="font-size: 25rpx; line-height: 1.55; white-space: pre-wrap;">{{ msg.content }}</text>
+            <view class="c3-chat-bubble" :class="{ user: msg.role === 'user' }">
+              <text class="c3-chat-text">{{ msg.content }}</text>
             </view>
           </view>
-          <view v-if="sendingCoachChat" style="padding: 10rpx 4rpx;">
-            <text style="font-size: 22rpx; color: var(--rgm-text-2, #a1a1aa);">🎯 教练正在结合您的 CTL/ATL 负荷与课表推演建议...</text>
+          <view v-if="sendingCoachChat" class="c3-chat-typing">
+            <text class="c3-chat-typing-txt">教练正在结合 CTL/ATL 与睡眠基线推演建议...</text>
           </view>
         </scroll-view>
 
-        <view style="padding: 16rpx 24rpx; display: flex; align-items: center; gap: 12rpx; border-top: 1rpx solid var(--rgm-line-solid, rgba(255,255,255,0.08));">
+        <view class="c3-chat-input-bar">
           <input
             v-model="coachChatInput"
-            class="modal-input"
-            style="flex: 1; margin: 0;"
-            placeholder="输入训练、配速、心率或伤痛恢复问题..."
+            class="modal-input c3-chat-input"
+            placeholder="追问配速、心率或伤痛恢复..."
             confirm-type="send"
             @confirm="sendCoachChatMessage()"
           />
           <button
-            class="modal-save-btn"
-            style="flex: 0 0 auto; width: auto; padding: 0 28rpx; height: 72rpx; line-height: 72rpx; margin: 0;"
+            class="modal-save-btn c3-chat-send"
             :loading="sendingCoachChat"
             :disabled="sendingCoachChat"
             @click="sendCoachChatMessage()"
@@ -1188,11 +799,25 @@
       @close="showCoachGoalSheet = false"
       @saved="handleCoachGoalSaved"
     />
+
+    <!-- Sticky Floating Preview Confirmation Bar (保留既有无阻塞确认) -->
+    <view v-if="isPreviewPlan" class="preview-sticky-bar">
+      <view class="preview-sticky-info">
+        <text class="preview-sticky-title">预览待确认 · 尚未覆盖原计划</text>
+        <text class="preview-sticky-sub">核对周跑量与日常安排后点击启用</text>
+      </view>
+      <view class="preview-sticky-actions">
+        <button class="psb-btn discard" :disabled="confirmingPlan" @click="handleDiscardGeneratedPlan">放弃</button>
+        <button class="psb-btn confirm" :loading="confirmingPlan" :disabled="confirmingPlan" @click="handleConfirmGeneratedPlan">
+          立即启用此课表
+        </button>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import { currentTheme, themeClass, applySystemTheme, isVolt } from "../../utils/theme";
 import { explainTerm } from "../../utils/glossary";
 import { trackClick, trackSubView, trackFunnelStep } from "../../utils/telemetry";
 import { ref, computed, watch, onMounted, nextTick } from "vue";
@@ -1202,6 +827,7 @@ import { request, getStoredUser, checkAndAutoLogin, UserProfile, syncTabBarIndex
 import PersonalShareCardModal from "../../components/PersonalShareCardModal.vue";
 import PersonalReportModal from "../../components/PersonalReportModal.vue";
 import GoalSheetModal from "../../components/GoalSheetModal.vue";
+import RgmIcon from "../../components/RgmIcon.vue";
 
 const showCoachGoalSheet = ref(false);
 const coachGoalSheetTab = ref<"week" | "month">("week");
@@ -1479,12 +1105,12 @@ function getAlignmentPillClass(week: any): string {
 
 function getAlignmentIcon(week: any): string {
   const hasRace = (week?.days || []).some((d: any) => d.workout_type === "race");
-  if (hasRace) return "🏁";
+  if (hasRace) return "赛";
   const isDownWeek = (week?.phase || "").includes("减量") || (week?.week_title || "").includes("减量");
-  if (isDownWeek) return "🌊";
+  if (isDownWeek) return "减";
   const ratio = getAlignmentRatio(week);
-  if (ratio >= 88 && ratio <= 112) return "🎯";
-  return "⚡";
+  if (ratio >= 88 && ratio <= 112) return "稳";
+  return "升";
 }
 
 function getAlignmentLabel(week: any): string {
@@ -1498,11 +1124,11 @@ function getAlignmentLabel(week: any): string {
 }
 
 const maintenanceList = [
-  { id: "aerobic_base", name: "🏃 基础有氧耐力扩容", desc: "Zone 2 低心率 · 慢肌毛细血管网" },
-  { id: "lactate_threshold", name: "⚡ 乳酸阈值耐力提升", desc: "LT2 巡航间歇 · 提高抗乳酸稳态" },
-  { id: "vo2max_speed", name: "🚀 VO2Max 速度储备", desc: "800~1500m 间歇 · 步频神经刚性" },
-  { id: "trail_climbing", name: "🏔️ 山地越野爬坡抗阻", desc: "手杖爬升 D+ · 股四头肌离心耐受" },
-  { id: "general_maintenance", name: "🛡️ 综合体能维持", desc: "平衡跑量 · 核心稳定与防伤" }
+  { id: "aerobic_base", name: "基础有氧耐力", desc: "Zone 2 低心率 · 慢肌毛细血管网" },
+  { id: "lactate_threshold", name: "乳酸阈值提升", desc: "LT2 巡航间歇 · 提高抗乳酸稳态" },
+  { id: "vo2max_speed", name: "VO2Max 速度储备", desc: "800~1500m 间歇 · 步频神经刚性" },
+  { id: "trail_climbing", name: "山地越野爬坡", desc: "手杖爬升 D+ · 股四头肌离心耐受" },
+  { id: "general_maintenance", name: "综合体能维持", desc: "平衡跑量 · 核心稳定与防伤" }
 ];
 
 const activeMiniWeek = computed(() => {
@@ -1510,13 +1136,102 @@ const activeMiniWeek = computed(() => {
   return weeks.find((w: any) => w.week_index === selectedWeekIdx.value) || weeks[0];
 });
 
+const todayBeijingStr = computed(() => {
+  const now = new Date();
+  const bj = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
+  const y = bj.getFullYear();
+  const m = String(bj.getMonth() + 1).padStart(2, "0");
+  const d = String(bj.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+});
+
+function isTodayWorkout(day: any): boolean {
+  if (!day) return false;
+  if (day.date && day.date === todayBeijingStr.value) return true;
+  if (day.is_today) return true;
+  return false;
+}
+
+const activeWeekCompliancePct = computed(() => {
+  const w = activeMiniWeek.value;
+  if (!w) return 0;
+  if (w.compliance_rate != null) {
+    return Math.min(100, Math.max(0, Math.round(Number(w.compliance_rate) || 0)));
+  }
+  const planned = Number(w.weekly_mileage_km || 0);
+  const actual = Number(w.actual_mileage_km || 0);
+  if (planned <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((actual / planned) * 100)));
+});
+
+const activeWeekRingStyle = computed(() => {
+  const pct = activeWeekCompliancePct.value;
+  const deg = Math.round(pct * 3.6);
+  const fillCol = isVolt.value ? "#059669" : "#10B981";
+  const trackCol = isVolt.value ? "#E2E8F0" : "#23232C";
+  return {
+    background: `conic-gradient(${fillCol} 0deg ${deg}deg, ${trackCol} ${deg}deg 360deg)`,
+  };
+});
+
+const planWeeksLadder = computed(() => {
+  const weeks: any[] = plan.value?.schedule_data?.weeks || [];
+  if (!weeks.length) return [];
+  let windowWeeks = weeks;
+  if (weeks.length > 8) {
+    const selIdx = Math.max(0, weeks.findIndex((w: any) => Number(w.week_index) === Number(selectedWeekIdx.value)));
+    const start = Math.max(0, Math.min(weeks.length - 8, selIdx - 3));
+    windowWeeks = weeks.slice(start, start + 8);
+  }
+  const maxKm = Math.max(...windowWeeks.map((w: any) => Number(w.weekly_mileage_km || 0)), 30);
+  return windowWeeks.map((w: any) => {
+    const wIdx = Number(w.week_index);
+    const curIdx = Number(currentWeekIndex.value || 1);
+    const isSel = wIdx === Number(selectedWeekIdx.value);
+    const isTaper = String(w.phase || w.week_title || "").includes("减量");
+    const kind = isSel ? "selected" : wIdx < curIdx ? "past" : isTaper ? "taper" : "future";
+    const km = Number(w.weekly_mileage_km || 0);
+    const barHeightRpx = Math.max(24, Math.min(82, Math.round((km / maxKm) * 82)));
+    return {
+      ...w,
+      kind,
+      barHeightRpx,
+      shortPhase: String(w.phase || "训练").split(/[\s(（]/)[0],
+    };
+  });
+});
+
+const heroTargetRaceInfo = computed(() => {
+  const name = plan.value?.target_race_name || recommendedRace.value?.name || planRaceName.value || "周期科学训练";
+  const matched = (userRaces.value || []).find(
+    (r: any) => r.name === name || (name && String(r.name || "").includes(name))
+  ) || recommendedRace.value;
+  const daysLeft = matched?.days_left;
+  const tier = matched ? (matched.priority == 1 || matched.priority === "A" ? "A标" : matched.priority == 2 || matched.priority === "B" ? "B标" : "C标") : "目标";
+  return {
+    name,
+    tier,
+    daysBadge: daysLeft != null && Number(daysLeft) >= 0 ? `D-${daysLeft}` : "",
+    targetTime: plan.value?.target_time || matched?.target_time || "",
+    phase: activeMiniWeek.value?.phase || "周期训练期",
+  };
+});
+
+const expandedStrategyIds = ref<Record<string, boolean>>({});
+function toggleStrategyExpand(key: string) {
+  expandedStrategyIds.value = {
+    ...expandedStrategyIds.value,
+    [key]: !expandedStrategyIds.value[key],
+  };
+}
+
 const COACH_FEELING_TAGS = [
-  "🤩 状态极佳",
-  "😊 轻松舒适",
-  "💪 正常发挥",
-  "😮‍💨 略感吃力",
-  "🥵 疲惫掉速",
-  "🦵 肌肉酸紧",
+  "状态极佳",
+  "轻松舒适",
+  "正常发挥",
+  "略感吃力",
+  "疲惫掉速",
+  "肌肉酸紧",
 ];
 
 // Edit modal & runner daily self-report state
@@ -1631,12 +1346,12 @@ function getWorkoutTypeLabel(type: string): string {
   const map: Record<string, string> = {
     easy_run: "轻松跑",
     tempo: "门槛跑",
-    interval: "间歇跑",
-    long_run: "长距离",
+    interval: "间歇",
+    long_run: "LSD",
     trail_climb: "越野爬坡",
-    cross_training: "交叉力量",
-    race: "🏁 比赛日",
-    rest: "休息日"
+    cross_training: "力量",
+    race: "比赛日",
+    rest: "休息"
   };
   return map[type] || "跑步";
 }
@@ -1719,7 +1434,7 @@ async function handleSyncToGoals() {
     title: "同步课表至个人目标",
     content: "确定将当前周期课表的周跑量与月度目标同步为您的个人目标吗？首页打卡进度环将直接跟踪该计划。",
     confirmText: "立即同步",
-    confirmColor: "#af52de",
+    confirmColor: "#FC4C02",
     success: async (mRes) => {
       if (!mRes.confirm) return;
       syncingGoal.value = true;
@@ -1793,17 +1508,10 @@ async function handleGeneratePlan() {
       const curWk = res.plan.current_week_index || computeCurrentWeekIndex(res.plan);
       selectedWeekIdx.value = curWk;
       showPlanConfig.value = false;
-      uni.showModal({
-        title: "已生成课表预览（尚未写入）",
-        content: "新训练课表已生成预览。您可以先审阅各周安排，或立即点击「确认更新并启用」正式写入生效；若不确认则不会覆盖原计划。",
-        confirmText: "立即确认启用",
-        cancelText: "先审阅预览",
-        confirmColor: "#10b981",
-        success: (mRes) => {
-          if (mRes.confirm) {
-            doConfirmGeneratedPlan();
-          }
-        }
+      uni.showToast({
+        title: "课表预览已生成，请在底部点击启用",
+        icon: "none",
+        duration: 2400,
       });
     }
   } catch (err) {
@@ -1876,18 +1584,8 @@ function handleRollbackUserPlan() {
 }
 
 function handleConfirmGeneratedPlan() {
-  uni.showModal({
-    title: "确认更新训练计划",
-    content: "确定启用这套新生成的周期训练课表并正式写入更新现有计划吗？",
-    confirmText: "确认更新",
-    cancelText: "再看看",
-    confirmColor: "#10b981",
-    success: (mRes) => {
-      if (mRes.confirm) {
-        doConfirmGeneratedPlan();
-      }
-    }
-  });
+  if (confirmingPlan.value) return;
+  doConfirmGeneratedPlan();
 }
 
 function handleDiscardGeneratedPlan() {
@@ -2388,6 +2086,13 @@ onMounted(() => {
 onShow(() => {
   applySystemTheme(currentTheme.value);
   syncTabBarIndex();
+  try {
+    const openChat = uni.getStorageSync("rgm_coach_open_chat");
+    if (openChat === "1") {
+      uni.removeStorageSync("rgm_coach_open_chat");
+      openCoachChatModal();
+    }
+  } catch (_) {}
   loadLatestReport();
   loadUserPlan();
 });
@@ -4507,6 +4212,1041 @@ onShareTimeline(() => {
   font-size: 20rpx;
   font-weight: bold;
   color: var(--rgm-brand-text, #d8b4fe);
+}
+
+.coach-page.has-preview-bar {
+  padding-bottom: calc(230rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(230rpx + env(safe-area-inset-bottom));
+}
+
+.preview-sticky-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 95;
+  padding: 18rpx 26rpx calc(20rpx + constant(safe-area-inset-bottom)) 26rpx;
+  padding: 18rpx 26rpx calc(20rpx + env(safe-area-inset-bottom)) 26rpx;
+  background: var(--rgm-card, #141418);
+  border-top: 2rpx solid rgba(16, 185, 129, 0.45);
+  box-shadow: 0 -10rpx 32rpx rgba(0, 0, 0, 0.38);
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.preview-sticky-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.preview-sticky-title {
+  font-size: 23rpx;
+  font-weight: 800;
+  color: #10b981;
+  white-space: nowrap;
+}
+
+.preview-sticky-sub {
+  font-size: 20rpx;
+  color: var(--rgm-text-3, #9ca3af);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-sticky-actions {
+  display: flex;
+  gap: 16rpx;
+}
+
+.psb-btn {
+  margin: 0;
+  height: 74rpx;
+  line-height: 74rpx;
+  border-radius: 18rpx;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.psb-btn.discard {
+  flex: 1;
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.1));
+  color: var(--rgm-text, #e4e4e7);
+  border: 1rpx solid var(--rgm-line-solid, rgba(255, 255, 255, 0.2));
+}
+
+.psb-btn.confirm {
+  flex: 2;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+}
+
+/* ── Coach v3 Minimal Graphical System ── */
+.coach-v3 {
+  padding: 20rpx 28rpx calc(140rpx + constant(safe-area-inset-bottom)) 28rpx;
+  padding: 20rpx 28rpx calc(140rpx + env(safe-area-inset-bottom)) 28rpx;
+}
+
+.c3-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 22rpx;
+}
+
+.c3-seg {
+  width: 280rpx;
+}
+
+.c3-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.rgm-icon-btn.active {
+  border-color: var(--rgm-brand);
+  background: var(--rgm-brand-tint);
+}
+
+.c3-wear-warn {
+  margin-bottom: 18rpx;
+  padding: 14rpx 20rpx;
+  border-radius: 20rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.c3-wear-left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.c3-wear-txt {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-amber);
+}
+
+.c3-wear-more {
+  font-size: 22rpx;
+  color: var(--rgm-amber);
+}
+
+.c3-switch-banner {
+  margin-bottom: 18rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 22rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+}
+
+.c3-sb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.c3-sb-title {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+}
+
+.c3-sb-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.c3-sb-link {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-text-2);
+}
+
+.c3-sb-cta {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text);
+}
+
+.c3-config-drawer {
+  padding: 24rpx;
+  margin-bottom: 22rpx;
+}
+
+.c3-cd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-bottom: 18rpx;
+}
+
+.c3-cd-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.c3-cd-title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+}
+
+.c3-cd-tools {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.c3-cd-pill {
+  font-size: 21rpx;
+  font-weight: 700;
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text-2);
+}
+
+.c3-anchor-edit {
+  margin-left: auto;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand);
+}
+
+.c3-plan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.c3-goal-hero {
+  padding: 24rpx 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.c3-gh-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.c3-gh-top {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: nowrap;
+}
+
+.c3-tier-tag {
+  font-size: 19rpx;
+  font-weight: 800;
+  padding: 4rpx 12rpx;
+  border-radius: 10rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+  color: var(--rgm-brand-text);
+  flex-shrink: 0;
+}
+
+.c3-race-title {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c3-days-pill {
+  font-size: 20rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text);
+  flex-shrink: 0;
+}
+
+.c3-gh-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.c3-green-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--rgm-green);
+  flex-shrink: 0;
+}
+
+.c3-gh-sub {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c3-ring-outer {
+  width: 108rpx;
+  height: 108rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.c3-ring-hole {
+  width: 86rpx;
+  height: 86rpx;
+  border-radius: 50%;
+  background: var(--rgm-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.c3-ring-pct {
+  font-size: 24rpx;
+  font-weight: 900;
+  color: var(--rgm-green);
+}
+
+.c3-ladder-card {
+  padding: 22rpx 22rpx 20rpx;
+}
+
+.c3-ladder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
+}
+
+.c3-ladder-title {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-text-2);
+}
+
+.c3-ladder-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.c3-ladder-km {
+  font-size: 23rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text);
+}
+
+.c3-sync-chip {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+  color: var(--rgm-brand-text);
+}
+
+.c3-ladder-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10rpx;
+  height: 116rpx;
+}
+
+.c3-ladder-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.c3-ladder-stage {
+  height: 84rpx;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+}
+
+.c3-ladder-bar {
+  width: 28rpx;
+  border-radius: 10rpx;
+  background: var(--rgm-card-3);
+}
+
+.c3-ladder-bar.past {
+  background: var(--rgm-green);
+}
+
+.c3-ladder-bar.taper {
+  background: var(--rgm-blue);
+}
+
+.c3-ladder-bar.selected {
+  background: var(--rgm-brand);
+  box-shadow: 0 4rpx 14rpx var(--rgm-brand-glow);
+}
+
+.c3-ladder-lbl {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: var(--rgm-text-3);
+}
+
+.c3-ladder-lbl.active {
+  color: var(--rgm-brand);
+  font-weight: 800;
+}
+
+.c3-coach-line {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.c3-coach-line-txt {
+  font-size: 22rpx;
+  color: var(--rgm-text);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.c3-week-days {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.c3-day-today {
+  background: var(--rgm-green-tint);
+  border: 1.5rpx solid var(--rgm-green);
+  border-radius: 28rpx;
+  padding: 22rpx 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.c3-dt-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.c3-dt-top {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.c3-dt-badge {
+  font-size: 20rpx;
+  font-weight: 800;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-green);
+  color: #ffffff;
+}
+
+.c3-dt-pace {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  font-weight: 600;
+}
+
+.c3-dt-km {
+  font-size: 40rpx;
+  font-weight: 900;
+  color: var(--rgm-text);
+  line-height: 1.1;
+}
+
+.c3-dt-sub {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c3-dt-check {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: var(--rgm-card);
+  border: 3rpx solid var(--rgm-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.c3-dt-check.checked {
+  background: var(--rgm-green);
+}
+
+.c3-day-row {
+  min-height: 82rpx;
+  padding: 14rpx 22rpx;
+  border-radius: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.c3-day-row.isrest {
+  opacity: 0.78;
+}
+
+.c3-dr-left {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.c3-dr-day {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--rgm-text-2);
+  width: 54rpx;
+  flex-shrink: 0;
+}
+
+.c3-dr-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--rgm-text-3);
+  flex-shrink: 0;
+}
+
+.c3-dr-dot.badge-easy { background: var(--rgm-green); }
+.c3-dr-dot.badge-tempo { background: var(--rgm-brand); }
+.c3-dr-dot.badge-interval { background: var(--rgm-blue); }
+.c3-dr-dot.badge-long { background: var(--rgm-purple); }
+.c3-dr-dot.badge-race { background: var(--rgm-red); }
+
+.c3-dr-type {
+  font-size: 20rpx;
+  font-weight: 800;
+  padding: 4rpx 12rpx;
+  border-radius: 10rpx;
+  flex-shrink: 0;
+}
+
+.c3-dr-title {
+  font-size: 23rpx;
+  font-weight: 600;
+  color: var(--rgm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.c3-dr-right {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex-shrink: 0;
+}
+
+.c3-dr-actual {
+  font-size: 23rpx;
+  font-weight: 800;
+  color: var(--rgm-green);
+}
+
+.c3-dr-missed {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-red);
+}
+
+.c3-dr-rpe {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+}
+
+.c3-feedback-box {
+  padding: 20rpx 22rpx;
+}
+
+.c3-fb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.c3-fb-title {
+  font-size: 25rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+}
+
+.c3-fb-toggle {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+  background: var(--rgm-brand-tint);
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+}
+
+.c3-fb-form {
+  margin-top: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid var(--rgm-line);
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.c3-body-shortcut {
+  padding: 22rpx 24rpx;
+  margin-bottom: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+
+.c3-bs-left {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.c3-bs-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.c3-bs-title {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: var(--rgm-text);
+}
+
+.c3-bs-sub {
+  font-size: 21rpx;
+  color: var(--rgm-text-3);
+}
+
+.c3-race-setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.c3-rs-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.c3-rs-sub {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+}
+
+.c3-rs-right {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.c3-reanalyze-pill {
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text);
+}
+
+.c3-switch-pill {
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
+}
+
+.c3-rs-expand {
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid var(--rgm-line);
+}
+
+.c3-strategy-compact {
+  margin-top: 12rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-card-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.c3-strategy-txt {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  line-height: 1.45;
+}
+
+.c3-strategy-txt.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.c3-strategy-taper {
+  font-size: 22rpx;
+  color: var(--rgm-text-2);
+  line-height: 1.45;
+}
+
+.c3-strategy-more {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text);
+  align-self: flex-end;
+}
+
+.c3-rpe-grid {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 8rpx;
+}
+
+.c3-rpe-pill {
+  flex: 1;
+  height: 54rpx;
+  border-radius: 12rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text-2);
+  font-size: 22rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.c3-rpe-pill.easy { background: var(--rgm-green); border-color: var(--rgm-green); color: #ffffff; }
+.c3-rpe-pill.mod { background: var(--rgm-brand); border-color: var(--rgm-brand); color: #ffffff; }
+.c3-rpe-pill.hard { background: var(--rgm-amber); border-color: var(--rgm-amber); color: #ffffff; }
+.c3-rpe-pill.max { background: var(--rgm-red); border-color: var(--rgm-red); color: #ffffff; }
+
+.c3-feel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10rpx;
+  margin-top: 8rpx;
+}
+
+.c3-feel-chip {
+  padding: 14rpx 8rpx;
+  border-radius: 14rpx;
+  text-align: center;
+  font-size: 22rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text);
+}
+
+.c3-feel-chip.active {
+  background: var(--rgm-green-tint);
+  border-color: var(--rgm-green);
+  color: var(--rgm-green);
+}
+
+.c3-photo-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+
+.c3-photo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.c3-photo-item {
+  width: 132rpx;
+  height: 132rpx;
+  border-radius: 16rpx;
+  position: relative;
+  overflow: hidden;
+  border: 1rpx solid var(--rgm-line-solid);
+}
+
+.c3-photo-img {
+  width: 100%;
+  height: 100%;
+}
+
+.c3-photo-del {
+  position: absolute;
+  top: 6rpx;
+  right: 6rpx;
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  font-size: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.c3-photo-add {
+  width: 132rpx;
+  height: 132rpx;
+  border-radius: 16rpx;
+  background: var(--rgm-card-2);
+  border: 2rpx dashed var(--rgm-line-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+}
+
+.c3-photo-add-txt {
+  font-size: 19rpx;
+  color: var(--rgm-text-2);
+  font-weight: 600;
+}
+
+.c3-swap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.c3-undo-swap {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-red);
+}
+
+.c3-swap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  margin-top: 8rpx;
+}
+
+.c3-swap-chip {
+  padding: 8rpx 16rpx;
+  border-radius: 12rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text-2);
+}
+
+.c3-swap-chip.active {
+  background: var(--rgm-blue);
+  border-color: var(--rgm-blue);
+  color: #ffffff;
+}
+
+.c3-toggle-row {
+  display: flex;
+  gap: 14rpx;
+  margin-bottom: 16rpx;
+}
+
+.c3-toggle-pill {
+  flex: 1;
+  padding: 14rpx;
+  border-radius: 16rpx;
+  text-align: center;
+  font-size: 22rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text-2);
+}
+
+.c3-toggle-pill.on {
+  background: var(--rgm-green-tint);
+  border-color: var(--rgm-green);
+  color: var(--rgm-green);
+}
+
+.c3-locked-note {
+  margin-bottom: 14rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 14rpx;
+  background: var(--rgm-amber-tint);
+  border: 1rpx solid var(--rgm-amber-line);
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.c3-locked-txt {
+  font-size: 21rpx;
+  color: var(--rgm-amber);
+  font-weight: 600;
+}
+
+.modal-input.disabled,
+.modal-textarea.disabled {
+  opacity: 0.55;
+}
+
+.c3-chat-drawer {
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.c3-chat-presets {
+  padding: 12rpx 24rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  border-bottom: 1rpx solid var(--rgm-line);
+}
+
+.c3-chat-preset-pill {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
+}
+
+.c3-chat-preset-txt {
+  font-size: 21rpx;
+  color: var(--rgm-brand-text);
+  font-weight: 700;
+}
+
+.c3-chat-scroll {
+  flex: 1;
+  min-height: 360rpx;
+  max-height: 52vh;
+  padding: 20rpx 24rpx;
+  box-sizing: border-box;
+}
+
+.c3-chat-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 16rpx;
+}
+
+.c3-chat-row.user {
+  justify-content: flex-end;
+}
+
+.c3-chat-bubble {
+  max-width: 90%;
+  padding: 16rpx 22rpx;
+  border-radius: 20rpx 20rpx 20rpx 6rpx;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line-solid);
+  color: var(--rgm-text);
+}
+
+.c3-chat-bubble.user {
+  max-width: 84%;
+  border-radius: 20rpx 20rpx 6rpx 20rpx;
+  background: var(--rgm-brand);
+  border-color: var(--rgm-brand);
+  color: #ffffff;
+}
+
+.c3-chat-text {
+  font-size: 24rpx;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.c3-chat-typing {
+  padding: 8rpx 4rpx;
+}
+
+.c3-chat-typing-txt {
+  font-size: 22rpx;
+  color: var(--rgm-text-3);
+}
+
+.c3-chat-input-bar {
+  padding: 16rpx 24rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  border-top: 1rpx solid var(--rgm-line);
+}
+
+.c3-chat-input {
+  flex: 1;
+  margin: 0;
+}
+
+.c3-chat-send {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 28rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  margin: 0;
 }
 
 </style>

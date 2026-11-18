@@ -261,7 +261,7 @@ export default function PacerEvaluationCard({ uid, viewerUid }: PacerEvaluationC
       </div>
 
       {/* Event Selector OR Custom Club LSD Bar */}
-      {distanceType !== "custom" ? (
+      {distanceType !== "custom" && evalData?.official_eval_eligible !== false ? (
         <div className="bg-[#18181c] border border-white/5 rounded-2xl p-4 space-y-3">
           {upcomingRaces.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
@@ -349,7 +349,7 @@ export default function PacerEvaluationCard({ uid, viewerUid }: PacerEvaluationC
             </div>
           )}
         </div>
-      ) : (
+      ) : distanceType === "custom" ? (
         <div className="bg-[#18181c] border border-white/5 rounded-2xl p-4 flex flex-wrap items-end gap-4">
           <div className="flex items-center gap-2 text-xs font-bold text-amber-300 w-full">
             <Sliders className="w-4 h-4" />
@@ -384,7 +384,7 @@ export default function PacerEvaluationCard({ uid, viewerUid }: PacerEvaluationC
             重新测算拉练胜任度
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Horizontal All-Groups Suitability Matrix Strip */}
       {distanceType !== "custom" && allGroups.length > 0 && (
@@ -434,10 +434,54 @@ export default function PacerEvaluationCard({ uid, viewerUid }: PacerEvaluationC
       )}
 
       {/* Main Evaluation Body */}
-      {loading && !sel ? (
+      {loading && !sel && evalData?.official_eval_eligible !== false ? (
         <div className="py-12 flex items-center justify-center gap-2 text-sm text-zinc-400">
           <Loader2 className="w-4 h-4 animate-spin text-[#FC4C02]" />
           正在执行六维官兔量化模型演算...
+        </div>
+      ) : evalData?.official_eval_eligible === false ? (
+        <div className="bg-[#18181c] border border-amber-500/30 rounded-2xl p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#FC4C02] shrink-0 mt-0.5" />
+            <div className="space-y-1.5">
+              <div className="text-sm font-black text-white">
+                {evalData.ineligible_reason || "暂无正式比赛纪录，不予生成官方兔子评估"}
+              </div>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                全程马拉松与半程马拉松官方配速员（官兔）评估均须具备对应项目的正式比赛完赛纪录（日常训练跑及越野赛不计作正式路跑比赛纪录）。如您已有完赛证书，可在个人档案中补录最佳成绩或历史赛程；亦可切换至「跑团拉练自定义」评估日常内部领跑胜任度。
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button
+              onClick={() => handleSwitchDistance("custom")}
+              className="px-4 py-2 rounded-xl bg-[#FC4C02] hover:opacity-90 text-xs font-bold text-white transition"
+            >
+              切换至跑团拉练领跑评估
+            </button>
+            {distanceType === "fm" && evalData.official_records_summary?.has_hm && (
+              <button
+                onClick={() => handleSwitchDistance("hm")}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition"
+              >
+                查看半马官兔评估（半马纪录 {evalData.official_records_summary.hm_best_str}）
+              </button>
+            )}
+            {distanceType === "hm" && evalData.official_records_summary?.has_fm && (
+              <button
+                onClick={() => handleSwitchDistance("fm")}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition"
+              >
+                查看全马官兔评估（全马纪录 {evalData.official_records_summary.fm_best_str}）
+              </button>
+            )}
+            <a
+              href="/dashboard/profile"
+              className="px-4 py-2 rounded-xl border border-white/15 hover:border-white/30 text-xs font-bold text-zinc-300 transition"
+            >
+              前往个人档案录入正式比赛成绩
+            </a>
+          </div>
         </div>
       ) : sel ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

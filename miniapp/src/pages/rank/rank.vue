@@ -6,30 +6,21 @@
 
     <!-- If user belongs to a club -->
     <view v-if="currentClub" class="rank-content">
-      <!-- ── 跑团简要上下文横幅与切换 ── -->
-      <view class="club-context-bar">
-        <image
-          class="club-logo-mini"
-          :src="currentClub.logo_url || '/static/logo-square.png'"
-          mode="aspectFill"
-          @click="goToTeamPage"
-        />
-        <view class="club-meta" @click="goToTeamPage">
-          <view class="club-name-row">
-            <text class="club-title">{{ currentClub.name }}</text>
-            <text class="role-badge" :class="'role-' + currentRole">
-              {{ currentRole === "owner" ? "👑 团长" : currentRole === "coach" ? "🧢 教练" : "🏃 团员" }}
-            </text>
-          </view>
+      <!-- ── Minimalist Club Header Bar ── -->
+      <view class="rk-topbar" @click="goToTeamPage">
+        <view class="rk-club-left">
+          <image
+            class="rk-club-logo"
+            :src="currentClub.logo_url || '/static/logo-square.png'"
+            mode="aspectFill"
+          />
+          <text class="rk-club-title">{{ currentClub.name }}</text>
+          <text class="rk-role-pill">{{ currentRole === "owner" ? "团长" : currentRole === "coach" ? "教练" : "团员" }}</text>
         </view>
-        <view v-if="userClubs.length > 1" class="switch-club-pill" @click="showSwitchModal = true">
-          <text class="switch-icon">⇄</text>
-          <text class="switch-text">切换跑团</text>
+        <view v-if="userClubs.length > 1" class="rk-switch-pill" @click.stop="showSwitchModal = true">
+          <text class="rk-switch-txt">切换 ›</text>
         </view>
-        <view v-else class="enter-team-hint" @click="goToTeamPage">
-          <text class="hint-text">跑团主页</text>
-          <text class="arrow">›</text>
-        </view>
+        <text v-else class="rk-home-link">跑团主页 ›</text>
       </view>
 
       <!-- ── 🚫 跑团访问权限已暂停阻断屏 ── -->
@@ -185,25 +176,75 @@
           </view>
         </view>
 
-        <!-- ── SECTION 1: 🥇 本月英雄榜（默认展示前三，点击展开 10人/页 完整榜单） ── -->
-        <view class="section-card" id="rank-section">
+        <!-- ── Minimalist 2-Tab Segmented Switcher ── -->
+        <view class="rgm-seg-bar" style="margin-bottom: 20rpx;">
+          <view
+            class="rgm-seg-item"
+            :class="{ active: activeRankTab === 'rank' }"
+            @click="switchRankTab('rank')"
+          >
+            本月英雄榜{{ leaderboard.length ? ` (${leaderboard.length})` : '' }}
+          </view>
+          <view
+            class="rgm-seg-item"
+            :class="{ active: activeRankTab === 'feed' }"
+            @click="switchRankTab('feed')"
+          >
+            打卡动态{{ feed.length ? ` (${feed.length})` : '' }}
+          </view>
+        </view>
+
+        <!-- ── B2 本月英雄榜：#2/#1/#3 领奖台 + 榜单 ── -->
+        <view v-if="activeRankTab === 'rank'" class="section-card" id="rank-section">
           <view class="card-header-row rank-header-row">
             <view class="title-with-icon">
-              <text class="icon">🥇</text>
               <text class="card-title">本月英雄榜</text>
               <text v-if="leaderboard.length" class="count-badge">({{ leaderboard.length }}人)</text>
             </view>
             <view class="header-right-meta">
               <view v-if="myRankItem" class="my-rank-pill" @click="jumpToMyRank">
-                <text class="mrp-icon">📍</text>
-                <text class="mrp-text">我的排名 #{{ myRankItem.rank }} · {{ myRankItem.distance_km }}km ›</text>
+                <text class="mrp-text">我 #{{ myRankItem.rank }} · {{ myRankItem.distance_km }}km ›</text>
               </view>
+            </view>
+          </view>
+
+          <!-- 第 1 页顶部展示视觉领奖台 (#2 / #1 / #3) -->
+          <view v-if="currentRankPage === 1 && podiumSlots.length > 0" class="rk-podium-stage">
+            <view
+              v-for="slot in podiumSlots"
+              :key="slot.user_id"
+              class="rk-podium-col"
+              :class="[slot.tierClass, { 'is-me': slot.user_id === user?.id }]"
+            >
+              <image
+                class="rk-podium-avatar"
+                :src="slot.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                mode="aspectFill"
+              />
+              <text class="rk-podium-name">{{ slot.display_name }}</text>
+              <text class="rk-podium-km">{{ slot.distance_km }} <text class="rk-podium-unit">km</text></text>
+              <view class="rk-podium-pedestal">
+                <text class="rk-podium-rank">#{{ slot.rank }}</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 本人不在当前页时固定提示条，一键跳至所在页 -->
+          <view v-if="myRankItem && !isMyRankVisibleInPage" class="pinned-my-rank-bar" @click="jumpToMyRank">
+            <view class="pmrb-left">
+              <text class="pmrb-tag">我的位置</text>
+              <text class="pmrb-rank">#{{ myRankItem.rank }}</text>
+              <text class="pmrb-name">{{ myRankItem.display_name }}</text>
+            </view>
+            <view class="pmrb-right">
+              <text class="pmrb-km">{{ myRankItem.distance_km }}km</text>
+              <text class="pmrb-jump">跳到我 ›</text>
             </view>
           </view>
 
           <view v-if="leaderboard.length" class="leaderboard-list">
             <view
-              v-for="item in paginatedLeaderboard"
+              v-for="item in (currentRankPage === 1 && podiumSlots.length === 3 && paginatedLeaderboard.length > 3 ? paginatedLeaderboard.slice(3) : paginatedLeaderboard)"
               :key="item.user_id"
               class="rank-item"
               :class="{
@@ -216,9 +257,7 @@
             >
               <view class="rank-left">
                 <view class="rank-badge-box">
-                  <text class="rank-num" :class="'rank-' + item.rank">
-                    {{ item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank }}
-                  </text>
+                  <text class="rank-num" :class="'rank-' + item.rank">#{{ item.rank }}</text>
                 </view>
                 <image
                   class="user-avatar"
@@ -232,7 +271,7 @@
                     <text v-if="item.role === 'owner'" class="mini-role-tag owner">团长</text>
                     <text v-else-if="item.role === 'coach'" class="mini-role-tag coach">教练</text>
                   </view>
-                  <text class="progress-sub">完成度 {{ item.progress_pct }}% · 目标 {{ item.target_km }}km</text>
+                  <text class="progress-sub">达成 {{ item.progress_pct }}% · 目标 {{ item.target_km }}km</text>
                 </view>
               </view>
 
@@ -310,7 +349,7 @@
         </view>
 
       <!-- ── SECTION 2: 🔥 跑团打卡动态 · 跑步记录与AI点评 ── -->
-      <view class="section-card" id="feed-section">
+      <view v-if="activeRankTab === 'feed'" class="section-card" id="feed-section">
         <view class="card-header-row">
           <view class="title-with-icon">
             <text class="icon">🔥</text>
@@ -411,20 +450,21 @@
               <text class="feed-track-arr">›</text>
             </view>
 
-            <!-- Coach Critique Bubble -->
+            <!-- Layer 2: Runner Critique & Coach Box (2-line clamp expandable) -->
             <view
               v-if="!act.is_critique_hidden && (act.ai_journal || act.user_id === user?.id)"
-              class="coach-bubble"
+              class="rgm-coach-box rk-coach-box"
+              @click="toggleExpandFeedNote(act.id)"
             >
-              <view class="coach-badge-row">
-                <view class="coach-badge-left">
-                  <text class="coach-robot-icon">🎯</text>
-                  <text class="coach-badge-title">Canova教练点评</text>
-                </view>
-                <text class="ai-comment-tip">仅供参考</text>
+              <view class="rk-cb-head">
+                <text class="rk-cb-title">Canova 教练点评</text>
+                <text class="rk-cb-toggle">{{ expandedFeedNoteIds[act.id] ? '收起' : '展开' }}</text>
               </view>
-              <text class="coach-comment-text">
-                {{ act.ai_journal || "点评生成中..." }}
+              <text
+                class="rk-cb-text"
+                :class="{ 'is-clamped': !expandedFeedNoteIds[act.id] }"
+              >
+                {{ formatCleanJournal(act.ai_journal) || "点评生成中..." }}
               </text>
             </view>
 
@@ -432,7 +472,6 @@
             <view v-if="act.captain_cheer" class="coach-bubble captain-bubble">
               <view class="coach-badge-row">
                 <view class="coach-badge-left">
-                  <text class="coach-robot-icon">📣</text>
                   <text class="coach-badge-title captain-title">{{ act.captain_cheer_meta?.captain_title || "团长加油" }}</text>
                 </view>
                 <text class="ai-comment-tip">全员可见</text>
@@ -440,27 +479,43 @@
               <text class="coach-comment-text">{{ act.captain_cheer }}</text>
             </view>
 
-            <!-- Social Actions (Like & Comment buttons) -->
+            <!-- Layer 3: Compact Interaction Bar + 4 Quick Praise Pills + Collapsible Threads -->
             <view class="social-bar">
               <view
                 class="like-btn"
                 :class="{ liked: act.has_liked }"
                 @click="handleToggleLike(act)"
               >
-                <text class="heart-icon">{{ act.has_liked ? '❤️' : '🤍' }}</text>
+                <RgmIcon name="heart" :size="24" :color="act.has_liked ? 'red' : 'muted'" />
                 <text class="like-text">
-                  {{ act.has_liked ? '已点赞' : '点赞' }} ({{ act.likes_count || 0 }})
+                  {{ act.has_liked ? '已赞' : '点赞' }} ({{ act.likes_count || 0 }})
                 </text>
               </view>
               <view class="comment-trigger-btn" @click="handleOpenCommentModal(act)">
-                <text class="cmt-icon">💬</text>
+                <RgmIcon name="chat" :size="24" color="ink" />
                 <text class="cmt-text">留言 ({{ act.comments?.length || 0 }})</text>
               </view>
+              <view
+                v-if="act.comments && act.comments.length > 2"
+                class="rk-thread-toggle"
+                @click="toggleExpandComments(act.id)"
+              >
+                <text class="rk-tt-txt">{{ expandedCommentIds[act.id] ? '收起评论 ▴' : `看全部 ${act.comments.length} 条 ▾` }}</text>
+              </view>
+            </view>
+
+            <view class="rk-praise-row">
+              <text
+                v-for="pr in ['配速很稳', '有氧扎实', '太自律了', '注意恢复']"
+                :key="pr"
+                class="rk-praise-pill"
+                @click="openQuickPraise(act, pr)"
+              >+ {{ pr }}</text>
             </view>
 
             <!-- Likers Strip (显示点赞者及头像) -->
             <view v-if="act.likers && act.likers.length > 0" class="likers-box">
-              <text class="likers-heart">❤️</text>
+              <text class="likers-heart">赞</text>
               <view class="likers-list">
                 <view
                   v-for="(lk, lkIdx) in act.likers"
@@ -474,14 +529,14 @@
                   />
                   <text class="liker-name">{{ lk.display_name || '跑友' }}</text>
                 </view>
-                <text class="likers-suffix">等 {{ act.likers.length }} 人点赞</text>
+                <text class="likers-suffix">等 {{ act.likers.length }} 人</text>
               </view>
             </view>
 
-            <!-- Threaded Comments List (跑友留言产生 Thread) -->
+            <!-- Threaded Comments List (默认最多展示2条主楼，可展开全部) -->
             <view v-if="act.comments && act.comments.length > 0" class="comments-box">
               <view
-                v-for="thread in getCommentThreads(act.comments)"
+                v-for="thread in (expandedCommentIds[act.id] ? getCommentThreads(act.comments) : getCommentThreads(act.comments).slice(0, 2))"
                 :key="thread.id"
                 class="cmt-thread-group"
               >
@@ -748,6 +803,7 @@
 
 <script setup lang="ts">
 import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import RgmIcon from "../../components/RgmIcon.vue";
 import PageSkeleton from "../../components/PageSkeleton.vue";
 import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import { ref, computed } from "vue";
@@ -896,10 +952,60 @@ const feedTotal = ref(0);
 const hasMoreFeed = ref(false);
 const loadingMoreFeed = ref(false);
 
-// ── 英雄榜折叠与分页状态（默认展示前三，点击展开 10人/页） ──
+const podiumSlots = computed(() => {
+  const list = leaderboard.value.filter((i: any) => i.rank <= 3).slice(0, 3);
+  if (!list.length) return [];
+  const r1 = list.find((i: any) => i.rank === 1) || list[0];
+  const r2 = list.find((i: any) => i.rank === 2) || (list.length > 1 ? list[1] : null);
+  const r3 = list.find((i: any) => i.rank === 3) || (list.length > 2 ? list[2] : null);
+  const slots: any[] = [];
+  if (r2) slots.push({ ...r2, tierClass: "tier-2" });
+  if (r1) slots.push({ ...r1, tierClass: "tier-1" });
+  if (r3) slots.push({ ...r3, tierClass: "tier-3" });
+  return slots;
+});
+const expandedFeedNoteIds = ref<Record<string, boolean>>({});
+const expandedCommentIds = ref<Record<string, boolean>>({});
+function toggleExpandFeedNote(id: string) {
+  expandedFeedNoteIds.value = { ...expandedFeedNoteIds.value, [id]: !expandedFeedNoteIds.value[id] };
+}
+function toggleExpandComments(id: string) {
+  expandedCommentIds.value = { ...expandedCommentIds.value, [id]: !expandedCommentIds.value[id] };
+}
+function formatCleanJournal(raw: any): string {
+  if (!raw) return "";
+  if (typeof raw === "object") return String(raw.evaluation || raw.summary || raw.critique || raw.content || "");
+  const s = String(raw).trim();
+  if (s.startsWith("{")) {
+    try {
+      const p = JSON.parse(s);
+      if (p && typeof p === "object") return String(p.evaluation || p.summary || p.critique || p.content || "");
+    } catch (_) {}
+  }
+  return s;
+}
+function openQuickPraise(act: any, preset: string) {
+  activeCommentActivityId.value = act.id;
+  replyTargetComment.value = null;
+  commentTextInput.value = preset;
+  showCommentModal.value = true;
+}
+
+// ── 英雄榜视图切换 & 折叠分页状态（默认展示前 10 名） ──
+const activeRankTab = ref<"rank" | "feed">("rank");
 const rankPageSize = ref(10);
 const currentRankPage = ref(1);
-const isRankExpanded = ref(false);
+const isRankExpanded = ref(true);
+
+function switchRankTab(tab: "rank" | "feed") {
+  if (activeRankTab.value === tab) return;
+  activeRankTab.value = tab;
+  trackClick(
+    "rank_view_switch",
+    tab === "rank" ? "榜单Tab: 本月英雄榜" : "榜单Tab: 打卡动态",
+    { club_id: currentClub.value?.id, tab }
+  );
+}
 
 const totalRankPages = computed(() => {
   if (!leaderboard.value.length) return 1;
@@ -918,6 +1024,12 @@ const myRankItem = computed(() => {
   const uid = user.value?.id;
   if (!uid || !leaderboard.value.length) return null;
   return leaderboard.value.find((item: any) => item.user_id === uid) || null;
+});
+
+const isMyRankVisibleInPage = computed(() => {
+  const uid = user.value?.id;
+  if (!uid) return false;
+  return paginatedLeaderboard.value.some((item: any) => item.user_id === uid);
 });
 
 const visibleRankPageNumbers = computed(() => {
@@ -1710,7 +1822,7 @@ let pendingScrollToFeed = false;
 function scrollToFeedIfNeeded() {
   if (!pendingScrollToFeed) return;
   pendingScrollToFeed = false;
-  setTimeout(() => uni.pageScrollTo({ selector: "#feed-section", duration: 300 }), 200);
+  activeRankTab.value = "feed";
 }
 
 onShow(() => {
@@ -1738,7 +1850,10 @@ onPullDownRefresh(async () => {
 
 onLoad((options: any) => {
   initShareMenu();
-  if (options?.section === "feed") pendingScrollToFeed = true;
+  if (options?.section === "feed") {
+    activeRankTab.value = "feed";
+    pendingScrollToFeed = true;
+  }
 });
 
 onShareAppMessage((res: any) => {
@@ -2438,6 +2553,105 @@ onShareTimeline(() => {
   font-size: 22rpx;
   color: var(--rgm-brand-text, #fc4c02);
   font-weight: 600;
+}
+
+/* ── 英雄榜 / 打卡动态 顶部分段 Tab & 固定我的排名条 ── */
+.rank-view-tabs {
+  display: flex;
+  gap: 12rpx;
+  padding: 8rpx;
+  margin-bottom: 22rpx;
+  border-radius: 22rpx;
+  background: var(--rgm-card, #121214);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+}
+
+.rank-view-tab {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 12rpx;
+  border-radius: 16rpx;
+  transition: all 0.2s;
+}
+
+.rank-view-tab.active {
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.22), rgba(245, 158, 11, 0.16));
+  border: 1rpx solid rgba(252, 76, 2, 0.45);
+}
+
+.rvt-txt {
+  font-size: 25rpx;
+  font-weight: 800;
+  color: var(--rgm-text-2, #a1a1aa);
+}
+
+.rank-view-tab.active .rvt-txt {
+  color: var(--rgm-brand-text, #fc4c02);
+}
+
+.pinned-my-rank-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 18rpx;
+  border-radius: 18rpx;
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.14), rgba(245, 158, 11, 0.08));
+  border: 1rpx solid rgba(252, 76, 2, 0.35);
+}
+
+.pmrb-left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+  flex: 1;
+}
+
+.pmrb-tag {
+  font-size: 20rpx;
+  font-weight: 800;
+  color: var(--rgm-brand-text, #fc4c02);
+  white-space: nowrap;
+}
+
+.pmrb-rank {
+  font-size: 26rpx;
+  font-weight: 900;
+  color: var(--rgm-text, #ffffff);
+  white-space: nowrap;
+}
+
+.pmrb-name {
+  font-size: 23rpx;
+  font-weight: 600;
+  color: var(--rgm-text-2, #d4d4d8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pmrb-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-shrink: 0;
+}
+
+.pmrb-km {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: var(--rgm-text, #ffffff);
+}
+
+.pmrb-jump {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--rgm-brand-text, #fc4c02);
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(252, 76, 2, 0.16);
 }
 
 /* ── 通用卡片容器 ── */
@@ -3605,5 +3819,82 @@ onShareTimeline(() => {
   background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
   color: var(--rgm-text, #e5e7eb);
   border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.15));
+}
+
+/* Minimalist Rank & Feed Styles (B1 / B2) */
+.rk-topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 22rpx;
+  margin-bottom: 18rpx;
+  border-radius: 22rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+}
+.rk-club-left { display: flex; flex-direction: row; align-items: center; gap: 12rpx; min-width: 0; flex: 1; }
+.rk-club-logo { width: 52rpx; height: 52rpx; border-radius: 14rpx; flex-shrink: 0; background: var(--rgm-card-2); }
+.rk-club-title { font-size: 28rpx; font-weight: 800; color: var(--rgm-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-role-pill { font-size: 18rpx; font-weight: 700; padding: 2rpx 12rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand-text); flex-shrink: 0; }
+.rk-switch-pill { padding: 8rpx 16rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); }
+.rk-switch-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-ink); }
+.rk-home-link { font-size: 22rpx; font-weight: 700; color: var(--rgm-brand-text); flex-shrink: 0; }
+
+.rk-podium-stage {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 16rpx;
+  padding: 16rpx 8rpx 20rpx;
+  margin-bottom: 16rpx;
+  border-bottom: 1rpx solid var(--rgm-line);
+}
+.rk-podium-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6rpx; }
+.rk-podium-avatar { width: 68rpx; height: 68rpx; border-radius: 50%; border: 3rpx solid var(--rgm-line); background: var(--rgm-card-2); }
+.rk-podium-col.tier-1 .rk-podium-avatar { width: 84rpx; height: 84rpx; border-color: var(--rgm-brand); }
+.rk-podium-name { font-size: 22rpx; font-weight: 700; color: var(--rgm-ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-podium-col.is-me .rk-podium-name { color: var(--rgm-brand-text); }
+.rk-podium-km { font-size: 25rpx; font-weight: 800; color: var(--rgm-ink); font-variant-numeric: tabular-nums; }
+.rk-podium-unit { font-size: 18rpx; color: var(--rgm-ink-3); }
+.rk-podium-pedestal {
+  width: 100%;
+  border-radius: 16rpx 16rpx 8rpx 8rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+}
+.rk-podium-col.tier-1 .rk-podium-pedestal { height: 76rpx; background: var(--rgm-brand-tint); border-color: var(--rgm-brand-line); }
+.rk-podium-col.tier-2 .rk-podium-pedestal { height: 54rpx; }
+.rk-podium-col.tier-3 .rk-podium-pedestal { height: 40rpx; }
+.rk-podium-rank { font-size: 22rpx; font-weight: 800; color: var(--rgm-ink-2); }
+.rk-podium-col.tier-1 .rk-podium-rank { color: var(--rgm-brand-text); }
+
+.rk-coach-box { margin: 14rpx 0 12rpx; }
+.rk-cb-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 6rpx; }
+.rk-cb-title { font-size: 21rpx; font-weight: 800; color: var(--rgm-green); }
+.rk-cb-toggle { font-size: 19rpx; color: var(--rgm-ink-3); }
+.rk-cb-text { font-size: 23rpx; line-height: 1.5; color: var(--rgm-ink); }
+.rk-cb-text.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rk-thread-toggle { margin-left: auto; padding: 6rpx 14rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); }
+.rk-tt-txt { font-size: 20rpx; font-weight: 700; color: var(--rgm-brand-text); }
+.rk-praise-row { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10rpx; margin: 12rpx 0; }
+.rk-praise-pill {
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  background: var(--rgm-card-2);
+  border: 1rpx solid var(--rgm-line);
+  color: var(--rgm-ink-2);
 }
 </style>

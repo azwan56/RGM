@@ -180,4 +180,94 @@ button::after {
   color: var(--rgm-text-3, #71717a);
   font-weight: 400;
 }
+
+/* ───────── 全站统一极简图形原语基础类 (Obsidian Dark × Volt Light v3.0) ───────── */
+.rgm-card {
+  background-color: var(--rgm-card, #141418);
+  border: 1px solid var(--rgm-line-solid, #27272F);
+  border-radius: 32rpx;
+}
+
+.rgm-icon-btn {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+  background-color: var(--rgm-card, #141418);
+  border: 1px solid var(--rgm-line-solid, #27272F);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0;
+}
+
+.rgm-seg-bar {
+  display: flex;
+  align-items: center;
+  padding: 6rpx;
+  border-radius: 999rpx;
+  background-color: var(--rgm-card-2, #1B1B22);
+  border: 1px solid var(--rgm-line-solid, #27272F);
+  gap: 6rpx;
+}
+
+.rgm-seg-item {
+  flex: 1;
+  height: 60rpx;
+  border-radius: 999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--rgm-text-2, #A1A1AA);
+  transition: all 0.15s ease;
+}
+
+.rgm-seg-item.active {
+  background-color: var(--rgm-brand, #FC4C02);
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+.rgm-ticket {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--rgm-card, #141418);
+  border: 1px solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  border-radius: 32rpx;
+}
+
+.rgm-ticket-perf {
+  position: relative;
+  height: 24rpx;
+  margin: 0 -24rpx;
+  display: flex;
+  align-items: center;
+}
+
+.rgm-ticket-perf::before,
+.rgm-ticket-perf::after {
+  content: "";
+  width: 24rpx;
+  height: 24rpx;
+  border-radius: 50%;
+  background-color: var(--rgm-bg, #0B0B0E);
+  border: 1px solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  flex-shrink: 0;
+}
+
+.rgm-ticket-perf-line {
+  flex: 1;
+  height: 0;
+  border-top: 2rpx dashed var(--rgm-line-2, rgba(255, 255, 255, 0.16));
+  margin: 0 8rpx;
+}
+
+.rgm-coach-box {
+  background-color: var(--rgm-blue-tint, rgba(56, 189, 248, 0.12));
+  border: 1px solid var(--rgm-blue-line, rgba(56, 189, 248, 0.30));
+  border-radius: 20rpx;
+  padding: 16rpx 20rpx;
+}
 </style>

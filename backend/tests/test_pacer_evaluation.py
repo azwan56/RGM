@@ -145,7 +145,20 @@ def test_platinum_shanghai_marathon_metronome_runner_and_credentials():
     assert r_lz_315["event_calibration"]["sub_plateau"] is True
     assert r_lz_315["selected_evaluation"]["req_cert_margin_sec"] > r_bj_315["selected_evaluation"]["req_cert_margin_sec"]
 
-    # 4. Test AI Prescription & Self-Recommendation endpoint
+    # 4. Verify Red Cross / AHA first-aid certificate has ZERO impact on pacer evaluation score or text
+    sc_with_aha = sel_330["overall_score"]
+    s5_with_aha = next(d for d in sel_330["dimensions"] if d["key"] == "leadership_credentials")["score"]
+    client.put(f"/api/profile/{uid}", json={"first_aid_cert_type": "red_cross"})
+    d_rc = client.get(f"/api/science/pacer-eval/{uid}?event_name=上海马拉松&distance_type=fm&target_group=330&allow_web_search=false").json()
+    client.put(f"/api/profile/{uid}", json={"first_aid_cert_type": ""})
+    d_no_fa = client.get(f"/api/science/pacer-eval/{uid}?event_name=上海马拉松&distance_type=fm&target_group=330&allow_web_search=false").json()
+    assert d_rc["selected_evaluation"]["overall_score"] == sc_with_aha == d_no_fa["selected_evaluation"]["overall_score"]
+    s5_no_fa = next(d for d in d_no_fa["selected_evaluation"]["dimensions"] if d["key"] == "leadership_credentials")
+    assert s5_no_fa["score"] == s5_with_aha
+    assert "红十字" not in json.dumps(d_rc, ensure_ascii=False)
+    assert "急救" not in json.dumps(d_rc, ensure_ascii=False)
+
+    # 5. Test AI Prescription & Self-Recommendation endpoint
     r_ai = client.post(
         f"/api/science/pacer-ai-prescription/{uid}",
         json={"event_name": "上海马拉松", "distance_type": "fm", "target_group": "330"},
@@ -155,6 +168,7 @@ def test_platinum_shanghai_marathon_metronome_runner_and_credentials():
     assert ai_data["success"] is True
     assert len(ai_data["four_week_plan"]) > 30
     assert "330" in ai_data["application_statement"] or "上海马拉松" in ai_data["application_statement"]
+    assert "急救" not in ai_data["application_statement"] and "红十字" not in ai_data["application_statement"]
 
 
 def test_dual_gatekeeper_detrained_veteran_vs_dark_horse_missing_cert():
@@ -189,12 +203,12 @@ def test_dual_gatekeeper_detrained_veteran_vs_dark_horse_missing_cert():
     assert sel_vet["gates"]["fitness_gate"]["status"] in ("fail", "warn")
     assert sel_vet["overall_score"] <= 68  # Capped safely against bonk risk despite 2:38 historical PB!
 
-    # Case B: Dark Horse (No FM certificate at all, only 5K/10K/training, but training 85km/wk at 4:00/km!)
+    # Case B: Runner with NO official FM or HM race record (even with 21km training run + 42.5km trail run + 85km/wk!)
     uid_dh = "u_test_pacer_dark_horse"
     client.put(
         f"/api/profile/{uid_dh}",
         json={
-            "display_name": "黑马小李",
+            "display_name": "无赛历跑霸小李",
             "date_of_birth": "1996-08-20",
             "marathon_pb": 0,
             "half_pb": 0,
@@ -207,16 +221,50 @@ def test_dual_gatekeeper_detrained_veteran_vs_dark_horse_missing_cert():
     for wk in range(6):
         b = wk * 7
         _insert_run(uid_dh, f"act_dh_a_{wk}", b + 1, 16.0, 255, avg_hr=145)
-        _insert_run(uid_dh, f"act_dh_b_{wk}", b + 3, 18.0, 250, avg_hr=148)
+        _insert_run(uid_dh, f"act_dh_b_{wk}", b + 3, 21.3, 250, avg_hr=156, name="周三晚间长距离训练")
         _insert_run(uid_dh, f"act_dh_c_{wk}", b + 6, 32.0, 260, avg_hr=150)
+    # Also insert a 42.5km trail race with sport_type='running' -> must NOT count as official road marathon!
+    _insert_run(uid_dh, "act_dh_trail_42k", 14, 42.5, 420, avg_hr=152, name="杭州大宋108越野赛")
 
-    # On Official Gold Label FM 330 -> fitness passes easily, cert_gate flags 'missing_cert' ("胜任私兔/拉练兔 · 官兔初审缺证")
-    res_dh_off = client.get(f"/api/science/pacer-eval/{uid_dh}?event_name=北京马拉松&distance_type=fm&target_group=330&allow_web_search=false").json()
-    sel_dh_off = res_dh_off["selected_evaluation"]
-    assert sel_dh_off["gates"]["fitness_gate"]["status"] == "pass"
-    assert sel_dh_off["gates"]["cert_gate"]["status"] == "missing_cert"
-    assert "私兔" in sel_dh_off["verdict_label"]
-    assert sel_dh_off["private_pacer_score"] >= 80
+    # Neither FM nor HM official pacer evaluation should be generated!
+    res_dh_fm = client.get(f"/api/science/pacer-eval/{uid_dh}?event_name=北京马拉松&distance_type=fm&target_group=330&allow_web_search=false").json()
+    assert res_dh_fm["official_eval_eligible"] is False
+    assert res_dh_fm["selected_evaluation"] is None
+    assert res_dh_fm["all_groups_matrix"] == []
+
+    res_dh_hm = client.get(f"/api/science/pacer-eval/{uid_dh}?event_name=上海半程马拉松&distance_type=hm&target_group=200&allow_web_search=false").json()
+    assert res_dh_hm["official_eval_eligible"] is False
+    assert res_dh_hm["selected_evaluation"] is None
+    assert res_dh_hm["all_groups_matrix"] == []
+
+    # AI prescription for Official FM/HM Pacer should reject with 400 when runner has no official race record
+    r_dh_ai = client.post(
+        f"/api/science/pacer-ai-prescription/{uid_dh}",
+        json={"event_name": "北京马拉松", "distance_type": "fm", "target_group": "330"},
+    )
+    assert r_dh_ai.status_code == 400
+
+    # Case C: Runner with ONLY official Half Marathon record -> eligible for HM Official Pacer, NOT eligible for FM Official Pacer!
+    uid_hm_only = "u_test_pacer_hm_only"
+    client.put(
+        f"/api/profile/{uid_hm_only}",
+        json={
+            "display_name": "半马跑者小周",
+            "date_of_birth": "1993-04-12",
+            "marathon_pb": 0,
+            "half_pb": 5400,  # 1:30:00 official HM PB
+        },
+    )
+    for wk in range(4):
+        _insert_run(uid_hm_only, f"act_hmo_{wk}", wk * 7 + 2, 18.0, 285, avg_hr=146)
+
+    res_hmo_fm = client.get(f"/api/science/pacer-eval/{uid_hm_only}?distance_type=fm&allow_web_search=false").json()
+    assert res_hmo_fm["official_eval_eligible"] is False
+    assert res_hmo_fm["selected_evaluation"] is None
+
+    res_hmo_hm = client.get(f"/api/science/pacer-eval/{uid_hm_only}?distance_type=hm&target_group=200&allow_web_search=false").json()
+    assert res_hmo_hm["official_eval_eligible"] is True
+    assert res_hmo_hm["selected_evaluation"] is not None
 
     # On Custom Club 30km LSD @ 5:00/km -> cert_gate is exempt, overall_score >= 82!
     res_dh_lsd = client.get(
@@ -297,11 +345,22 @@ def test_club_pacer_radar_privacy_and_assign_event_pacer():
     assert r_radar.status_code == 200
     radar_data = r_radar.json()
     assert radar_data["total_members_evaluated"] == 3
+    assert radar_data["eligible_members_count"] == 1
+    assert radar_data["excluded_no_record_count"] == 2
     g_330 = next(g for g in radar_data["groups_ranking"] if g["group_code"] == "330")
-    cand_ajie = next(c for c in g_330["candidates"] if c["uid"] == member_uid)
+    assert [c["uid"] for c in g_330["candidates"]] == [member_uid]
+    cand_ajie = g_330["candidates"][0]
     rec_dim = next(d for d in cand_ajie["dimensions"] if d["key"] == "recovery_reliability")
     assert "76ms" not in rec_dim["display_value"] and "49bpm" not in rec_dim["display_value"]
     assert "隐私保护已脱敏" in rec_dim["display_value"]
+
+    # On Half Marathon Official Pacer Radar -> member_uid has FM PB only (half_pb=0), so 0 members have official HM record!
+    r_radar_hm = client.get(
+        f"/api/team/club_pacer_test_01/pacer-radar?operator_uid={owner_uid}&event_name=上海半程马拉松&distance_type=hm&allow_web_search=false"
+    ).json()
+    assert r_radar_hm["eligible_members_count"] == 0
+    assert r_radar_hm["excluded_no_record_count"] == 3
+    assert all(len(g["candidates"]) == 0 for g in r_radar_hm["groups_ranking"])
 
     # Owner assigns member_uid as '🐰 领跑兔' for evt_pacer_lsd_01 -> writes participant & creates notification!
     r_assign = client.post(

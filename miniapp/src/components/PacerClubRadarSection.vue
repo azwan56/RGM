@@ -71,7 +71,10 @@
 
       <!-- Toolbar: Copy Roster -->
       <view v-if="radarData" class="pcr-toolbar">
-        <text class="pcr-stat">已评估活跃队员 {{ radarData.total_members_evaluated || 0 }} 人</text>
+        <text v-if="distanceType !== 'custom'" class="pcr-stat">
+          正式纪录参评 {{ radarData.eligible_members_count ?? radarData.members_best_fit?.length ?? 0 }}/{{ radarData.total_members_evaluated || 0 }} 人
+        </text>
+        <text v-else class="pcr-stat">已评估活跃队员 {{ radarData.total_members_evaluated || 0 }} 人</text>
         <text class="pcr-copy-link" @click="copyRecommendedRoster">📋 复制微信群推荐名单</text>
       </view>
 
@@ -106,7 +109,6 @@
                 <view>
                   <view class="pcr-name-row">
                     <text class="pcr-cand-name">{{ cand.display_name }} ↗</text>
-                    <text v-if="cand.first_aid_cert_label" class="pcr-fa-tag">🚑急救</text>
                   </view>
                   <text class="pcr-cand-meta">
                     当期 {{ cand.pred_finish_str }} · 证书 {{ cand.cert_finish_str }}
@@ -136,6 +138,13 @@
               </view>
             </view>
           </view>
+        </view>
+        <view v-else class="pcr-empty-cand">
+          {{
+            distanceType !== "custom"
+              ? "当前跑团暂无具备该项目正式比赛纪录的队员（无正式全马/半马比赛纪录不生成官兔评估），可切换至「内部拉练兔」筛选。"
+              : "暂无活跃成员数据，同步手表后即可自动排名。"
+          }}
         </view>
       </template>
     </view>
@@ -186,8 +195,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
-import { request } from "../utils/api";
+import { ref, computed, watch, onBeforeUnmount } from "vue";
+import { request, setTabBarHidden } from "../utils/api";
 import { isVolt, themeClass } from "../utils/theme";
 
 const props = defineProps<{
@@ -396,6 +405,8 @@ watch(
     else radarData.value = null;
   }
 );
+watch(assignCand, (v) => setTabBarHidden(Boolean(v), "pacer_radar_assign"));
+onBeforeUnmount(() => setTabBarHidden(false, "pacer_radar_assign"));
 </script>
 
 <style scoped>
@@ -827,5 +838,15 @@ watch(
 .pcr-m-btn.primary {
   background: #fc4c02;
   color: #ffffff;
+}
+.pcr-empty-cand {
+  padding: 28rpx 20rpx;
+  text-align: center;
+  font-size: 23rpx;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+.pcr-light .pcr-empty-cand {
+  color: #475569;
 }
 </style>

@@ -12,19 +12,19 @@
 
       <view
         v-if="webLoginUser"
-        style="margin: 14rpx 0 22rpx 0; padding: 16rpx 26rpx; border-radius: 18rpx; background: rgba(255,255,255,0.06); border: 1rpx solid rgba(255,255,255,0.12); display: flex; align-items: center; gap: 16rpx;"
+        style="margin: 14rpx 0 22rpx 0; padding: 16rpx 26rpx; border-radius: 18rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); display: flex; align-items: center; gap: 16rpx;"
       >
         <image
           v-if="webLoginUser.avatar_url"
           :src="webLoginUser.avatar_url"
           mode="aspectFill"
-          style="width: 64rpx; height: 64rpx; border-radius: 50%; background: #27272a;"
+          style="width: 64rpx; height: 64rpx; border-radius: 50%; background: var(--rgm-track);"
         />
         <view style="text-align: left;">
-          <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-text, #fff); display: block;">
+          <text style="font-size: 26rpx; font-weight: 700; color: var(--rgm-ink); display: block;">
             {{ webLoginUser.display_name || "微信跑者" }}
           </text>
-          <text style="font-size: 21rpx; color: var(--rgm-text-2, #a1a1aa); display: block;">
+          <text style="font-size: 21rpx; color: var(--rgm-ink-2); display: block;">
             同步手表档案、周期课表与跑团身份
           </text>
         </view>
@@ -32,20 +32,20 @@
 
       <view
         v-if="webLoginError"
-        style="width: 100%; margin-bottom: 20rpx; padding: 16rpx 20rpx; border-radius: 14rpx; background: rgba(239,68,68,0.14); border: 1rpx solid rgba(239,68,68,0.4);"
+        style="width: 100%; margin-bottom: 20rpx; padding: 16rpx 20rpx; border-radius: 14rpx; background: var(--rgm-red-tint); border: 1rpx solid var(--rgm-red-line);"
       >
-        <text style="font-size: 23rpx; color: #fca5a5;">{{ webLoginError }}</text>
+        <text style="font-size: 23rpx; color: var(--rgm-red);">{{ webLoginError }}</text>
       </view>
 
       <view
         v-if="webLoginConfirmed"
-        style="width: 100%; margin-bottom: 24rpx; padding: 22rpx; border-radius: 16rpx; background: rgba(34,197,94,0.14); border: 1rpx solid rgba(34,197,94,0.45);"
+        style="width: 100%; margin-bottom: 24rpx; padding: 22rpx; border-radius: 16rpx; background: var(--rgm-green-tint); border: 1rpx solid var(--rgm-green-line);"
       >
-        <text style="font-size: 27rpx; font-weight: 800; color: #4ade80; display: block; margin-bottom: 6rpx;">
-          ✅ 网页端已成功登录！
+        <text style="font-size: 27rpx; font-weight: 800; color: var(--rgm-green); display: block; margin-bottom: 6rpx;">
+          网页端已成功登录
         </text>
-        <text style="font-size: 22rpx; color: var(--rgm-text-2, #d4d4d8); display: block;">
-          请返回电脑或平板浏览器继续查看您的数据大盘与教练工作台
+        <text style="font-size: 22rpx; color: var(--rgm-ink-2); display: block;">
+          请返回电脑或平板浏览器继续查看数据大盘与教练工作台
         </text>
       </view>
 
@@ -123,7 +123,8 @@
       </button>
     </view>
 
-    <!-- ── 快捷直达模块通道 ── -->
+    <!-- ── 快捷直达模块通道与核心功能亮点（非扫码登录态展示） ── -->
+    <template v-if="!webLoginScene">
     <view class="quick-nav-grid">
       <view class="qnav-item" @click="goToCoach">
         <text class="qnav-icon">🎯</text>
@@ -232,10 +233,8 @@
       </view>
     </view>
 
-    <!-- ── 底部留白，防止被悬浮操作栏遮挡 ── -->
+    <!-- ── 底部留白与操作栏（非扫码登录态展示） ── -->
     <view class="bottom-spacer"></view>
-
-    <!-- ── 底部固定吸底悬浮栏 (保证任何时候大拇指一键触达) ── -->
     <view class="floating-bottom-bar">
       <!-- #ifdef MP-WEIXIN -->
       <button class="fbar-btn fbar-share-btn" open-type="share">
@@ -248,6 +247,7 @@
         <text class="fbar-label">进入大厅</text>
       </button>
     </view>
+    </template>
   </view>
 </template>
 

@@ -2049,8 +2049,10 @@ def update_club_info_by_owner(club_id: str, req: UpdateClubInfoOwnerRequest):
 # ── Mentorship (师傅/徒弟 1对1 结对，1位师傅最多同时带3位队员，同大群内支持跨跑团) ──
 
 class BindMentorshipRequest(BaseModel):
-    mentor_uid: str
-    mentee_uid: str
+    mentor_uid: Optional[str] = None
+    mentee_uid: Optional[str] = None
+    mentor_id: Optional[str] = None
+    mentee_id: Optional[str] = None
     org_id: Optional[str] = None
     club_id: Optional[str] = None
     operator_uid: Optional[str] = None
@@ -2058,8 +2060,10 @@ class BindMentorshipRequest(BaseModel):
 
 
 class UnbindMentorshipRequest(BaseModel):
-    mentor_uid: str
-    mentee_uid: str
+    mentor_uid: Optional[str] = None
+    mentee_uid: Optional[str] = None
+    mentor_id: Optional[str] = None
+    mentee_id: Optional[str] = None
     operator_uid: Optional[str] = None
 
 
@@ -2093,14 +2097,20 @@ def bind_mentorship_endpoint(req: BindMentorshipRequest):
     建立 1对1 师徒关系（每位队员限 1 位师傅，每位师傅最多同时带 3 位队员，支持同大群内跨跑团）。
     """
     try:
+        effective_mentor = (req.mentor_uid or req.mentor_id or "").strip()
+        effective_mentee = (req.mentee_uid or req.mentee_id or "").strip()
+        if not effective_mentor or not effective_mentee:
+            raise HTTPException(status_code=422, detail="mentor_uid and mentee_uid are required")
         return LocalStore.bind_mentor_mentee(
-            mentor_uid=req.mentor_uid,
-            mentee_uid=req.mentee_uid,
+            mentor_uid=effective_mentor,
+            mentee_uid=effective_mentee,
             org_id=req.org_id,
             club_id=req.club_id,
             operator_uid=req.operator_uid,
             via_invite=bool(req.via_invite),
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -2114,11 +2124,17 @@ def unbind_mentorship_endpoint(req: UnbindMentorshipRequest):
     解除 1对1 师徒关系。
     """
     try:
+        effective_mentor = (req.mentor_uid or req.mentor_id or "").strip()
+        effective_mentee = (req.mentee_uid or req.mentee_id or "").strip()
+        if not effective_mentor or not effective_mentee:
+            raise HTTPException(status_code=422, detail="mentor_uid and mentee_uid are required")
         return LocalStore.unbind_mentor_mentee(
-            mentor_uid=req.mentor_uid,
-            mentee_uid=req.mentee_uid,
+            mentor_uid=effective_mentor,
+            mentee_uid=effective_mentee,
             operator_uid=req.operator_uid,
         )
+    except HTTPException:
+        raise
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:

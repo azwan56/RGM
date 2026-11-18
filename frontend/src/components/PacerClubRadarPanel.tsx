@@ -273,7 +273,22 @@ export default function PacerClubRadarPanel({
 
             {radarData && (
               <span className="text-xs text-zinc-400 font-mono">
-                已评估活跃成员 <strong className="text-white">{radarData.total_members_evaluated}</strong> 人
+                {distanceType !== "custom" ? (
+                  <>
+                    有正式纪录参评{" "}
+                    <strong className="text-white">
+                      {radarData.eligible_members_count ?? radarData.members_best_fit?.length ?? 0}
+                    </strong>{" "}
+                    / {radarData.total_members_evaluated} 人
+                    {Number(radarData.excluded_no_record_count || 0) > 0 && (
+                      <span className="text-zinc-500">（已过滤无正式纪录 {radarData.excluded_no_record_count} 人）</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    已评估活跃成员 <strong className="text-white">{radarData.total_members_evaluated}</strong> 人
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -428,11 +443,6 @@ export default function PacerClubRadarPanel({
                                 {cand.display_name}
                                 <ExternalLink className="w-3 h-3 opacity-60" />
                               </button>
-                              {cand.first_aid_cert_label && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 text-[10px] font-bold">
-                                  🚑 {cand.first_aid_cert_label.split(" ").pop()}
-                                </span>
-                              )}
                             </div>
                             <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
                               当期预测 {cand.pred_finish_str} · 证书 {cand.cert_finish_str}
@@ -486,7 +496,9 @@ export default function PacerClubRadarPanel({
                 </div>
               ) : (
                 <div className="py-6 text-center text-xs text-zinc-500">
-                  暂无活跃成员数据，邀请队员加入跑团并同步运动手表后即可自动排名。
+                  {distanceType !== "custom"
+                    ? "当前跑团暂无具备该项目正式比赛纪录的队员（无正式全马/半马比赛纪录的队员不生成官方兔子评估），可切换至「内部拉练领跑兔」筛选日常拉练领跑人选。"
+                    : "暂无活跃成员数据，邀请队员加入跑团并同步运动手表后即可自动排名。"}
                 </div>
               )}
             </>

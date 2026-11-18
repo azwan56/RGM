@@ -12,7 +12,10 @@
     data-index="{{index}}"
     bindtap="switchTab"
   >
-    <image class="tab-bar-icon" src="{{selected === index ? (item.activeSrc || item.selectedIconPath) : (item.src || item.iconPath)}}" mode="aspectFit"></image>
+    <view class="tab-bar-icon-wrap">
+      <image class="tab-bar-icon" src="{{selected === index ? (item.activeSrc || item.selectedIconPath) : (item.src || item.iconPath)}}" mode="aspectFit"></image>
+      <view wx:if="{{item.badgeDot && selected !== index}}" class="tab-badge-dot"></view>
+    </view>
     <text class="tab-bar-text {{selected === index ? 'active' : ''}} {{item.text.length > 4 ? 'text-compact' : ''}}">{{item.text}}</text>
   </view>
 </view>

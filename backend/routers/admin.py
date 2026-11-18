@@ -319,6 +319,9 @@ def reply_support_ticket_as_admin(
 def get_admin_analytics_overview(
     days: int = 14,
     include_wechat: bool = True,
+    platform_scope: str = "all",
+    exclude_admins: bool = False,
+    release_only: bool = False,
     admin_info: Dict[str, Any] = Depends(verify_super_admin),
 ) -> Dict[str, Any]:
     """
@@ -330,7 +333,12 @@ def get_admin_analytics_overview(
     from utils.wechat import wechat_client
 
     eff_days = max(1, min(30, int(days or 14)))
-    behavior = LocalStore.get_behavior_analytics_overview(days=eff_days)
+    behavior = LocalStore.get_behavior_analytics_overview(
+        days=eff_days,
+        platform_scope=platform_scope,
+        exclude_admins=exclude_admins,
+        release_only=release_only,
+    )
     conversion_funnel = LocalStore.get_conversion_funnel_analytics()
     wechat_datacube = None
     if include_wechat:

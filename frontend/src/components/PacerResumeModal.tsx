@@ -90,7 +90,6 @@ export default function PacerResumeModal({ open, onClose, evalData }: PacerResum
         : `${sel.target_pace_str}/km`
       : "--";
     const watchBadge = runner.watch_verified_label || runner.device_verified_label || "";
-    const firstAidLabel = runner.first_aid_cert_label || runner.first_aid_label || "";
 
     const displayName =
       useRealName && runner.real_name
@@ -178,12 +177,9 @@ export default function PacerResumeModal({ open, onClose, evalData }: PacerResum
       if (runner.gender === "female") idTags.push("女");
       else if (runner.gender === "male") idTags.push("男");
       if (runner.age) idTags.push(`${runner.age}岁`);
-      if (runner.first_aid_cert_type && firstAidLabel) {
-        idTags.push(firstAidLabel);
-      }
       ctx.fillStyle = textSub;
       ctx.font = "600 21px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif";
-      ctx.fillText(idTags.join(" · ") || "跑团认证跑者", 92, 324);
+      ctx.fillText(idTags.join(" · ") || "认证耐力跑者", 92, 324);
 
       // Key Metrics Pills inside Hero
       const heroStats = [

@@ -162,9 +162,9 @@
                 min="0"
                 max="100"
                 step="2"
-                activeColor="#d0fd3e"
-                backgroundColor="rgba(255,255,255,0.14)"
-                block-color="#d0fd3e"
+                activeColor="#FC4C02"
+                :backgroundColor="isVolt ? '#E5E7EB' : 'rgba(255,255,255,0.14)'"
+                block-color="#FC4C02"
                 block-size="18"
                 @change="handleFocusSliderChange"
               />
@@ -224,13 +224,7 @@
           <!-- Canova Commentary Switcher -->
           <view class="psc-control-group">
             <view class="psc-label-between">
-              <text class="psc-ctrl-label">
-                {{
-                  activeCommentaryKey === "captain" || (shareData?.is_critique_hidden && shareData?.captain_cheer)
-                    ? "📣 团长加油："
-                    : "👨‍🏫 Canova 点评："
-                }}
-              </text>
+              <text class="psc-ctrl-label">👨‍🏫 Canova 点评：</text>
               <text class="psc-edit-toggle" @click="showCustomEdit = !showCustomEdit">
                 {{ showCustomEdit ? "收起编辑 ▴" : "✍️ 微调文字" }}
               </text>
@@ -659,14 +653,11 @@ async function fetchShareCardData(actId?: string, dateStr?: string, rId?: string
         }
       }
 
-      const baseOpts = res.commentary_options || [];
-      const opts = res.captain_cheer
-        ? [...baseOpts, { key: "captain", label: "📣 团长加油", text: res.captain_cheer }]
-        : baseOpts;
+      const opts = Array.isArray(res.commentary_options) ? res.commentary_options : [];
       commentaryOptions.value = opts;
-      if (res.is_critique_hidden && res.captain_cheer) {
-        activeCommentaryKey.value = "captain";
-        customCommentary.value = res.captain_cheer;
+      if (res.is_critique_hidden || opts.length === 0) {
+        activeCommentaryKey.value = "exec";
+        customCommentary.value = "";
       } else {
         const defaultKey = showDailyPlan.value ? "exec" : "phys";
         const matchedOpt = opts.find((o: any) => o.key === defaultKey) || opts[0];
@@ -918,11 +909,11 @@ function drawGpsRouteOnPhoto(
       boxH,
       18,
       isLightBackdrop ? "rgba(255, 255, 255, 0.90)" : "rgba(10, 14, 23, 0.58)",
-      isLightBackdrop ? "rgba(252, 76, 2, 0.32)" : "rgba(208, 253, 62, 0.42)",
+      isLightBackdrop ? "rgba(252, 76, 2, 0.32)" : "rgba(252, 76, 2, 0.45)",
       1.5
     );
     ctx.setFontSize(15);
-    ctx.setFillStyle(isLightBackdrop ? "#C23800" : "#d0fd3e");
+    ctx.setFillStyle(isLightBackdrop ? "#C23800" : "#FF6B2B");
     ctx.fillText("🗺️ GPS 运动轨迹", boxX + 14, boxY + 24);
   }
 
@@ -989,7 +980,7 @@ function drawGpsRouteOnPhoto(
     else ctx.lineTo(p.x, p.y);
   });
   ctx.setLineWidth(withHudCard ? 1.4 : 2.2);
-  ctx.setStrokeStyle("#d0fd3e");
+  ctx.setStrokeStyle("#FF8533");
   ctx.stroke();
 
   const startPt = pts[0];
@@ -1085,7 +1076,7 @@ function drawElevationOnPhoto(
 
   ctx.beginPath();
   ctx.arc(peakPt.x, peakPt.y, 4.5, 0, Math.PI * 2);
-  ctx.setFillStyle(isLightBackdrop ? "#FC4C02" : "#d0fd3e");
+  ctx.setFillStyle(isLightBackdrop ? "#FC4C02" : "#FF6B2B");
   ctx.fill();
   ctx.setLineWidth(1.5);
   ctx.setStrokeStyle(isLightBackdrop ? "#ffffff" : "#090b10");
@@ -1093,7 +1084,7 @@ function drawElevationOnPhoto(
 
   const peakLabelX = Math.max(chartL + 36, Math.min(chartR - 36, peakPt.x));
   ctx.setFontSize(14);
-  ctx.setFillStyle(isLightBackdrop ? "#C23800" : "#d0fd3e");
+  ctx.setFillStyle(isLightBackdrop ? "#C23800" : "#FF6B2B");
   ctx.fillText(`▲${Math.round(peakPt.elev)}m`, peakLabelX - 24, Math.max(chartT + 12, peakPt.y - 8));
 
   ctx.setFontSize(14);
@@ -1162,7 +1153,7 @@ async function renderPosterCanvas() {
       1.5
     );
 
-    // ── SECTION 1: Runner & Club Header (Y: 46 -> 122) ──
+    // ── SECTION 1: Runner Header (Y: 46 -> 122, without club info) ──
     const avX = 52;
     const avY = 48;
     const avSize = 64;
@@ -1186,43 +1177,10 @@ async function renderPosterCanvas() {
       ctx.fillText(firstChar, avX + 18, avY + 42);
     }
 
-    // Runner Name & Club Pill
+    // Runner Name (pure personal identity, no club badge)
     const runnerName = String(usr.display_name || "跑者").slice(0, 10);
-    ctx.setFontSize(26);
     ctx.setFillStyle(isLight ? "#0F172A" : "#ffffff");
-    ctx.fillText(runnerName, 132, 76);
-
-    const clubName = String(usr.club_name || "万跑跑团助手").slice(0, 14);
-    const clubLabel = `${isRace ? "🏅" : "🏃"} ${clubName}`;
-    const nameW = Math.min(200, Math.ceil(getTextVisualWidth(ctx, runnerName, 26) + 18));
-    const clubTextW = getTextVisualWidth(ctx, clubLabel, 15);
-    const clubPillW = Math.min(250, Math.ceil(clubTextW + 28));
-    const clubPillX = 132 + nameW;
-    drawRoundedRect(
-      ctx,
-      clubPillX,
-      50,
-      clubPillW,
-      32,
-      16,
-      isRace
-        ? isLight
-          ? "#fef3c7"
-          : "rgba(251, 191, 36, 0.16)"
-        : isLight
-        ? "#FFF5EE"
-        : "rgba(252, 76, 2, 0.16)",
-      isRace
-        ? isLight
-          ? "rgba(217, 119, 6, 0.45)"
-          : "rgba(251, 191, 36, 0.48)"
-        : isLight
-        ? "rgba(252, 76, 2, 0.32)"
-        : "rgba(252, 76, 2, 0.45)",
-      1
-    );
-    ctx.setFillStyle(isRace ? (isLight ? "#b45309" : "#fbbf24") : isLight ? "#C23800" : "#fc4c02");
-    drawFittedText(ctx, clubLabel, clubPillX + 14, 72, clubPillW - 24, 15, 12);
+    drawFittedText(ctx, runnerName, 132, 76, W - 180 - 132, 26, 18);
 
     ctx.setFontSize(18);
     ctx.setFillStyle(isLight ? "#475569" : "#9ca3af");
@@ -1235,7 +1193,7 @@ async function renderPosterCanvas() {
     // Date Badge on Top Right
     const dateLabel = String(act.date || plan.date || "").replace(/-/g, ".");
     ctx.setFontSize(20);
-    ctx.setFillStyle(isRace ? (isLight ? "#b45309" : "#fbbf24") : isLight ? "#FC4C02" : "#d0fd3e");
+    ctx.setFillStyle(isRace ? (isLight ? "#b45309" : "#fbbf24") : isLight ? "#FC4C02" : "#FF6B2B");
     ctx.fillText(dateLabel, W - 168, 78);
     ctx.setFontSize(15);
     ctx.setFillStyle(isRace ? (isLight ? "#d97706" : "#f59e0b") : isLight ? "#64748b" : "#71717a");
@@ -1352,7 +1310,7 @@ async function renderPosterCanvas() {
       : pY + 122;
 
     ctx.setFontSize(64);
-    ctx.setFillStyle(isLightHero ? (isRace ? "#b45309" : "#FC4C02") : isRace ? "#fbbf24" : "#d0fd3e");
+    ctx.setFillStyle(isLightHero ? (isRace ? "#b45309" : "#FC4C02") : isRace ? "#fbbf24" : "#FF6B2B");
     const distStr = Number(act.distance_km || 0).toFixed(2);
     ctx.fillText(distStr, pX + 22, stampBaseY);
     const distTextW = distStr.length * 38;
@@ -1560,7 +1518,7 @@ async function renderPosterCanvas() {
         label: isRace ? "完赛距离" : "实际距离",
         val: `${Number(act.distance_km || 0).toFixed(2)}`,
         unit: "km",
-        color: isLight ? "#FC4C02" : "#d0fd3e",
+        color: isLight ? "#FC4C02" : "#FF6B2B",
       },
       {
         label: "平均配速",
@@ -1611,8 +1569,6 @@ async function renderPosterCanvas() {
 
     // ── SECTION 4: Canova Coach's Commentary (👨‍🏫 Canova 教练点评) ──
     const cY = showDailyPlan.value ? 956 : 932;
-    const isCaptainMode =
-      activeCommentaryKey.value === "captain" || (Boolean(d.is_critique_hidden) && Boolean(d.captain_cheer));
     const cH = showDailyPlan.value ? 254 : 276;
     ctx.save();
     drawRoundedRect(
@@ -1622,16 +1578,14 @@ async function renderPosterCanvas() {
       pW,
       cH,
       20,
-      isLight ? "#F8FAFC" : isCaptainMode ? "#1f1912" : "#171426",
-      isLight ? "#E2E8F0" : isCaptainMode ? "rgba(245, 158, 11, 0.45)" : "rgba(191, 90, 242, 0.45)",
+      isLight ? "#F8FAFC" : "#171426",
+      isLight ? "#E2E8F0" : "rgba(191, 90, 242, 0.45)",
       1.5
     );
     ctx.clip();
 
     const verdictText = String(
-      isCaptainMode
-        ? d.captain_cheer_meta?.club_name || "跑团全员鼓励"
-        : d.verdict_badge || (isRace ? "荣耀完赛 · 科学兑现" : "科学耐力周期复盘")
+      d.verdict_badge || (isRace ? "荣耀完赛 · 科学兑现" : "科学耐力周期复盘")
     ).slice(0, 12);
     const verdictLeftX = drawRightAlignedPill(
       ctx,
@@ -1640,19 +1594,16 @@ async function renderPosterCanvas() {
       32,
       verdictText,
       14,
-      isLight ? "#FFF5EE" : isCaptainMode ? "rgba(245, 158, 11, 0.16)" : "rgba(192, 132, 252, 0.15)",
-      isLight ? "rgba(252, 76, 2, 0.30)" : isCaptainMode ? "rgba(245, 158, 11, 0.35)" : "rgba(192, 132, 252, 0.35)",
-      isLight ? "#C23800" : isCaptainMode ? "#fde68a" : "#e9d5ff",
+      isLight ? "#FFF5EE" : "rgba(192, 132, 252, 0.15)",
+      isLight ? "rgba(252, 76, 2, 0.30)" : "rgba(192, 132, 252, 0.35)",
+      isLight ? "#C23800" : "#e9d5ff",
       148
     );
 
-    ctx.setFillStyle(isLight ? "#0F172A" : isCaptainMode ? "#fbbf24" : "#c084fc");
-    const captainTitleText = d.captain_cheer_meta?.captain_title
-      ? `📣 ${d.captain_cheer_meta.captain_title}`
-      : "📣 跑团团长加油";
+    ctx.setFillStyle(isLight ? "#0F172A" : "#c084fc");
     drawFittedText(
       ctx,
-      isCaptainMode ? captainTitleText : isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评",
+      isRace ? "👨‍🏫 Canova 教练完赛点评" : "👨‍🏫 Canova 教练点评",
       pX + 24,
       cY + 40,
       verdictLeftX - (pX + 24) - 14,
@@ -1660,10 +1611,7 @@ async function renderPosterCanvas() {
       16
     );
 
-    const fallbackQuote =
-      activeCommentaryKey.value === "captain"
-        ? d.captain_cheer || ""
-        : d.canova_commentary || (d.is_critique_hidden ? d.captain_cheer || "" : "");
+    const fallbackQuote = d.canova_commentary || "";
     const finalCommentary = (customCommentary.value || fallbackQuote).trim();
     if (finalCommentary) {
       ctx.setFillStyle(isLight ? "#334155" : "#e4e4e7");
@@ -1712,7 +1660,7 @@ async function renderPosterCanvas() {
     drawFittedText(ctx, `${runnerName} 邀你一起科学奔跑`, pX + 24, fY + 80, footerLeftMaxW, 25, 18);
 
     ctx.setFillStyle(isLight ? "#475569" : "#a1a1aa");
-    drawFittedText(ctx, `长按识别小程序码 · 加入【${clubName}】`, pX + 24, fY + 116, footerLeftMaxW, 18, 13);
+    drawFittedText(ctx, "长按识别小程序码 · 微信打开小程序主页", pX + 24, fY + 116, footerLeftMaxW, 18, 13);
 
     ctx.setFillStyle(isLight ? "#64748B" : "#38bdf8");
     drawFittedText(ctx, "⌚ 佳明/高驰手表自动同步  ·  📈 Canova 专属计划", pX + 24, fY + 152, footerLeftMaxW, 16, 12);
@@ -1729,8 +1677,8 @@ async function renderPosterCanvas() {
     }
 
     ctx.setFontSize(14);
-    ctx.setFillStyle(isLight ? "#C23800" : "#d0fd3e");
-    const qrCap = "长按扫码受邀入团";
+    ctx.setFillStyle(isLight ? "#C23800" : "#FF6B2B");
+    const qrCap = "扫码进入小程序";
     const qrCapW = getTextVisualWidth(ctx, qrCap, 14);
     ctx.fillText(qrCap, qrBoxX + Math.max(0, (qrBoxSize - qrCapW) / 2), fY + 172);
     ctx.restore();
@@ -1937,14 +1885,14 @@ function handleShareImage() {
 }
 
 .psc-face-box {
-  background: rgba(208, 253, 62, 0.05);
-  border: 1rpx solid rgba(208, 253, 62, 0.22);
+  background: var(--rgm-brand-tint);
+  border: 1rpx solid var(--rgm-brand-line);
   border-radius: 16rpx;
   padding: 14rpx 16rpx;
 }
 
 .psc-face-status {
-  color: #d0fd3e;
+  color: var(--rgm-brand-text);
   font-weight: 700;
   font-size: 21rpx;
 }
@@ -1969,7 +1917,7 @@ function handleShareImage() {
 
 .psc-slider-val {
   font-size: 20rpx;
-  color: #d0fd3e;
+  color: var(--rgm-brand-text);
   font-weight: 700;
   width: 58rpx;
   text-align: right;
@@ -2010,9 +1958,9 @@ function handleShareImage() {
 }
 
 .psc-pill.active {
-  background: rgba(208, 253, 62, 0.16);
-  border-color: #d0fd3e;
-  color: #d0fd3e;
+  background: var(--rgm-brand-tint);
+  border-color: var(--rgm-brand);
+  color: var(--rgm-brand-text);
 }
 
 .psc-pill.race-pill.active {
@@ -2090,8 +2038,8 @@ function handleShareImage() {
   width: 56rpx;
   height: 56rpx;
   border-radius: 50%;
-  border: 5rpx solid rgba(208, 253, 62, 0.2);
-  border-top-color: #d0fd3e;
+  border: 5rpx solid var(--rgm-brand-tint);
+  border-top-color: var(--rgm-brand);
   animation: pscSpin 0.9s linear infinite;
 }
 
@@ -2146,8 +2094,8 @@ function handleShareImage() {
 
 .psc-action-btn.save-btn {
   flex: 1.25;
-  background: linear-gradient(135deg, #d0fd3e, #a3e635);
-  color: #090b10;
+  background: linear-gradient(135deg, #FC4C02, #EA580C);
+  color: #FFFFFF;
   border: none;
 }
 

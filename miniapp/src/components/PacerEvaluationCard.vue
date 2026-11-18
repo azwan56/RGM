@@ -29,7 +29,7 @@
     </view>
 
     <!-- Event Selector OR Custom Club LSD Inputs -->
-    <view v-if="distanceType !== 'custom'" class="pec-event-box">
+    <view v-if="distanceType !== 'custom' && evalData?.official_eval_eligible !== false" class="pec-event-box">
       <view v-if="upcomingRoadRaces.length > 0" class="pec-chip-section">
         <text class="pec-chip-label">🎯 待参赛程：</text>
         <scroll-view scroll-x class="pec-h-scroll" show-scrollbar="false">
@@ -85,7 +85,7 @@
       </view>
     </view>
 
-    <view v-else class="pec-event-box">
+    <view v-else-if="distanceType === 'custom'" class="pec-event-box">
       <text class="pec-lsd-tip">🐰 跑团内部拉练模式：豁免官方田协证书，聚焦当期真实体能与控速节拍</text>
       <view class="pec-custom-inputs">
         <view class="pec-input-col">
@@ -127,7 +127,37 @@
     </view>
 
     <!-- Main Result -->
-    <view v-if="loading && !sel" class="pec-loading">正在演算六维官兔胜任度...</view>
+    <view v-if="loading && !sel && evalData?.official_eval_eligible !== false" class="pec-loading">正在演算六维官兔胜任度...</view>
+    <view v-else-if="evalData?.official_eval_eligible === false" class="pec-ineligible-box">
+      <text class="pec-ineligible-title">
+        ⛔ {{ evalData.ineligible_reason || "暂无对应项目的正式比赛纪录，不予生成官方兔子评估" }}
+      </text>
+      <text class="pec-ineligible-desc">
+        全程马拉松与半程马拉松官方配速员（官兔）评估均须具备对应项目的正式比赛完赛纪录（日常训练跑及越野赛不计作正式路跑比赛纪录）。您可在「我的」页补录正式比赛成绩，或切换至「跑团拉练」测算内部领跑胜任度。
+      </text>
+      <view class="pec-ineligible-actions">
+        <view class="pec-ineligible-btn primary" @click="switchDistance('custom')">
+          切换跑团拉练评估
+        </view>
+        <view
+          v-if="distanceType === 'fm' && evalData?.official_records_summary?.has_hm"
+          class="pec-ineligible-btn secondary"
+          @click="switchDistance('hm')"
+        >
+          查看半马官兔评估
+        </view>
+        <view
+          v-if="distanceType === 'hm' && evalData?.official_records_summary?.has_fm"
+          class="pec-ineligible-btn secondary"
+          @click="switchDistance('fm')"
+        >
+          查看全马官兔评估
+        </view>
+        <view class="pec-ineligible-btn ghost" @click="goToProfile">
+          去补录比赛成绩
+        </view>
+      </view>
+    </view>
     <view v-else-if="sel" class="pec-body">
       <!-- Score Hero -->
       <view class="pec-hero">
@@ -295,6 +325,10 @@ const showcase = computed(() => evalData.value?.showcase_run || null);
 const upcomingRoadRaces = computed(() =>
   (evalData.value?.upcoming_races || []).filter((r: any) => !r.is_trail).slice(0, 3)
 );
+
+function goToProfile() {
+  uni.switchTab({ url: "/pages/profile/profile" });
+}
 
 const visibleGates = computed(() => {
   const gMap = sel.value?.gates || {};
@@ -1063,5 +1097,69 @@ onMounted(() => {
 .pec-light .pec-lsd-tip,
 .pec-light .pec-dim-score {
   color: #b45309;
+}
+.pec-ineligible-box {
+  padding: 26rpx;
+  border-radius: 22rpx;
+  background: rgba(252, 76, 2, 0.08);
+  border: 1rpx solid rgba(252, 76, 2, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+.pec-light .pec-ineligible-box {
+  background: #fff7ed;
+  border-color: rgba(234, 88, 12, 0.32);
+}
+.pec-ineligible-title {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.45;
+}
+.pec-light .pec-ineligible-title {
+  color: #9a3412;
+}
+.pec-ineligible-desc {
+  font-size: 22rpx;
+  color: #cbd5e1;
+  line-height: 1.55;
+}
+.pec-light .pec-ineligible-desc {
+  color: #475569;
+}
+.pec-ineligible-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 6rpx;
+}
+.pec-ineligible-btn {
+  padding: 12rpx 22rpx;
+  border-radius: 16rpx;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+.pec-ineligible-btn.primary {
+  background: #fc4c02;
+  color: #ffffff;
+}
+.pec-ineligible-btn.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+.pec-light .pec-ineligible-btn.secondary {
+  background: #ffedd5;
+  color: #c2410c;
+}
+.pec-ineligible-btn.ghost {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1rpx solid rgba(255, 255, 255, 0.16);
+  color: #e2e8f0;
+}
+.pec-light .pec-ineligible-btn.ghost {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #334155;
 }
 </style>

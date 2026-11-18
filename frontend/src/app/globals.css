@@ -8,16 +8,25 @@ html {
   --background: #0b0b0e;
   --foreground: #f4f4f6;
   --rgm-bg: #0b0b0e;
-  --rgm-card: #141418;
+  --rgm-sidebar: #101015;
+  --rgm-topbar: #101015;
+  --rgm-card: #141419;
   --rgm-card-2: #1b1b22;
   --rgm-card-3: #23232c;
-  --rgm-border: #27272f;
+  --rgm-border: #272730;
+  --rgm-divider: #1e1e26;
   --rgm-line: rgba(255, 255, 255, 0.08);
   --rgm-text: #f4f4f6;
   --rgm-text-2: #a1a1aa;
   --rgm-text-muted: #71717a;
   --rgm-brand: #fc4c02;
   --rgm-accent: #fc4c02;
+  --rgm-brand-tint: #28150e;
+  --rgm-green-tint: #0f241d;
+  --rgm-blue-tint: #0e1f2f;
+  --rgm-purple-tint: #1e142b;
+  --rgm-amber-tint: #271d0d;
+  --rgm-red-tint: #291316;
   background-color: var(--rgm-bg);
 }
 
@@ -26,16 +35,25 @@ html.theme-light {
   --background: #f6f8fa;
   --foreground: #0f172a;
   --rgm-bg: #f6f8fa;
+  --rgm-sidebar: #ffffff;
+  --rgm-topbar: #ffffff;
   --rgm-card: #ffffff;
   --rgm-card-2: #f8fafc;
   --rgm-card-3: #f1f5f9;
   --rgm-border: #e2e8f0;
+  --rgm-divider: #edf2f7;
   --rgm-line: rgba(15, 23, 42, 0.08);
   --rgm-text: #0f172a;
   --rgm-text-2: #475569;
-  --rgm-text-muted: #94a3b8;
+  --rgm-text-muted: #64748b;
   --rgm-brand: #fc4c02;
   --rgm-accent: #fc4c02;
+  --rgm-brand-tint: #fff4ed;
+  --rgm-green-tint: #ecfdf5;
+  --rgm-blue-tint: #f0f9ff;
+  --rgm-purple-tint: #faf5ff;
+  --rgm-amber-tint: #fffbeb;
+  --rgm-red-tint: #fef2f2;
   background-color: var(--rgm-bg);
 }
 
@@ -154,6 +172,7 @@ html.theme-light [class*="bg-[#181519]"],
 html.theme-light [class*="bg-[#1b1a24]"],
 html.theme-light [class*="bg-[#09090c]"],
 html.theme-light [class*="bg-[#101014]"],
+html.theme-light [class*="bg-[#101015]"],
 html.theme-light [class*="bg-[#111216]"],
 html.theme-light [class*="bg-[#11131c]"],
 html.theme-light [class*="bg-[#121520]"],
@@ -401,6 +420,8 @@ html.theme-light [class~="bg-[#FC4C02]"].text-white,
 html.theme-light [class~="bg-[#FC4C02]"] .text-white,
 html.theme-light [class~="bg-[#fc4c02]"].text-white,
 html.theme-light [class~="bg-[#fc4c02]"] .text-white,
+html.theme-light [class~="bg-[var(--rgm-brand)]"].text-white,
+html.theme-light [class~="bg-[var(--rgm-brand)]"] .text-white,
 html.theme-light [class~="from-[#FC4C02]"].text-white,
 html.theme-light [class~="from-[#FC4C02]"] .text-white,
 html.theme-light [class~="from-[#fc4c02]"].text-white,
@@ -808,4 +829,34 @@ html.theme-light .rgm-org-tile-tag.is-alert {
 html.theme-light .rgm-org-tile-tag.is-ok {
   background-color: #ecfdf5;
   color: #059669;
+}
+
+/* ============================================================================
+   Web 3.0 Role-Adaptive Desktop Shell & Bento Surface Utilities
+   ============================================================================ */
+.rgm-web3-page {
+  width: 100%;
+  transition: padding-left 0.2s ease;
+}
+
+@media (min-width: 1024px) {
+  .rgm-web3-page {
+    padding-left: 72px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .rgm-web3-page {
+    padding-left: 224px;
+  }
+}
+
+.rgm-bento-card {
+  background-color: var(--rgm-card);
+  border: 1px solid var(--rgm-border);
+  border-radius: 16px;
+}
+
+html.theme-light .rgm-bento-card {
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.045), 0 2px 6px -1px rgba(15, 23, 42, 0.025);
 }

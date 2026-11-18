@@ -60,6 +60,9 @@ export default function AdminPage() {
 
   // UX & Behavior Analytics states
   const [analyticsDays, setAnalyticsDays] = useState<number>(14);
+  const [analyticsPlatform, setAnalyticsPlatform] = useState<"miniapp" | "all" | "web">("miniapp");
+  const [analyticsExcludeAdmins, setAnalyticsExcludeAdmins] = useState<boolean>(true);
+  const [analyticsReleaseOnly, setAnalyticsReleaseOnly] = useState<boolean>(true);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -352,15 +355,25 @@ export default function AdminPage() {
     }
   }
 
-  async function loadAnalyticsOverview(daysOverride?: number, tokenOverride?: string) {
+  async function loadAnalyticsOverview(
+    daysOverride?: number,
+    tokenOverride?: string,
+    opts?: { platform?: "miniapp" | "all" | "web"; excludeAdmins?: boolean; releaseOnly?: boolean }
+  ) {
     const tk = tokenOverride || adminToken;
     if (!tk) return;
     const d = daysOverride ?? analyticsDays;
+    const plat = opts?.platform ?? analyticsPlatform;
+    const exclAdm = opts?.excludeAdmins ?? analyticsExcludeAdmins;
+    const relOnly = opts?.releaseOnly ?? analyticsReleaseOnly;
     setAnalyticsLoading(true);
     try {
-      const res = await axios.get(`/api/admin/analytics/overview?days=${d}&include_wechat=true`, {
-        headers: { Authorization: `Bearer ${tk}` }
-      });
+      const res = await axios.get(
+        `/api/admin/analytics/overview?days=${d}&include_wechat=true&platform_scope=${plat}&exclude_admins=${exclAdm}&release_only=${relOnly}`,
+        {
+          headers: { Authorization: `Bearer ${tk}` }
+        }
+      );
       const data = res.data || null;
       setAnalyticsData(data);
       const recent = data?.behavior?.recent_sessions || [];
@@ -400,6 +413,41 @@ export default function AdminPage() {
       loadAnalyticsOverview(analyticsDays, adminToken);
     }
   }, [activeTab, adminToken]);
+
+  useEffect(() => {
+    const syncAdminTab = (hrefOverride?: string) => {
+      if (typeof window === "undefined") return;
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const sp = new URLSearchParams(searchStr);
+      const qTab = sp.get("tab");
+      if (
+        qTab === "orgs" ||
+        qTab === "clubs" ||
+        qTab === "unaffiliated" ||
+        qTab === "support" ||
+        qTab === "analytics"
+      ) {
+        setActiveTab(qTab);
+      }
+    };
+    syncAdminTab();
+    const onPopState = () => syncAdminTab();
+    const onNavIntent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const href = String(detail?.href || "");
+      if (href.startsWith("/dashboard/admin")) {
+        syncAdminTab(href);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("rgm-nav-intent", onNavIntent as EventListener);
+    };
+  }, []);
 
   // Club Modals Opener
   function openCreateModal() {
@@ -842,10 +890,10 @@ export default function AdminPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen rgm-web3-page bg-[var(--rgm-bg)] text-[var(--rgm-text)] flex flex-col font-sans">
       <Navbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8">
+      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Header Banner */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-900 border border-red-500/20 p-6 rounded-3xl backdrop-blur-md shadow-2xl">
           <div className="flex items-center gap-4">
@@ -979,6 +1027,73 @@ export default function AdminPage() {
         ) : (
           /* Logged In -> Admin Dashboard */
           <div className="space-y-6">
+            {/* W5.1: 4-Card Platform Governance Overview Strip */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab("orgs")}
+                className="rgm-bento-card p-4 text-left hover:border-[#FC4C02]/50 transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-400">🏛️ 商学院大群总数</span>
+                  <School className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-2xl font-black text-white">{orgs.length}</div>
+                <div className="text-[11px] text-amber-300 font-semibold">点击治理大群与 14 天准入 ›</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("clubs")}
+                className="rgm-bento-card p-4 text-left hover:border-[#FC4C02]/50 transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-400">🏃 分跑团与俱乐部</span>
+                  <Users className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-2xl font-black text-white">{clubs.length}</div>
+                <div className="text-[11px] text-zinc-400">
+                  正常 {clubs.filter((c) => (c.status || "active") === "active").length} · 暂停/锁定{" "}
+                  {clubs.filter((c) => c.status && c.status !== "active").length}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("unaffiliated")}
+                className="rgm-bento-card p-4 text-left hover:border-[#FC4C02]/50 transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-400">🌍 自由跑者转化池</span>
+                  <UserCheck className="w-4 h-4 text-cyan-400" />
+                </div>
+                <div className="text-2xl font-black text-white">
+                  {unaffiliatedData?.summary?.total_members ?? users.length}
+                </div>
+                <div className="text-[11px] text-cyan-300">
+                  已绑表 {unaffiliatedData?.summary?.watch_bound_count ?? 0} · 已设目标{" "}
+                  {unaffiliatedData?.summary?.goal_set_count ?? 0}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("support")}
+                className="rgm-bento-card p-4 text-left hover:border-[#FC4C02]/50 transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-400">💬 待响应支持工单</span>
+                  <FileText className="w-4 h-4 text-[#FC4C02]" />
+                </div>
+                <div className="text-2xl font-black text-white">
+                  {supportTickets.filter((t) => t.status !== "resolved" && !t.admin_reply).length}
+                </div>
+                <div className="text-[11px] text-zinc-400">
+                  累计工单 {supportTickets.length} · 含设备诊断上下文
+                </div>
+              </button>
+            </div>
+
             {/* Top Navigation Tabs */}
             <div className="flex flex-wrap items-center gap-3 border-b border-white/10 pb-4">
               <button
@@ -1733,6 +1848,46 @@ export default function AdminPage() {
             {/* TAB 3: Support Tickets View */}
             {activeTab === "support" && (
               <div className="space-y-6">
+                {/* W5.3: 4-Channel System Health Monitor */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+                  {[
+                    {
+                      title: "⌚ Garmin CN / Global 通道",
+                      status: "在线监听",
+                      detail: `设备同步类工单 ${supportTickets.filter((t) => t.category === "device_sync").length} 笔`,
+                      badgeClass: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+                    },
+                    {
+                      title: "⌚ COROS 高驰开放接口",
+                      status: "同步正常",
+                      detail: "中国区 teamcnapi / 国际区双节点就绪",
+                      badgeClass: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+                    },
+                    {
+                      title: "🤖 Canova AI 推理引擎",
+                      status: "响应正常",
+                      detail: "日报生成 · 批阅建议 · 赛前减量诊断",
+                      badgeClass: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+                    },
+                    {
+                      title: "🔐 AES-256 隐私与脱敏网关",
+                      status: "合规防护中",
+                      detail: "实名密文 · GPS/HRV 保密拦截已启用",
+                      badgeClass: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+                    },
+                  ].map((ch) => (
+                    <div key={ch.title} className="rgm-bento-card p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white truncate">{ch.title}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${ch.badgeClass}`}>
+                          {ch.status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-zinc-400">{ch.detail}</div>
+                    </div>
+                  ))}
+                </div>
+
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#141416] p-4 rounded-2xl border border-white/5">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1889,7 +2044,58 @@ export default function AdminPage() {
                       单用户「打开小程序 → 页面停留与滚动浏览深度 → 按钮/弹窗点击 → 退出」全链路回放 · 存量转化漏斗 · 微信官方 We分析
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10">
+                      {[
+                        { key: "miniapp", label: "仅小程序" },
+                        { key: "web", label: "仅网页" },
+                        { key: "all", label: "全平台" },
+                      ].map((p) => (
+                        <button
+                          key={p.key}
+                          onClick={() => {
+                            const next = p.key as "miniapp" | "all" | "web";
+                            setAnalyticsPlatform(next);
+                            loadAnalyticsOverview(analyticsDays, undefined, { platform: next });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                            analyticsPlatform === p.key
+                              ? "bg-emerald-600 text-white shadow shadow-emerald-600/30"
+                              : "text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const next = !analyticsExcludeAdmins;
+                        setAnalyticsExcludeAdmins(next);
+                        loadAnalyticsOverview(analyticsDays, undefined, { excludeAdmins: next });
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                        analyticsExcludeAdmins
+                          ? "bg-sky-600/20 text-sky-300 border-sky-500/40"
+                          : "bg-white/5 text-zinc-400 border-white/10 hover:text-white"
+                      }`}
+                    >
+                      {analyticsExcludeAdmins ? "✓ 排除超管" : "含超管测试"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const next = !analyticsReleaseOnly;
+                        setAnalyticsReleaseOnly(next);
+                        loadAnalyticsOverview(analyticsDays, undefined, { releaseOnly: next });
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                        analyticsReleaseOnly
+                          ? "bg-purple-600/20 text-purple-300 border-purple-500/40"
+                          : "bg-white/5 text-zinc-400 border-white/10 hover:text-white"
+                      }`}
+                    >
+                      {analyticsReleaseOnly ? "✓ 仅线上正式版" : "含开发/体验版"}
+                    </button>
                     {[7, 14, 30].map((d) => (
                       <button
                         key={d}
@@ -1959,6 +2165,9 @@ export default function AdminPage() {
                           <div className="text-xl font-black text-amber-300 mt-1">
                             {analyticsData?.behavior?.summary?.avg_session_duration_sec ?? 0}
                             <span className="text-xs font-normal text-zinc-500 ml-1">秒</span>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 mt-0.5">
+                            中位数 {analyticsData?.behavior?.summary?.median_session_duration_sec ?? 0} 秒
                           </div>
                         </div>
                         <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">

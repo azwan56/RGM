@@ -62,8 +62,8 @@ export function createGoalSheetState(rawGoal: any, currentCalMonth: number): Goa
     editMonthlyArray: [...mArr],
     hasIndependentMonthly,
     customMonthMode: !isDefaultGoal && !isUniformFuture,
-    // Default ON only if existing saved future months already match weekly × 4.3
-    autoSyncMonthly: !isDefaultGoal && matchesAutoFormula,
+    // Default ON for brand-new users setting up their first goal, or if existing months already match weekly × 4.3
+    autoSyncMonthly: isDefaultGoal || matchesAutoFormula,
     weeklyChangedByUser: false,
     monthlyEditedByUser: false,
     syncManuallyToggled: false,
@@ -93,13 +93,15 @@ export function setUniformMonthlyKmInState(st: GoalSheetState, mkm: number): voi
   st.syncManuallyToggled = false;
   st.monthlyEditedByUser = true;
   st.editUniformMonthlyKm = clean;
+  const lockBeforeMonth = st.isDefaultGoal ? st.currentCalMonth - 1 : st.currentCalMonth;
   st.editMonthlyArray = st.editMonthlyArray.map((orig, idx) =>
-    idx + 1 <= st.currentCalMonth ? orig : clean
+    idx + 1 <= lockBeforeMonth ? orig : clean
   );
 }
 
 export function setSingleMonthKmInState(st: GoalSheetState, idx: number, rawVal: string | number): void {
-  if (idx + 1 <= st.currentCalMonth) return;
+  const lockBeforeMonth = st.isDefaultGoal ? st.currentCalMonth - 1 : st.currentCalMonth;
+  if (idx + 1 <= lockBeforeMonth) return;
   st.autoSyncMonthly = false;
   st.syncManuallyToggled = false;
   st.monthlyEditedByUser = true;
@@ -118,6 +120,10 @@ export function getPreviewNextMonthKm(st: GoalSheetState): number {
   if (willStateRewriteFutureMonths(st)) {
     return calcSyncedMonthlyKm(st.editWeeklyKm);
   }
+  if (st.isDefaultGoal) {
+    const src = st.monthlyEditedByUser ? st.editMonthlyArray : st.initialMonthlyArray;
+    return src[st.currentCalMonth - 1] || st.editUniformMonthlyKm;
+  }
   if (st.currentCalMonth < 12) {
     const src = st.monthlyEditedByUser ? st.editMonthlyArray : st.initialMonthlyArray;
     return src[st.currentCalMonth] || st.editUniformMonthlyKm;
@@ -128,6 +134,7 @@ export function getPreviewNextMonthKm(st: GoalSheetState): number {
 export function buildGoalSavePayload(st: GoalSheetState) {
   const wk = Number(st.editWeeklyKm) || 50;
   const shouldSyncMonthly = willStateRewriteFutureMonths(st);
+  const lockBeforeMonth = st.isDefaultGoal ? st.currentCalMonth - 1 : st.currentCalMonth;
 
   let targetDist: number;
   let finalMonthly: number[];
@@ -135,16 +142,21 @@ export function buildGoalSavePayload(st: GoalSheetState) {
   if (shouldSyncMonthly) {
     targetDist = calcSyncedMonthlyKm(wk);
     finalMonthly = st.initialMonthlyArray.map((orig, idx) =>
-      idx + 1 <= st.currentCalMonth ? Number(orig) || 0 : targetDist
+      idx + 1 <= lockBeforeMonth ? Number(orig) || 0 : targetDist
     );
   } else if (st.monthlyEditedByUser) {
     targetDist = Number(st.editUniformMonthlyKm) || 200;
     finalMonthly = st.editMonthlyArray.map((orig, idx) =>
-      idx + 1 <= st.currentCalMonth
+      idx + 1 <= lockBeforeMonth
         ? Number(st.initialMonthlyArray[idx]) || 0
         : st.customMonthMode
         ? Number(orig) || 0
         : targetDist
+    );
+  } else if (st.isDefaultGoal) {
+    targetDist = st.autoSyncMonthly ? calcSyncedMonthlyKm(wk) : (Number(st.initialTargetDistance) || 200);
+    finalMonthly = st.initialMonthlyArray.map((orig, idx) =>
+      idx + 1 <= lockBeforeMonth ? Number(orig) || 0 : targetDist
     );
   } else {
     // Neither synced nor manually edited on Month tab -> preserve original monthly targets verbatim!
@@ -157,10 +169,11 @@ export function buildGoalSavePayload(st: GoalSheetState) {
     payload: {
       weekly_target: wk,
       next_weekly_target: wk,
+      ...(st.isDefaultGoal ? { current_week_target: wk } : {}),
       target_distance: targetDist,
       monthly_targets: finalMonthly,
       period_type: "monthly",
-      target_period: "next_week",
+      target_period: st.isDefaultGoal ? "this_week" : "next_week",
       enforce_started_lock: true,
     },
   };
