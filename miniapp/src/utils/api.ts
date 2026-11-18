@@ -36,6 +36,12 @@ export interface UserProfile {
   hide_biometrics?: boolean;
   canova_critique_visibility?: string;
   canova_critique_club_ids?: string[];
+  city?: string;
+  running_landmarks?: string[];
+  usual_time_slot?: string;
+  looking_for_buddy?: boolean;
+  allow_buddy_search_scope?: string;
+  allow_club_search_scope?: string;
 }
 
 export function getToken(): string {
@@ -93,14 +99,18 @@ export function getActiveClubId(): string {
  * Set the currently active running club ID to local storage.
  */
 export function setActiveClubId(clubId: string) {
+  const prevClubId = getActiveClubId();
   if (clubId) {
     uni.setStorageSync("rgm_active_club_id", clubId);
   } else {
     uni.removeStorageSync("rgm_active_club_id");
   }
-  try {
-    uni.setStorageSync("rgm_dashboard_dirty", 1);
-  } catch (_) {}
+  if (String(prevClubId || "") !== String(clubId || "")) {
+    try {
+      uni.setStorageSync("rgm_dashboard_dirty", 1);
+      uni.setStorageSync("rgm_last_mutation_ts", Date.now());
+    } catch (_) {}
+  }
 }
 
 /**
@@ -205,6 +215,7 @@ export async function request<T = any>(
           if (upperMethod !== "GET" && !url.includes("/notifications/read")) {
             try {
               uni.setStorageSync("rgm_dashboard_dirty", 1);
+              uni.setStorageSync("rgm_last_mutation_ts", Date.now());
             } catch (_) {}
           }
           resolve(res.data as T);
@@ -1458,10 +1469,18 @@ export interface OrgReminderInfo {
   cancelText?: string;
 }
 
-export async function fetchOrgReminderInfo(uid: string): Promise<OrgReminderInfo> {
+export async function fetchOrgReminderInfo(
+  uid: string,
+  preloadedOrgs?: any[]
+): Promise<OrgReminderInfo> {
   try {
-    const res = await request(`/api/org/my-orgs/${encodeURIComponent(uid)}`);
-    const orgs: any[] = res?.organizations || [];
+    let orgs: any[] = [];
+    if (Array.isArray(preloadedOrgs)) {
+      orgs = preloadedOrgs;
+    } else {
+      const res = await request(`/api/org/my-orgs/${encodeURIComponent(uid)}`);
+      orgs = res?.organizations || [];
+    }
 
     // 1. Check suspended/expired
     const suspendedMemberships = orgs.filter(
@@ -1551,7 +1570,7 @@ export function navigateToCreateClub() {
 
 export async function checkAndPromptOrgReminder(
   uid: string,
-  options: { force?: boolean; preview?: boolean } = {}
+  options: { force?: boolean; preview?: boolean; respectDailyThrottle?: boolean; preloadedOrgs?: any[] } = {}
 ): Promise<OrgReminderInfo> {
   let reminder: OrgReminderInfo;
   if (options.preview) {
@@ -1568,7 +1587,7 @@ export async function checkAndPromptOrgReminder(
       cancelText: "稍后再说",
     };
   } else {
-    reminder = await fetchOrgReminderInfo(uid);
+    reminder = await fetchOrgReminderInfo(uid, options.preloadedOrgs);
   }
 
   if (!reminder.hasReminder) {
@@ -1579,7 +1598,22 @@ export async function checkAndPromptOrgReminder(
     return reminder;
   }
 
+  const todayKey = new Date().toISOString().slice(0, 10);
+  if (options.respectDailyThrottle && !options.force && !options.preview && reminder.type !== "suspended") {
+    try {
+      const lastDay = uni.getStorageSync(`rgm_org_reminder_day_${uid}`);
+      if (lastDay === todayKey) {
+        return reminder;
+      }
+    } catch (_) {}
+  }
+
   _hasPromptedOrgReminderInSession = true;
+  if (options.respectDailyThrottle && reminder.type !== "suspended") {
+    try {
+      uni.setStorageSync(`rgm_org_reminder_day_${uid}`, todayKey);
+    } catch (_) {}
+  }
 
   uni.showModal({
     title: reminder.title,
@@ -1659,6 +1693,129 @@ export function formatBeijingTime(isoStr?: string | null, withYear = false): str
     return withYear ? clean.slice(0, 16) : clean.slice(5, 16);
   }
   return clean;
+}
+
+export function resolveAssetUrl(url?: string | null): string {
+  const s = String(url || "").trim();
+  if (!s) return "";
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  if (s.startsWith("/")) return `${API_BASE_URL}${s}`;
+  return s;
+}
+
+export async function chooseAndUploadShowcasePhotos(opts: {
+  ownerType: "club" | "coach";
+  ownerId: string;
+  uploaderUid: string;
+  category?: string;
+  caption?: string;
+  maxCount?: number;
+  setFirstAsCover?: boolean;
+}): Promise<any[]> {
+  const count = Math.max(1, Math.min(9, opts.maxCount || 9));
+  const pickedPaths: string[] = await new Promise((resolve, reject) => {
+    const pickFallback = () => {
+      uni.chooseImage({
+        count,
+        sizeType: ["compressed"],
+        sourceType: ["album", "camera"],
+        success: (res: any) => resolve(Array.isArray(res?.tempFilePaths) ? res.tempFilePaths : []),
+        fail: (err: any) => reject(new Error(err?.errMsg || "已取消选图")),
+      });
+    };
+    // #ifdef MP-WEIXIN
+    if (typeof uni.chooseMedia === "function") {
+      uni.chooseMedia({
+        count,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        sizeType: ["compressed"],
+        success: (res: any) => {
+          const list = Array.isArray(res?.tempFiles)
+            ? res.tempFiles.map((f: any) => f.tempFilePath).filter(Boolean)
+            : [];
+          resolve(list);
+        },
+        fail: (err: any) => {
+          const msg = String(err?.errMsg || "");
+          if (msg.includes("cancel")) {
+            resolve([]);
+          } else {
+            pickFallback();
+          }
+        },
+      });
+      return;
+    }
+    // #endif
+    pickFallback();
+  });
+
+  if (!pickedPaths.length) return [];
+
+  const uploaded: any[] = [];
+  for (let i = 0; i < pickedPaths.length; i++) {
+    const rawPath = pickedPaths[i];
+    const readyPath = await compressImageIfPossible(rawPath, 78, 1440);
+    const dotIdx = readyPath.lastIndexOf(".");
+    const rawExt = dotIdx !== -1 ? readyPath.substring(dotIdx).toLowerCase() : ".jpg";
+    const ext = [".jpg", ".jpeg", ".png", ".webp"].includes(rawExt) ? rawExt : ".jpg";
+    const isCover = Boolean(opts.setFirstAsCover && i === 0);
+
+    try {
+      const b64: string = await new Promise((resB, rejB) => {
+        const fs = typeof uni.getFileSystemManager === "function" ? uni.getFileSystemManager() : null;
+        if (!fs) return rejB(new Error("no_fs"));
+        fs.readFile({
+          filePath: readyPath,
+          encoding: "base64",
+          success: (r: any) => (r?.data ? resB(r.data) : rejB(new Error("empty_b64"))),
+          fail: (e: any) => rejB(e),
+        });
+      });
+      const res: any = await request("/api/community/showcase/photos/upload-base64", "POST", {
+        uploader_uid: opts.uploaderUid,
+        owner_type: opts.ownerType,
+        owner_id: opts.ownerId,
+        category: opts.category || "group_run",
+        caption: opts.caption || "",
+        is_cover: isCover,
+        image_base64: b64,
+        ext,
+      });
+      if (res?.photo) uploaded.push(res.photo);
+    } catch (_b64Err) {
+      const token = getToken();
+      const resPhoto: any = await new Promise((resUp, rejUp) => {
+        uni.uploadFile({
+          url: `${API_BASE_URL}/api/community/showcase/photos/upload`,
+          filePath: readyPath,
+          name: "file",
+          formData: {
+            owner_type: opts.ownerType,
+            owner_id: opts.ownerId,
+            uploader_uid: opts.uploaderUid,
+            category: opts.category || "group_run",
+            caption: opts.caption || "",
+            is_cover: isCover ? "true" : "false",
+          },
+          header: token ? { Authorization: `Bearer ${token}` } : {},
+          success: (uRes: any) => {
+            try {
+              const d = typeof uRes.data === "string" ? JSON.parse(uRes.data) : uRes.data;
+              if (d?.photo) resUp(d.photo);
+              else rejUp(new Error(d?.detail || "上传失败"));
+            } catch {
+              rejUp(new Error("解析失败"));
+            }
+          },
+          fail: (err: any) => rejUp(new Error(err?.errMsg || "上传失败")),
+        });
+      });
+      if (resPhoto) uploaded.push(resPhoto);
+    }
+  }
+  return uploaded;
 }
 
 

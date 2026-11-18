@@ -50,6 +50,12 @@ function resolvePageMeta(pathname: string | null, searchStr: string): { title: s
   if (pathname === "/dashboard/analysis") {
     return { title: "运动生理与轨迹复盘", subtitle: "有效 VDOT · Taper 减量推演 · 官兔潜能评估 · 4K 战报" };
   }
+  if (pathname === "/dashboard/discover") {
+    return { title: "六维同频寻搭子", subtitle: "5岁年龄段与地标脱敏筛选 · 互关周跑量 PK · 自主检索隐私" };
+  }
+  if (pathname === "/dashboard/plaza") {
+    return { title: "选团与名帅风采展厅", subtitle: "手表防伪核验战绩 · 教练认证履历 · 合练赛场实拍墙" };
+  }
   if (pathname === "/dashboard/team-coach" || (pathname === "/dashboard/team" && tab === "coach")) {
     if (mode === "batch-critique") {
       return { title: "教练 5 秒连续批阅三栏舱", subtitle: "异常置顶队列 · AI 遥测对照 · 快捷词条连续发送" };
@@ -506,6 +512,21 @@ export default function Navbar() {
         href: "/dashboard/team",
         icon: Users,
         isActive: pathname === "/dashboard/team" && curOrgAct !== "audit" && curTab !== "president",
+      },
+      {
+        key: "discover",
+        label: "同频寻搭子",
+        href: "/dashboard/discover",
+        icon: Target,
+        badge: "6维",
+        isActive: pathname === "/dashboard/discover",
+      },
+      {
+        key: "plaza",
+        label: "选团与名帅",
+        href: "/dashboard/plaza",
+        icon: Sparkles,
+        isActive: pathname === "/dashboard/plaza",
       },
       {
         key: "profile",

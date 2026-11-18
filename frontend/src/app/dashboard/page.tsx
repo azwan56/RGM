@@ -12,6 +12,7 @@ import RouteMapPreview from "@/components/RouteMapPreview";
 import OrgRequirementModal, { OrgReminderInfo } from "@/components/OrgRequirementModal";
 import PersonalShareCardModal from "@/components/PersonalShareCardModal";
 import PersonalReportModal from "@/components/PersonalReportModal";
+import ClubPulsePanel from "@/components/community/ClubPulsePanel";
 import {
   Zap,
   Activity,
@@ -891,6 +892,16 @@ export default function DashboardPage() {
               </div>
             );
           })()}
+
+        {/* ── W11.1–W11.2 首页跑团置顶广播、跑搭子同频环 & 社交脉搏 ── */}
+        {user?.id && (
+          <ClubPulsePanel
+            uid={user.id}
+            clubId={activeClub?.id}
+            isLeader={Boolean(activeClub?.role === "owner" || activeClub?.role === "coach" || user?.is_admin)}
+            onClubJoined={() => loadDashboardData(user.id)}
+          />
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════════════
             第一行核心区：左栏 (7 cols)「卡片 A：今日核心处方 Hero Card + 卡片 B：本周 7 日微周期胶囊阵列」

@@ -35,13 +35,15 @@ router = APIRouter()
 def get_miniapp_dashboard_data(
     uid: str,
     viewer_uid: Optional[str] = Query(None, description="Viewer user ID"),
+    include_home_extras: bool = Query(False, description="Bundle unread notifications, onboarding, orgs, and next group run"),
+    lite_activities: bool = Query(False, description="Limit returned activity rows to top 3 while keeping full month summary"),
     request: Request = None,
 ) -> Dict[str, Any]:
     """
     Bundles all data needed for Home Screen & Web Dashboard:
     1. Monthly & Weekly Goal Progress (Distance, Target, %, Daily needed)
     2. 6-Month Monthly Running Distance Trend & Recent 3-month breakdown
-    3. 2026 Yearly Totals, Projected KM, Run Counts, Circular Gauge Stats
+    3. Yearly Totals, Projected KM, Run Counts, Circular Gauge Stats
     4. Garmin Connection Status & Last Sync Time
     5. Recent Running Activities
     6. Today's Health Metrics (Sleep Score & Hours, RHR, Body Battery, HRV)
@@ -71,40 +73,88 @@ def get_miniapp_dashboard_data(
             and not LocalStore.can_view_confidential_runner_data(resolved_viewer, eff_uid)
         )
 
+        user_orgs: Optional[List[Dict[str, Any]]] = None
+        preloaded_org_status: Optional[Dict[str, Dict[str, Any]]] = None
+        if include_home_extras:
+            user_orgs = LocalStore.get_user_organizations(eff_uid)
+            preloaded_org_status = {
+                o["id"]: {
+                    "is_member": True,
+                    "status": o.get("status"),
+                    "role": o.get("role"),
+                    "is_valid": o.get("is_valid", True),
+                    "days_remaining": o.get("days_remaining"),
+                    "deadline_at": o.get("deadline_at"),
+                    "missing_fields": o.get("missing_fields", []),
+                }
+                for o in user_orgs
+                if o.get("id") and o.get("is_member") and o.get("status") != "none"
+            }
+
+        user_clubs = LocalStore.get_user_clubs(eff_uid, preloaded_org_status=preloaded_org_status)
+        clubs_by_uid = {eff_uid: user_clubs}
+
         # 2. Compute Monthly Goal Progress
         today = LocalStore.get_beijing_today()
-        month_start = date(today.year, today.month, 1).isoformat()
         _, total_days = calendar.monthrange(today.year, today.month)
         days_left = max(1, total_days - today.day + 1)
 
-        goal = LocalStore.get_goal(eff_uid)
+        unread_notif_holder: Optional[List[int]] = [] if include_home_extras else None
+        goal = LocalStore.get_goal(eff_uid, unread_notif_out=unread_notif_holder)
         monthly_targets = goal.get("monthly_targets")
         if monthly_targets and isinstance(monthly_targets, list) and len(monthly_targets) >= today.month:
             target_km = float(monthly_targets[today.month - 1] or goal.get("target_distance") or 200.0)
         else:
             target_km = float(goal.get("target_distance") or 200.0)
 
-        current_m = LocalStore.get_month_distance_meters(eff_uid, month_start)
+        # 2.1 Weekly Progress (respect locked current_week_target when next week was modified)
+        weekly_progress = LocalStore.get_weekly_stats(
+            eff_uid,
+            target_km=goal.get("current_week_target") or goal.get("weekly_target"),
+            goal_info=goal,
+        )
+
+        # 3. Monthly Trend (6 months), Current Year Stats & Current Month Summary (1 connection, 1 SQL query)
+        period_bundle = LocalStore.get_dashboard_period_stats_bundle(
+            eff_uid, year=today.year, num_months=6, goal_info=goal
+        )
+        monthly_trend = period_bundle["monthly_trend"]
+        yearly_stats = period_bundle["yearly_stats"]
+
+        # 4. Current Month Activities (lite mode fetches top 3 + aggregate summary)
+        month_summary: Optional[Dict[str, Any]] = None
+        if lite_activities:
+            month_summary = period_bundle["month_summary"]
+            month_acts = LocalStore.get_month_activities(
+                eff_uid,
+                today.year,
+                today.month,
+                limit=3,
+                include_route_preview=False,
+                profile=profile,
+            )
+            current_m = float(month_summary.get("total_meters") or 0.0)
+        else:
+            month_acts = LocalStore.get_month_activities(
+                eff_uid,
+                today.year,
+                today.month,
+                include_route_preview=False,
+                profile=profile,
+            )
+            current_m = sum(
+                float(a.get("distance_meters") or 0.0)
+                for a in month_acts
+                if (a.get("exclude_mode") or "normal") != "excluded"
+            )
+
         current_km = round(current_m / 1000.0, 1)
         progress_pct = round((current_km / target_km) * 100, 1) if target_km > 0 else 0.0
         remaining_km = max(0.0, round(target_km - current_km, 1))
         daily_req = round(remaining_km / days_left, 1)
 
-        # 2.1 Weekly Progress (respect locked current_week_target when next week was modified)
-        weekly_progress = LocalStore.get_weekly_stats(
-            eff_uid,
-            target_km=goal.get("current_week_target") or goal.get("weekly_target"),
-        )
-
-        # 3. Monthly Trend (6 months) & Yearly Stats (2026)
-        monthly_trend = LocalStore.get_monthly_trend(eff_uid, num_months=6)
-        yearly_stats = LocalStore.get_yearly_stats(eff_uid, year=2026)
-
-        # 4. Current Month Activities (All activities for current month)
-        today = LocalStore.get_beijing_today()
-        month_acts = LocalStore.get_month_activities(eff_uid, today.year, today.month)
         try:
-            enrich_activities_with_captain_cheer(month_acts)
+            enrich_activities_with_captain_cheer(month_acts, preloaded_clubs_by_uid=clubs_by_uid)
         except Exception as cc_ex:
             logger.warning(f"[miniapp] Dashboard month captain cheer skipped: {cc_ex}")
         formatted_month_acts = []
@@ -149,13 +199,36 @@ def get_miniapp_dashboard_data(
                 "map_image_url": a.get("map_image_url")
             })
 
-        # Recent activities (for fitness form and fallback)
-        local_acts = LocalStore.get_recent_activities(eff_uid, limit=100)
+        # Recent activities (scalar-only for fitness form & fallback)
+        local_acts = LocalStore.get_recent_activities(
+            eff_uid,
+            limit=100,
+            include_splits=False,
+            include_critiques=False,
+            include_route_preview=False,
+            profile=profile,
+        )
         fallback_recent = []
         if not formatted_month_acts:
-            fallback_src = [a for a in local_acts[:10] if (a.get("exclude_mode") or "normal") != "excluded"]
+            fb_limit = 3 if lite_activities else 10
+            fallback_src = [a for a in local_acts if (a.get("exclude_mode") or "normal") != "excluded"][:fb_limit]
+            pending_fb_critiques = []
+            for fb_act in fallback_src:
+                LocalStore._heal_stale_activity_critique(
+                    fb_act, profile, pending_updates=pending_fb_critiques
+                )
+            if pending_fb_critiques:
+                try:
+                    with sqlite3.connect(DB_PATH) as c_upd:
+                        c_upd.executemany(
+                            "UPDATE activities SET ai_journal = ? WHERE id = ?",
+                            pending_fb_critiques,
+                        )
+                        c_upd.commit()
+                except Exception as fb_ex:
+                    logger.warning(f"[miniapp] Fallback critique persist skipped: {fb_ex}")
             try:
-                enrich_activities_with_captain_cheer(fallback_src)
+                enrich_activities_with_captain_cheer(fallback_src, preloaded_clubs_by_uid=clubs_by_uid)
             except Exception as cc_ex:
                 logger.warning(f"[miniapp] Dashboard fallback captain cheer skipped: {cc_ex}")
             for a in fallback_src:
@@ -201,7 +274,7 @@ def get_miniapp_dashboard_data(
 
         recent_activities = formatted_month_acts if formatted_month_acts else fallback_recent
 
-        # 5. Today's Health Snapshot (4-grid card data)
+        # 5. Today's Health Snapshot (4-grid card data + 30d bundle in 1 connection)
         if profile.get("garmin_connected"):
             device_brand = "garmin"
         elif profile.get("coros_connected"):
@@ -215,9 +288,15 @@ def get_miniapp_dashboard_data(
         else:
             device_brand = "none"
 
-        health_data = LocalStore.get_latest_health(eff_uid)
+        health_bundle = LocalStore.get_health_bundle_30d(eff_uid)
+        health_data = health_bundle.get("latest_health")
         recovery_avail = LocalStore.assess_recovery_data_availability(
-            eff_uid, health_row=health_data, profile=profile, recent_acts=local_acts
+            eff_uid,
+            health_row=health_data,
+            profile=profile,
+            recent_acts=local_acts,
+            health_rows_14d=health_bundle.get("rows_14d"),
+            has_older_health_history=health_bundle.get("has_older_history"),
         )
         if health_data:
             is_rec_ok = bool(recovery_avail.get("recovery_data_available"))
@@ -355,7 +434,10 @@ def get_miniapp_dashboard_data(
                 or (profile.get("vo2max") is not None and float(profile.get("vo2max") or 0) > 0)
             )
             v_meta_pb = LocalStore.resolve_verified_runner_profile_and_pbs(
-                eff_uid, profile=profile, recent_acts=local_acts, query_activities=True
+                eff_uid,
+                profile=profile,
+                recent_acts=local_acts,
+                query_activities=(len(local_acts) >= 100),
             )
             has_verified_pb = bool(
                 v_meta_pb.get("verified_mp_sec")
@@ -373,9 +455,7 @@ def get_miniapp_dashboard_data(
                     "peak_vdot": v_meta_pb.get("peak_vdot"),
                     "peak_endurance_vdot": v_meta_pb.get("peak_endurance_vdot"),
                 }
-                trend_30d = LocalStore.get_health_trend_30d(eff_uid)
-                if not trend_30d and health_data:
-                    trend_30d = [health_data]
+                trend_30d = health_bundle.get("trend_30d") or ([health_data] if health_data else [])
                 canova_mat = compute_canova_athlete_matrix(
                     profile=clean_prof,
                     activities=local_acts,
@@ -395,7 +475,28 @@ def get_miniapp_dashboard_data(
         fitness_form["is_recovery_phase"] = is_recovery_phase
         fitness_form["peak_vdot"] = peak_vdot_val
 
-        return {
+        extra_bundle: Dict[str, Any] = {}
+        if include_home_extras:
+            unread_fallback: Optional[List[int]] = None
+            if not unread_notif_holder:
+                unread_notif_holder = []
+                unread_fallback = unread_notif_holder
+            onboarding_status = LocalStore.get_user_onboarding_status(
+                eff_uid,
+                preloaded_profile=profile,
+                preloaded_clubs=user_clubs,
+                preloaded_goal=goal,
+                preloaded_has_activities=True if local_acts else None,
+                unread_notif_out=unread_fallback,
+            )
+            extra_bundle = {
+                "unread_notif_count": unread_notif_holder[0] if unread_notif_holder else 0,
+                "onboarding_status": onboarding_status,
+                "organizations": user_orgs or [],
+                "next_group_run": LocalStore.get_user_next_group_run(eff_uid, preloaded_clubs=user_clubs),
+            }
+
+        payload = {
             "user": {
                 "id": eff_uid,
                 "display_name": profile.get("display_name") or "跑者",
@@ -431,7 +532,19 @@ def get_miniapp_dashboard_data(
                 "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
                     profile.get("canova_critique_club_ids")
                 ),
-                "is_coach_or_owner": LocalStore.is_user_coach_or_owner(eff_uid),
+                "city": profile.get("city") or "",
+                "running_landmarks": LocalStore.parse_running_landmarks(profile.get("running_landmarks")),
+                "usual_time_slot": profile.get("usual_time_slot") or "",
+                "looking_for_buddy": True if profile.get("looking_for_buddy") is None else bool(profile.get("looking_for_buddy")),
+                "allow_buddy_search_scope": LocalStore.normalize_buddy_search_scope(
+                    profile.get("allow_buddy_search_scope")
+                ),
+                "allow_club_search_scope": LocalStore.normalize_club_search_scope(
+                    profile.get("allow_club_search_scope")
+                ),
+                "is_coach_or_owner": LocalStore.is_user_coach_or_owner(
+                    eff_uid, preloaded_clubs=user_clubs, preloaded_orgs=user_orgs
+                ),
             },
             "vdot": current_vdot,
             "fitness_form": fitness_form,
@@ -453,19 +566,22 @@ def get_miniapp_dashboard_data(
                 "year": today.year,
                 "month": today.month,
                 "month_label": f"{today.year}年{today.month}月",
-                "total_count": len(formatted_month_acts),
-                "total_km": round(sum(a["distance_km"] for a in formatted_month_acts), 1),
+                "total_count": int(month_summary["total_count"]) if month_summary is not None else len(formatted_month_acts),
+                "total_km": float(month_summary["total_km"]) if month_summary is not None else round(sum(a["distance_km"] for a in formatted_month_acts), 1),
             },
             "recent_activities": recent_activities,
             "today_health": today_health,
             "recovery_data_availability": recovery_avail,
-            "club_feed_summary": LocalStore.get_user_club_feed_summary(eff_uid),
+            "club_feed_summary": LocalStore.get_user_club_feed_summary(eff_uid, preloaded_clubs=user_clubs),
             "ai_coach_tip": (
                 recovery_avail.get("user_warning")
                 if recovery_avail.get("night_wear_missing")
                 else "保持耐心，专注有氧节奏构建，专项能力水到渠成。"
             )
         }
+        if extra_bundle:
+            payload.update(extra_bundle)
+        return payload
     except Exception as e:
         logger.error(f"[miniapp] Error compiling dashboard: {e}")
         today = LocalStore.get_beijing_today()

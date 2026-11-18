@@ -731,24 +731,31 @@ class GarminAdapter:
         except Exception as e:
             logger.warning(f"[garmin] fetch personal-information error: {e}")
 
-        # 2. Fallback to user-settings endpoint
-        try:
-            user_settings = self.client.get_user_profile() # /userprofile-service/userprofile/user-settings
-            if isinstance(user_settings, dict):
-                user_data = user_settings.get("userData") or {}
-                if user_data.get("birthDate") and not info["date_of_birth"]:
-                    info["date_of_birth"] = str(user_data["birthDate"])[:10]
-                if user_data.get("gender") and not info["gender"]:
-                    info["gender"] = str(user_data["gender"]).lower()
-                if user_data.get("height") and not info["height_cm"]:
-                    info["height_cm"] = round(float(user_data["height"]), 1)
-                if user_data.get("weight") and not info["weight_kg"]:
-                    w_val = float(user_data["weight"])
-                    info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
-                if user_data.get("vo2MaxRunning") and not info["vo2max"]:
-                    info["vo2max"] = round(float(user_data["vo2MaxRunning"]), 1)
-        except Exception as e:
-            logger.warning(f"[garmin] fetch user-settings error: {e}")
+        # 2. Fallback to user-settings endpoint only if any key biometric/profile field is missing
+        if not (
+            info["date_of_birth"]
+            and info["gender"]
+            and info["height_cm"]
+            and info["weight_kg"]
+            and info["vo2max"]
+        ):
+            try:
+                user_settings = self.client.get_user_profile() # /userprofile-service/userprofile/user-settings
+                if isinstance(user_settings, dict):
+                    user_data = user_settings.get("userData") or {}
+                    if user_data.get("birthDate") and not info["date_of_birth"]:
+                        info["date_of_birth"] = str(user_data["birthDate"])[:10]
+                    if user_data.get("gender") and not info["gender"]:
+                        info["gender"] = str(user_data["gender"]).lower()
+                    if user_data.get("height") and not info["height_cm"]:
+                        info["height_cm"] = round(float(user_data["height"]), 1)
+                    if user_data.get("weight") and not info["weight_kg"]:
+                        w_val = float(user_data["weight"])
+                        info["weight_kg"] = round(w_val / 1000.0, 1) if w_val > 500 else round(w_val, 1)
+                    if user_data.get("vo2MaxRunning") and not info["vo2max"]:
+                        info["vo2max"] = round(float(user_data["vo2MaxRunning"]), 1)
+            except Exception as e:
+                logger.warning(f"[garmin] fetch user-settings error: {e}")
 
         logger.info(f"[garmin] Resolved profile metrics: DOB={info['date_of_birth']}, gender={info['gender']}, "
                     f"height={info['height_cm']}cm, weight={info['weight_kg']}kg, VO2Max={info['vo2max']}")

@@ -1825,10 +1825,26 @@ function scrollToFeedIfNeeded() {
   activeRankTab.value = "feed";
 }
 
+let lastRankLoadedAt = 0;
+let lastRankClubId = "";
+
 onShow(() => {
   applySystemTheme(currentTheme.value);
+  const storedNow = getStoredUser();
+  const uidChanged = Boolean(storedNow?.id && storedNow.id !== user.value?.id);
+  let activeClubId = "";
+  let mutTs = 0;
+  let isDirty = false;
+  try {
+    activeClubId = String(uni.getStorageSync("rgm_active_club_id") || "");
+    mutTs = Number(uni.getStorageSync("rgm_last_mutation_ts") || 0);
+    isDirty = Boolean(uni.getStorageSync("rgm_dashboard_dirty"));
+  } catch (_) {}
+
   // 首次进入显示骨架屏，首个请求结束（或 8 秒超时）后关闭
   if (firstLoadPending.value) {
+    lastRankLoadedAt = Date.now();
+    lastRankClubId = activeClubId;
     const timer = setTimeout(() => (firstLoadPending.value = false), 8000);
     Promise.resolve(loadRankData())
       .catch(() => {})
@@ -1839,11 +1855,27 @@ onShow(() => {
       });
   } else {
     scrollToFeedIfNeeded();
+    if (
+      lastRankLoadedAt > 0 &&
+      !uidChanged &&
+      activeClubId === lastRankClubId &&
+      !isDirty &&
+      mutTs <= lastRankLoadedAt &&
+      Date.now() - lastRankLoadedAt < 30000
+    ) {
+      return;
+    }
+    lastRankLoadedAt = Date.now();
+    lastRankClubId = activeClubId;
     loadRankData();
   }
 });
 
 onPullDownRefresh(async () => {
+  lastRankLoadedAt = Date.now();
+  try {
+    lastRankClubId = String(uni.getStorageSync("rgm_active_club_id") || "");
+  } catch (_) {}
   await loadRankData();
   uni.stopPullDownRefresh();
 });

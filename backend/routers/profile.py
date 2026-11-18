@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Header, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, Header, UploadFile, File, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
@@ -10,7 +10,7 @@ from db import supabase_admin
 from utils.local_store import LocalStore
 from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
-from utils.running_metrics import get_age_from_dob, estimate_vo2max
+from utils.running_metrics import get_age_from_dob, estimate_vo2max, compute_canova_athlete_matrix
 from utils.encryption import decrypt_string, compute_age_group
 from utils.security import validate_uploaded_image_bytes
 
@@ -53,6 +53,12 @@ class ProfileUpdateRequest(BaseModel):
     canova_critique_club_ids: Optional[List[str]] = None
     first_aid_cert_type: Optional[str] = None
     pacer_bio_tags: Optional[str] = None
+    city: Optional[str] = None
+    running_landmarks: Optional[List[str]] = None
+    usual_time_slot: Optional[str] = None
+    looking_for_buddy: Optional[bool] = None
+    allow_buddy_search_scope: Optional[str] = None
+    allow_club_search_scope: Optional[str] = None
 
 class EstimateVo2maxRequest(BaseModel):
     five_k_pb: Optional[Any] = None
@@ -122,8 +128,14 @@ def secs_to_time_str(s: Optional[int]) -> str:
     return f"{m}:{sec:02d}"
 
 @router.get("/{uid}")
-def get_user_profile(uid: str):
-    """Gets user profile, current year goal, and race plans."""
+def get_user_profile(
+    uid: str,
+    include_miniapp_bundle: bool = Query(
+        False,
+        description="Bundle orgs, onboarding_status, yearly_stats, vdot, and support_tickets for MiniApp Profile",
+    ),
+):
+    """Gets user profile, current year goal, and race plans (and optional MiniApp bundle)."""
     profile = LocalStore.get_profile(uid)
 
     if not profile:
@@ -170,7 +182,14 @@ def get_user_profile(uid: str):
     profile["age_group"] = compute_age_group(profile.get("date_of_birth"))
     dob_val = profile.get("date_of_birth") or ""
     profile["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
-    profile["is_coach_or_owner"] = LocalStore.is_user_coach_or_owner(uid)
+    owner_uid = profile.get("id") or uid
+    clubs = LocalStore.get_user_clubs(owner_uid) or []
+    organizations: Optional[List[Dict[str, Any]]] = None
+    if include_miniapp_bundle:
+        organizations = LocalStore.get_user_organizations(owner_uid)
+    profile["is_coach_or_owner"] = LocalStore.is_user_coach_or_owner(
+        owner_uid, preloaded_clubs=clubs, preloaded_orgs=organizations
+    )
     profile["hide_gps_route"] = bool(profile.get("hide_gps_route"))
     profile["hide_biometrics"] = bool(profile.get("hide_biometrics"))
     profile["canova_critique_visibility"] = LocalStore.normalize_canova_critique_visibility(
@@ -181,12 +200,114 @@ def get_user_profile(uid: str):
     )
     profile["first_aid_cert_type"] = profile.get("first_aid_cert_type") or ""
     profile["pacer_bio_tags"] = profile.get("pacer_bio_tags") or ""
-    owner_uid = profile.get("id") or uid
-    clubs = LocalStore.get_user_clubs(owner_uid) or []
-    goal = LocalStore.get_goal(uid)
-    races = LocalStore.get_race_plans(uid)
+    profile["city"] = profile.get("city") or ""
+    profile["running_landmarks"] = LocalStore.parse_running_landmarks(profile.get("running_landmarks"))
+    profile["usual_time_slot"] = profile.get("usual_time_slot") or ""
+    lfb_val = profile.get("looking_for_buddy")
+    profile["looking_for_buddy"] = True if lfb_val is None else bool(lfb_val)
+    profile["allow_buddy_search_scope"] = LocalStore.normalize_buddy_search_scope(
+        profile.get("allow_buddy_search_scope")
+    )
+    profile["allow_club_search_scope"] = LocalStore.normalize_club_search_scope(
+        profile.get("allow_club_search_scope")
+    )
+    goal = LocalStore.get_goal(owner_uid)
+    races = LocalStore.get_race_plans(owner_uid)
 
-    return {"profile": profile, "goal": goal, "races": races, "clubs": clubs}
+    payload: Dict[str, Any] = {"profile": profile, "goal": goal, "races": races, "clubs": clubs}
+    if include_miniapp_bundle:
+        today_bj = LocalStore.get_beijing_today()
+        yearly_stats = LocalStore.get_yearly_stats(owner_uid, year=today_bj.year, goal_info=goal)
+        support_tickets = LocalStore.get_user_support_tickets(owner_uid)
+
+        local_acts = LocalStore.get_recent_activities(
+            owner_uid,
+            limit=100,
+            include_splits=False,
+            include_critiques=False,
+            include_route_preview=False,
+            profile=profile,
+        )
+        vdot_val: Optional[float] = None
+        try:
+            health_bundle = LocalStore.get_health_bundle_30d(owner_uid)
+            health_data = health_bundle.get("latest_health")
+            has_watch_vo2 = bool(
+                (health_data and health_data.get("vo2_max") and float(health_data.get("vo2_max") or 0) > 0)
+                or (profile.get("vo2max") is not None and float(profile.get("vo2max") or 0) > 0)
+            )
+            v_meta_pb = LocalStore.resolve_verified_runner_profile_and_pbs(
+                owner_uid,
+                profile=profile,
+                recent_acts=local_acts,
+                query_activities=(len(local_acts) >= 100),
+            )
+            has_verified_pb = bool(
+                v_meta_pb.get("verified_mp_sec")
+                or v_meta_pb.get("verified_hp_sec")
+                or v_meta_pb.get("verified_10k_sec")
+                or v_meta_pb.get("verified_5k_sec")
+            )
+            if local_acts or has_watch_vo2 or has_verified_pb:
+                ctl_val = 0.0
+                tsb_val = 0.0
+                if local_acts:
+                    try:
+                        from utils.metrics_domain import MetricsDomainService
+                        load_summary = MetricsDomainService.compute_load_and_form(
+                            activities=local_acts,
+                            profile=profile,
+                            window_days=30,
+                            warmup_days=180,
+                        )
+                        ctl_val = float(load_summary.get("current_ctl") or 0.0)
+                        tsb_val = float(load_summary.get("current_tsb") or 0.0)
+                    except Exception:
+                        pass
+                clean_prof = {
+                    **profile,
+                    "marathon_pb": v_meta_pb.get("verified_mp_sec"),
+                    "half_pb": v_meta_pb.get("verified_hp_sec"),
+                    "ten_k_pb": v_meta_pb.get("verified_10k_sec"),
+                    "five_k_pb": v_meta_pb.get("verified_5k_sec"),
+                    "peak_vdot": v_meta_pb.get("peak_vdot"),
+                    "peak_endurance_vdot": v_meta_pb.get("peak_endurance_vdot"),
+                }
+                trend_30d = health_bundle.get("trend_30d") or ([health_data] if health_data else [])
+                canova_mat = compute_canova_athlete_matrix(
+                    profile=clean_prof,
+                    activities=local_acts,
+                    current_ctl=ctl_val,
+                    current_tsb=tsb_val,
+                    health_trend=trend_30d,
+                )
+                eff_v = canova_mat.get("effective_vdot")
+                if eff_v and float(eff_v) > 0:
+                    vdot_val = round(float(eff_v), 1)
+        except Exception as ve:
+            logger.warning(f"[profile] Bundle VDOT calc skipped: {ve}")
+        if vdot_val is None and profile.get("vo2max") is not None:
+            try:
+                vdot_val = round(float(profile["vo2max"]), 1)
+            except Exception:
+                pass
+
+        onboarding_status = LocalStore.get_user_onboarding_status(
+            owner_uid,
+            preloaded_profile=profile,
+            preloaded_clubs=clubs,
+            preloaded_goal=goal,
+            preloaded_has_activities=True if local_acts else None,
+        )
+        payload.update({
+            "organizations": organizations or [],
+            "onboarding_status": onboarding_status,
+            "yearly_stats": yearly_stats,
+            "vdot": vdot_val,
+            "support_tickets": support_tickets,
+        })
+
+    return payload
 
 
 @router.put("/{uid}")

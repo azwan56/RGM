@@ -70,6 +70,33 @@
       <text class="h3-org-alert-cta">去填写 ›</text>
     </view>
 
+    <!-- ── M12 金色定向兼团特邀横幅（若有）── -->
+    <view
+      v-if="homeSocialPulse?.pending_targeted_invites?.length"
+      class="h3-bcast-capsule is-invite"
+      @click="goToInviteLanding(homeSocialPulse.pending_targeted_invites[0].invite_token)"
+    >
+      <text class="h3-bcast-txt">
+        ✨ {{ homeSocialPulse.pending_targeted_invites[0].club_name }} 诚邀免码兼团 ›
+      </text>
+    </view>
+
+    <!-- ── M11 置顶广播折叠胶囊（团长/教练置顶72h）── -->
+    <view v-if="homeSocialPulse?.pinned_broadcast" class="h3-bcast-capsule" @click="bcastExpanded = !bcastExpanded">
+      <view class="h3-bcast-top">
+        <text class="h3-bcast-badge">📢 置顶广播</text>
+        <text class="h3-bcast-title">{{ homeSocialPulse.pinned_broadcast.title }}</text>
+        <text
+          class="h3-bcast-ack"
+          :class="{ acked: homeSocialPulse.pinned_broadcast.viewer_acked }"
+          @click.stop="ackPinnedBroadcast(homeSocialPulse.pinned_broadcast.id)"
+        >
+          {{ homeSocialPulse.pinned_broadcast.viewer_acked ? '已收到' : '收到 ✓' }}
+        </text>
+      </view>
+      <text v-if="bcastExpanded" class="h3-bcast-body">{{ homeSocialPulse.pinned_broadcast.content }}</text>
+    </view>
+
     <!-- ── 首页四大核心图形模块容器（支持 E5 Flex order 自定义排序）── -->
     <view class="home-modules-container h3-modules">
       <!-- 模块 1 · 登机牌式约跑票根（有近期已报名约跑时置顶） -->
@@ -107,6 +134,54 @@
             <text class="h3-ticket-loc-txt">{{ myNextRun.location || '跑团集合点' }}</text>
           </view>
           <text class="h3-ticket-club">{{ myNextRun.club_name || '跑团约跑' }}</text>
+        </view>
+      </view>
+
+      <!-- 模块 1.5 · 跑搭子同频环 & 跑团社交脉搏 (M11.1) -->
+      <view id="rgm-mod-feed" class="rgm-card h3-pulse-card" :style="{ order: getModuleOrder('feed') }">
+        <view class="h3-pulse-head">
+          <view>
+            <text class="h3-pulse-title">⚡ 跑搭子与跑团脉搏</text>
+            <text class="h3-pulse-sub">{{ homeSocialPulse?.weekly_pk_summary?.summary_text || '关注同频跑友解锁周跑量 PK' }}</text>
+          </view>
+          <view class="h3-pulse-links">
+            <text class="h3-pulse-link" @click="goSubpage('/pages/discover/discover')">寻搭子</text>
+            <text class="h3-pulse-link is-alt" @click="goSubpage('/pages/showcase/showcase')">选团展厅</text>
+          </view>
+        </view>
+
+        <scroll-view v-if="homeSocialPulse?.buddy_live_rings?.length" scroll-x class="h3-rings-row">
+          <view
+            v-for="b in homeSocialPulse.buddy_live_rings.slice(0, 8)"
+            :key="b.user_id"
+            class="h3-ring-item"
+            @click="goSubpage('/pages/discover/discover')"
+          >
+            <view class="h3-ring-circle" :class="{ active: b.ran_today }">
+              <text class="h3-ring-init">{{ String(b.display_name || '跑').slice(0, 1) }}</text>
+            </view>
+            <text class="h3-ring-name">{{ b.display_name }}</text>
+            <text class="h3-ring-km">{{ b.week_km }}k</text>
+          </view>
+        </scroll-view>
+
+        <view
+          v-for="it in (homeSocialPulse?.pulse_items || []).slice(0, 2)"
+          :key="it.item_id"
+          class="h3-pulse-item"
+        >
+          <template v-if="it.kind === 'newcomer_icebreaker'">
+            <view class="h3-pi-row">
+              <text class="h3-pi-txt">👋 {{ it.display_name }}（{{ it.age_group }} · {{ it.vdot_band }}）</text>
+              <text class="h3-pi-btn" @click="quickCheer('newcomer', it.item_id, it.user_id, 'welcome_pat')">拍肩欢迎</text>
+            </view>
+          </template>
+          <template v-else-if="it.kind === 'activity_checkin' && it.activity">
+            <view class="h3-pi-row">
+              <text class="h3-pi-txt">🏃 {{ it.activity.display_name }} · {{ it.activity.distance_km }}km ({{ it.activity.avg_pace_str || '--' }})</text>
+              <text class="h3-pi-btn" @click="quickCheer('activity', it.activity.id, it.activity.user_id, 'steady_aerobic')">👏 有氧稳</text>
+            </view>
+          </template>
         </view>
       </view>
 
@@ -1687,10 +1762,20 @@ function writeCachedDashboardSnapshot(uid: string, data: any) {
             return rest;
           })
         : arr;
-    const slim = {
+    const slimMonth = slimActs(data.current_month_activities);
+    const sameRecentAsMonth =
+      Array.isArray(data.current_month_activities) &&
+      data.current_month_activities.length > 0 &&
+      Array.isArray(data.recent_activities) &&
+      data.recent_activities.length === data.current_month_activities.length &&
+      data.recent_activities[0]?.id === data.current_month_activities[0]?.id;
+    const slim: any = {
       ...data,
-      current_month_activities: slimActs(data.current_month_activities),
-      recent_activities: slimActs(data.recent_activities),
+      current_month_activities: slimMonth,
+      recent_activities: sameRecentAsMonth ? undefined : slimActs(data.recent_activities),
+      next_group_run: "next_group_run" in data ? data.next_group_run : myNextRun.value,
+      unread_notif_count:
+        typeof data.unread_notif_count === "number" ? data.unread_notif_count : unreadNotifCount.value,
     };
     uni.setStorageSync(`rgm_dashboard_cache_${uid}`, slim);
   } catch (_) {}
@@ -1698,6 +1783,14 @@ function writeCachedDashboardSnapshot(uid: string, data: any) {
 
 const initialStoredUser = getStoredUser();
 const initialCachedDashboard = readCachedDashboardSnapshot(initialStoredUser?.id);
+if (initialCachedDashboard) {
+  if ("next_group_run" in initialCachedDashboard) {
+    myNextRun.value = initialCachedDashboard.next_group_run || null;
+  }
+  if (typeof initialCachedDashboard.unread_notif_count === "number") {
+    unreadNotifCount.value = initialCachedDashboard.unread_notif_count;
+  }
+}
 if (initialStoredUser?.id) {
   try {
     const cachedOnboard = uni.getStorageSync(`rgm_onboard_status_${initialStoredUser.id}`);
@@ -1843,7 +1936,7 @@ function getModuleMeta(key: HomeModuleKey) {
 // ── E5 双切页弹窗状态：消息通知 & 首页排序 ──
 const e5ModalTab = ref<"notif" | "order">("notif");
 const homeOrderVisibleKeys = computed(() =>
-  homeModuleOrderDraft.value.filter((k) => ["nextrun", "today", "goal", "status", "recent"].includes(k))
+  homeModuleOrderDraft.value.filter((k) => ["nextrun", "feed", "today", "goal", "status", "recent"].includes(k))
 );
 
 function openLayoutOrderModal() {
@@ -2819,10 +2912,9 @@ async function loadDashboard() {
     return;
   }
   const uid = user.value.id;
-  loadMyNextRun(uid);
 
   try {
-    const data = await request(`/api/miniapp/dashboard/${uid}`);
+    const data = await request(`/api/miniapp/dashboard/${uid}?include_home_extras=1&lite_activities=1`);
     if (data && data.progress) {
       dashboardData.value = data;
       lastDashboardFetchAt = Date.now();
@@ -2852,20 +2944,45 @@ async function loadDashboard() {
       nextTick(() => {
         scheduleFitnessChart(120);
       });
-      loadNotifications();
-      request(`/api/profile/${uid}/onboarding-status`).then((st: any) => {
-        if (st) {
-          onboardStatus.value = st;
-          // 后端字段为 is_completed（旧代码读 is_fully_completed 恒为 undefined，导致横幅对所有人常驻）
-          showOnboardReminder.value = !(st.is_completed ?? st.is_fully_completed);
-          try {
-            uni.setStorageSync(`rgm_onboard_status_${uid}`, st);
-          } catch (_) {}
-        }
-      }).catch((e: any) => {
-        console.warn("Onboarding status check:", e);
-      });
-      checkAndPromptOrgReminder(uid).then((rem) => {
+
+      if ("next_group_run" in data) {
+        myNextRun.value = data.next_group_run || null;
+      } else {
+        loadMyNextRun(uid);
+      }
+      loadHomeSocialPulse(uid);
+
+      if (typeof data.unread_notif_count === "number") {
+        unreadNotifCount.value = data.unread_notif_count;
+      } else {
+        loadNotifications();
+      }
+
+      if (data.onboarding_status) {
+        const st = data.onboarding_status;
+        onboardStatus.value = st;
+        showOnboardReminder.value = !(st.is_completed ?? st.is_fully_completed);
+        try {
+          uni.setStorageSync(`rgm_onboard_status_${uid}`, st);
+        } catch (_) {}
+      } else {
+        request(`/api/profile/${uid}/onboarding-status`).then((st: any) => {
+          if (st) {
+            onboardStatus.value = st;
+            showOnboardReminder.value = !(st.is_completed ?? st.is_fully_completed);
+            try {
+              uni.setStorageSync(`rgm_onboard_status_${uid}`, st);
+            } catch (_) {}
+          }
+        }).catch((e: any) => {
+          console.warn("Onboarding status check:", e);
+        });
+      }
+
+      checkAndPromptOrgReminder(uid, {
+        respectDailyThrottle: true,
+        preloadedOrgs: Array.isArray(data.organizations) ? data.organizations : undefined,
+      }).then((rem) => {
         if (rem && rem.hasReminder) {
           pendingOrgReminder.value = rem;
         } else {
@@ -3029,8 +3146,11 @@ async function executeCloudSync(
     if (trigRes?.async_mode) {
       uni.showToast({ title: `正在后台同步${syncDeviceName.value}...`, icon: "none", duration: 2200 });
       const deadline = Date.now() + 120000;
+      const pollDelays = [600, 1000, 1500];
+      let pollIdx = 0;
       while (!homeSyncUnmounted && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 2000));
+        const waitMs = pollIdx < pollDelays.length ? pollDelays[pollIdx++] : 2000;
+        await new Promise((r) => setTimeout(r, waitMs));
         if (homeSyncUnmounted) return;
         const st = await request(`/api/sync/status/${uid}`, "GET");
         if (!st || st.status === "idle" || st.status === "done" || st.status === "failed") {
@@ -3236,7 +3356,6 @@ onShow(() => {
 
 onPullDownRefresh(async () => {
   try {
-    loadMyNextRun();
     const ok = await loadDashboard();
     if (ok === false) {
       uni.showToast({ title: "刷新失败，请检查网络后重试", icon: "none" });
@@ -3249,6 +3368,61 @@ onPullDownRefresh(async () => {
     uni.stopPullDownRefresh();
   }
 });
+
+const homeSocialPulse = ref<any>(null);
+const bcastExpanded = ref(false);
+
+async function loadHomeSocialPulse(uid: string) {
+  if (!uid) return;
+  try {
+    const cached = uni.getStorageSync(`rgm_home_pulse_${uid}`);
+    if (cached && !homeSocialPulse.value) homeSocialPulse.value = cached;
+  } catch {}
+  try {
+    const res: any = await request(`/api/community/home-pulse?viewer_uid=${encodeURIComponent(uid)}&limit=4`);
+    if (res) {
+      homeSocialPulse.value = res;
+      uni.setStorageSync(`rgm_home_pulse_${uid}`, res);
+    }
+  } catch {}
+}
+
+async function ackPinnedBroadcast(bid: string) {
+  const uid = user.value?.id;
+  if (!uid || !bid) return;
+  try {
+    await request(`/api/community/broadcasts/${encodeURIComponent(bid)}/ack`, "POST", { user_id: uid });
+    if (homeSocialPulse.value?.pinned_broadcast) {
+      homeSocialPulse.value.pinned_broadcast.viewer_acked = true;
+    }
+    uni.showToast({ title: "已确认收到 ✓", icon: "none" });
+  } catch {}
+}
+
+async function quickCheer(targetType: string, targetId: string, recipientId: string, cheerKey: string) {
+  const uid = user.value?.id;
+  if (!uid || !targetId) return;
+  try {
+    await request("/api/community/micro-cheer", "POST", {
+      sender_id: uid,
+      target_type: targetType,
+      target_id: targetId,
+      recipient_id: recipientId,
+      cheer_key: cheerKey,
+      club_id: homeSocialPulse.value?.club_id || "",
+    });
+    uni.showToast({ title: "已送出鼓励 👏", icon: "none" });
+  } catch {}
+}
+
+function goSubpage(url: string) {
+  uni.navigateTo({ url });
+}
+
+function goToInviteLanding(tok: string) {
+  if (!tok) return;
+  uni.navigateTo({ url: `/pages/invite/invite?token=${encodeURIComponent(tok)}` });
+}
 </script>
 
 <style scoped>
@@ -8581,5 +8755,42 @@ onPullDownRefresh(async () => {
   font-weight: 700;
   color: var(--rgm-blue);
 }
+
+.h3-bcast-capsule {
+  margin-bottom: 16rpx;
+  padding: 16rpx 22rpx;
+  border-radius: 20rpx;
+  background: var(--rgm-card);
+  border: 1rpx solid var(--rgm-line);
+}
+.h3-bcast-capsule.is-invite {
+  background: var(--rgm-amber-tint);
+  border-color: var(--rgm-amber-line);
+}
+.h3-bcast-txt { font-size: 23rpx; font-weight: 800; color: var(--rgm-text); }
+.h3-bcast-top { display: flex; align-items: center; gap: 12rpx; }
+.h3-bcast-badge { font-size: 18rpx; padding: 4rpx 12rpx; border-radius: 999rpx; background: var(--rgm-brand); color: #fff; font-weight: 800; flex-shrink: 0; }
+.h3-bcast-title { flex: 1; font-size: 23rpx; font-weight: 800; color: var(--rgm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-bcast-ack { font-size: 20rpx; padding: 4rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); font-weight: 800; flex-shrink: 0; }
+.h3-bcast-ack.acked { background: var(--rgm-green-tint); color: var(--rgm-green); }
+.h3-bcast-body { display: block; font-size: 21rpx; color: var(--rgm-text-2); margin-top: 10rpx; line-height: 1.45; }
+.h3-pulse-card { padding: 24rpx; margin-bottom: 20rpx; }
+.h3-pulse-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12rpx; }
+.h3-pulse-title { font-size: 28rpx; font-weight: 900; color: var(--rgm-text); display: block; }
+.h3-pulse-sub { font-size: 20rpx; color: var(--rgm-text-2); display: block; margin-top: 4rpx; }
+.h3-pulse-links { display: flex; gap: 10rpx; flex-shrink: 0; }
+.h3-pulse-link { font-size: 20rpx; font-weight: 800; padding: 6rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); }
+.h3-pulse-link.is-alt { background: var(--rgm-card-2); color: var(--rgm-text); border: 1rpx solid var(--rgm-line); }
+.h3-rings-row { white-space: nowrap; margin-top: 16rpx; }
+.h3-ring-item { display: inline-flex; flex-direction: column; align-items: center; width: 92rpx; margin-right: 14rpx; }
+.h3-ring-circle { width: 68rpx; height: 68rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 2rpx solid var(--rgm-line); display: flex; align-items: center; justify-content: center; }
+.h3-ring-circle.active { border-color: var(--rgm-green); border-width: 4rpx; }
+.h3-ring-init { font-size: 26rpx; font-weight: 900; color: var(--rgm-text); }
+.h3-ring-name { font-size: 19rpx; color: var(--rgm-text); margin-top: 4rpx; max-width: 88rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-ring-km { font-size: 18rpx; color: var(--rgm-text-3); }
+.h3-pulse-item { margin-top: 12rpx; padding: 14rpx 16rpx; border-radius: 14rpx; background: var(--rgm-card-2); }
+.h3-pi-row { display: flex; justify-content: space-between; align-items: center; gap: 10rpx; }
+.h3-pi-txt { flex: 1; font-size: 22rpx; color: var(--rgm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-pi-btn { font-size: 20rpx; font-weight: 800; padding: 4rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); flex-shrink: 0; }
 
 </style>

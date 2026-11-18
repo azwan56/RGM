@@ -1880,36 +1880,37 @@ async function loadLatestReport() {
   if (!user.value || !user.value.id) return;
   const uid = user.value.id;
 
-  try {
-    const rRes = await request(`/api/profile/${uid}/races`);
-    if (Array.isArray(rRes)) {
-      userRaces.value = rRes;
-    } else if (rRes && Array.isArray(rRes.races)) {
-      userRaces.value = rRes.races;
-    }
-  } catch (e) {
-    console.warn("Fetch user races fallback:", e);
+  const [racesRes, reportRes] = await Promise.all([
+    request(`/api/profile/${uid}/races`).catch((e) => {
+      console.warn("Fetch user races fallback:", e);
+      return null;
+    }),
+    request(`/api/coach/latest/${uid}`).catch((e) => {
+      console.warn("Fetch coach report fallback:", e);
+      return null;
+    }),
+  ]);
+
+  if (Array.isArray(racesRes)) {
+    userRaces.value = racesRes;
+  } else if (racesRes && Array.isArray(racesRes.races)) {
+    userRaces.value = racesRes.races;
   }
 
-  try {
-    const res = await request(`/api/coach/latest/${uid}`);
-    if (res && res.summary) {
-      if (!res.multi_race_strategy) {
-        res.multi_race_strategy = { ...defaultAnalysis.multi_race_strategy };
-      }
-      analysis.value = res;
-      if (res.athlete_snapshot?.target_race) {
-        targetRace.value = res.athlete_snapshot.target_race;
-      }
-      if (res.athlete_snapshot?.target_time) {
-        targetTime.value = res.athlete_snapshot.target_time;
-      }
-      if (res.athlete_snapshot?.race_category) {
-        raceType.value = res.athlete_snapshot.race_category;
-      }
+  if (reportRes && reportRes.summary) {
+    if (!reportRes.multi_race_strategy) {
+      reportRes.multi_race_strategy = { ...defaultAnalysis.multi_race_strategy };
     }
-  } catch (e) {
-    console.warn("Fetch coach report fallback:", e);
+    analysis.value = reportRes;
+    if (reportRes.athlete_snapshot?.target_race) {
+      targetRace.value = reportRes.athlete_snapshot.target_race;
+    }
+    if (reportRes.athlete_snapshot?.target_time) {
+      targetTime.value = reportRes.athlete_snapshot.target_time;
+    }
+    if (reportRes.athlete_snapshot?.race_category) {
+      raceType.value = reportRes.athlete_snapshot.race_category;
+    }
   }
 
   // Ensure race_timeline_advice is populated if user has registered races
@@ -2079,9 +2080,7 @@ function formatAdvice(w: any): string {
   return String(w);
 }
 
-onMounted(() => {
-  loadUserPlan();
-});
+let lastCoachLoadedAt = 0;
 
 onShow(() => {
   applySystemTheme(currentTheme.value);
@@ -2093,8 +2092,28 @@ onShow(() => {
       openCoachChatModal();
     }
   } catch (_) {}
-  loadLatestReport();
-  loadUserPlan();
+
+  const storedNow = getStoredUser();
+  const uidChanged = Boolean(storedNow?.id && storedNow.id !== user.value?.id);
+  let mutTs = 0;
+  let isDirty = false;
+  try {
+    mutTs = Number(uni.getStorageSync("rgm_last_mutation_ts") || 0);
+    isDirty = Boolean(uni.getStorageSync("rgm_dashboard_dirty"));
+  } catch (_) {}
+
+  if (
+    lastCoachLoadedAt > 0 &&
+    !uidChanged &&
+    !isDirty &&
+    mutTs <= lastCoachLoadedAt &&
+    Date.now() - lastCoachLoadedAt < 30000
+  ) {
+    return;
+  }
+
+  lastCoachLoadedAt = Date.now();
+  Promise.all([loadLatestReport(), loadUserPlan()]);
 });
 
 const isAnyCoachPageModalOpen = computed(() => Boolean(editModalOpen.value || showCoachChatModal.value));
@@ -2102,6 +2121,7 @@ watch(isAnyCoachPageModalOpen, (open) => setTabBarHidden(open, "coach_page"));
 
 onPullDownRefresh(async () => {
   try {
+    lastCoachLoadedAt = Date.now();
     await Promise.all([loadLatestReport(), loadUserPlan()]);
     uni.showToast({ title: "数据已刷新", icon: "success" });
   } catch (e) {

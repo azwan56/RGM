@@ -741,10 +741,14 @@ def _is_event_for_club(ev_row: Dict[str, Any], club_id: str) -> bool:
     return False
 
 
+_CLUB_EVENTS_ORG_COLS_CACHE: Dict[str, str] = {}
+
+
 def enrich_activities_with_captain_cheer(
     activities: List[Dict[str, Any]],
     club_id: Optional[str] = None,
     db_path: Optional[str] = None,
+    preloaded_clubs_by_uid: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Batch-enriches a list of activity dictionaries in-place with public
@@ -789,10 +793,19 @@ def enrich_activities_with_captain_cheer(
         uid_aliases.setdefault(canon_uid, {canon_uid}).add(raw_uid)
         if canon_uid in selected_club_by_uid:
             continue
-        try:
-            raw_clubs = ls.LocalStore.get_user_clubs(canon_uid) or []
-        except Exception:
-            raw_clubs = []
+        if preloaded_clubs_by_uid is not None and (
+            canon_uid in preloaded_clubs_by_uid or raw_uid in preloaded_clubs_by_uid
+        ):
+            raw_clubs = (
+                preloaded_clubs_by_uid.get(canon_uid)
+                if canon_uid in preloaded_clubs_by_uid
+                else preloaded_clubs_by_uid.get(raw_uid)
+            ) or []
+        else:
+            try:
+                raw_clubs = ls.LocalStore.get_user_clubs(canon_uid) or []
+            except Exception:
+                raw_clubs = []
         active_clubs = [
             c
             for c in raw_clubs
@@ -833,12 +846,13 @@ def enrich_activities_with_captain_cheer(
     owner_uid_by_club: Dict[str, str] = {}
     for _, _, _, c in affiliated_items:
         cid = str(c["id"])
-        if c.get("owner_id"):
+        if cid not in owner_uid_by_club and c.get("owner_id"):
             owner_uid_by_club[cid] = ls.LocalStore.resolve_user_id(str(c["owner_id"]))
 
     dates = [d for _, _, d, _ in affiliated_items if d is not None]
     min_date = (min(dates) - timedelta(days=45)).isoformat() if dates else "1970-01-01"
     max_date = max(dates).isoformat() if dates else "2999-12-31"
+    max_date_excl = (max(dates) + timedelta(days=1)).isoformat() if dates else "2999-12-31"
     max_race_date = (max(dates) + timedelta(days=15)).isoformat() if dates else "2999-12-31"
     min_health_date = (min(dates) - timedelta(days=7)).isoformat() if dates else "1970-01-01"
 
@@ -893,12 +907,16 @@ def enrich_activities_with_captain_cheer(
                 """,
                 profile_query_uids,
             )
+            captain_uid_set = set(captain_uids)
             for r in cur.fetchall():
                 d_row = dict(r)
                 if d_row.get("date_of_birth"):
                     d_row["date_of_birth"] = ls.decrypt_pii(d_row["date_of_birth"])
-                profiles_map[str(d_row["id"])] = d_row
-                canon = ls.LocalStore.resolve_user_id(str(d_row["id"]))
+                raw_id_str = str(d_row["id"])
+                profiles_map[raw_id_str] = d_row
+                canon = alias_to_canon.get(raw_id_str)
+                if canon is None:
+                    canon = raw_id_str if raw_id_str in captain_uid_set else ls.LocalStore.resolve_user_id(raw_id_str)
                 profiles_map.setdefault(canon, d_row)
 
         # Build captain display metadata map per club
@@ -927,16 +945,20 @@ def enrich_activities_with_captain_cheer(
                        moving_time_seconds, elevation_gain_meters, average_heartrate, trimp, exclude_mode
                 FROM activities
                 WHERE user_id IN ({ph})
-                  AND substr(start_time, 1, 10) >= ?
-                  AND substr(start_time, 1, 10) <= ?
+                  AND start_time >= ?
+                  AND start_time < ?
                   AND {ls.RUNNING_SQL_FILTER}
                 ORDER BY start_time ASC
                 """,
-                all_runner_aliases + [min_date, max_date],
+                all_runner_aliases + [min_date, max_date_excl],
             )
             for r in cur.fetchall():
                 d_act = dict(r)
-                cu = alias_to_canon.get(str(d_act["user_id"]), ls.LocalStore.resolve_user_id(str(d_act["user_id"])))
+                raw_act_uid = str(d_act["user_id"])
+                cu = alias_to_canon.get(raw_act_uid)
+                if cu is None:
+                    cu = ls.LocalStore.resolve_user_id(raw_act_uid)
+                    alias_to_canon[raw_act_uid] = cu
                 acts_by_uid.setdefault(cu, []).append(d_act)
 
         # 3. Batch fetch daily_health (overnight wear sanitized -> boolean flag only)
@@ -949,11 +971,11 @@ def enrich_activities_with_captain_cheer(
                            sleep_score, hrv_last_night_avg, hrv_weekly_avg, hrv_status
                     FROM daily_health
                     WHERE user_id IN ({ph})
-                      AND substr(date, 1, 10) >= ?
-                      AND substr(date, 1, 10) <= ?
+                      AND date >= ?
+                      AND date < ?
                     ORDER BY date DESC
                     """,
-                    all_runner_aliases + [min_health_date, max_date],
+                    all_runner_aliases + [min_health_date, max_date_excl],
                 )
                 for r in cur.fetchall():
                     san = _sanitize_daily_health_row(dict(r))
@@ -991,13 +1013,16 @@ def enrich_activities_with_captain_cheer(
         if all_runner_aliases:
             ph = ",".join(["?"] * len(all_runner_aliases))
             try:
-                cur.execute("PRAGMA table_info(club_events)")
-                ce_cols = {row[1] for row in cur.fetchall()}
-                org_cols = (
-                    ", ce.is_org_event, ce.scope_club_ids"
-                    if "is_org_event" in ce_cols and "scope_club_ids" in ce_cols
-                    else ""
-                )
+                org_cols = _CLUB_EVENTS_ORG_COLS_CACHE.get(eff_db_path)
+                if org_cols is None:
+                    cur.execute("PRAGMA table_info(club_events)")
+                    ce_cols = {row[1] for row in cur.fetchall()}
+                    org_cols = (
+                        ", ce.is_org_event, ce.scope_club_ids"
+                        if "is_org_event" in ce_cols and "scope_club_ids" in ce_cols
+                        else ""
+                    )
+                    _CLUB_EVENTS_ORG_COLS_CACHE[eff_db_path] = org_cols
                 cur.execute(
                     f"""
                     SELECT cep.user_id, cep.activity_id, cep.status AS part_status,
@@ -1026,11 +1051,11 @@ def enrich_activities_with_captain_cheer(
                     SELECT user_id, name, race_type, race_date, priority, status
                     FROM race_plans
                     WHERE user_id IN ({ph})
-                      AND substr(race_date, 1, 10) >= ?
-                      AND substr(race_date, 1, 10) <= ?
+                      AND race_date >= ?
+                      AND race_date < ?
                     ORDER BY race_date ASC
                     """,
-                    all_runner_aliases + [min_date, max_race_date],
+                    all_runner_aliases + [min_date, ls._next_day_iso(max_race_date)],
                 )
                 for r in cur.fetchall():
                     d_rc = dict(r)

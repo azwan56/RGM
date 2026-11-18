@@ -13,6 +13,7 @@ from utils.encryption import decrypt_string
 from utils.garmin_adapter import GarminAdapter
 from utils.coros_adapter import CorosAdapter
 from utils.running_metrics import calculate_trimp
+from utils.canova_holistic_critique import CANOVA_CRITIQUE_SCHEMA_VERSION
 from utils.local_store import LocalStore, DB_PATH, sqlite3, parse_iso_datetime
 
 logger = logging.getLogger("router_sync")
@@ -194,7 +195,14 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
     if not user or (not has_garmin and not has_coros):
         if has_apple_watch or has_huawei or has_suunto:
             sync_time_iso = datetime.utcnow().isoformat() + "Z"
-            recent_acts = LocalStore.get_recent_activities(uid, limit=100)
+            recent_acts = LocalStore.get_recent_activities(
+                uid,
+                limit=100,
+                include_splits=False,
+                include_critiques=False,
+                include_route_preview=False,
+                profile=user,
+            )
             latest_h = LocalStore.get_latest_health(uid)
             if has_suunto:
                 brand_label = "颂拓 Suunto"
@@ -407,8 +415,9 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
 
         all_activities, skipped_cross_brand = _filter_cross_brand_duplicates(uid, all_activities)
 
-        # Check existing DB cache (lightweight scalar flags only, zero GPS blobs read)
-        existing_cache: Dict[str, Tuple[bool, bool]] = {}
+        # Check existing DB cache (lightweight scalar flags + unchanged fingerprint)
+        schema_marker = f"%{CANOVA_CRITIQUE_SCHEMA_VERSION}%"
+        existing_cache: Dict[str, Tuple[bool, bool, float, int, float, float, str]] = {}
         act_ids_all = [str(a.get("id") or "") for a in all_activities if a.get("id")]
         if act_ids_all:
             try:
@@ -421,19 +430,32 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                             f"""
                             SELECT id,
                                    COALESCE(has_gps_track, CASE WHEN route_preview_json IS NOT NULL OR gps_track_data IS NOT NULL THEN 1 ELSE 0 END) AS has_gps,
-                                   CASE WHEN segment_analysis_json IS NOT NULL AND segment_analysis_json != '' THEN 1 ELSE 0 END AS has_seg
+                                   CASE WHEN segment_analysis_json IS NOT NULL AND segment_analysis_json LIKE ? THEN 1 ELSE 0 END AS has_v4_seg,
+                                   COALESCE(distance_meters, 0.0),
+                                   COALESCE(moving_time_seconds, 0),
+                                   COALESCE(average_heartrate, 0.0),
+                                   COALESCE(elevation_gain_meters, 0.0),
+                                   COALESCE(name, '')
                             FROM activities
                             WHERE id IN ({ph})
                             """,
-                            chunk,
+                            [schema_marker] + chunk,
                         )
-                        for r_id, r_gps, r_seg in cur.fetchall():
-                            existing_cache[str(r_id)] = (bool(r_gps), bool(r_seg))
+                        for r_id, r_gps, r_seg, r_dist, r_mov, r_hr, r_elev, r_name in cur.fetchall():
+                            existing_cache[str(r_id)] = (
+                                bool(r_gps),
+                                bool(r_seg),
+                                round(float(r_dist or 0.0), 1),
+                                int(r_mov or 0),
+                                round(float(r_hr or 0.0), 1),
+                                round(float(r_elev or 0.0), 1),
+                                str(r_name or ""),
+                            )
             except Exception as ce_db:
                 logger.debug(f"[sync] Existing cache lookup skipped: {ce_db}")
 
         # Auto-prefetch detailed telemetry/laps/GPS track:
-        # - Latest 2 running activities (Garmin or COROS) missing segment_analysis or gps_track_data (Rule #1)
+        # - Latest 2 running activities (Garmin or COROS) missing v4 segment_analysis or gps_track_data
         # - Up to 5 latest outdoor activities missing gps_track_data
         run_prefetch_count = 0
         track_prefetch_count = 0
@@ -445,14 +467,17 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                 continue
             is_run = LocalStore.is_running_activity(act.get("sport_type"))
             is_outdoor = act.get("sport_type") in ["Run", "TrailRun", "Ride", "Hike", "Walk"]
-            has_cached_gps, has_cached_seg = existing_cache.get(act_id, (False, False))
+            cached_info = existing_cache.get(act_id)
+            has_cached_gps = cached_info[0] if cached_info else False
+            has_cached_v4_seg = cached_info[1] if cached_info else False
 
-            need_run_detail = is_run and run_prefetch_count < 2 and (not has_cached_gps or not has_cached_seg)
+            need_run_detail = is_run and run_prefetch_count < 2 and (not has_cached_gps or not has_cached_v4_seg)
             need_map_track = is_outdoor and track_prefetch_count < 5 and not has_cached_gps
 
             if is_run and run_prefetch_count < 2:
                 run_prefetch_count += 1
-                segment_target_ids.add(act_id)
+                if cached_info is None or not has_cached_v4_seg or not has_cached_gps or bool(act.get("gps_track_data")):
+                    segment_target_ids.add(act_id)
 
             if not (need_run_detail or need_map_track):
                 continue
@@ -496,10 +521,21 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
 
             act["user_id"] = uid
             act_id = str(act.get("id") or "")
-            was_new = act_id not in existing_cache
+            cached_row = existing_cache.get(act_id)
+            was_new = cached_row is None
             will_segment = act_id in segment_target_ids or bool(
                 was_new and LocalStore.is_running_activity(act.get("sport_type")) and act.get("gps_track_data")
             )
+            if not was_new and not will_segment and not act.get("gps_track_data"):
+                cur_sig = (
+                    round(float(act.get("distance_meters") or 0.0), 1),
+                    int(act.get("moving_time_seconds") or 0),
+                    round(float(act.get("average_heartrate") or 0.0), 1),
+                    round(float(act.get("elevation_gain_meters") or 0.0), 1),
+                    str(act.get("name") or ""),
+                )
+                if cur_sig == cached_row[2:]:
+                    continue
 
             # Defer push notification until segmented critique is ready if we are running segment analysis
             LocalStore.upsert_activity(act, notify=(not will_segment), reconcile_plan=False)

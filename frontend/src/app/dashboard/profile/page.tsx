@@ -107,6 +107,15 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [savingConfidentiality, setSavingConfidentiality] = useState(false);
 
+  // ── W11 同城地标与寻搭子/招募检索授权开关 ──
+  const [city, setCity] = useState("");
+  const [runningLandmarksText, setRunningLandmarksText] = useState("");
+  const [usualTimeSlot, setUsualTimeSlot] = useState("");
+  const [lookingForBuddy, setLookingForBuddy] = useState(true);
+  const [allowBuddySearchScope, setAllowBuddySearchScope] = useState<"org_and_clubs" | "public" | "none">("org_and_clubs");
+  const [allowClubSearchScope, setAllowClubSearchScope] = useState<"same_org" | "public" | "none">("same_org");
+  const [savingSearchPrivacy, setSavingSearchPrivacy] = useState(false);
+
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
@@ -304,6 +313,14 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         setCanovaCritiqueClubIds(
           Array.isArray(profile.canova_critique_club_ids) ? profile.canova_critique_club_ids : []
         );
+        setCity(profile.city || "");
+        setRunningLandmarksText(
+          Array.isArray(profile.running_landmarks) ? profile.running_landmarks.join("、") : ""
+        );
+        setUsualTimeSlot(profile.usual_time_slot || "");
+        setLookingForBuddy(profile.looking_for_buddy !== false);
+        setAllowBuddySearchScope(profile.allow_buddy_search_scope || "org_and_clubs");
+        setAllowClubSearchScope(profile.allow_club_search_scope || "same_org");
         if (profile.height_cm) setHeightCm(profile.height_cm);
         if (profile.weight_kg) setWeightKg(profile.weight_kg);
         if (profile.date_of_birth) {
@@ -933,6 +950,30 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     }
   }
 
+  function parseLandmarksArray(raw: string): string[] {
+    return raw
+      .split(/[,，、;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  async function persistSearchPrivacy(field: string, value: any) {
+    if (!user?.id) return;
+    setSavingSearchPrivacy(true);
+    if (field === "looking_for_buddy") setLookingForBuddy(Boolean(value));
+    if (field === "allow_buddy_search_scope") setAllowBuddySearchScope(value);
+    if (field === "allow_club_search_scope") setAllowClubSearchScope(value);
+    try {
+      await apiClient.put(`/api/profile/${encodeURIComponent(user.id)}`, { [field]: value });
+      showToast("✅ 寻搭子与跑团检索权限已实时同步");
+    } catch (err: any) {
+      showToast("更新隐私范围失败: " + (err?.message || ""), "error");
+    } finally {
+      setSavingSearchPrivacy(false);
+    }
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -964,6 +1005,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         hide_biometrics: hideBiometrics,
         canova_critique_visibility: canovaCritiqueVisibility,
         canova_critique_club_ids: canovaCritiqueClubIds,
+        city: city.trim(),
+        running_landmarks: parseLandmarksArray(runningLandmarksText),
+        usual_time_slot: usualTimeSlot.trim(),
+        looking_for_buddy: lookingForBuddy,
+        allow_buddy_search_scope: allowBuddySearchScope,
+        allow_club_search_scope: allowClubSearchScope,
         date_of_birth: dateOfBirth || null,
         vo2max: vo2max !== "" ? Number(vo2max) : null,
         height_cm: heightCm || null,
@@ -1036,6 +1083,12 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
       setHideBiometrics(true);
       setCanovaCritiqueVisibility("self");
       setCanovaCritiqueClubIds([]);
+      setCity("");
+      setRunningLandmarksText("");
+      setUsualTimeSlot("");
+      setLookingForBuddy(false);
+      setAllowBuddySearchScope("none");
+      setAllowClubSearchScope("none");
       setGarminConnected(false);
       setGarminEmail("");
       setCorosConnected(false);
@@ -1838,6 +1891,36 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                           {hideBiometrics ? "🔒 保密中" : "🌐 团友可见"}
                         </span>
                       </button>
+
+                      {/* Quick Buddy & Club Search Privacy Summary Pills */}
+                      <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-bold text-white">🤝 跑搭子检索范围</span>
+                          <select
+                            value={allowBuddySearchScope}
+                            disabled={savingSearchPrivacy}
+                            onChange={(e) => persistSearchPrivacy("allow_buddy_search_scope", e.target.value)}
+                            className="px-2 py-1 rounded-lg bg-[#18181c] border border-white/15 text-[11px] font-bold text-white"
+                          >
+                            <option value="org_and_clubs">同团及大群校友</option>
+                            <option value="public">全平台同城公开</option>
+                            <option value="none">关闭搭档搜索</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-bold text-white">🏛️ 跑团招募范围</span>
+                          <select
+                            value={allowClubSearchScope}
+                            disabled={savingSearchPrivacy}
+                            onChange={(e) => persistSearchPrivacy("allow_club_search_scope", e.target.value)}
+                            className="px-2 py-1 rounded-lg bg-[#18181c] border border-white/15 text-[11px] font-bold text-white"
+                          >
+                            <option value="same_org">同大群分团可邀(兼团)</option>
+                            <option value="public">全平台跑团可邀</option>
+                            <option value="none">关闭跑团招募</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Danger Zone: Purge Cloud Data */}
@@ -2162,6 +2245,80 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                     )}
                 </div>
 
+                {/* Dual Discovery & Recruitment Search Scope Controls */}
+                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-white">🔍 寻搭子与跑团靶向邀约授权开关（无排他兼团保护）</div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        跑团之间无排他性；开启后仅按 5 岁年龄段、VDOT 与公园地标脱敏匹配，随时可一键关闭
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs font-bold text-zinc-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={lookingForBuddy}
+                        disabled={savingSearchPrivacy}
+                        onChange={(e) => persistSearchPrivacy("looking_for_buddy", e.target.checked)}
+                        className="w-4 h-4 accent-[#FC4C02]"
+                      />
+                      积极寻找同频跑搭子
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold text-zinc-300">1. 可被跑友搜索范围 (`allow_buddy_search_scope`)</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { v: "org_and_clubs", l: "同团+大群校友" },
+                          { v: "public", l: "全平台公开" },
+                          { v: "none", l: "关闭搭档搜索" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            disabled={savingSearchPrivacy}
+                            onClick={() => persistSearchPrivacy("allow_buddy_search_scope", opt.v)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              allowBuddySearchScope === opt.v
+                                ? "bg-[#FC4C02] text-white border-[#FC4C02]"
+                                : "bg-white/[0.03] border-white/10 text-zinc-300"
+                            }`}
+                          >
+                            {opt.l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold text-zinc-300">2. 可被跑团/教练邀约范围 (`allow_club_search_scope`)</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { v: "same_org", l: "同大群分团可邀(兼团)" },
+                          { v: "public", l: "全平台跑团可邀" },
+                          { v: "none", l: "关闭跑团招募" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            disabled={savingSearchPrivacy}
+                            onClick={() => persistSearchPrivacy("allow_club_search_scope", opt.v)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              allowClubSearchScope === opt.v
+                                ? "bg-[#FC4C02] text-white border-[#FC4C02]"
+                                : "bg-white/[0.03] border-white/10 text-zinc-300"
+                            }`}
+                          >
+                            {opt.l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Compact Platform Default Privacy Strip */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11px] text-zinc-400">
                   <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
@@ -2395,6 +2552,46 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </label>
                   {uploadingAvatar && <span className="text-xs text-[#FC4C02] animate-pulse">正在上传头像...</span>}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── CARD: 常驻城市与常跑公共地标（用于同频寻搭子，绝不泄露家庭住址与精确 GPS） ── */}
+          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-bold text-white tracking-wide">📍 常驻城市与常跑地标标签</h2>
+              <span className="text-[11px] text-zinc-400">仅用于同频跑友公园地标匹配（点击底部「💾 保存设定」一并保存）</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">常驻城市</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="例如：上海 / 北京 / 深圳"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">常跑公园/田径场（逗号分隔）</label>
+                <input
+                  type="text"
+                  value={runningLandmarksText}
+                  onChange={(e) => setRunningLandmarksText(e.target.value)}
+                  placeholder="例如：世纪公园、徐汇滨江、卢湾体育场"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1.5 font-semibold">偏好跑步时段</label>
+                <input
+                  type="text"
+                  value={usualTimeSlot}
+                  onChange={(e) => setUsualTimeSlot(e.target.value)}
+                  placeholder="例如：工作日晨跑 06:00 / 周末拉练"
+                  className="w-full bg-[#18181c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FC4C02]"
+                />
               </div>
             </div>
           </div>

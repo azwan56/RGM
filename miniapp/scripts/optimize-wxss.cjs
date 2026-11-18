@@ -115,11 +115,11 @@ for (const jsonFile of walk(targetDir, (f) => f.endsWith(".json"))) {
     if (!obj.preloadRule) obj.preloadRule = {};
     obj.preloadRule["pages/index/index"] = {
       network: "all",
-      packages: ["pages/rank", "pages/modals", "pages/activities", "pages/cockpit"],
+      packages: ["pages/rank", "pages/modals", "pages/activities", "pages/cockpit", "pages/discover"],
     };
     obj.preloadRule["pages/team/team"] = {
       network: "all",
-      packages: ["pages/rank", "pages/group-run", "pages/modals", "pages/cockpit"],
+      packages: ["pages/rank", "pages/group-run", "pages/modals", "pages/cockpit", "pages/showcase", "pages/recruit"],
     };
     obj.preloadRule["pages/coach/coach"] = {
       network: "all",

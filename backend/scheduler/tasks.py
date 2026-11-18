@@ -9,11 +9,12 @@ Executes:
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from config import settings
 from db import supabase_admin
-from utils.local_store import LocalStore
+from utils.local_store import LocalStore, parse_iso_datetime
 
 logger = logging.getLogger("rgm_scheduler")
 scheduler = BackgroundScheduler(
@@ -24,6 +25,30 @@ scheduler = BackgroundScheduler(
     }
 )
 _sync_batch_lock = threading.Lock()
+
+
+def _is_recently_synced(u_row: dict, min_interval_sec: int = 600) -> bool:
+    """Return True if all connected Garmin/COROS devices for this user synced within `min_interval_sec`."""
+    now_utc = datetime.now(timezone.utc)
+    has_provider = False
+    for flag_key, ts_key in (
+        ("garmin_connected", "garmin_last_sync_at"),
+        ("coros_connected", "coros_last_sync_at"),
+    ):
+        if u_row.get(flag_key):
+            has_provider = True
+            ts_val = u_row.get(ts_key)
+            if not ts_val:
+                return False
+            dt = parse_iso_datetime(str(ts_val))
+            if dt is None:
+                return False
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if (now_utc - dt).total_seconds() >= min_interval_sec:
+                return False
+    return has_provider
+
 
 def sync_all_connected_users():
     """Iterates through all users with garmin_connected=True or coros_connected=True and triggers sync."""
@@ -54,13 +79,20 @@ def sync_all_connected_users():
             logger.info("[scheduler] No connected Garmin/COROS users to sync.")
             return
 
-        logger.info(f"[scheduler] ⏳ Starting automatic polling sync for {len(all_users)} device user(s)...")
+        pending_users = [u for u in all_users if not _is_recently_synced(u)]
+        if not pending_users:
+            logger.info(f"[scheduler] All {len(all_users)} connected user(s) synced within last 10m; skipping cycle.")
+            return
+
+        logger.info(
+            f"[scheduler] ⏳ Starting automatic polling sync for {len(pending_users)}/{len(all_users)} device user(s)..."
+        )
 
         from routers.sync import sync_single_user
-        for idx, u in enumerate(all_users):
+        for idx, u in enumerate(pending_users):
             uid = u["id"]
             try:
-                logger.info(f"[scheduler] [{idx+1}/{len(all_users)}] Auto-syncing devices for user {uid} ({u.get('display_name')})...")
+                logger.info(f"[scheduler] [{idx+1}/{len(pending_users)}] Auto-syncing devices for user {uid} ({u.get('display_name')})...")
                 res = sync_single_user(uid)
                 if res.get("success"):
                     logger.info(f"[scheduler] ✅ User {uid} auto-sync success: {res.get('synced_activities', 0)} activities synced.")
@@ -70,7 +102,7 @@ def sync_all_connected_users():
                 logger.error(f"[scheduler] ❌ Failed to auto-sync user {uid}: {e}")
             
             # Gentle stagger between users to respect Garmin/COROS rate limits without blocking the cycle
-            if idx < len(all_users) - 1:
+            if idx < len(pending_users) - 1:
                 time.sleep(1.5)
 
         logger.info("[scheduler] 🎉 Automatic polling sync cycle completed.")

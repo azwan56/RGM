@@ -23,8 +23,14 @@ export default function AuthModal({ open, onClose, initialTab = "watch" }: AuthM
   }, [open, initialTab]);
 
   function getPostLoginRedirect(): string {
-    if (typeof window !== "undefined" && localStorage.getItem("rgm_pending_club_invite")) {
-      return "/dashboard/team";
+    if (typeof window !== "undefined") {
+      const targetedTok = localStorage.getItem("rgm_pending_targeted_invite_token");
+      if (targetedTok) {
+        return `/join/${encodeURIComponent(targetedTok)}`;
+      }
+      if (localStorage.getItem("rgm_pending_club_invite")) {
+        return "/dashboard/team";
+      }
     }
     return "/dashboard";
   }

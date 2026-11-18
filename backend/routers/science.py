@@ -107,7 +107,14 @@ def get_science_metrics(
         max_hr = float(profile.get("max_heart_rate") or 190.0)
         health_trend = LocalStore.get_health_trend_30d(canonical_uid)
 
-        activities = LocalStore.get_recent_activities(canonical_uid, limit=250)
+        activities = LocalStore.get_recent_activities(
+            canonical_uid,
+            limit=250,
+            include_splits=False,
+            include_critiques=False,
+            include_route_preview=False,
+            profile=profile,
+        )
         v_meta = LocalStore.resolve_verified_runner_profile_and_pbs(
             canonical_uid, profile=profile, recent_acts=activities, query_activities=True
         )

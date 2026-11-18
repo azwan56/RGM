@@ -13,8 +13,14 @@ export default function LoginPage() {
   const [pendingInvite, setPendingInvite] = useState<{ club_id?: string; invite_code?: string } | null>(null);
 
   function getPostLoginRedirect(): string {
-    if (typeof window !== "undefined" && localStorage.getItem("rgm_pending_club_invite")) {
-      return "/dashboard/team";
+    if (typeof window !== "undefined") {
+      const targetedTok = localStorage.getItem("rgm_pending_targeted_invite_token");
+      if (targetedTok) {
+        return `/join/${encodeURIComponent(targetedTok)}`;
+      }
+      if (localStorage.getItem("rgm_pending_club_invite")) {
+        return "/dashboard/team";
+      }
     }
     return "/dashboard";
   }

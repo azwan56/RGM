@@ -597,6 +597,60 @@
           </view>
         </view>
 
+        <!-- M11.4 同频寻搭子与跑团招募检索授权 + 地标标签 -->
+        <view class="privacy-critique-box" style="margin-top: 16rpx;">
+          <text class="pc-label" style="display: block; margin-bottom: 10rpx;">🤝 可被搭档搜索范围（无排他隐私授权）</text>
+          <view class="scope-pill-row">
+            <view
+              v-for="opt in [
+                { v: 'org_and_clubs', l: '同团+大群校友' },
+                { v: 'public', l: '全平台公开' },
+                { v: 'none', l: '关闭搜索' },
+              ]"
+              :key="opt.v"
+              class="scope-pill-btn"
+              :class="{ active: (profile?.allow_buddy_search_scope || 'org_and_clubs') === opt.v }"
+              @click="handleSelectSearchScope('allow_buddy_search_scope', opt.v)"
+            >
+              {{ opt.l }}
+            </view>
+          </view>
+
+          <text class="pc-label" style="display: block; margin: 16rpx 0 10rpx;">🏛️ 可被跑团/教练邀约范围（支持兼团）</text>
+          <view class="scope-pill-row">
+            <view
+              v-for="opt in [
+                { v: 'same_org', l: '同大群分团可邀' },
+                { v: 'public', l: '全平台可邀' },
+                { v: 'none', l: '关闭招募' },
+              ]"
+              :key="opt.v"
+              class="scope-pill-btn"
+              :class="{ active: (profile?.allow_club_search_scope || 'same_org') === opt.v }"
+              @click="handleSelectSearchScope('allow_club_search_scope', opt.v)"
+            >
+              {{ opt.l }}
+            </view>
+          </view>
+
+          <view style="display: flex; gap: 12rpx; margin-top: 16rpx;">
+            <input
+              :value="profile?.city || ''"
+              placeholder="城市（如 上海）"
+              class="scope-inp"
+              style="width: 180rpx;"
+              @input="onInputCity"
+            />
+            <input
+              :value="landmarksText"
+              placeholder="常跑地标（如 世纪公园、徐汇滨江）"
+              class="scope-inp"
+              style="flex: 1;"
+              @input="onInputLandmarks"
+            />
+          </view>
+        </view>
+
         <view class="privacy-statement-box" style="margin-top: 16rpx;">
           <view class="privacy-rule-item">
             <text class="privacy-rule-icon">🔒</text>
@@ -4059,18 +4113,40 @@ const userClubs = ref<any[]>([]);
 const showPersonalReportModal = ref(false);
 const userVdot = ref<number | null>(null);
 const userActivities = ref<any[]>([]);
+const yearlyStatsBreakdown = ref<any>(null);
 
 const yearMileageStats = computed(() => {
+  const srv = yearlyStatsBreakdown.value;
   const now = new Date();
-  const currentYear = now.getFullYear();
+  const currentYear = Number(srv?.year || now.getFullYear());
   const currentMonth = now.getMonth() + 1;
+  if (srv && Array.isArray(srv.monthly_breakdown) && srv.monthly_breakdown.length > 0) {
+    const srvVals = srv.monthly_breakdown
+      .slice(0, 12)
+      .map((item: any) => Math.round(Number(item?.distance_km || 0)));
+    const hasRealSrv = srvVals.some((v: number) => v > 0);
+    const displayVals = hasRealSrv
+      ? srvVals
+      : (monthlyTargets.value || []).slice(0, 12).map((v) => Number(v || 0));
+    const maxVal = Math.max(10, ...displayVals);
+    const totalKm = Math.round(Number(srv.total_km || 0));
+    const months = displayVals.map((km: number, idx: number) => ({
+      month: idx + 1,
+      km,
+      pct: km > 0 ? Math.max(10, Math.min(100, Math.round((km / maxVal) * 100))) : 8,
+      isCurrent: idx + 1 === currentMonth,
+    }));
+    return { currentYear, totalKm, months };
+  }
+
+  const fallbackYear = now.getFullYear();
   const monthSums = Array(12).fill(0);
   for (const act of userActivities.value || []) {
     const rawDate = String(act?.start_date_local || act?.start_time || "");
     if (!rawDate) continue;
     const yr = Number(rawDate.slice(0, 4));
     const mo = Number(rawDate.slice(5, 7));
-    if (yr === currentYear && mo >= 1 && mo <= 12) {
+    if (yr === fallbackYear && mo >= 1 && mo <= 12) {
       const distKm = act?.distance_km != null ? Number(act.distance_km) : Number(act?.distance_meters || 0) / 1000;
       if (isFinite(distKm) && distKm > 0) monthSums[mo - 1] += distKm;
     }
@@ -4087,7 +4163,7 @@ const yearMileageStats = computed(() => {
     pct: km > 0 ? Math.max(10, Math.min(100, Math.round((km / maxVal) * 100))) : 8,
     isCurrent: idx + 1 === currentMonth,
   }));
-  return { currentYear, totalKm, months };
+  return { currentYear: fallbackYear, totalKm, months };
 });
 
 const isAnyProfilePageModalOpen = computed(() =>
@@ -4419,26 +4495,51 @@ async function loadProfileData() {
   const uid = user.value.id;
 
   try {
-    const [res, clubRes, orgRes, onboardRes, sciRes, actRes] = await Promise.all([
-      request(`/api/profile/${uid}`),
-      request(`/api/team/my-clubs/${uid}`),
-      request(`/api/org/my-orgs/${uid}`),
-      request(`/api/profile/${uid}/onboarding-status`).catch(() => null),
-      request(`/api/science/metrics/${uid}`).catch(() => null),
-      request(`/api/miniapp/activities/${uid}`).catch(() => null),
-    ]);
+    const res = await request(`/api/profile/${uid}?include_miniapp_bundle=1`);
+    const hasBundle = Boolean(
+      res && ("organizations" in res || "yearly_stats" in res || "onboarding_status" in res)
+    );
 
-    if (onboardRes) {
-      onboardingStatus.value = onboardRes;
-    }
-    if (sciRes?.vdot != null) {
-      userVdot.value = Number(sciRes.vdot);
-    }
-    if (Array.isArray(actRes?.activities)) {
-      userActivities.value = actRes.activities;
+    if (res?.onboarding_status) {
+      onboardingStatus.value = res.onboarding_status;
+    } else if (!hasBundle) {
+      request(`/api/profile/${uid}/onboarding-status`)
+        .then((st: any) => {
+          if (st) onboardingStatus.value = st;
+        })
+        .catch(() => null);
     }
 
-    userOrgs.value = orgRes?.organizations || [];
+    if (res && "vdot" in res) {
+      userVdot.value = res.vdot != null ? Number(res.vdot) : null;
+    } else if (!hasBundle) {
+      request(`/api/science/metrics/${uid}`)
+        .then((sciRes: any) => {
+          if (sciRes?.vdot != null) userVdot.value = Number(sciRes.vdot);
+        })
+        .catch(() => null);
+    }
+
+    if (res?.yearly_stats) {
+      yearlyStatsBreakdown.value = res.yearly_stats;
+    } else if (!hasBundle) {
+      request(`/api/miniapp/activities/${uid}`)
+        .then((actRes: any) => {
+          if (Array.isArray(actRes?.activities)) {
+            userActivities.value = actRes.activities;
+          }
+        })
+        .catch(() => null);
+    }
+
+    if (Array.isArray(res?.organizations)) {
+      userOrgs.value = res.organizations;
+    } else if (!hasBundle) {
+      const orgRes = await request(`/api/org/my-orgs/${uid}`).catch(() => null);
+      userOrgs.value = orgRes?.organizations || [];
+    } else {
+      userOrgs.value = [];
+    }
 
     if (res?.profile) {
       profile.value = {
@@ -4524,11 +4625,15 @@ async function loadProfileData() {
       races.value = res.races;
     }
 
-    const clubs = clubRes?.clubs || res?.clubs || [];
+    const clubs = res?.clubs || [];
     userClubs.value = clubs;
     userClub.value = resolveActiveClub(clubs);
 
-    loadMySupportTickets();
+    if (Array.isArray(res?.support_tickets)) {
+      mySupportTickets.value = res.support_tickets;
+    } else {
+      loadMySupportTickets();
+    }
 
     // ── Check if user has temporary or suspended org memberships → show reminder ──
     checkOrgMembershipReminder(uid, userOrgs.value);
@@ -4540,7 +4645,7 @@ async function loadProfileData() {
 // Popup reminder: if user belongs to any org with 'suspended' or 'temporary' status
 async function checkOrgMembershipReminder(uid: string, orgsList?: any[]) {
   try {
-    const orgs: any[] = orgsList || (await request(`/api/org/my-orgs/${uid}`))?.organizations || [];
+    const orgs: any[] = Array.isArray(orgsList) ? orgsList : (await request(`/api/org/my-orgs/${uid}`))?.organizations || [];
     const suspendedMemberships = orgs.filter((o: any) => o.status === "expired" || o.status === "suspended" || o.is_suspended);
     if (suspendedMemberships.length > 0) {
       const firstOrg = suspendedMemberships[0];
@@ -5585,6 +5690,10 @@ async function handleSaveAll() {
       canova_critique_club_ids: Array.isArray(profile.value?.canova_critique_club_ids)
         ? profile.value.canova_critique_club_ids
         : [],
+      city: profile.value?.city || "",
+      running_landmarks: parseLandmarksInput(landmarksText.value),
+      allow_buddy_search_scope: profile.value?.allow_buddy_search_scope || "org_and_clubs",
+      allow_club_search_scope: profile.value?.allow_club_search_scope || "same_org",
     });
 
     const finalMonthlyTargets = monthlyTargets.value.map((v, idx) => {
@@ -5739,6 +5848,10 @@ async function executePurgePrivacy() {
             profile.value.hide_biometrics = true;
             profile.value.canova_critique_visibility = "self";
             profile.value.canova_critique_club_ids = [];
+            profile.value.city = "";
+            profile.value.running_landmarks = [];
+            profile.value.allow_buddy_search_scope = "none";
+            profile.value.allow_club_search_scope = "none";
             profile.value.garmin_connected = false;
             profile.value.coros_connected = false;
             profile.value.apple_watch_connected = false;
@@ -6151,6 +6264,8 @@ async function handleImportGarminPb() {
   }
 }
 
+let lastProfileLoadedAt = 0;
+
 onShow(() => {
   applySystemTheme(currentTheme.value);
   syncTabBarIndex(4);
@@ -6158,29 +6273,60 @@ onShow(() => {
   if (autoBrand) {
     uni.removeStorageSync("auto_open_device_brand");
   }
-  const profilePromise = loadProfileData();
-  if (uni.getStorageSync("auto_open_edit_profile")) {
+  const openEditProfile = Boolean(uni.getStorageSync("auto_open_edit_profile"));
+  const openSupport = Boolean(uni.getStorageSync("auto_open_support"));
+  const openPrivacy = Boolean(uni.getStorageSync("auto_open_privacy"));
+  const scrollRequired = Boolean(uni.getStorageSync("auto_scroll_to_required_fields"));
+  const scrollDevice = Boolean(uni.getStorageSync("auto_scroll_to_device"));
+
+  const storedNow = getStoredUser();
+  const uidChanged = Boolean(storedNow?.id && storedNow.id !== user.value?.id);
+  let mutTs = 0;
+  let isDirty = false;
+  try {
+    mutTs = Number(uni.getStorageSync("rgm_last_mutation_ts") || 0);
+    isDirty = Boolean(uni.getStorageSync("rgm_dashboard_dirty"));
+  } catch (_) {}
+
+  const hasJumpAction = Boolean(autoBrand || openEditProfile || openSupport || openPrivacy || scrollRequired || scrollDevice);
+  const shouldFetchProfile =
+    hasJumpAction ||
+    lastProfileLoadedAt === 0 ||
+    uidChanged ||
+    isDirty ||
+    mutTs > lastProfileLoadedAt ||
+    Date.now() - lastProfileLoadedAt >= 30000;
+
+  let profilePromise: Promise<void> = Promise.resolve();
+  if (shouldFetchProfile) {
+    lastProfileLoadedAt = Date.now();
+    profilePromise = loadProfileData();
+  }
+
+  if (openEditProfile) {
     uni.removeStorageSync("auto_open_edit_profile");
     activeSection.value = "";
     Promise.resolve(profilePromise).finally(() => {
       openEditProfileModal();
     });
-  } else if (uni.getStorageSync("auto_open_support")) {
+  } else if (openSupport) {
     uni.removeStorageSync("auto_open_support");
     activeSection.value = "support";
-    setTimeout(() => {
-      loadMySupportTickets();
-    }, 300);
-  } else if (uni.getStorageSync("auto_open_privacy")) {
+    if (!shouldFetchProfile) {
+      setTimeout(() => {
+        loadMySupportTickets();
+      }, 300);
+    }
+  } else if (openPrivacy) {
     uni.removeStorageSync("auto_open_privacy");
     activeSection.value = "personal";
-  } else if (uni.getStorageSync("auto_scroll_to_required_fields")) {
+  } else if (scrollRequired) {
     uni.removeStorageSync("auto_scroll_to_required_fields");
     activeSection.value = "personal";
     setTimeout(() => {
       scrollToRequiredFields();
     }, 450);
-  } else if (uni.getStorageSync("auto_scroll_to_device") || autoBrand) {
+  } else if (scrollDevice || autoBrand) {
     uni.removeStorageSync("auto_scroll_to_device");
     scrollToDeviceCard();
     if (autoBrand) {
@@ -6214,6 +6360,40 @@ onShareAppMessage(() => {
 onShareTimeline(() => {
   return getUnifiedShareTimeline();
 });
+
+const landmarksText = computed(() =>
+  Array.isArray(profile.value?.running_landmarks) ? profile.value.running_landmarks.join("、") : ""
+);
+
+function parseLandmarksInput(raw: string): string[] {
+  return String(raw || "").split(/[,，、;\n]+/).map((s) => s.trim()).filter(Boolean).slice(0, 8);
+}
+
+function onInputCity(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.city = e?.detail?.value || "";
+}
+
+function onInputLandmarks(e: any) {
+  if (!profile.value) profile.value = {};
+  profile.value.running_landmarks = parseLandmarksInput(e?.detail?.value || "");
+}
+
+async function handleSelectSearchScope(
+  field: "allow_buddy_search_scope" | "allow_club_search_scope",
+  val: string
+) {
+  const uid = user.value?.id;
+  if (!uid) return;
+  if (!profile.value) profile.value = {};
+  profile.value[field] = val;
+  try {
+    await request(`/api/profile/${encodeURIComponent(uid)}`, "PUT", { [field]: val });
+    uni.showToast({ title: "检索隐私范围已同步 ✓", icon: "none" });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || "更新失败", icon: "none" });
+  }
+}
 </script>
 
 <style scoped>
@@ -10845,6 +11025,11 @@ onShareTimeline(() => {
 }
 .p3-t4-val { font-size: 22rpx; font-weight: 800; color: var(--rgm-ink); font-variant-numeric: tabular-nums; }
 .p3-t4-lbl { font-size: 18rpx; color: var(--rgm-ink-3); }
+
+.scope-pill-row { display: flex; flex-wrap: wrap; gap: 10rpx; }
+.scope-pill-btn { padding: 8rpx 16rpx; border-radius: 999rpx; font-size: 21rpx; font-weight: 700; background: var(--rgm-card-2); color: var(--rgm-ink-2); border: 1rpx solid var(--rgm-line); }
+.scope-pill-btn.active { background: var(--rgm-brand); color: #ffffff; border-color: var(--rgm-brand); }
+.scope-inp { height: 64rpx; padding: 0 16rpx; border-radius: 14rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); color: var(--rgm-ink); font-size: 22rpx; }
 
 </style>
 

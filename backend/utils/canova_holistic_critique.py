@@ -321,8 +321,16 @@ def build_canova_holistic_context(
 
     win_45_start = (act_date - timedelta(days=45)).isoformat()
     win_7_start = (act_date - timedelta(days=6)).isoformat()
+    act_date_next_iso = (act_date + timedelta(days=1)).isoformat()
     week_monday = act_date - timedelta(days=act_date.weekday())
     week_monday_iso = week_monday.isoformat()
+
+    if eff_canonical == uid_str:
+        uid_cond = "user_id = ?"
+        uid_params: tuple = (eff_canonical,)
+    else:
+        uid_cond = "(user_id = ? OR user_id = ?)"
+        uid_params = (eff_canonical, uid_str)
 
     acts_45d: List[Dict[str, Any]] = []
     health_7d: List[Dict[str, Any]] = []
@@ -338,17 +346,17 @@ def build_canova_holistic_context(
 
         try:
             cur.execute(
-                """
+                f"""
                 SELECT id, name, sport_type, start_time, distance_meters, moving_time_seconds,
                        elevation_gain_meters, avg_pace_str, average_heartrate, trimp, exclude_mode
                 FROM activities
-                WHERE (user_id = ? OR user_id = ?)
-                  AND substr(start_time, 1, 10) >= ?
-                  AND substr(start_time, 1, 10) <= ?
+                WHERE {uid_cond}
+                  AND start_time >= ?
+                  AND start_time < ?
                   AND COALESCE(exclude_mode, 'normal') != 'excluded'
                 ORDER BY start_time ASC
                 """,
-                (eff_canonical, uid_str, win_45_start, act_date_iso),
+                uid_params + (win_45_start, act_date_next_iso),
             )
             acts_45d = [dict(r) for r in cur.fetchall()]
         except Exception:
@@ -356,12 +364,12 @@ def build_canova_holistic_context(
 
         try:
             cur.execute(
-                """
+                f"""
                 SELECT * FROM daily_health
-                WHERE user_id = ? OR user_id = ?
+                WHERE {uid_cond}
                 ORDER BY date DESC LIMIT 20
                 """,
-                (eff_canonical, uid_str),
+                uid_params,
             )
             for hr_row in cur.fetchall():
                 d_str = str(hr_row["date"] or "")[:10]
@@ -374,8 +382,8 @@ def build_canova_holistic_context(
 
         try:
             cur.execute(
-                "SELECT weekly_target FROM goals WHERE user_id = ? OR user_id = ? LIMIT 1",
-                (eff_canonical, uid_str),
+                f"SELECT weekly_target FROM goals WHERE {uid_cond} LIMIT 1",
+                uid_params,
             )
             g_row = cur.fetchone()
             if g_row and g_row["weekly_target"] and float(g_row["weekly_target"]) > 0:
@@ -385,14 +393,14 @@ def build_canova_holistic_context(
 
         try:
             cur.execute(
-                """
+                f"""
                 SELECT id, title, start_date, end_date, target_race_name, target_date, goal_type, schedule_data
                 FROM training_plans
-                WHERE (user_id = ? OR user_id = ?) AND status IN ('active', 'published')
+                WHERE {uid_cond} AND status IN ('active', 'published')
                 ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC
                 LIMIT 5
                 """,
-                (eff_canonical, uid_str),
+                uid_params,
             )
             plan_rows = [dict(r) for r in cur.fetchall()]
         except Exception:
@@ -400,13 +408,13 @@ def build_canova_holistic_context(
 
         try:
             cur.execute(
-                """
+                f"""
                 SELECT name, race_type, race_date, target_time, priority, status, finish_time
                 FROM race_plans
-                WHERE (user_id = ? OR user_id = ?) AND race_date > ?
+                WHERE {uid_cond} AND race_date > ?
                 ORDER BY race_date ASC
                 """,
-                (eff_canonical, uid_str, act_date_iso),
+                uid_params + (act_date_iso,),
             )
             race_rows = [dict(r) for r in cur.fetchall()]
         except Exception:

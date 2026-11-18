@@ -11,6 +11,8 @@ import PacerClubRadarPanel from "@/components/PacerClubRadarPanel";
 import OrgManagementHub from "@/components/OrgManagementHub";
 import CaptainExecutiveCockpit from "@/components/web3/CaptainExecutiveCockpit";
 import BatchCritiqueCockpit from "@/components/web3/BatchCritiqueCockpit";
+import TargetedRecruitPanel from "@/components/community/TargetedRecruitPanel";
+import ShowcaseStudioModal from "@/components/community/ShowcaseStudioModal";
 import { supabase } from "@/lib/supabase";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
 import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
@@ -240,6 +242,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   const [allClubs, setAllClubs] = useState<any[]>([]);
   const [loadingAllClubs, setLoadingAllClubs] = useState(false);
   const [joiningClubId, setJoiningClubId] = useState<string | null>(null);
+  const [showcaseStudioMode, setShowcaseStudioMode] = useState<"club" | "coach" | null>(null);
+  const [inlineInviteClubId, setInlineInviteClubId] = useState<string | null>(null);
+  const [inlineInviteCode, setInlineInviteCode] = useState("");
 
   // Club Report states (Owner only)
   const [showReportModal, setShowReportModal] = useState(false);
@@ -3004,6 +3009,28 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     浏览全部跑团 ({allClubs.length})
                   </button>
                   <button
+                    onClick={() => router.push("/dashboard/plaza")}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-amber-300 rounded-2xl text-xs font-bold transition cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    选团与名帅展厅
+                  </button>
+                  <button
+                    onClick={() => router.push("/dashboard/discover")}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-sky-300 rounded-2xl text-xs font-bold transition cursor-pointer"
+                  >
+                    <Target className="w-4 h-4 text-sky-400" />
+                    六维寻搭子
+                  </button>
+                  {!currentClub?.is_virtual_unaffiliated && (
+                    <button
+                      onClick={() => router.push(`/dashboard/plaza?club_id=${encodeURIComponent(currentClub.id)}`)}
+                      className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition cursor-pointer"
+                    >
+                      🖼️ 本团宣传页
+                    </button>
+                  )}
+                  <button
                     onClick={() => setShowJoinModal(true)}
                     className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition shadow-sm"
                   >
@@ -3930,6 +3957,45 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               onSwitchToEvents={() => setActiveTab("events")}
               onSwitchToCoach={() => setActiveTab("coach")}
             />
+
+            {/* W13.4 跑团品牌宣传页装修台入口 */}
+            {!currentClub?.is_virtual_unaffiliated && (
+              <div className="bg-gradient-to-r from-[#FC4C02]/15 via-[#121215] to-[#18181c] border border-[#FC4C02]/30 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+                <div>
+                  <h2 className="text-base font-black text-white flex items-center gap-2">
+                    🖼️ 跑团品牌宣传页与合练照片墙装修台
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    设置跑团 Slogan、合练公园与排期、上传合练/赛场/证书大片；开启后发的每一封定向特邀函都将自带宣传页背书
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/dashboard/plaza?club_id=${encodeURIComponent(currentClub.id)}`)}
+                    className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white cursor-pointer"
+                  >
+                    预览对外主页 ›
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowcaseStudioMode("club")}
+                    className="px-4 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-500 text-white text-xs font-black cursor-pointer"
+                  >
+                    🎨 装修宣传页 & 传图
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* W12.1–W12.4 团长/教练多维靶向纳新与漏斗 */}
+            {!currentClub?.is_virtual_unaffiliated && user?.id && (
+              <TargetedRecruitPanel
+                clubId={currentClub.id}
+                clubName={currentClub.name}
+                operatorUid={user.id}
+              />
+            )}
             {/* Club Lifecycle & Status Management (Only Owner & Admin) */}
             {(currentRole === "owner" || user?.is_admin) && (
               <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-5 shadow-xl">
@@ -4564,9 +4630,18 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </span>
                 </button>
               </div>
-              <span className="text-[11px] text-zinc-400">
-                当前主控跑团：{currentClub?.name || "跑团"} · {sortedCoachStudents.length} 位学员
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-zinc-400">
+                  当前主控跑团：{currentClub?.name || "跑团"} · {sortedCoachStudents.length} 位学员
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowcaseStudioMode("coach")}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 text-xs font-bold cursor-pointer"
+                >
+                  🏅 编辑我的教练资历与相册
+                </button>
+              </div>
             </div>
 
             {coachViewMode === "critique" ? (
@@ -9512,7 +9587,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       </div>
                     </div>
 
-                    <div className="shrink-0">
+                    <div className="shrink-0 flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAllClubsModal(false);
+                          router.push(`/dashboard/plaza?club_id=${encodeURIComponent(club.id)}`);
+                        }}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                      >
+                        宣传页 ›
+                      </button>
                       {isCurrent ? (
                         <span className="text-xs text-[#FC4C02] font-bold px-3 py-1.5 bg-[#FC4C02]/10 rounded-xl">
                           正在查看
@@ -9528,14 +9613,42 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         >
                           切换查看
                         </button>
+                      ) : inlineInviteClubId === club.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={inlineInviteCode}
+                            onChange={(e) => setInlineInviteCode(e.target.value)}
+                            placeholder="6位邀请码"
+                            className="w-24 px-2.5 py-1.5 rounded-lg bg-[#121215] border border-amber-500/40 text-xs text-white uppercase"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (inlineInviteCode.trim()) {
+                                handleJoinClubDirect(club.id, inlineInviteCode.trim().toUpperCase());
+                                setInlineInviteClubId(null);
+                                setInlineInviteCode("");
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold cursor-pointer"
+                          >
+                            加入
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineInviteClubId(null)}
+                            className="px-2 py-1.5 text-xs text-zinc-400 cursor-pointer"
+                          >
+                            取消
+                          </button>
+                        </div>
                       ) : (
                         <button
                           onClick={() => {
                             if (club.join_mode === "invite") {
-                              const code = window.prompt(`跑团【${club.name}】已设置凭专属邀请码加入，请输入 6 位邀请码：`);
-                              if (code) {
-                                handleJoinClubDirect(club.id, code.trim().toUpperCase());
-                              }
+                              setInlineInviteClubId(club.id);
+                              setInlineInviteCode("");
                             } else {
                               handleJoinClubDirect(club.id);
                             }
@@ -9551,7 +9664,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                             ? "加入中..."
                             : club.join_mode === "invite"
                             ? "🔑 凭码加入"
-                            : "+ 自由加入"}
+                            : "+ 自由兼团"}
                         </button>
                       )}
                     </div>
@@ -10595,6 +10708,15 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
             </div>
           </div>
         </div>
+      )}
+      {showcaseStudioMode && user?.id && (
+        <ShowcaseStudioModal
+          open={Boolean(showcaseStudioMode)}
+          onClose={() => setShowcaseStudioMode(null)}
+          mode={showcaseStudioMode}
+          ownerId={showcaseStudioMode === "club" ? currentClub?.id || "" : user.id}
+          operatorUid={user.id}
+        />
       )}
     </div>
   );

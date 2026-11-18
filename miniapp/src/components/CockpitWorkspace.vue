@@ -167,6 +167,8 @@
             >
               {{ batchGenerating ? '生成中...' : '批量草案' }}
             </button>
+            <button class="cw-batch-pill" @click="navigateSub(`/pages/recruit/recruit?club_id=${encodeURIComponent(currentClub?.id || '')}`)">靶向纳新</button>
+            <button class="cw-batch-pill" @click="navigateSub('/pages/showcase/showcase?mode=coach_studio')">名帅主页</button>
           </view>
 
           <view class="cw-filter-strip">
@@ -3867,6 +3869,10 @@ watch(
 onBeforeUnmount(() => {
   setTabBarHidden(false, "cockpit_page");
 });
+
+function navigateSub(url: string) {
+  uni.navigateTo({ url });
+}
 </script>
 
 <style scoped>

@@ -11,6 +11,7 @@ import calendar
 import copy
 import math
 import re
+import threading
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, date, timedelta, timezone
 from utils.encryption import encrypt_pii, decrypt_pii, compute_age_group
@@ -43,6 +44,7 @@ class _Sqlite3Proxy:
         try:
             conn.execute("PRAGMA busy_timeout = 15000")
             conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA temp_store = MEMORY")
         except Exception:
             pass
         return conn
@@ -62,6 +64,43 @@ DB_PATH = os.environ.get("RGM_DB_PATH") or os.path.join(DB_DIR, "rgm.db")
 def db_connect(database: Optional[str] = None, *args, **kwargs):
     """Unified auto-closing SQLite connection helper with WAL/busy_timeout pragmas."""
     return sqlite3.connect(database or DB_PATH, *args, **kwargs)
+
+
+_UID_RESOLVE_LOCK = threading.Lock()
+_UID_RESOLVE_CACHE: Dict[Tuple[str, str], Tuple[str, float]] = {}
+_UID_RESOLVE_TTL_SECONDS = 60.0
+_UID_RESOLVE_CACHE_MAX = 8192
+
+
+def _invalidate_uid_cache(uid: Optional[str] = None) -> None:
+    """Clears cached canonical UID resolutions for the active DB_PATH (or a specific uid)."""
+    with _UID_RESOLVE_LOCK:
+        if not uid:
+            _UID_RESOLVE_CACHE.clear()
+            return
+        keys_to_drop = [
+            k for k, v in _UID_RESOLVE_CACHE.items()
+            if k[0] == DB_PATH and (k[1] == uid or v[0] == uid)
+        ]
+        for k in keys_to_drop:
+            _UID_RESOLVE_CACHE.pop(k, None)
+
+
+def _next_day_iso(day_str: str) -> str:
+    """Returns YYYY-MM-DD + 1 day for half-open indexed timestamp range queries."""
+    clean = str(day_str or "")[:10]
+    try:
+        return (date.fromisoformat(clean) + timedelta(days=1)).isoformat()
+    except Exception:
+        return f"{clean}\uffff"
+
+
+def _uid_sql_clause(col: str, canonical_uid: str, raw_uid: Optional[str] = None) -> Tuple[str, Tuple[str, ...]]:
+    """Builds `col = ?` when canonical == raw to keep ORDER BY index eligibility (avoids OR temp B-Tree)."""
+    c_str = str(canonical_uid)
+    if not raw_uid or str(raw_uid) == c_str:
+        return f"{col} = ?", (c_str,)
+    return f"{col} IN (?, ?)", (c_str, str(raw_uid))
 
 DEFAULT_ORG_PROGRAMS = [
     "中文EMBA",
@@ -140,10 +179,11 @@ def to_beijing_iso(dt_str: Optional[str]) -> Optional[str]:
         return dt.astimezone(_CN_TZ).isoformat(timespec="seconds")
     return s
 
-def _build_slim_route_preview(raw_track: Any) -> Optional[Dict[str, Any]]:
-    """Extracts a compact <=250-point polyline thumbnail (normalized to latitude/longitude + bounds) from full gps_track_data."""
+def _build_slim_route_preview(raw_track: Any, max_points: int = 250) -> Optional[Dict[str, Any]]:
+    """Extracts a compact <=max_points polyline thumbnail (normalized to latitude/longitude + bounds) from full gps_track_data."""
     if not raw_track:
         return None
+    max_pts = max(2, int(max_points or 250))
     parsed = raw_track
     if isinstance(raw_track, str):
         try:
@@ -153,6 +193,29 @@ def _build_slim_route_preview(raw_track: Any) -> Optional[Dict[str, Any]]:
     if isinstance(parsed, list):
         pts = parsed
     elif isinstance(parsed, dict):
+        # Fast path: precomputed route_preview_json already has normalized points, center, and bounds
+        pts_fast = parsed.get("points")
+        bounds_fast = parsed.get("bounds")
+        if (
+            set(parsed.keys()).issubset({"points", "center", "bounds"})
+            and isinstance(pts_fast, list)
+            and len(pts_fast) >= 2
+            and isinstance(bounds_fast, dict)
+            and "southwest" in bounds_fast
+            and "northeast" in bounds_fast
+            and isinstance(pts_fast[0], dict)
+            and "latitude" in pts_fast[0]
+            and "longitude" in pts_fast[0]
+        ):
+            if len(pts_fast) <= max_pts:
+                return parsed
+            step_fast = (len(pts_fast) - 1) / float(max_pts - 1)
+            sampled_fast = [pts_fast[int(round(i * step_fast))] for i in range(max_pts - 1)] + [pts_fast[-1]]
+            return {
+                "points": sampled_fast,
+                "center": parsed.get("center"),
+                "bounds": bounds_fast,
+            }
         pts = parsed.get("points") if parsed.get("points") is not None else parsed.get("route")
     else:
         return None
@@ -182,12 +245,11 @@ def _build_slim_route_preview(raw_track: Any) -> Optional[Dict[str, Any]]:
         return None
     try:
         from utils.geo_utils import smooth_sparse_stadium_track
-        smoothed = smooth_sparse_stadium_track(valid_pts, max_output_points=250)
+        smoothed = smooth_sparse_stadium_track(valid_pts, max_output_points=max_pts)
         if smoothed is not valid_pts and len(smoothed) >= 2:
             valid_pts = smoothed
     except Exception:
         pass
-    max_pts = 250
     if len(valid_pts) <= max_pts:
         sampled = valid_pts
     else:
@@ -859,6 +921,12 @@ def init_db():
             cursor.execute("ALTER TABLE club_events ADD COLUMN visibility_mode TEXT DEFAULT 'registered_only'")
         if "recap_note" not in event_cols:
             cursor.execute("ALTER TABLE club_events ADD COLUMN recap_note TEXT DEFAULT ''")
+        if "org_id" not in event_cols:
+            cursor.execute("ALTER TABLE club_events ADD COLUMN org_id TEXT DEFAULT NULL")
+        if "is_org_event" not in event_cols:
+            cursor.execute("ALTER TABLE club_events ADD COLUMN is_org_event INTEGER DEFAULT 0")
+        if "scope_club_ids" not in event_cols:
+            cursor.execute("ALTER TABLE club_events ADD COLUMN scope_club_ids TEXT DEFAULT 'all'")
 
         cursor.execute("PRAGMA table_info(club_event_participants)")
         ep_cols = {row[1] for row in cursor.fetchall()}
@@ -902,6 +970,25 @@ def init_db():
             cursor.execute("ALTER TABLE profiles ADD COLUMN history_skipped BOOLEAN DEFAULT 0")
         if "invited_by" not in p_cols:
             cursor.execute("ALTER TABLE profiles ADD COLUMN invited_by TEXT")
+        if "city" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN city TEXT DEFAULT ''")
+        if "running_landmarks" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN running_landmarks TEXT DEFAULT '[]'")
+        if "usual_time_slot" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN usual_time_slot TEXT DEFAULT ''")
+        if "looking_for_buddy" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN looking_for_buddy INTEGER DEFAULT 1")
+        if "allow_buddy_search_scope" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN allow_buddy_search_scope TEXT DEFAULT 'org_and_clubs'")
+        if "allow_club_search_scope" not in p_cols:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN allow_club_search_scope TEXT DEFAULT 'same_org'")
+        try:
+            cursor.execute("UPDATE profiles SET running_landmarks = '[]' WHERE running_landmarks IS NULL OR TRIM(running_landmarks) = ''")
+            cursor.execute("UPDATE profiles SET looking_for_buddy = 1 WHERE looking_for_buddy IS NULL")
+            cursor.execute("UPDATE profiles SET allow_buddy_search_scope = 'org_and_clubs' WHERE allow_buddy_search_scope IS NULL OR TRIM(allow_buddy_search_scope) = ''")
+            cursor.execute("UPDATE profiles SET allow_club_search_scope = 'same_org' WHERE allow_club_search_scope IS NULL OR TRIM(allow_club_search_scope) = ''")
+        except Exception:
+            pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_referrals (
@@ -1055,6 +1142,11 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_profiles_garmin ON profiles(garmin_email)",
             "CREATE INDEX IF NOT EXISTS idx_profiles_coros ON profiles(coros_account)",
             "CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email)",
+            "CREATE INDEX IF NOT EXISTS idx_profiles_display_name ON profiles(display_name)",
+            "CREATE INDEX IF NOT EXISTS idx_clubs_org_id ON clubs(org_id)",
+            "CREATE INDEX IF NOT EXISTS idx_club_events_club ON club_events(club_id, start_date DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_club_event_part_user ON club_event_participants(user_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_sys_notif_user_unread ON system_notifications(user_id, is_read, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_club_memberships_user ON club_memberships(user_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_club_memberships_club ON club_memberships(club_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id)",
@@ -1066,6 +1158,7 @@ def init_db():
                 cursor.execute(idx_sql)
             except Exception:
                 pass
+        _invalidate_uid_cache()
 
         # Phase 2: Cold/hot separation — migrate inline heavy gps_track_data blobs to activity_streams
         try:
@@ -1228,6 +1321,133 @@ def init_db():
             except Exception:
                 pass
 
+        # Phase 1-4 Community Social Pulse, 6D Buddy Discovery, Club/Coach Showcase & Targeted Recruitment
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS club_broadcasts (
+                id TEXT PRIMARY KEY,
+                club_id TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                category TEXT DEFAULT 'notice',
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                target_audience TEXT DEFAULT 'all',
+                linked_event_id TEXT DEFAULT NULL,
+                is_pinned INTEGER DEFAULT 1,
+                expires_at TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_club_broadcasts_club ON club_broadcasts(club_id, is_pinned, created_at DESC)")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS club_broadcast_receipts (
+                id TEXT PRIMARY KEY,
+                broadcast_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                ack_at TEXT NOT NULL,
+                UNIQUE(broadcast_id, user_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_receipts_bid ON club_broadcast_receipts(broadcast_id)")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pulse_micro_cheers (
+                id TEXT PRIMARY KEY,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                club_id TEXT DEFAULT '',
+                sender_id TEXT NOT NULL,
+                recipient_id TEXT NOT NULL,
+                cheer_key TEXT NOT NULL,
+                cheer_label TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(target_type, target_id, sender_id, cheer_key)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pulse_cheers_target ON pulse_micro_cheers(target_type, target_id)")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_follows (
+                id TEXT PRIMARY KEY,
+                follower_id TEXT NOT NULL,
+                followee_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(follower_id, followee_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows(follower_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_follows_followee ON user_follows(followee_id)")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS club_showcase_profiles (
+                club_id TEXT PRIMARY KEY,
+                slogan TEXT DEFAULT '',
+                hero_cover_url TEXT DEFAULT '',
+                style_tags TEXT DEFAULT '[]',
+                home_landmarks TEXT DEFAULT '[]',
+                schedule_summary TEXT DEFAULT '',
+                group_paces_json TEXT DEFAULT '[]',
+                highlights_md TEXT DEFAULT '',
+                is_published INTEGER DEFAULT 1,
+                updated_by TEXT DEFAULT '',
+                updated_at TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS coach_public_resumes (
+                user_id TEXT PRIMARY KEY,
+                headline TEXT DEFAULT '',
+                specialty_tags TEXT DEFAULT '[]',
+                certifications_json TEXT DEFAULT '[]',
+                bio_story TEXT DEFAULT '',
+                coaching_philosophy TEXT DEFAULT '',
+                featured_club_ids TEXT DEFAULT '[]',
+                accepting_runners INTEGER DEFAULT 1,
+                is_published INTEGER DEFAULT 1,
+                updated_at TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS showcase_photos (
+                id TEXT PRIMARY KEY,
+                owner_type TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                uploader_id TEXT NOT NULL,
+                photo_url TEXT NOT NULL,
+                category TEXT DEFAULT 'group_run',
+                caption TEXT DEFAULT '',
+                sort_order INTEGER DEFAULT 0,
+                is_cover INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_showcase_photos_owner ON showcase_photos(owner_type, owner_id, sort_order ASC, created_at DESC)")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS club_targeted_invites (
+                id TEXT PRIMARY KEY,
+                invite_token TEXT UNIQUE NOT NULL,
+                club_id TEXT NOT NULL,
+                inviter_id TEXT NOT NULL,
+                target_user_id TEXT DEFAULT NULL,
+                preassigned_group TEXT DEFAULT '',
+                reason_tag TEXT DEFAULT '',
+                custom_message TEXT DEFAULT '',
+                attach_showcase INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'sent',
+                viewed_at TEXT DEFAULT NULL,
+                responded_at TEXT DEFAULT NULL,
+                accepted_by_uid TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_targeted_invites_club ON club_targeted_invites(club_id, status, created_at DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_targeted_invites_target ON club_targeted_invites(target_user_id, status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_targeted_invites_token ON club_targeted_invites(invite_token)")
+
         conn.commit()
 
 init_db()
@@ -1255,6 +1475,59 @@ class LocalStore:
     RUNNING_SQL_FILTER = RUNNING_SQL_FILTER
     SUPER_ADMIN_UIDS = {"admin", "super_admin", "u_df65d9a588c9", "u_wx_0f769b6cfb"}
     VALID_CANOVA_CRITIQUE_VISIBILITY = ("self", "coach_mentor", "selected_clubs", "all_clubs")
+    VALID_BUDDY_SEARCH_SCOPES = ("org_and_clubs", "public", "none")
+    VALID_CLUB_SEARCH_SCOPES = ("same_org", "public", "none")
+
+    @staticmethod
+    def normalize_buddy_search_scope(val: Any) -> str:
+        s = str(val or "").strip().lower()
+        if s in ("org_and_clubs", "public", "none"):
+            return s
+        if s in ("same_org", "org", "clubs", "friends"):
+            return "org_and_clubs"
+        if s in ("off", "false", "closed", "private"):
+            return "none"
+        return "org_and_clubs"
+
+    @staticmethod
+    def normalize_club_search_scope(val: Any) -> str:
+        s = str(val or "").strip().lower()
+        if s in ("same_org", "public", "none"):
+            return s
+        if s in ("org", "org_and_clubs"):
+            return "same_org"
+        if s in ("off", "false", "closed", "private"):
+            return "none"
+        return "same_org"
+
+    @staticmethod
+    def parse_running_landmarks(val: Any) -> List[str]:
+        if val is None or val == "":
+            return []
+        items: Any = val
+        if isinstance(val, str):
+            raw_s = val.strip()
+            if not raw_s:
+                return []
+            if raw_s.startswith("["):
+                try:
+                    items = json.loads(raw_s)
+                except Exception:
+                    items = re.split(r"[,，、;/\n]+", raw_s)
+            else:
+                items = re.split(r"[,，、;/\n]+", raw_s)
+        if not isinstance(items, (list, tuple, set)):
+            return []
+        out: List[str] = []
+        seen = set()
+        for it in items:
+            lm = str(it or "").strip()[:24]
+            if lm and lm not in seen:
+                seen.add(lm)
+                out.append(lm)
+            if len(out) >= 8:
+                break
+        return out
 
     @staticmethod
     def normalize_canova_critique_visibility(val: Any) -> str:
@@ -1319,28 +1592,59 @@ class LocalStore:
             return True
         return False
     @staticmethod
+    def invalidate_uid_cache(uid: Optional[str] = None) -> None:
+        _invalidate_uid_cache(uid)
+
+    @staticmethod
     def resolve_user_id(uid: str) -> str:
-        """Resolves canonical user_id from profiles or merged user_identities."""
+        """Resolves canonical user_id from profiles or merged user_identities using indexed lookups + TTL cache."""
         if not uid:
             return uid
         if uid in ("u_wx_ac848a8f47", "u_wx_a9e9067fe2", "u_wx_fc10855228", "u_wx_220959b918", "u_wx_12dda0f9c1", "u_wx_ff680df8b5"):
             return "u_df65d9a588c9"
+
+        now_mono = time.monotonic()
+        cache_key = (DB_PATH, uid)
+        with _UID_RESOLVE_LOCK:
+            cached = _UID_RESOLVE_CACHE.get(cache_key)
+            if cached and (now_mono - cached[1]) < _UID_RESOLVE_TTL_SECONDS:
+                return cached[0]
+
+        resolved: Optional[str] = None
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (uid, uid, uid))
+            cursor.execute("SELECT id FROM profiles WHERE id = ? LIMIT 1", (uid,))
             row = cursor.fetchone()
             if row and row[0]:
-                return row[0]
-            try:
-                cursor.execute(
-                    "SELECT user_id FROM user_identities WHERE provider = 'merged_uid' AND provider_id = ?",
-                    (uid,),
-                )
-                merged_row = cursor.fetchone()
-                if merged_row and merged_row[0]:
-                    return merged_row[0]
-            except Exception:
-                pass
+                resolved = row[0]
+            else:
+                cursor.execute("SELECT id FROM profiles WHERE email = ? LIMIT 1", (uid,))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    resolved = row[0]
+                else:
+                    cursor.execute("SELECT id FROM profiles WHERE display_name = ? LIMIT 1", (uid,))
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        resolved = row[0]
+                    else:
+                        try:
+                            cursor.execute(
+                                "SELECT user_id FROM user_identities WHERE provider = 'merged_uid' AND provider_id = ? LIMIT 1",
+                                (uid,),
+                            )
+                            merged_row = cursor.fetchone()
+                            if merged_row and merged_row[0]:
+                                resolved = merged_row[0]
+                        except Exception:
+                            pass
+
+        if resolved:
+            with _UID_RESOLVE_LOCK:
+                if len(_UID_RESOLVE_CACHE) >= _UID_RESOLVE_CACHE_MAX:
+                    _UID_RESOLVE_CACHE.clear()
+                _UID_RESOLVE_CACHE[cache_key] = (resolved, now_mono)
+            return resolved
         return uid
 
     @staticmethod
@@ -1364,6 +1668,8 @@ class LocalStore:
                 (provider, clean_pid, user_id, now_iso),
             )
             conn.commit()
+        _invalidate_uid_cache(clean_pid)
+        _invalidate_uid_cache(user_id)
 
     @staticmethod
     def merge_user_profiles(
@@ -1527,6 +1833,7 @@ class LocalStore:
         finally:
             conn.close()
 
+        _invalidate_uid_cache()
         if merged_updates:
             LocalStore.upsert_profile(target_uid, merged_updates)
         return target_uid
@@ -1652,6 +1959,17 @@ class LocalStore:
         res["canova_critique_club_ids"] = LocalStore.parse_canova_critique_club_ids(
             res.get("canova_critique_club_ids")
         )
+        res["city"] = str(res.get("city") or "").strip()
+        res["running_landmarks"] = LocalStore.parse_running_landmarks(res.get("running_landmarks"))
+        res["usual_time_slot"] = str(res.get("usual_time_slot") or "").strip()
+        lfb_raw = res.get("looking_for_buddy")
+        res["looking_for_buddy"] = True if lfb_raw is None else bool(int(lfb_raw) if str(lfb_raw).isdigit() else lfb_raw)
+        res["allow_buddy_search_scope"] = LocalStore.normalize_buddy_search_scope(
+            res.get("allow_buddy_search_scope")
+        )
+        res["allow_club_search_scope"] = LocalStore.normalize_club_search_scope(
+            res.get("allow_club_search_scope")
+        )
         for f in ["id_card", "date_of_birth", "phone", "real_name"]:
             if f in res and res[f]:
                 res[f] = decrypt_pii(res[f])
@@ -1663,8 +1981,14 @@ class LocalStore:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM profiles WHERE id = ? OR email = ? OR display_name = ?", (eff_uid, eff_uid, eff_uid))
+            cursor.execute("SELECT * FROM profiles WHERE id = ? LIMIT 1", (eff_uid,))
             row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT * FROM profiles WHERE email = ? LIMIT 1", (eff_uid,))
+                row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT * FROM profiles WHERE display_name = ? LIMIT 1", (eff_uid,))
+                row = cursor.fetchone()
             if row:
                 d = dict(row)
                 d["garmin_connected"] = bool(d.get("garmin_connected"))
@@ -1829,6 +2153,7 @@ class LocalStore:
             cursor.execute("DELETE FROM organization_members WHERE user_id = ?", (uid,))
             cursor.execute("DELETE FROM activity_streams WHERE user_id = ?", (uid,))
             conn.commit()
+        _invalidate_uid_cache()
 
     @staticmethod
     def upsert_profile(uid: str, data: Dict[str, Any]):
@@ -1847,6 +2172,25 @@ class LocalStore:
                 LocalStore.parse_canova_critique_club_ids(data["canova_critique_club_ids"]),
                 ensure_ascii=False,
             )
+        if "running_landmarks" in data and data["running_landmarks"] is not None:
+            data["running_landmarks"] = json.dumps(
+                LocalStore.parse_running_landmarks(data["running_landmarks"]),
+                ensure_ascii=False,
+            )
+        if "allow_buddy_search_scope" in data and data["allow_buddy_search_scope"] is not None:
+            data["allow_buddy_search_scope"] = LocalStore.normalize_buddy_search_scope(
+                data["allow_buddy_search_scope"]
+            )
+        if "allow_club_search_scope" in data and data["allow_club_search_scope"] is not None:
+            data["allow_club_search_scope"] = LocalStore.normalize_club_search_scope(
+                data["allow_club_search_scope"]
+            )
+        if "looking_for_buddy" in data and data["looking_for_buddy"] is not None:
+            data["looking_for_buddy"] = 1 if bool(data["looking_for_buddy"]) else 0
+        if "city" in data and data["city"] is not None:
+            data["city"] = str(data["city"]).strip()[:32]
+        if "usual_time_slot" in data and data["usual_time_slot"] is not None:
+            data["usual_time_slot"] = str(data["usual_time_slot"]).strip()[:32]
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -1886,6 +2230,7 @@ class LocalStore:
                 placeholders = ["?"] * len(cols)
                 cursor.execute(f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({', '.join(placeholders)})", list(valid_data.values()))
             conn.commit()
+        _invalidate_uid_cache()
 
         # Synchronize relevant runner credentials to any organizations joined
         org_sync_keys = {"real_name", "gender", "date_of_birth", "phone", "id_card", "class_name",
@@ -2100,9 +2445,22 @@ class LocalStore:
                 logger.warning(f"Canova critique push notification failed: {pe}")
 
     @staticmethod
-    def get_recent_activities(uid: str, limit: int = 15, include_splits: bool = True) -> List[Dict[str, Any]]:
+    def get_recent_activities(
+        uid: str,
+        limit: int = 15,
+        include_splits: bool = True,
+        include_critiques: bool = True,
+        include_route_preview: bool = True,
+        profile: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         split_cols = ", laps_data, splits_data, segment_analysis_json" if include_splits else ""
+        route_col = (
+            "COALESCE(route_preview_json, gps_track_data) AS gps_track_data"
+            if include_route_preview
+            else "NULL AS gps_track_data"
+        )
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -2113,21 +2471,23 @@ class LocalStore:
                        average_heartrate, max_heartrate, average_cadence, avg_pace_str,
                        calories, aerobic_training_effect, anaerobic_training_effect, trimp,
                        ai_journal, map_image_url, exclude_mode, has_gps_track,
-                       COALESCE(route_preview_json, gps_track_data) AS gps_track_data{split_cols}
+                       {route_col}{split_cols}
                 FROM activities
-                WHERE user_id = ? OR user_id = ?
+                WHERE {uid_cond}
                 ORDER BY start_time DESC
                 LIMIT ?
                 """,
-                (canonical_uid, uid, limit),
+                (*uid_params, limit),
             )
             rows = [dict(r) for r in cursor.fetchall()]
 
-        profile = LocalStore.get_profile(canonical_uid) or {}
+        if profile is None:
+            profile = LocalStore.get_profile(canonical_uid) or {}
         rest_hr = float(profile.get("resting_heart_rate") or 58.0)
         max_hr = float(profile.get("max_heart_rate") or 190.0)
         from utils.running_metrics import calculate_workout_effective_vdot
 
+        pending_critique_updates: List[Tuple[str, str]] = []
         for r in rows:
             r["exclude_mode"] = r.get("exclude_mode") or "normal"
             if r["exclude_mode"] == "normal" and LocalStore.is_running_activity(r.get("sport_type")):
@@ -2142,7 +2502,21 @@ class LocalStore:
             else:
                 r["workout_effective_vdot"] = None
 
-            LocalStore._heal_stale_activity_critique(r, profile)
+            if include_critiques:
+                LocalStore._heal_stale_activity_critique(
+                    r, profile, pending_updates=pending_critique_updates
+                )
+
+        if pending_critique_updates:
+            try:
+                with sqlite3.connect(DB_PATH) as c_upd:
+                    c_upd.executemany(
+                        "UPDATE activities SET ai_journal = ? WHERE id = ?",
+                        pending_critique_updates,
+                    )
+                    c_upd.commit()
+            except Exception as u_ex:
+                logger.warning(f"Batch critique persist in get_recent_activities skipped: {u_ex}")
 
         return rows
 
@@ -2252,20 +2626,23 @@ class LocalStore:
             return 4.5
 
         try:
+            uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
+            act_day = act_date[:10]
+            act_next_day = _next_day_iso(act_day)
             with sqlite3.connect(DB_PATH) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
                 # 1. Check user's preset race_plans on act_date
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, name, race_type, race_date, target_time, race_info
                     FROM race_plans
-                    WHERE (user_id = ? OR user_id = ?)
-                      AND substr(race_date, 1, 10) = ?
+                    WHERE {uid_cond}
+                      AND race_date >= ? AND race_date < ?
                     ORDER BY priority ASC, created_at DESC
                     """,
-                    (canonical_uid, uid, act_date[:10]),
+                    (*uid_params, act_day, act_next_day),
                 )
                 for r in cursor.fetchall():
                     rdict = dict(r)
@@ -2290,15 +2667,15 @@ class LocalStore:
 
                 # 2. Check active/published training_plans for scheduled workout or race day
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, title, goal_type, target_race_id, target_race_name, target_date, status, schedule_data
                     FROM training_plans
-                    WHERE (user_id = ? OR user_id = ?)
+                    WHERE {uid_cond}
                       AND status IN ('active', 'published')
                     ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC
                     LIMIT 5
                     """,
-                    (canonical_uid, uid),
+                    uid_params,
                 )
                 for row in cursor.fetchall():
                     p_row = dict(row)
@@ -2489,18 +2866,19 @@ class LocalStore:
         - Physiological status & injury risk warnings
         """
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         today = get_beijing_today()
         start_date = today - timedelta(days=days)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT start_time, distance_meters, moving_time_seconds, average_heartrate, trimp, exclude_mode
                 FROM activities
-                WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                WHERE {uid_cond} AND start_time >= ?
                   AND COALESCE(exclude_mode, 'normal') != 'excluded'
                 ORDER BY start_time ASC
-            """, (canonical_uid, uid, start_date.isoformat()))
+            """, (*uid_params, start_date.isoformat()))
             rows = [dict(r) for r in cursor.fetchall()]
 
         profile = LocalStore.get_profile(uid) or {}
@@ -2602,7 +2980,40 @@ class LocalStore:
             return float(res[0]) if res and res[0] is not None else 0.0
 
     @staticmethod
-    def get_month_activities(uid: str, year: Optional[int] = None, month: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_month_activities_summary(uid: str, year: Optional[int] = None, month: Optional[int] = None) -> Dict[str, Any]:
+        """Fast aggregate count and distance_meters for a calendar month without fetching row blobs."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        today = get_beijing_today()
+        target_year = year or today.year
+        target_month = month or today.month
+        start_date = f"{target_year:04d}-{target_month:02d}-01"
+        end_date = f"{target_year + 1:04d}-01-01" if target_month == 12 else f"{target_year:04d}-{target_month + 1:02d}-01"
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT COUNT(*), COALESCE(SUM(distance_meters), 0.0)
+                FROM activities
+                WHERE user_id = ? AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
+                """,
+                (canonical_uid, start_date, end_date),
+            )
+            row = cursor.fetchone()
+        cnt = int(row[0] or 0) if row else 0
+        dist_m = float(row[1] or 0.0) if row else 0.0
+        return {"total_count": cnt, "total_km": round(dist_m / 1000.0, 1), "total_meters": dist_m}
+
+    @staticmethod
+    def get_month_activities(
+        uid: str,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        limit: Optional[int] = None,
+        include_critiques: bool = True,
+        include_route_preview: bool = True,
+        profile: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(uid)
         today = get_beijing_today()
         target_year = year or today.year
@@ -2614,6 +3025,16 @@ class LocalStore:
         else:
             end_date = f"{target_year:04d}-{target_month + 1:02d}-01"
 
+        route_col = (
+            "COALESCE(route_preview_json, gps_track_data) AS gps_track_data"
+            if include_route_preview
+            else "NULL AS gps_track_data"
+        )
+        limit_clause = "LIMIT ?" if limit is not None and int(limit) > 0 else ""
+        sql_params: List[Any] = [canonical_uid, start_date, end_date]
+        if limit_clause:
+            sql_params.append(int(limit))
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -2623,20 +3044,22 @@ class LocalStore:
                        average_heartrate, max_heartrate, average_cadence, avg_pace_str,
                        calories, aerobic_training_effect, anaerobic_training_effect, trimp,
                        ai_journal, map_image_url, exclude_mode, has_gps_track,
-                       COALESCE(route_preview_json, gps_track_data) AS gps_track_data
+                       {route_col}
                 FROM activities 
                 WHERE user_id = ? AND start_time >= ? AND start_time < ? 
                   AND {RUNNING_SQL_FILTER}
                 ORDER BY start_time DESC
-            """, (canonical_uid, start_date, end_date))
+                {limit_clause}
+            """, sql_params)
             rows = [dict(r) for r in cursor.fetchall()]
 
-        profile = LocalStore.get_profile(canonical_uid) or {}
+        if profile is None:
+            profile = LocalStore.get_profile(canonical_uid) or {}
         rest_hr = float(profile.get("resting_heart_rate") or 58.0)
         max_hr = float(profile.get("max_heart_rate") or 190.0)
         from utils.running_metrics import calculate_workout_effective_vdot
 
-        # Generate Canova critiques in memory (no write-on-GET) and workout_effective_vdot
+        pending_critique_updates: List[Tuple[str, str]] = []
         for r in rows:
             r["exclude_mode"] = r.get("exclude_mode") or "normal"
             if r["exclude_mode"] == "normal" and LocalStore.is_running_activity(r.get("sport_type")):
@@ -2651,13 +3074,32 @@ class LocalStore:
             else:
                 r["workout_effective_vdot"] = None
 
-            LocalStore._heal_stale_activity_critique(r, profile)
+            if include_critiques:
+                LocalStore._heal_stale_activity_critique(
+                    r, profile, pending_updates=pending_critique_updates
+                )
+
+        if pending_critique_updates:
+            try:
+                with sqlite3.connect(DB_PATH) as c_upd:
+                    c_upd.executemany(
+                        "UPDATE activities SET ai_journal = ? WHERE id = ?",
+                        pending_critique_updates,
+                    )
+                    c_upd.commit()
+            except Exception as u_ex:
+                logger.warning(f"Batch critique persist in get_month_activities skipped: {u_ex}")
 
         return rows
 
     @staticmethod
-    def get_weekly_stats(uid: str, target_km: Optional[float] = None) -> Dict[str, Any]:
+    def get_weekly_stats(
+        uid: str,
+        target_km: Optional[float] = None,
+        goal_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             today = get_beijing_today()
@@ -2669,7 +3111,7 @@ class LocalStore:
             next_monday_iso = (sunday + timedelta(days=1)).isoformat()
 
             # 1. Resolve weekly target distance (current started week is locked; next week is editable)
-            g_info = LocalStore.get_goal(canonical_uid)
+            g_info = goal_info if goal_info is not None else LocalStore.get_goal(canonical_uid)
             next_monday = sunday + timedelta(days=1)
             next_sunday = next_monday + timedelta(days=6)
             next_iso_year, next_iso_week, _ = next_monday.isocalendar()
@@ -2682,33 +3124,24 @@ class LocalStore:
                     target_km = 50.0
             next_week_target_km = float(g_info.get("next_weekly_target") or g_info.get("weekly_target") or target_km)
 
-            # 2. Total week distance & runs
+            # 2. Total week distance & runs + daily breakdown in a single query
+            day_names = ["一", "二", "三", "四", "五", "六", "日"]
             cursor.execute(f"""
-                SELECT SUM(distance_meters), COUNT(id)
+                SELECT substr(start_time, 1, 10) as act_date, SUM(distance_meters), COUNT(id)
                 FROM activities
-                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                WHERE {uid_cond} AND start_time >= ? AND start_time < ?
                   AND {RUNNING_SQL_FILTER}
-            """, (canonical_uid, uid, monday_iso, next_monday_iso))
-            res = cursor.fetchone()
-            week_m = float(res[0]) if res and res[0] is not None else 0.0
-            week_runs = int(res[1]) if res and res[1] is not None else 0
+                GROUP BY substr(start_time, 1, 10)
+            """, (*uid_params, monday_iso, next_monday_iso))
+            daily_map = { row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in cursor.fetchall() }
+            week_m = sum(v[0] for v in daily_map.values())
+            week_runs = sum(v[1] for v in daily_map.values())
             current_week_km = round(week_m / 1000.0, 1)
 
             progress_pct = round((current_week_km / target_km) * 100, 1) if target_km > 0 else 0.0
             remaining_km = max(0.0, round(target_km - current_week_km, 1))
             days_left = max(1, 7 - weekday)  # remaining days in current week including today
             daily_req = round(remaining_km / days_left, 1)
-
-            # 3. Daily breakdown Mon-Sun
-            day_names = ["一", "二", "三", "四", "五", "六", "日"]
-            cursor.execute(f"""
-                SELECT substr(start_time, 1, 10) as act_date, SUM(distance_meters), COUNT(id)
-                FROM activities
-                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
-                  AND {RUNNING_SQL_FILTER}
-                GROUP BY substr(start_time, 1, 10)
-            """, (canonical_uid, uid, monday_iso, next_monday_iso))
-            daily_map = { row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in cursor.fetchall() }
 
             daily_breakdown = []
             for d_idx in range(7):
@@ -2728,7 +3161,7 @@ class LocalStore:
                 })
 
             iso_year, iso_week, _ = today.isocalendar()
-            today_workout = LocalStore.get_today_workout(uid)
+            today_workout = LocalStore.get_today_workout(canonical_uid, cursor=cursor)
             return {
                 "week_number": iso_week,
                 "week_label": f"第{iso_week}周 ({monday.strftime('%m/%d')}~{sunday.strftime('%m/%d')})",
@@ -2752,12 +3185,17 @@ class LocalStore:
             }
 
     @staticmethod
-    def get_today_workout(uid: str) -> Optional[Dict[str, Any]]:
+    def get_today_workout(
+        uid: str,
+        cursor: Optional[sqlite3.Cursor] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Retrieves today's scheduled workout from the runner's active periodized training plan.
         """
         canonical_uid = LocalStore.resolve_user_id(uid)
-        plan = LocalStore.get_user_active_training_plan(canonical_uid, reconcile=False)
+        plan = LocalStore.get_user_active_training_plan(
+            canonical_uid, reconcile=False, cursor=cursor
+        )
         if not plan:
             return None
 
@@ -2812,6 +3250,7 @@ class LocalStore:
     @staticmethod
     def get_monthly_trend(uid: str, num_months: int = 6) -> Dict[str, Any]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         today = get_beijing_today()
         months = []
         for i in range(num_months - 1, -1, -1):
@@ -2833,11 +3272,11 @@ class LocalStore:
                 f"""
                 SELECT substr(start_time, 1, 7) AS ym, COALESCE(SUM(distance_meters), 0.0), COUNT(id)
                 FROM activities
-                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                WHERE {uid_cond} AND start_time >= ? AND start_time < ?
                   AND {RUNNING_SQL_FILTER}
                 GROUP BY substr(start_time, 1, 7)
                 """,
-                (canonical_uid, uid, range_start, range_end),
+                (*uid_params, range_start, range_end),
             )
             agg_map = {str(r[0]): (float(r[1] or 0.0), int(r[2] or 0)) for r in cursor.fetchall()}
 
@@ -2868,8 +3307,13 @@ class LocalStore:
         }
 
     @staticmethod
-    def get_yearly_stats(uid: str, year: Optional[int] = None) -> Dict[str, Any]:
+    def get_yearly_stats(
+        uid: str,
+        year: Optional[int] = None,
+        goal_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         today = get_beijing_today()
         eff_year = int(year) if year else today.year
         start_iso = f"{eff_year:04d}-01-01"
@@ -2884,26 +3328,33 @@ class LocalStore:
                        COALESCE(SUM(distance_meters), 0.0) AS dist_m,
                        COUNT(id) AS run_cnt
                 FROM activities
-                WHERE (user_id = ? OR user_id = ?) AND start_time >= ? AND start_time < ?
+                WHERE {uid_cond} AND start_time >= ? AND start_time < ?
                   AND {RUNNING_SQL_FILTER}
                 GROUP BY CAST(substr(start_time, 6, 2) AS INTEGER)
                 """,
-                (canonical_uid, uid, start_iso, end_iso),
+                (*uid_params, start_iso, end_iso),
             )
             month_agg = {int(r["m_num"]): (float(r["dist_m"] or 0.0), int(r["run_cnt"] or 0)) for r in cursor.fetchall() if r["m_num"]}
 
             target_year_km = 2400.0
-            cursor.execute("SELECT monthly_targets, target_distance FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
-            g_row = cursor.fetchone()
-            if g_row:
-                try:
-                    targets = json.loads(g_row["monthly_targets"]) if g_row["monthly_targets"] else None
-                    if isinstance(targets, list) and len(targets) > 0:
-                        target_year_km = sum(float(t) for t in targets)
-                    elif g_row["target_distance"]:
-                        target_year_km = float(g_row["target_distance"]) * 12.0
-                except Exception:
-                    pass
+            if goal_info is not None:
+                mt = goal_info.get("monthly_targets")
+                if isinstance(mt, list) and len(mt) > 0:
+                    target_year_km = sum(float(t) for t in mt)
+                elif goal_info.get("target_distance"):
+                    target_year_km = float(goal_info["target_distance"]) * 12.0
+            else:
+                cursor.execute(f"SELECT monthly_targets, target_distance FROM goals WHERE {uid_cond}", uid_params)
+                g_row = cursor.fetchone()
+                if g_row:
+                    try:
+                        targets = json.loads(g_row["monthly_targets"]) if g_row["monthly_targets"] else None
+                        if isinstance(targets, list) and len(targets) > 0:
+                            target_year_km = sum(float(t) for t in targets)
+                        elif g_row["target_distance"]:
+                            target_year_km = float(g_row["target_distance"]) * 12.0
+                    except Exception:
+                        pass
 
         total_m = sum(v[0] for v in month_agg.values())
         total_runs = sum(v[1] for v in month_agg.values())
@@ -2947,6 +3398,162 @@ class LocalStore:
                 "distance_km": best_month_km,
             },
             "monthly_breakdown": monthly_breakdown,
+        }
+
+    @staticmethod
+    def get_dashboard_period_stats_bundle(
+        uid: str,
+        year: Optional[int] = None,
+        num_months: int = 6,
+        goal_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Single-connection, single-query bundle computing monthly_trend, yearly_stats, and current month_summary."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
+        today = get_beijing_today()
+        eff_year = int(year) if year else today.year
+
+        months = []
+        for i in range(num_months - 1, -1, -1):
+            m = today.month - i
+            y = today.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            months.append((y, m))
+
+        first_y, first_m = months[0]
+        last_y, last_m = months[-1]
+        trend_start = f"{first_y:04d}-{first_m:02d}-01"
+        trend_end = f"{(last_y + 1 if last_m == 12 else last_y):04d}-{(1 if last_m == 12 else last_m + 1):02d}-01"
+        year_start = f"{eff_year:04d}-01-01"
+        year_end = f"{eff_year + 1:04d}-01-01"
+        cur_ym_key = f"{today.year:04d}-{today.month:02d}"
+        cur_m_start = f"{cur_ym_key}-01"
+        cur_m_end = f"{(today.year + 1 if today.month == 12 else today.year):04d}-{(1 if today.month == 12 else today.month + 1):02d}-01"
+
+        overall_start = min(trend_start, year_start, cur_m_start)
+        overall_end = max(trend_end, year_end, cur_m_end)
+
+        target_year_km = 2400.0
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT substr(start_time, 1, 7) AS ym,
+                       COALESCE(SUM(distance_meters), 0.0) AS dist_m,
+                       COUNT(id) AS run_cnt
+                FROM activities
+                WHERE {uid_cond} AND start_time >= ? AND start_time < ?
+                  AND {RUNNING_SQL_FILTER}
+                GROUP BY substr(start_time, 1, 7)
+                """,
+                (*uid_params, overall_start, overall_end),
+            )
+            ym_map = {
+                str(r["ym"]): (float(r["dist_m"] or 0.0), int(r["run_cnt"] or 0))
+                for r in cursor.fetchall()
+                if r["ym"]
+            }
+
+            if goal_info is not None:
+                mt = goal_info.get("monthly_targets")
+                if isinstance(mt, list) and len(mt) > 0:
+                    target_year_km = sum(float(t) for t in mt)
+                elif goal_info.get("target_distance"):
+                    target_year_km = float(goal_info["target_distance"]) * 12.0
+            else:
+                cursor.execute(f"SELECT monthly_targets, target_distance FROM goals WHERE {uid_cond}", uid_params)
+                g_row = cursor.fetchone()
+                if g_row:
+                    try:
+                        targets = json.loads(g_row["monthly_targets"]) if g_row["monthly_targets"] else None
+                        if isinstance(targets, list) and len(targets) > 0:
+                            target_year_km = sum(float(t) for t in targets)
+                        elif g_row["target_distance"]:
+                            target_year_km = float(g_row["target_distance"]) * 12.0
+                    except Exception:
+                        pass
+
+        # 1. monthly_trend
+        trend = []
+        for (y, m) in months:
+            dist_m, count = ym_map.get(f"{y:04d}-{m:02d}", (0.0, 0))
+            trend.append({
+                "month_label": f"{y}/{m}月",
+                "year": y,
+                "month": m,
+                "distance_km": round(dist_m / 1000.0, 1),
+                "count": count,
+                "is_current": (y == today.year and m == today.month),
+            })
+        cur_km = trend[-1]["distance_km"] if trend else 0.0
+        prev_km = trend[-2]["distance_km"] if len(trend) >= 2 else 0.0
+        pct_change = round(((cur_km - prev_km) / prev_km) * 100, 1) if prev_km > 0 else 0.0
+        monthly_trend = {
+            "trend": trend,
+            "current_month_km": cur_km,
+            "prev_month_km": prev_km,
+            "pct_change": pct_change,
+            "recent_3_months": trend[-3:] if len(trend) >= 3 else trend,
+        }
+
+        # 2. yearly_stats
+        month_agg = {
+            m: ym_map.get(f"{eff_year:04d}-{m:02d}", (0.0, 0))
+            for m in range(1, 13)
+        }
+        total_m = sum(v[0] for v in month_agg.values())
+        total_runs = sum(v[1] for v in month_agg.values())
+        total_km = round(total_m / 1000.0, 1)
+        passed_months = today.month if eff_year == today.year else (12 if eff_year < today.year else 1)
+        avg_monthly_km = round(total_km / max(1, passed_months), 1)
+        projected_year_km = round(avg_monthly_km * 12, 1)
+        y_progress_pct = round((total_km / target_year_km) * 100, 1) if target_year_km > 0 else 0.0
+
+        best_month_name = f"{today.month if eff_year == today.year else 1}月"
+        best_month_km = 0.0
+        monthly_breakdown = []
+        for m in range(1, 13):
+            m_dist, m_count = month_agg.get(m, (0.0, 0))
+            m_km = round(m_dist / 1000.0, 1)
+            if m_km > best_month_km:
+                best_month_km = m_km
+                best_month_name = f"{m}月"
+            monthly_breakdown.append({
+                "month": m,
+                "month_label": f"{m}月",
+                "distance_km": m_km,
+                "runs_count": m_count,
+                "is_current": (eff_year == today.year and m == today.month),
+                "is_past": (eff_year < today.year or (eff_year == today.year and m <= today.month)),
+            })
+        yearly_stats = {
+            "year": eff_year,
+            "total_km": total_km,
+            "total_runs": total_runs,
+            "avg_monthly_km": avg_monthly_km,
+            "projected_year_km": projected_year_km,
+            "target_year_km": target_year_km,
+            "monthly_target_km": round(target_year_km / 12, 1),
+            "progress_pct": y_progress_pct,
+            "best_month": {"name": best_month_name, "distance_km": best_month_km},
+            "monthly_breakdown": monthly_breakdown,
+        }
+
+        # 3. month_summary
+        cur_m_dist, cur_m_cnt = ym_map.get(cur_ym_key, (0.0, 0))
+        month_summary = {
+            "total_count": cur_m_cnt,
+            "total_km": round(cur_m_dist / 1000.0, 1),
+            "total_meters": cur_m_dist,
+        }
+
+        return {
+            "monthly_trend": monthly_trend,
+            "yearly_stats": yearly_stats,
+            "month_summary": month_summary,
         }
 
     @staticmethod
@@ -3106,7 +3713,14 @@ class LocalStore:
         if profile is None:
             profile = LocalStore.get_profile(canonical_uid) or {}
         if recent_acts is None:
-            recent_acts = LocalStore.get_recent_activities(canonical_uid, limit=15) or []
+            recent_acts = LocalStore.get_recent_activities(
+                canonical_uid,
+                limit=15,
+                include_splits=False,
+                include_critiques=False,
+                include_route_preview=False,
+                profile=profile,
+            ) or []
         if health_row is None and health_rows_14d is None:
             health_row = LocalStore.get_latest_health(canonical_uid)
         elif health_row is not None:
@@ -3358,6 +3972,102 @@ class LocalStore:
             return trend
 
     @staticmethod
+    def get_health_bundle_30d(uid: str) -> Dict[str, Any]:
+        """Single-connection bundle returning latest_health (2d), rows_14d, has_older_history, and trend_30d."""
+        canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
+        today_bj = get_beijing_today()
+        cutoff_recent = (today_bj - timedelta(days=2)).isoformat()
+        cutoff_14d = (today_bj - timedelta(days=13)).isoformat()
+        cutoff_5d = (today_bj - timedelta(days=4)).isoformat()
+        cutoff_30d = (today_bj - timedelta(days=30)).isoformat()
+
+        rows: List[sqlite3.Row] = []
+        has_older_history = False
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT * FROM daily_health
+                WHERE {uid_cond} AND date >= ?
+                ORDER BY date DESC
+                """,
+                (*uid_params, cutoff_30d),
+            )
+            rows = cursor.fetchall()
+            has_older_history = any(
+                str(r["date"] or "")[:10] <= cutoff_5d for r in rows if r
+            )
+            if not has_older_history:
+                cursor.execute(
+                    f"""
+                    SELECT 1 FROM daily_health
+                    WHERE {uid_cond} AND date <= ?
+                    LIMIT 1
+                    """,
+                    (*uid_params, cutoff_5d),
+                )
+                has_older_history = cursor.fetchone() is not None
+
+        sanitized_pairs = [
+            (r["date"], LocalStore.sanitize_daily_health_row(dict(r)))
+            for r in rows
+            if r
+        ]
+        latest_health: Optional[Dict[str, Any]] = None
+        for d_val, san in sanitized_pairs:
+            if san and str(d_val or san.get("date") or "")[:10] >= cutoff_recent:
+                latest_health = san
+                break
+
+        rows_14d = [
+            san
+            for d_val, san in sanitized_pairs
+            if san and str(d_val or san.get("date") or "")[:10] >= cutoff_14d
+        ]
+
+        trend_30d: List[Dict[str, Any]] = []
+        if sanitized_pairs:
+            existing_map = {
+                str(d_val): (san or {})
+                for d_val, san in sanitized_pairs
+                if d_val is not None
+            }
+            for i in range(29, -1, -1):
+                d = today_bj - timedelta(days=i)
+                d_str = d.isoformat()
+                if d_str in existing_map:
+                    item = existing_map[d_str]
+                    rhr = item.get("resting_heart_rate")
+                    hrv = item.get("hrv_last_night_avg")
+                    hrv_wk = item.get("hrv_weekly_avg")
+                    bb = item.get("body_battery_max")
+                    sleep_score = item.get("sleep_score")
+                    vo2_m = item.get("vo2_max")
+                    trend_30d.append({
+                        "date": d_str,
+                        "date_label": d.strftime("%m-%d"),
+                        "resting_heart_rate": int(rhr) if rhr is not None else None,
+                        "hrv": int(hrv) if hrv is not None else None,
+                        "hrv_last_night_avg": int(hrv) if hrv is not None else None,
+                        "hrv_weekly_avg": int(hrv_wk) if hrv_wk is not None else None,
+                        "body_battery": int(bb) if bb is not None else None,
+                        "body_battery_max": int(bb) if bb is not None else None,
+                        "sleep_score": int(sleep_score) if sleep_score is not None else None,
+                        "vo2_max": float(vo2_m) if vo2_m is not None else None,
+                        "sleep_duration_hours": float(item.get("sleep_duration_hours")) if item.get("sleep_duration_hours") is not None else None,
+                        "sleep_duration_seconds": int(item.get("sleep_duration_seconds")) if item.get("sleep_duration_seconds") is not None else None,
+                    })
+
+        return {
+            "latest_health": latest_health,
+            "rows_14d": rows_14d,
+            "has_older_history": has_older_history,
+            "trend_30d": trend_30d,
+        }
+
+    @staticmethod
     def _format_goal_dict(row_dict: Optional[Dict[str, Any]], today: Optional[date] = None) -> Dict[str, Any]:
         eff_today = today or get_beijing_today()
         cur_monday = eff_today - timedelta(days=eff_today.weekday())
@@ -3424,14 +4134,25 @@ class LocalStore:
         }
 
     @staticmethod
-    def get_goal(uid: str) -> Dict[str, Any]:
+    def get_goal(
+        uid: str,
+        unread_notif_out: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         today = get_beijing_today()
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, uid))
+            cursor.execute(f"SELECT * FROM goals WHERE {uid_cond}", uid_params)
             row = cursor.fetchone()
+            if unread_notif_out is not None:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM system_notifications WHERE user_id = ? AND is_read = 0",
+                    (canonical_uid,),
+                )
+                n_row = cursor.fetchone()
+                unread_notif_out.append(int((n_row[0] or 0) if n_row else 0))
         return LocalStore._format_goal_dict(dict(row) if row else None, today=today)
 
     @staticmethod
@@ -3555,10 +4276,11 @@ class LocalStore:
     @staticmethod
     def get_race_plans(uid: str) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM race_plans WHERE user_id = ? OR user_id = ? ORDER BY race_date ASC", (canonical_uid, uid))
+            cursor.execute(f"SELECT * FROM race_plans WHERE {uid_cond} ORDER BY race_date ASC", uid_params)
             rows = cursor.fetchall()
             plans = []
             seen = set()
@@ -4235,13 +4957,16 @@ class LocalStore:
     upsert_user = lambda uid, data: LocalStore.upsert_profile(uid, data)
 
     @staticmethod
-    def get_user_clubs(uid: str) -> List[Dict[str, Any]]:
+    def get_user_clubs(
+        uid: str,
+        preloaded_org_status: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         eff_uid = LocalStore.resolve_user_id(uid)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT c.*, o.name as org_name, m.role, m.joined_at, m.privacy_consent
+                SELECT c.*, o.name as org_name, o.settings as org_settings, m.role, m.joined_at, m.privacy_consent
                 FROM club_memberships m
                 JOIN clubs c ON m.club_id = c.id
                 LEFT JOIN organizations o ON c.org_id = o.id
@@ -4250,10 +4975,24 @@ class LocalStore:
             """, (eff_uid,))
             rows = cursor.fetchall()
             clubs = [dict(r) for r in rows]
+            rules_by_org: Dict[str, List[Dict[str, Any]]] = {}
             visible_clubs = []
             for c in clubs:
-                if c.get("org_id"):
-                    st = LocalStore.check_org_member_status(c["org_id"], eff_uid)
+                org_settings_str = c.pop("org_settings", None)
+                org_id = c.get("org_id")
+                if org_id:
+                    if preloaded_org_status is not None and org_id in preloaded_org_status:
+                        st = preloaded_org_status[org_id]
+                    else:
+                        if org_id not in rules_by_org:
+                            rules_by_org[org_id] = LocalStore._parse_org_field_rules(org_settings_str)
+                        st = LocalStore.check_org_member_status(
+                            org_id,
+                            eff_uid,
+                            preloaded_rules=rules_by_org[org_id],
+                            cursor=cursor,
+                            conn=conn,
+                        )
                     if not st.get("is_member") and c.get("owner_id") != eff_uid and eff_uid not in ("admin", "super_admin"):
                         # Users who have not joined the organization must not see sub-clubs under that organization
                         continue
@@ -4269,50 +5008,237 @@ class LocalStore:
             return visible_clubs
 
     @staticmethod
-    def is_user_coach_or_owner(uid: str) -> bool:
+    def get_user_next_group_run(
+        uid: str,
+        preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Finds the user's nearest upcoming or ongoing joined club/org group run across up to 8 active clubs
+        (matching MiniApp groupRun.ts::fetchMyNextGroupRun + get_club_events enrichment), in 1 connection.
+        """
+        if not uid or str(uid).strip() == "runner_001":
+            return None
+        eff_uid = LocalStore.resolve_user_id(uid)
+        clubs = preloaded_clubs if preloaded_clubs is not None else LocalStore.get_user_clubs(eff_uid)
+        active_clubs = [c for c in clubs if not c.get("is_access_suspended") and c.get("id")][:8]
+        if not active_clubs:
+            return None
+
+        club_by_id: Dict[str, Dict[str, Any]] = {str(c["id"]): c for c in active_clubs}
+        org_to_clubs: Dict[str, List[Dict[str, Any]]] = {}
+        for c in active_clubs:
+            if c.get("org_id"):
+                org_to_clubs.setdefault(str(c["org_id"]), []).append(c)
+
+        club_ids = list(club_by_id.keys())
+        org_ids = list(org_to_clubs.keys())
+        c_ph = ",".join(["?"] * len(club_ids))
+        scope_cond = f"e.club_id IN ({c_ph})"
+        params: List[Any] = [eff_uid] + club_ids
+        if org_ids:
+            o_ph = ",".join(["?"] * len(org_ids))
+            scope_cond = f"({scope_cond} OR (e.is_org_event = 1 AND e.org_id IN ({o_ph})))"
+            params.extend(org_ids)
+
+        now_bj = datetime.utcnow() + timedelta(hours=8)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT e.*,
+                       cl.owner_id AS _club_owner_id,
+                       cr.display_name AS _cr_display_name,
+                       cr.avatar_url AS _cr_avatar_url,
+                       cr.real_name AS _cr_real_name,
+                       cm.role AS _cr_club_role
+                FROM club_events e
+                JOIN club_event_participants p ON p.event_id = e.id
+                LEFT JOIN clubs cl ON cl.id = e.club_id
+                LEFT JOIN profiles cr ON cr.id = COALESCE(NULLIF(e.creator_id, ''), cl.owner_id)
+                LEFT JOIN club_memberships cm ON cm.club_id = e.club_id AND cm.user_id = cr.id
+                WHERE p.user_id = ?
+                  AND p.status = 'joined'
+                  AND {scope_cond}
+                  AND COALESCE(LOWER(e.status), 'upcoming') NOT IN ('archived', 'completed', 'ended')
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                return None
+
+            candidates: List[Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]] = []
+            seen_ids = set()
+            for r in rows:
+                ev = dict(r)
+                evt_id = str(ev.get("id") or "")
+                if not evt_id or evt_id in seen_ids:
+                    continue
+                is_org_evt = bool(ev.get("is_org_event"))
+                ev_type = str(ev.get("event_type") or "").strip().lower()
+                if ev_type != "group_run" and not ev.get("meet_time"):
+                    continue
+
+                matched_club: Optional[Dict[str, Any]] = None
+                if ev.get("club_id") and str(ev["club_id"]) in club_by_id:
+                    matched_club = club_by_id[str(ev["club_id"])]
+                elif is_org_evt and ev.get("org_id") and str(ev["org_id"]) in org_to_clubs:
+                    raw_scope = (ev.get("scope_club_ids") or "all").strip()
+                    scope_set: Optional[set] = None
+                    if raw_scope and raw_scope != "all":
+                        try:
+                            parsed = json.loads(raw_scope)
+                            if isinstance(parsed, list) and parsed:
+                                scope_set = {str(x) for x in parsed}
+                        except Exception:
+                            scope_set = None
+                    for candidate_club in org_to_clubs[str(ev["org_id"])]:
+                        if scope_set is None or str(candidate_club["id"]) in scope_set:
+                            matched_club = candidate_club
+                            break
+                if matched_club is None:
+                    continue
+
+                lc = LocalStore._evaluate_club_event_lifecycle(ev, now_bj=now_bj)
+                if lc["is_archived"]:
+                    continue
+                if not lc["sanitized_meet_time"] and not ev.get("start_date"):
+                    continue
+                seen_ids.add(evt_id)
+                candidates.append((lc.get("sort_key") or "", ev, matched_club, lc))
+
+            if not candidates:
+                return None
+
+            candidates.sort(key=lambda item: item[0])
+            _, best_ev, best_club, best_lc = candidates[0]
+            evt_id = str(best_ev["id"])
+            best_cid = str(best_club["id"])
+
+            club_owner_id = best_ev.pop("_club_owner_id", None)
+            cr_display_name = best_ev.pop("_cr_display_name", None)
+            cr_avatar_url = best_ev.pop("_cr_avatar_url", None)
+            cr_real_name = best_ev.pop("_cr_real_name", None)
+            cr_club_role = best_ev.pop("_cr_club_role", None)
+
+            if best_lc["sanitized_meet_time"] and best_ev.get("meet_time"):
+                best_ev["meet_time"] = best_lc["sanitized_meet_time"]
+            best_ev["club_id"] = best_cid
+            best_ev["club_name"] = best_club.get("name") or "跑团约跑"
+            best_ev["is_org_event"] = bool(best_ev.get("is_org_event"))
+            best_ev["org_id"] = best_ev.get("org_id") or best_club.get("org_id")
+            best_ev["org_name"] = best_club.get("org_name") if best_ev["is_org_event"] else None
+            best_ev["is_archived"] = False
+            best_ev["lifecycle_status"] = best_lc["lifecycle_status"]
+            best_ev["visibility_mode"] = best_ev.get("visibility_mode") or "registered_only"
+            best_ev["recap_note"] = best_ev.get("recap_note") or ""
+            best_ev["repeat_rule"] = best_ev.get("repeat_rule") or "none"
+            if not best_ev.get("cover_image"):
+                best_ev["cover_image"] = "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80"
+
+            cursor.execute(
+                """
+                SELECT p.id as participant_id, p.user_id, p.joined_at, p.status,
+                       p.pace_group, p.runner_role, p.checkin_note,
+                       p.manual_distance_km, p.manual_pace_str, p.manual_duration_str,
+                       p.activity_id, COALESCE(p.likes_count, 0) as likes_count,
+                       pr.display_name, pr.avatar_url, pr.real_name
+                FROM club_event_participants p
+                LEFT JOIN profiles pr ON p.user_id = pr.id
+                WHERE p.event_id = ? AND p.status = 'joined'
+                ORDER BY p.joined_at ASC
+                """,
+                (evt_id,),
+            )
+            participants = []
+            for pr_row in cursor.fetchall():
+                p_dict = dict(pr_row)
+                p_dict["display_name"] = p_dict.get("display_name") or p_dict.get("real_name") or "跑友"
+                p_dict["pace_group"] = p_dict.get("pace_group") or "🏃 有氧组"
+                p_dict["runner_role"] = p_dict.get("runner_role") or "跟跑团员"
+                participants.append(p_dict)
+
+            best_ev["participants"] = participants
+            best_ev["participant_count"] = len(participants)
+            best_ev["is_joined"] = True
+
+            creator_id = best_ev.get("creator_id") or club_owner_id or best_club.get("owner_id")
+            if creator_id:
+                best_ev["creator_id"] = creator_id
+                if cr_display_name is not None or cr_real_name is not None or cr_avatar_url is not None:
+                    best_ev["creator_name"] = cr_display_name or cr_real_name or "跑团跑友"
+                    best_ev["creator_avatar"] = cr_avatar_url or ""
+                else:
+                    best_ev["creator_name"] = "跑团发起"
+                    best_ev["creator_avatar"] = ""
+                if best_ev["is_org_event"]:
+                    best_ev["creator_role"] = "🏛️ 大群联合"
+                elif cr_club_role == "owner" or (club_owner_id or best_club.get("owner_id")) == creator_id:
+                    best_ev["creator_role"] = "团长"
+                elif cr_club_role == "coach":
+                    best_ev["creator_role"] = "教练"
+                else:
+                    best_ev["creator_role"] = "发起人"
+            else:
+                best_ev["creator_name"] = "跑团组织"
+                best_ev["creator_avatar"] = None
+                best_ev["creator_role"] = "🏛️ 大群联合" if best_ev["is_org_event"] else "发起人"
+
+            return best_ev
+
+    @staticmethod
+    def is_user_coach_or_owner(
+        uid: str,
+        preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
+        preloaded_orgs: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
         """Returns True if the user is an owner, coach, or admin in any active club or organization."""
         if not uid:
             return False
         eff_uid = LocalStore.resolve_user_id(uid)
         if eff_uid in ("admin", "super_admin", "u_df65d9a588c9"):
             return True
+        if preloaded_clubs is not None:
+            for c in preloaded_clubs:
+                if (c.get("status") or "active") == "deleted":
+                    continue
+                if c.get("role") in ("owner", "coach", "admin") or c.get("owner_id") == eff_uid:
+                    return True
+        if preloaded_orgs is not None:
+            for o in preloaded_orgs:
+                if o.get("is_organizer") or o.get("role") in ("owner", "admin", "coach") or o.get("owner_id") == eff_uid:
+                    return True
         try:
             with sqlite3.connect(DB_PATH) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT 1 FROM club_memberships m
-                    JOIN clubs c ON m.club_id = c.id
-                    WHERE m.user_id = ? AND m.status = 'active'
-                      AND m.role IN ('owner', 'coach', 'admin')
-                      AND COALESCE(c.status, 'active') != 'deleted'
-                    LIMIT 1
+                    SELECT CASE WHEN
+                        EXISTS(
+                            SELECT 1 FROM club_memberships m
+                            JOIN clubs c ON m.club_id = c.id
+                            WHERE m.user_id = ? AND m.status = 'active'
+                              AND m.role IN ('owner', 'coach', 'admin')
+                              AND COALESCE(c.status, 'active') != 'deleted'
+                        )
+                        OR EXISTS(
+                            SELECT 1 FROM clubs
+                            WHERE owner_id = ? AND COALESCE(status, 'active') != 'deleted'
+                        )
+                        OR EXISTS(
+                            SELECT 1 FROM organization_members
+                            WHERE user_id = ? AND role IN ('owner', 'admin', 'coach')
+                        )
+                        OR EXISTS(
+                            SELECT 1 FROM organizations WHERE owner_id = ?
+                        )
+                    THEN 1 ELSE 0 END
                     """,
-                    (eff_uid,),
+                    (eff_uid, eff_uid, eff_uid, eff_uid),
                 )
-                if cursor.fetchone():
-                    return True
-                cursor.execute(
-                    "SELECT 1 FROM clubs WHERE owner_id = ? AND COALESCE(status, 'active') != 'deleted' LIMIT 1",
-                    (eff_uid,),
-                )
-                if cursor.fetchone():
-                    return True
-                cursor.execute(
-                    """
-                    SELECT 1 FROM organization_members
-                    WHERE user_id = ? AND role IN ('owner', 'admin', 'coach')
-                    LIMIT 1
-                    """,
-                    (eff_uid,),
-                )
-                if cursor.fetchone():
-                    return True
-                cursor.execute(
-                    "SELECT 1 FROM organizations WHERE owner_id = ? LIMIT 1",
-                    (eff_uid,),
-                )
-                if cursor.fetchone():
+                row = cursor.fetchone()
+                if row and row[0]:
                     return True
         except Exception:
             pass
@@ -6402,13 +7328,14 @@ class LocalStore:
                     act_row = cursor.fetchone()
 
                 if not act_row and event_date_str:
+                    event_next_date_str = _next_day_iso(event_date_str)
                     cursor.execute("""
                         SELECT id, name, start_time, distance_meters, moving_time_seconds,
                                avg_pace_str, average_heartrate, calories, trimp
                         FROM activities
-                        WHERE user_id = ? AND substr(start_time, 1, 10) = ?
+                        WHERE user_id = ? AND start_time >= ? AND start_time < ?
                         ORDER BY distance_meters DESC LIMIT 1
-                    """, (uid, event_date_str))
+                    """, (uid, event_date_str, event_next_date_str))
                     act_row = cursor.fetchone()
 
                 # 2. Query 30-day reference stats for this runner (so even before the run, teammates see their usual pace & mileage)
@@ -6418,7 +7345,7 @@ class LocalStore:
                            AVG(CASE WHEN distance_meters >= 1000 AND moving_time_seconds > 0
                                THEN (moving_time_seconds * 1000.0 / distance_meters) ELSE NULL END) as avg_sec_per_km
                     FROM activities
-                    WHERE user_id = ? AND substr(start_time, 1, 10) >= ?
+                    WHERE user_id = ? AND start_time >= ?
                 """, (uid, thirty_days_ago))
                 ref_row = cursor.fetchone()
                 recent_30d_km = round((ref_row["recent_meters"] or 0) / 1000.0, 1) if ref_row else 0.0
@@ -8806,6 +9733,8 @@ class LocalStore:
             return ""
 
         canonical_uid = LocalStore.resolve_user_id(uid)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
+        act_next_date = _next_day_iso(act_date)
         planned_day: Optional[Dict[str, Any]] = None
         same_day_runs: List[Dict[str, Any]] = []
 
@@ -8814,15 +9743,15 @@ class LocalStore:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    f"""
                     SELECT status, schedule_data
                     FROM training_plans
-                    WHERE (user_id = ? OR user_id = ?)
+                    WHERE {uid_cond}
                       AND status IN ('active', 'published')
                     ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC
                     LIMIT 5
                     """,
-                    (canonical_uid, uid),
+                    uid_params,
                 )
                 for row in cursor.fetchall():
                     try:
@@ -8845,12 +9774,12 @@ class LocalStore:
                         SELECT id, name, start_time, distance_meters, moving_time_seconds,
                                avg_pace_str, average_heartrate, max_heartrate, laps_data, splits_data
                         FROM activities
-                        WHERE (user_id = ? OR user_id = ?)
-                          AND substr(start_time, 1, 10) = ?
+                        WHERE {uid_cond}
+                          AND start_time >= ? AND start_time < ?
                           AND {RUNNING_SQL_FILTER}
                         ORDER BY start_time ASC
                         """,
-                        (canonical_uid, uid, act_date),
+                        (*uid_params, act_date, act_next_date),
                     )
                     same_day_runs = [dict(r) for r in cursor.fetchall()]
         except Exception as e:
@@ -9104,6 +10033,7 @@ class LocalStore:
         if uid:
             try:
                 canonical_uid = LocalStore.resolve_user_id(uid)
+                uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, uid)
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.row_factory = sqlite3.Row
                     cursor = conn.cursor()
@@ -9112,7 +10042,7 @@ class LocalStore:
                             f"""
                             SELECT distance_meters, avg_pace_str, average_heartrate, start_time
                             FROM activities
-                            WHERE (user_id = ? OR user_id = ?)
+                            WHERE {uid_cond}
                               AND id != ?
                               AND start_time < ?
                               AND distance_meters >= 2000
@@ -9120,21 +10050,21 @@ class LocalStore:
                             ORDER BY start_time DESC
                             LIMIT 15
                             """,
-                            (canonical_uid, uid, act_id or "", act_start),
+                            (*uid_params, act_id or "", act_start),
                         )
                     else:
                         cursor.execute(
                             f"""
                             SELECT distance_meters, avg_pace_str, average_heartrate, start_time
                             FROM activities
-                            WHERE (user_id = ? OR user_id = ?)
+                            WHERE {uid_cond}
                               AND id != ?
                               AND distance_meters >= 2000
                               AND {RUNNING_SQL_FILTER}
                             ORDER BY start_time DESC
                             LIMIT 15
                             """,
-                            (canonical_uid, uid, act_id or ""),
+                            (*uid_params, act_id or ""),
                         )
                     prev_runs = [dict(r) for r in cursor.fetchall()]
             except Exception:
@@ -9492,6 +10422,7 @@ class LocalStore:
     def _heal_stale_activity_critique(
         activity: Dict[str, Any],
         profile: Optional[Dict[str, Any]] = None,
+        pending_updates: Optional[List[Tuple[str, str]]] = None,
     ) -> None:
         """Regenerate missing or stale activity critiques without overwriting custom journals."""
         if not LocalStore._needs_canova_critique_refresh(
@@ -9502,11 +10433,18 @@ class LocalStore:
             return
         try:
             old_j = str(activity.get("ai_journal") or "")
-            if not old_j.strip():
-                # Generate missing critiques in memory (preserve zero writes on GET).
-                activity["ai_journal"] = LocalStore.generate_canova_critique(activity, profile)
-                return
             act_id = activity.get("id")
+            if not old_j.strip():
+                new_j = LocalStore.generate_canova_critique(activity, profile)
+                activity["ai_journal"] = new_j
+                if act_id and new_j:
+                    if pending_updates is not None:
+                        pending_updates.append((new_j, str(act_id)))
+                    else:
+                        with sqlite3.connect(DB_PATH) as c_upd:
+                            c_upd.execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (new_j, act_id))
+                            c_upd.commit()
+                return
             refreshed_seg = None
             if "分段表现：" in old_j and act_id:
                 try:
@@ -9519,15 +10457,18 @@ class LocalStore:
             new_j = LocalStore.generate_canova_critique(activity, profile)
             activity["ai_journal"] = new_j
             if act_id and new_j:
-                with sqlite3.connect(DB_PATH) as c_upd:
-                    c_upd.execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (new_j, act_id))
-                    c_upd.commit()
+                if pending_updates is not None:
+                    pending_updates.append((new_j, str(act_id)))
+                else:
+                    with sqlite3.connect(DB_PATH) as c_upd:
+                        c_upd.execute("UPDATE activities SET ai_journal = ? WHERE id = ?", (new_j, act_id))
+                        c_upd.commit()
         except Exception as ex:
             logger.warning(f"Generate/refresh critique failed for {activity.get('id')}: {ex}")
 
     @staticmethod
-    def _slim_feed_gps_track(raw_track: Any) -> Optional[Dict[str, Any]]:
-        return _build_slim_route_preview(raw_track)
+    def _slim_feed_gps_track(raw_track: Any, max_points: int = 36) -> Optional[Dict[str, Any]]:
+        return _build_slim_route_preview(raw_track, max_points=max_points)
 
     @staticmethod
     def _batch_get_activity_social(
@@ -9650,12 +10591,15 @@ class LocalStore:
 
             ai_journal = act.get("ai_journal")
             if LocalStore._needs_canova_critique_refresh(ai_journal, act):
-                try:
-                    ai_journal = LocalStore.generate_canova_critique(act)
-                    act["ai_journal"] = ai_journal
-                    critique_updates.append((ai_journal, act_id))
-                except Exception as ex:
-                    logger.warning(f"Generate critique in _enrich_club_feed_rows failed: {ex}")
+                if current_uid and LocalStore.can_view_canova_critique(
+                    current_uid, owner_uid, club_id=club_id, profile_cache=profile_cache
+                ):
+                    try:
+                        ai_journal = LocalStore.generate_canova_critique(act)
+                        act["ai_journal"] = ai_journal
+                        critique_updates.append((ai_journal, act_id))
+                    except Exception as ex:
+                        logger.warning(f"Generate critique in _enrich_club_feed_rows failed: {ex}")
 
             raw_gps = act.get("gps_track_data")
             slim_gps = LocalStore._slim_feed_gps_track(raw_gps)
@@ -9823,7 +10767,10 @@ class LocalStore:
         return enriched, month_total, total_all_time
 
     @staticmethod
-    def get_user_club_feed_summary(user_id: str) -> Dict[str, Any]:
+    def get_user_club_feed_summary(
+        user_id: str,
+        preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         Compiles a fast summary of the user's primary club check-in feed for the MiniApp Home shortcut card:
         - today_checkin_count, week_checkin_count, month_checkin_count
@@ -9832,15 +10779,17 @@ class LocalStore:
         - latest_checkins (up to 3 recent teammate check-ins with avatars)
         """
         eff_uid = LocalStore.resolve_user_id(user_id)
-        clubs = LocalStore.get_user_clubs(eff_uid)
+        clubs = preloaded_clubs if preloaded_clubs is not None else LocalStore.get_user_clubs(eff_uid)
         target_club = clubs[0] if clubs else None
         club_id = target_club["id"] if target_club else "club_rgm_flagship"
         club_name = target_club["name"] if target_club else "RGM 先锋跑团"
 
         today = get_beijing_today()
         today_str = today.isoformat()
+        today_next_str = _next_day_iso(today_str)
         week_start_str = (today - timedelta(days=today.weekday())).isoformat()
         month_start_str = f"{today.year:04d}-{today.month:02d}-01"
+        window_start_str = min(month_start_str, week_start_str, today_str)
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -9862,30 +10811,10 @@ class LocalStore:
 
             cursor.execute(
                 f"""
-                SELECT COUNT(*) FROM activities
-                WHERE user_id IN ({placeholders})
-                  AND substr(start_time, 1, 10) = ?
-                  AND {RUNNING_SQL_FILTER}
-                """,
-                uids + [today_str],
-            )
-            today_count = (cursor.fetchone() or [0])[0]
-
-            cursor.execute(
-                f"""
-                SELECT COUNT(*) FROM activities
-                WHERE user_id IN ({placeholders})
-                  AND substr(start_time, 1, 10) >= ?
-                  AND {RUNNING_SQL_FILTER}
-                """,
-                uids + [week_start_str],
-            )
-            week_count = (cursor.fetchone() or [0])[0]
-
-            cursor.execute(
-                f"""
-                SELECT a.user_id, a.ai_journal,
+                SELECT a.id, a.user_id, a.name, a.start_time, a.distance_meters, a.avg_pace_str, a.ai_journal,
                        p.id AS _owner_profile_id,
+                       COALESCE(NULLIF(p.display_name, ''), '跑友') AS display_name,
+                       COALESCE(NULLIF(p.avatar_url, ''), 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80') AS avatar_url,
                        COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
                        COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio,
                        COALESCE(NULLIF(TRIM(p.canova_critique_visibility), ''), 'self') AS _owner_critique_vis,
@@ -9893,60 +10822,73 @@ class LocalStore:
                 FROM activities a
                 LEFT JOIN profiles p ON a.user_id = p.id
                 WHERE a.user_id IN ({placeholders})
-                  AND substr(a.start_time, 1, 10) >= ?
-                  AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
-                """,
-                uids + [month_start_str],
-            )
-            month_rows = cursor.fetchall()
-            month_count = len(month_rows)
-            summary_profile_cache: Dict[str, Dict[str, Any]] = {}
-            coach_critique_count = 0
-            for mr in month_rows:
-                owner_uid = str(mr["user_id"] or "")
-                prof_id = mr["_owner_profile_id"]
-                if owner_uid and prof_id and owner_uid not in summary_profile_cache:
-                    stub = {
-                        "id": str(prof_id),
-                        "hide_gps_route": bool(mr["_owner_hide_gps"]),
-                        "hide_biometrics": bool(mr["_owner_hide_bio"]),
-                        "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(
-                            mr["_owner_critique_vis"]
-                        ),
-                        "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
-                            mr["_owner_critique_clubs"]
-                        ),
-                    }
-                    summary_profile_cache[owner_uid] = stub
-                    summary_profile_cache[str(prof_id)] = stub
-                if (mr["ai_journal"] or "").strip():
-                    if LocalStore.can_view_canova_critique(
-                        eff_uid, owner_uid, club_id=club_id, profile_cache=summary_profile_cache
-                    ):
-                        coach_critique_count += 1
-
-            cursor.execute(
-                f"""
-                SELECT a.id, a.user_id, a.name, a.start_time, a.distance_meters, a.avg_pace_str,
-                       COALESCE(NULLIF(p.display_name, ''), '跑友') AS display_name,
-                       COALESCE(NULLIF(p.avatar_url, ''), 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80') AS avatar_url
-                FROM activities a
-                LEFT JOIN profiles p ON a.user_id = p.id
-                WHERE a.user_id IN ({placeholders})
+                  AND a.start_time >= ?
                   AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
                 ORDER BY a.start_time DESC
-                LIMIT 3
                 """,
-                uids,
+                uids + [window_start_str],
             )
-            latest_rows = [dict(r) for r in cursor.fetchall()]
+            window_rows = cursor.fetchall()
+            today_count = 0
+            week_count = 0
+            month_count = 0
+            summary_profile_cache: Dict[str, Dict[str, Any]] = {}
+            coach_critique_count = 0
+            for mr in window_rows:
+                st_val = str(mr["start_time"] or "")
+                if today_str <= st_val < today_next_str:
+                    today_count += 1
+                if st_val >= week_start_str:
+                    week_count += 1
+                if st_val >= month_start_str:
+                    month_count += 1
+                    owner_uid = str(mr["user_id"] or "")
+                    prof_id = mr["_owner_profile_id"]
+                    if owner_uid and prof_id and owner_uid not in summary_profile_cache:
+                        stub = {
+                            "id": str(prof_id),
+                            "hide_gps_route": bool(mr["_owner_hide_gps"]),
+                            "hide_biometrics": bool(mr["_owner_hide_bio"]),
+                            "canova_critique_visibility": LocalStore.normalize_canova_critique_visibility(
+                                mr["_owner_critique_vis"]
+                            ),
+                            "canova_critique_club_ids": LocalStore.parse_canova_critique_club_ids(
+                                mr["_owner_critique_clubs"]
+                            ),
+                        }
+                        summary_profile_cache[owner_uid] = stub
+                        summary_profile_cache[str(prof_id)] = stub
+                    if (mr["ai_journal"] or "").strip():
+                        if LocalStore.can_view_canova_critique(
+                            eff_uid, owner_uid, club_id=club_id, profile_cache=summary_profile_cache
+                        ):
+                            coach_critique_count += 1
+
+            if len(window_rows) >= 3:
+                latest_rows = [dict(r) for r in window_rows[:3]]
+            else:
+                cursor.execute(
+                    f"""
+                    SELECT a.id, a.user_id, a.name, a.start_time, a.distance_meters, a.avg_pace_str,
+                           COALESCE(NULLIF(p.display_name, ''), '跑友') AS display_name,
+                           COALESCE(NULLIF(p.avatar_url, ''), 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80') AS avatar_url
+                    FROM activities a
+                    LEFT JOIN profiles p ON a.user_id = p.id
+                    WHERE a.user_id IN ({placeholders})
+                      AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
+                    ORDER BY a.start_time DESC
+                    LIMIT 3
+                    """,
+                    uids,
+                )
+                latest_rows = [dict(r) for r in cursor.fetchall()]
 
             cursor.execute(
                 f"""
                 SELECT
-                  (SELECT COUNT(*) FROM activity_likes l JOIN activities a ON l.activity_id = a.id WHERE a.user_id IN ({placeholders}) AND substr(a.start_time, 1, 10) >= ?)
+                  (SELECT COUNT(*) FROM activity_likes l JOIN activities a ON l.activity_id = a.id WHERE a.user_id IN ({placeholders}) AND a.start_time >= ?)
                   +
-                  (SELECT COUNT(*) FROM activity_comments c JOIN activities a ON c.activity_id = a.id WHERE a.user_id IN ({placeholders}) AND substr(a.start_time, 1, 10) >= ?)
+                  (SELECT COUNT(*) FROM activity_comments c JOIN activities a ON c.activity_id = a.id WHERE a.user_id IN ({placeholders}) AND a.start_time >= ?)
                 """,
                 uids + [month_start_str] + uids + [month_start_str],
             )
@@ -10351,6 +11293,8 @@ class LocalStore:
                 if dt_key:
                     health_by_day[dt_key] = hm_d
         else:
+            canon_act_uid = LocalStore.resolve_user_id(uid)
+            uid_cond, uid_params = _uid_sql_clause("user_id", canon_act_uid, uid)
             try:
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.row_factory = sqlite3.Row
@@ -10360,30 +11304,30 @@ class LocalStore:
                             SELECT id, name, sport_type, start_time, distance_meters, 
                                    moving_time_seconds, avg_pace_str, average_heartrate, trimp
                             FROM activities
-                            WHERE (user_id = ? OR user_id = ?) AND start_time >= ?
+                            WHERE {uid_cond} AND start_time >= ?
                               AND {RUNNING_SQL_FILTER}
                             ORDER BY start_time ASC
-                        """, (canonical_uid, uid, start_date_str))
+                        """, (*uid_params, start_date_str))
                     else:
                         cursor.execute(f"""
                             SELECT id, name, sport_type, start_time, distance_meters, 
                                    moving_time_seconds, avg_pace_str, average_heartrate, trimp
                             FROM activities
-                            WHERE (user_id = ? OR user_id = ?)
+                            WHERE {uid_cond}
                               AND {RUNNING_SQL_FILTER}
                             ORDER BY start_time ASC
-                        """, (canonical_uid, uid))
+                        """, uid_params)
                     act_rows = [dict(r) for r in cursor.fetchall()]
 
                     try:
-                        cursor.execute("""
+                        cursor.execute(f"""
                             SELECT date, resting_heart_rate, sleep_score, sleep_duration_hours,
                                    sleep_duration_seconds, body_battery_max,
                                    hrv_status, hrv_weekly_avg, hrv_last_night_avg
                             FROM daily_health
-                            WHERE user_id = ? OR user_id = ?
+                            WHERE {uid_cond}
                             ORDER BY date ASC
-                        """, (canonical_uid, uid))
+                        """, uid_params)
                         for hm_row in cursor.fetchall():
                             hm_d = LocalStore.sanitize_daily_health_row(dict(hm_row)) or {}
                             dt_key = str(hm_d.get("date") or "")[:10]
@@ -10732,20 +11676,48 @@ class LocalStore:
         return LocalStore._enrich_plan_with_current_week(res)
 
     @staticmethod
-    def get_user_active_training_plan(user_id: str, reconcile: bool = True) -> Optional[Dict[str, Any]]:
+    def get_user_active_training_plan(
+        user_id: str,
+        reconcile: bool = True,
+        cursor: Optional[sqlite3.Cursor] = None,
+    ) -> Optional[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(user_id)
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM training_plans 
-                WHERE (user_id = ? OR user_id = ?) AND status = 'active'
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, user_id)
+        row = None
+        active_cursor = cursor
+        if active_cursor is not None and not reconcile:
+            active_cursor.execute(
+                f"""
+                SELECT * FROM training_plans
+                WHERE {uid_cond} AND status = 'active'
                 ORDER BY updated_at DESC LIMIT 1
-            """, (canonical_uid, user_id))
-            row = cursor.fetchone()
+                """,
+                uid_params,
+            )
+            row = active_cursor.fetchone()
             if not row:
                 return None
-            res = dict(row)
+            res = (
+                dict(row)
+                if isinstance(row, sqlite3.Row)
+                else dict(zip([d[0] for d in active_cursor.description], row))
+            )
+        else:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                c = conn.cursor()
+                c.execute(
+                    f"""
+                    SELECT * FROM training_plans
+                    WHERE {uid_cond} AND status = 'active'
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    uid_params,
+                )
+                row = c.fetchone()
+                if not row:
+                    return None
+                res = dict(row)
         if res.get("schedule_data"):
             try:
                 res["schedule_data"] = json.loads(res["schedule_data"])
@@ -10758,14 +11730,18 @@ class LocalStore:
     @staticmethod
     def get_user_draft_training_plan(user_id: str, reconcile: bool = False) -> Optional[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(user_id)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, user_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                f"""
                 SELECT * FROM training_plans 
-                WHERE (user_id = ? OR user_id = ?) AND status = 'draft'
+                WHERE {uid_cond} AND status = 'draft'
                 ORDER BY updated_at DESC LIMIT 1
-            """, (canonical_uid, user_id))
+                """,
+                uid_params,
+            )
             row = cursor.fetchone()
             if not row:
                 return None
@@ -14572,6 +15548,17 @@ class LocalStore:
             return any((r["role"] in ("owner", "admin")) for r in mem_rows)
 
     @staticmethod
+    def _parse_org_field_rules(settings_str: Optional[str]) -> List[Dict[str, Any]]:
+        if settings_str:
+            try:
+                s_dict = json.loads(settings_str)
+                if isinstance(s_dict, dict) and "field_rules" in s_dict and isinstance(s_dict["field_rules"], list):
+                    return LocalStore._normalize_field_rules(s_dict["field_rules"])
+            except Exception:
+                pass
+        return LocalStore._normalize_field_rules(copy.deepcopy(DEFAULT_ORG_FIELD_RULES))
+
+    @staticmethod
     def get_org_field_rules(org_id: str) -> List[Dict[str, Any]]:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -14580,15 +15567,7 @@ class LocalStore:
             row = cursor.fetchone()
             if not row:
                 return LocalStore._normalize_field_rules(copy.deepcopy(DEFAULT_ORG_FIELD_RULES))
-            settings_str = row["settings"]
-            if settings_str:
-                try:
-                    s_dict = json.loads(settings_str)
-                    if isinstance(s_dict, dict) and "field_rules" in s_dict and isinstance(s_dict["field_rules"], list):
-                        return LocalStore._normalize_field_rules(s_dict["field_rules"])
-                except Exception:
-                    pass
-            return LocalStore._normalize_field_rules(copy.deepcopy(DEFAULT_ORG_FIELD_RULES))
+            return LocalStore._parse_org_field_rules(row["settings"])
 
     @staticmethod
     def update_org_field_rules(org_id: str, field_rules: List[Dict[str, Any]], operator_uid: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -14635,22 +15614,36 @@ class LocalStore:
         return False
 
     @staticmethod
-    def check_org_member_status(org_id: str, user_id: str) -> Dict[str, Any]:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, user_id))
-            row = cursor.fetchone()
-            if not row:
-                return {
-                    "is_member": False,
-                    "status": "none",
-                    "is_valid": False,
-                    "days_remaining": 0,
-                    "missing_fields": []
-                }
-
-            member = dict(row)
+    def check_org_member_status(
+        org_id: str,
+        user_id: str,
+        preloaded_rules: Optional[List[Dict[str, Any]]] = None,
+        cursor: Optional[sqlite3.Cursor] = None,
+        conn: Optional[sqlite3.Connection] = None,
+        preloaded_member: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        from contextlib import nullcontext
+        owns_conn = conn is None or cursor is None
+        with (sqlite3.connect(DB_PATH) if owns_conn else nullcontext(conn)) as active_conn:
+            if owns_conn:
+                active_conn.row_factory = sqlite3.Row
+                active_cursor = active_conn.cursor()
+            else:
+                active_cursor = cursor
+            if preloaded_member is not None:
+                member = dict(preloaded_member)
+            else:
+                active_cursor.execute("SELECT * FROM organization_members WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                row = active_cursor.fetchone()
+                if not row:
+                    return {
+                        "is_member": False,
+                        "status": "none",
+                        "is_valid": False,
+                        "days_remaining": 0,
+                        "missing_fields": []
+                    }
+                member = dict(row)
             status = member.get("status") or "temporary"
             role = member.get("role") or "member"
             joined_at_str = member.get("joined_at")
@@ -14679,7 +15672,7 @@ class LocalStore:
                 **extra_data
             }
 
-            rules = LocalStore.get_org_field_rules(org_id)
+            rules = preloaded_rules if preloaded_rules is not None else LocalStore.get_org_field_rules(org_id)
             missing_fields = []
             for r in rules:
                 if r.get("required") and not r.get("hidden") and r.get("mode") != "hidden":
@@ -14710,24 +15703,24 @@ class LocalStore:
 
                 target_status = "expired" if is_expired else "temporary"
                 if status != target_status or member.get("confirmed_by") is not None:
-                    cursor.execute("""
+                    active_cursor.execute("""
                         UPDATE organization_members 
                         SET status = ?, confirmed_at = NULL, confirmed_by = NULL 
                         WHERE org_id = ? AND user_id = ?
                     """, (target_status, org_id, user_id))
-                    conn.commit()
+                    active_conn.commit()
 
                 if target_status == "expired" and role not in ("owner", "admin"):
-                    cursor.execute("""
+                    active_cursor.execute("""
                         DELETE FROM club_memberships
                         WHERE user_id = ?
                           AND role != 'owner'
                           AND club_id IN (SELECT id FROM clubs WHERE org_id = ?)
                     """, (user_id, org_id))
-                    removed_n = cursor.rowcount or 0
-                    conn.commit()
+                    removed_n = active_cursor.rowcount or 0
+                    active_conn.commit()
                     if status != "expired":
-                        LocalStore._notify_org_member_expired(cursor, conn, org_id, user_id, removed_n, missing_fields)
+                        LocalStore._notify_org_member_expired(active_cursor, active_conn, org_id, user_id, removed_n, missing_fields)
 
                 return {
                     "is_member": True,
@@ -14742,8 +15735,8 @@ class LocalStore:
             # ── All required fields are filled ──
             if role in ("owner", "admin"):
                 if status != "confirmed":
-                    cursor.execute("UPDATE organization_members SET status = 'confirmed' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
-                    conn.commit()
+                    active_cursor.execute("UPDATE organization_members SET status = 'confirmed' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                    active_conn.commit()
                     status = "confirmed"
                 return {
                     "is_member": True,
@@ -14784,19 +15777,19 @@ class LocalStore:
 
             if is_expired:
                 if status != "expired":
-                    cursor.execute("UPDATE organization_members SET status = 'expired' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                    active_cursor.execute("UPDATE organization_members SET status = 'expired' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
                 removed_n = 0
                 if role not in ("owner", "admin"):
-                    cursor.execute("""
+                    active_cursor.execute("""
                         DELETE FROM club_memberships
                         WHERE user_id = ?
                           AND role != 'owner'
                           AND club_id IN (SELECT id FROM clubs WHERE org_id = ?)
                     """, (user_id, org_id))
-                    removed_n = cursor.rowcount or 0
-                conn.commit()
+                    removed_n = active_cursor.rowcount or 0
+                active_conn.commit()
                 if status != "expired" and role not in ("owner", "admin"):
-                    LocalStore._notify_org_member_expired(cursor, conn, org_id, user_id, removed_n, [])
+                    LocalStore._notify_org_member_expired(active_cursor, active_conn, org_id, user_id, removed_n, [])
                 return {
                     "is_member": True,
                     "status": "expired",
@@ -14808,8 +15801,8 @@ class LocalStore:
                 }
 
             if status != "pending":
-                cursor.execute("UPDATE organization_members SET status = 'pending' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
-                conn.commit()
+                active_cursor.execute("UPDATE organization_members SET status = 'pending' WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+                active_conn.commit()
 
             return {
                 "is_member": True,
@@ -15734,10 +16727,11 @@ class LocalStore:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT o.id, o.name, o.logo_url, o.description, o.city, o.join_mode, o.invite_code, o.owner_id,
+                SELECT o.id, o.name, o.logo_url, o.description, o.city, o.join_mode, o.invite_code, o.owner_id, o.settings as org_settings,
                        (SELECT COUNT(*) FROM organization_members om WHERE om.org_id = o.id) as member_count,
                        (SELECT COUNT(*) FROM organization_members om2 WHERE om2.org_id = o.id AND COALESCE(om2.status, 'pending') != 'confirmed') as pending_review_count,
                        (SELECT COUNT(*) FROM clubs sc WHERE sc.org_id = o.id) as sub_clubs_count,
+                       m.user_id as _m_user_id, m.confirmed_by as _m_confirmed_by, m.status as _m_raw_status,
                        m.real_name, m.gender, m.date_of_birth, m.class_name, m.phone, m.id_card,
                        COALESCE(m.role, CASE WHEN o.owner_id = ? THEN 'owner' ELSE 'member' END) as role,
                        COALESCE(m.status, 'confirmed') as status,
@@ -15752,8 +16746,31 @@ class LocalStore:
             result = []
             for r in rows:
                 d = dict(r)
+                org_settings_str = d.pop("org_settings", None)
+                m_user_id = d.pop("_m_user_id", None)
+                m_confirmed_by = d.pop("_m_confirmed_by", None)
+                m_raw_status = d.pop("_m_raw_status", None)
+                preloaded_member = (
+                    {
+                        "org_id": d["id"],
+                        "user_id": m_user_id,
+                        "status": m_raw_status,
+                        "role": d.get("role"),
+                        "joined_at": d.get("joined_at"),
+                        "confirmed_by": m_confirmed_by,
+                        "real_name": d.get("real_name"),
+                        "date_of_birth": d.get("date_of_birth"),
+                        "phone": d.get("phone"),
+                        "id_card": d.get("id_card"),
+                        "gender": d.get("gender"),
+                        "class_name": d.get("class_name"),
+                        "extra_data": d.get("extra_data"),
+                    }
+                    if m_user_id
+                    else None
+                )
                 d["join_mode"] = d.get("join_mode") or "invite"
-                d["field_rules"] = LocalStore.get_org_field_rules(d["id"])
+                d["field_rules"] = LocalStore._parse_org_field_rules(org_settings_str)
                 is_organizer = (
                     d.get("role") in ("owner", "admin") or
                     d.get("owner_id") == user_id or
@@ -15772,8 +16789,16 @@ class LocalStore:
                 dob_val = d.get("date_of_birth") or ""
                 d["birth_year"] = dob_val[:4] if len(dob_val) >= 4 and dob_val[:4].isdigit() else ""
                 
-                # Check status and expiry
-                status_info = LocalStore.check_org_member_status(d["id"], user_id)
+                # Check status and expiry reusing open connection + preloaded field_rules & member row
+                status_info = LocalStore.check_org_member_status(
+                    d["id"],
+                    user_id,
+                    preloaded_rules=d["field_rules"],
+                    cursor=cursor,
+                    conn=conn,
+                    preloaded_member=preloaded_member,
+                )
+                d["is_member"] = bool(status_info.get("is_member"))
                 d["status"] = status_info.get("status")
                 d["days_remaining"] = status_info.get("days_remaining")
                 d["remaining_days"] = status_info.get("days_remaining")
@@ -16620,44 +17645,55 @@ class LocalStore:
             anon_name = f"跑者_{user_id[-4:]}" if len(user_id) >= 4 else "跑者_8888"
             default_avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
 
-            cursor.execute("""
-                UPDATE profiles
-                SET real_name = '',
-                    id_card = '',
-                    date_of_birth = '',
-                    phone = '',
-                    email = '',
-                    password_hash = '',
-                    bio = '',
-                    wecom_webhook_url = '',
-                    emergency_contact = '',
-                    program = '',
-                    class_detail = '',
-                    class_name = '',
-                    garmin_connected = 0,
-                    garmin_email = '',
-                    garmin_encrypted_password = '',
-                    coros_connected = 0,
-                    coros_account = '',
-                    coros_encrypted_password = '',
-                    apple_watch_connected = 0,
-                    huawei_connected = 0,
-                    huawei_account = '',
-                    suunto_connected = 0,
-                    suunto_account = '',
-                    hide_gps_route = 1,
-                    hide_biometrics = 1,
-                    canova_critique_visibility = 'self',
-                    canova_critique_club_ids = '[]',
-                    display_name = ?,
-                    avatar_url = ?
-                WHERE id = ?
-            """, (anon_name, default_avatar, user_id))
+            cursor.execute("PRAGMA table_info(profiles)")
+            existing_prof_cols = {r[1] for r in cursor.fetchall()}
+            purge_map = {
+                "real_name": "",
+                "id_card": "",
+                "date_of_birth": "",
+                "phone": "",
+                "email": "",
+                "password_hash": "",
+                "bio": "",
+                "wecom_webhook_url": "",
+                "emergency_contact": "",
+                "program": "",
+                "class_detail": "",
+                "class_name": "",
+                "garmin_connected": 0,
+                "garmin_email": "",
+                "garmin_encrypted_password": "",
+                "coros_connected": 0,
+                "coros_account": "",
+                "coros_encrypted_password": "",
+                "apple_watch_connected": 0,
+                "huawei_connected": 0,
+                "huawei_account": "",
+                "suunto_connected": 0,
+                "suunto_account": "",
+                "hide_gps_route": 1,
+                "hide_biometrics": 1,
+                "canova_critique_visibility": "self",
+                "canova_critique_club_ids": "[]",
+                "city": "",
+                "running_landmarks": "[]",
+                "usual_time_slot": "",
+                "looking_for_buddy": 0,
+                "allow_buddy_search_scope": "none",
+                "allow_club_search_scope": "none",
+                "display_name": anon_name,
+                "avatar_url": default_avatar,
+            }
+            set_sql = ", ".join(f"{col} = ?" for col in purge_map if col in existing_prof_cols)
+            set_vals = [val for col, val in purge_map.items() if col in existing_prof_cols] + [user_id]
+            cursor.execute(f"UPDATE profiles SET {set_sql} WHERE id = ?", set_vals)
 
-            # Delete organization memberships so identity is erased from org rosters
+            # Delete organization memberships and follow relationships so identity is erased
             cursor.execute("DELETE FROM organization_members WHERE user_id = ?", (user_id,))
+            cursor.execute("DELETE FROM user_follows WHERE follower_id = ? OR followee_id = ?", (user_id, user_id))
 
             conn.commit()
+        _invalidate_uid_cache()
 
         # Remove local token files (Garmin / COROS / user_id-matched) if any exist
         try:
@@ -16777,7 +17813,18 @@ class LocalStore:
             """)
             items = [dict(r) for r in cursor.fetchall()]
             for item in items:
-                item["field_rules"] = LocalStore.get_org_field_rules(item["id"])
+                rules = None
+                settings_str = item.get("settings")
+                if settings_str:
+                    try:
+                        s_dict = json.loads(settings_str)
+                        if isinstance(s_dict, dict) and isinstance(s_dict.get("field_rules"), list):
+                            rules = LocalStore._normalize_field_rules(s_dict["field_rules"])
+                    except Exception:
+                        rules = None
+                if rules is None:
+                    rules = LocalStore._normalize_field_rules(copy.deepcopy(DEFAULT_ORG_FIELD_RULES))
+                item["field_rules"] = rules
             return items
 
     @staticmethod
@@ -16960,6 +18007,18 @@ class LocalStore:
             for r in cursor.fetchall():
                 nd = dict(r)
                 nd["created_at"] = to_beijing_iso(nd.get("created_at"))
+                n_type = str(nd.get("type") or "")
+                ref_id = str(nd.get("activity_id") or "")
+                if n_type == "club_targeted_invite" and ref_id.startswith("targeted_invite:"):
+                    tok = ref_id.split(":", 1)[1]
+                    nd["link_url"] = f"/join/{tok}"
+                    nd["miniapp_url"] = f"/pages/invite/invite?token={tok}"
+                elif n_type in ("buddy_follow", "buddy_mutual"):
+                    nd["link_url"] = "/dashboard/discover"
+                    nd["miniapp_url"] = "/pages/discover/discover"
+                elif n_type in ("club_broadcast", "pulse_cheer"):
+                    nd["link_url"] = "/dashboard"
+                    nd["miniapp_url"] = "/pages/index/index"
                 notifs.append(nd)
             return notifs
 
@@ -17006,9 +18065,20 @@ class LocalStore:
             return int(row[0]) if row else 0
 
     @staticmethod
-    def get_user_onboarding_status(user_id: str) -> Dict[str, Any]:
-        canonical_uid = LocalStore.resolve_user_id(user_id)
-        profile = LocalStore.get_profile(canonical_uid) or {}
+    def get_user_onboarding_status(
+        user_id: str,
+        preloaded_profile: Optional[Dict[str, Any]] = None,
+        preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
+        preloaded_goal: Optional[Dict[str, Any]] = None,
+        preloaded_has_activities: Optional[bool] = None,
+        unread_notif_out: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        if preloaded_profile is not None and preloaded_profile.get("id"):
+            canonical_uid = str(preloaded_profile["id"])
+            profile = preloaded_profile
+        else:
+            canonical_uid = LocalStore.resolve_user_id(user_id)
+            profile = LocalStore.get_profile(canonical_uid) or {}
 
         # Step 1: Profile (Name and at least gender or physical metrics)
         has_name = bool(profile.get("display_name") and profile.get("display_name") != "微信跑者")
@@ -17017,7 +18087,7 @@ class LocalStore:
         profile_done = has_name and (has_gender or has_detail)
 
         # Step 2: Club (Joined at least 1 club, or explicitly chose solo runner)
-        user_clubs = LocalStore.get_user_clubs(canonical_uid)
+        user_clubs = preloaded_clubs if preloaded_clubs is not None else LocalStore.get_user_clubs(canonical_uid)
         is_solo = bool(profile.get("is_solo_runner"))
         club_done = len(user_clubs) > 0 or is_solo
 
@@ -17030,19 +18100,39 @@ class LocalStore:
         device_skipped = bool(profile.get("device_skipped"))
         device_done = has_garmin or has_coros or has_apple_watch or has_huawei or has_suunto or device_skipped
 
-        # Step 4: History (Imported activities, or explicitly skipped)
-        act_count = LocalStore.get_user_activity_count(canonical_uid)
+        # Steps 4 & 5 (+ optional unread notification count) in at most 1 SQLite connection
+        goal = preloaded_goal if preloaded_goal is not None else LocalStore.get_goal(canonical_uid)
+        target_dist = float(goal.get("target_distance") or 200.0)
+        if preloaded_goal is not None and "is_default" in goal:
+            goals_done = (not bool(goal.get("is_default"))) and float(goal.get("target_distance") or 0) > 0
+            need_goal_query = False
+        else:
+            goals_done = False
+            need_goal_query = True
+
+        act_count = 1 if preloaded_has_activities else 0
+        if preloaded_has_activities is None or need_goal_query or unread_notif_out is not None:
+            uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, user_id)
+            with sqlite3.connect(DB_PATH) as conn:
+                c = conn.cursor()
+                if preloaded_has_activities is None:
+                    c.execute("SELECT COUNT(*) FROM activities WHERE user_id = ?", (canonical_uid,))
+                    arow = c.fetchone()
+                    act_count = int(arow[0]) if arow else 0
+                if need_goal_query:
+                    c.execute(f"SELECT target_distance FROM goals WHERE {uid_cond} LIMIT 1", uid_params)
+                    goal_row = c.fetchone()
+                    goals_done = bool(goal_row and float(goal_row[0] or 0) > 0)
+                if unread_notif_out is not None:
+                    c.execute(
+                        "SELECT COUNT(*) FROM system_notifications WHERE user_id = ? AND is_read = 0",
+                        (canonical_uid,),
+                    )
+                    n_row = c.fetchone()
+                    unread_notif_out.append(int((n_row[0] or 0) if n_row else 0))
+
         history_skipped = bool(profile.get("history_skipped"))
         history_done = act_count > 0 or history_skipped
-
-        # Step 5: Training Goals (Explicitly saved in goals table)
-        goal = LocalStore.get_goal(canonical_uid)
-        target_dist = float(goal.get("target_distance") or 200.0)
-        with sqlite3.connect(DB_PATH) as conn:
-            c = conn.cursor()
-            c.execute("SELECT target_distance FROM goals WHERE user_id = ? OR user_id = ?", (canonical_uid, user_id))
-            goal_row = c.fetchone()
-        goals_done = bool(goal_row and float(goal_row[0] or 0) > 0)
 
         steps = {
             "profile": profile_done,
@@ -17200,17 +18290,18 @@ class LocalStore:
     @staticmethod
     def get_user_support_tickets(user_id: str) -> List[Dict[str, Any]]:
         canonical_uid = LocalStore.resolve_user_id(user_id)
+        uid_cond, uid_params = _uid_sql_clause("user_id", canonical_uid, user_id)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT * FROM support_tickets
-                WHERE user_id = ? OR user_id = ?
+                WHERE {uid_cond}
                 ORDER BY created_at DESC
                 LIMIT 30
                 """,
-                (canonical_uid, user_id),
+                uid_params,
             )
             rows = cursor.fetchall()
             out = []
@@ -20140,6 +21231,2898 @@ class LocalStore:
             },
             "steps": steps,
         }
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Phase 1-4: Social Pulse, 6D Buddy Discovery, Showcase & Targeted Recruit
+    # ════════════════════════════════════════════════════════════════════════
+
+    PULSE_CHEER_LABELS = {
+        "steady_aerobic": "👏 有氧真稳",
+        "high_intensity": "🔥 强度拉满",
+        "stretch_recover": "🦵 注意排酸拉伸",
+        "weekend_run": "🏃 周末约起",
+        "welcome_pat": "👋 拍肩欢迎",
+    }
+
+    AGE_BRACKET_OPTIONS = ("U30", "30-34", "35-39", "40-44", "45-49", "50+")
+
+    @staticmethod
+    def compute_age_bracket_5y(dob: Optional[str]) -> str:
+        """Computes anonymized 5-year age bracket ('U30'|'30-34'|'35-39'|'40-44'|'45-49'|'50+'|'未填')."""
+        if not dob:
+            return "未填"
+        val = decrypt_pii(str(dob).strip())
+        if not val:
+            return "未填"
+        try:
+            year_str = val[:4]
+            if not (len(year_str) == 4 and year_str.isdigit()):
+                return "未填"
+            birth_year = int(year_str)
+            today_bj = get_beijing_today()
+            age = today_bj.year - birth_year
+            if len(val) >= 10 and val[5:7].isdigit() and val[8:10].isdigit():
+                if (today_bj.month, today_bj.day) < (int(val[5:7]), int(val[8:10])):
+                    age -= 1
+            if age < 12 or age > 95:
+                return "未填"
+            if age < 30:
+                return "U30"
+            if age <= 34:
+                return "30-34"
+            if age <= 39:
+                return "35-39"
+            if age <= 44:
+                return "40-44"
+            if age <= 49:
+                return "45-49"
+            return "50+"
+        except Exception:
+            return "未填"
+
+    @staticmethod
+    def _extract_watch_brands(row: Dict[str, Any]) -> List[str]:
+        """Extracts bound wearable brand labels from a profile row."""
+        brands: List[str] = []
+        if row.get("garmin_connected") or str(row.get("garmin_email") or "").strip():
+            brands.append("佳明")
+        if row.get("coros_connected") or str(row.get("coros_account") or "").strip():
+            brands.append("高驰")
+        if row.get("apple_watch_connected"):
+            brands.append("Apple Watch")
+        if row.get("huawei_connected") or str(row.get("huawei_account") or "").strip():
+            brands.append("华为")
+        if row.get("suunto_connected") or str(row.get("suunto_account") or "").strip():
+            brands.append("颂拓")
+        return brands
+
+    @staticmethod
+    def _is_club_leader_raw(cursor, club_id: str, user_id: str) -> bool:
+        """Returns True if user_id is super_admin, club owner, or active owner/coach/admin of club_id."""
+        if not user_id or not club_id:
+            return False
+        canonical = LocalStore.resolve_user_id(user_id)
+        if LocalStore.is_super_admin(user_id) or LocalStore.is_super_admin(canonical):
+            return True
+        cursor.execute("SELECT owner_id FROM clubs WHERE id = ?", (club_id,))
+        crow = cursor.fetchone()
+        if crow and LocalStore.resolve_user_id(crow[0] or "") == canonical:
+            return True
+        cursor.execute(
+            """
+            SELECT 1 FROM club_memberships
+            WHERE club_id = ? AND user_id IN (?, ?) AND status = 'active'
+              AND role IN ('owner', 'coach', 'admin')
+            LIMIT 1
+            """,
+            (club_id, canonical, user_id),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _compute_candidate_vdot(uid: str, prof_row: Dict[str, Any]) -> Optional[float]:
+        """Computes runner VDOT from stored VO2max or verified PBs."""
+        v = prof_row.get("vo2max")
+        if v is not None:
+            try:
+                vf = float(v)
+                if 20.0 <= vf <= 90.0:
+                    return round(vf, 1)
+            except Exception:
+                pass
+        meta = LocalStore.resolve_verified_runner_profile_and_pbs(uid, profile=prof_row, query_activities=False)
+        if meta.get("peak_vdot"):
+            return float(meta["peak_vdot"])
+        return None
+
+    @staticmethod
+    def _vdot_to_band_label(vdot: Optional[float]) -> str:
+        """Formats VDOT into a crisp readable band label for newcomers & discovery cards."""
+        if not vdot or vdot <= 0:
+            return "配速成长中"
+        if vdot >= 55:
+            return f"VDOT {round(vdot)} · 竞速精英"
+        if vdot >= 46:
+            return f"VDOT {round(vdot)} · 破330梯队"
+        if vdot >= 38:
+            return f"VDOT {round(vdot)} · 破4进阶"
+        return f"VDOT {round(vdot)} · 稳步打底"
+
+    @staticmethod
+    def _broadcast_matches_viewer(
+        broadcast_row: Dict[str, Any],
+        member_role: Optional[str],
+        member_group: Optional[str],
+        joined_at: Optional[str],
+        is_leader: bool = False,
+    ) -> bool:
+        """Determines whether a club broadcast applies to the given viewer."""
+        if is_leader:
+            return True
+        aud = str(broadcast_row.get("target_audience") or "all").strip().lower()
+        if aud in ("", "all"):
+            return True
+        if aud in ("group_a", "a", "a组"):
+            return "a" in str(member_group or "").strip().lower()
+        if aud in ("group_b", "b", "b组"):
+            return "b" in str(member_group or "").strip().lower()
+        if aud in ("group_c", "c", "c组"):
+            return "c" in str(member_group or "").strip().lower()
+        if aud == "newcomers_14d":
+            jdt = parse_iso_datetime(joined_at)
+            if not jdt:
+                return True
+            if jdt.tzinfo is None:
+                jdt = jdt.replace(tzinfo=timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            return (now_utc - jdt).days <= 14
+        return True
+
+    @staticmethod
+    def create_club_broadcast(
+        club_id: str,
+        author_id: str,
+        category: str = "notice",
+        title: str = "",
+        content: str = "",
+        target_audience: str = "all",
+        linked_event_id: Optional[str] = None,
+        pin_hours: int = 72,
+    ) -> Dict[str, Any]:
+        """Creates a pinned club broadcast (max 1 pinned per club) and notifies matching members."""
+        canonical_author = LocalStore.resolve_user_id(author_id)
+        cat = str(category or "notice").strip().lower()
+        if cat not in ("notice", "group_run", "pb_news", "welcome"):
+            cat = "notice"
+        aud = str(target_audience or "all").strip().lower()
+        if aud not in ("all", "group_a", "group_b", "group_c", "newcomers_14d"):
+            aud = "all"
+        clean_title = str(title or "").strip()[:80]
+        clean_content = str(content or "").strip()[:600]
+        if not clean_title or not clean_content:
+            raise ValueError("广播标题与正文不能为空")
+
+        now_bj = get_beijing_now()
+        created_at = get_beijing_iso()
+        expires_at = (now_bj + timedelta(hours=max(1, min(336, int(pin_hours or 72))))).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        bid = f"bcast_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM clubs WHERE id = ?", (club_id,))
+            crow = cursor.fetchone()
+            if not crow:
+                raise ValueError("跑团不存在")
+            club_name = crow["name"] or "跑团"
+            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_author):
+                raise PermissionError("仅跑团团长、教练或管理员可发布置顶广播")
+
+            cursor.execute(
+                "UPDATE club_broadcasts SET is_pinned = 0 WHERE club_id = ? AND is_pinned = 1",
+                (club_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO club_broadcasts
+                (id, club_id, author_id, category, title, content, target_audience, linked_event_id, is_pinned, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (bid, club_id, canonical_author, cat, clean_title, clean_content, aud, linked_event_id, expires_at, created_at),
+            )
+            # Author auto-acknowledges own broadcast
+            cursor.execute(
+                "INSERT OR IGNORE INTO club_broadcast_receipts (id, broadcast_id, user_id, ack_at) VALUES (?, ?, ?, ?)",
+                (f"ack_{bid}_{canonical_author}", bid, canonical_author, created_at),
+            )
+
+            cursor.execute(
+                "SELECT display_name, avatar_url FROM profiles WHERE id = ?",
+                (canonical_author,),
+            )
+            arow = cursor.fetchone()
+            author_name = (arow["display_name"] if arow and arow["display_name"] else None) or "团长/教练"
+            author_avatar = (arow["avatar_url"] if arow else None) or ""
+
+            # Fan out in-app notifications to matching active members
+            cursor.execute(
+                "SELECT user_id, role, training_group, joined_at FROM club_memberships WHERE club_id = ? AND status = 'active'",
+                (club_id,),
+            )
+            members = cursor.fetchall()
+            target_uids: List[str] = []
+            b_stub = {"target_audience": aud}
+            for m in members:
+                muid = LocalStore.resolve_user_id(m["user_id"])
+                if not muid or muid == canonical_author:
+                    continue
+                if LocalStore._broadcast_matches_viewer(
+                    b_stub, m["role"], m["training_group"], m["joined_at"], is_leader=False
+                ):
+                    target_uids.append(muid)
+            for tuid in set(target_uids):
+                LocalStore._insert_notification_raw(
+                    cursor,
+                    tuid,
+                    f"📢 【{club_name}】{clean_title}",
+                    f"{author_name}：{clean_content[:120]}",
+                    "club_broadcast",
+                    f"broadcast:{bid}",
+                )
+            conn.commit()
+
+        return {
+            "id": bid,
+            "club_id": club_id,
+            "club_name": club_name,
+            "author_id": canonical_author,
+            "author_name": author_name,
+            "author_avatar": author_avatar,
+            "category": cat,
+            "title": clean_title,
+            "content": clean_content,
+            "target_audience": aud,
+            "linked_event_id": linked_event_id,
+            "is_pinned": True,
+            "expires_at": expires_at,
+            "created_at": created_at,
+            "ack_count": 1,
+            "member_count": max(1, len(members)),
+            "viewer_acked": True,
+            "notified_count": len(set(target_uids)),
+        }
+
+    @staticmethod
+    def get_club_broadcasts(
+        club_id: str,
+        viewer_uid: Optional[str] = None,
+        include_history: bool = False,
+    ) -> Dict[str, Any]:
+        """Lists active pinned and optional historical broadcasts for a club with ack stats."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else ""
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, owner_id FROM clubs WHERE id = ?", (club_id,))
+            crow = cursor.fetchone()
+            if not crow:
+                return {"pinned_broadcast": None, "broadcasts": []}
+
+            is_leader = LocalStore._is_club_leader_raw(cursor, club_id, canonical_viewer) if canonical_viewer else False
+            cursor.execute(
+                "SELECT role, training_group, joined_at FROM club_memberships WHERE club_id = ? AND user_id = ? AND status = 'active'",
+                (club_id, canonical_viewer),
+            )
+            mrow = cursor.fetchone()
+            cursor.execute(
+                "SELECT COUNT(DISTINCT user_id) FROM club_memberships WHERE club_id = ? AND status = 'active'",
+                (club_id,),
+            )
+            member_count = int((cursor.fetchone() or [0])[0] or 0)
+
+            where_sql = "b.club_id = ?"
+            if not include_history:
+                where_sql += " AND b.is_pinned = 1 AND (b.expires_at IS NULL OR b.expires_at >= ?)"
+                params: Tuple[Any, ...] = (club_id, now_iso)
+            else:
+                params = (club_id,)
+
+            cursor.execute(
+                f"""
+                SELECT b.*,
+                       COALESCE(NULLIF(p.display_name, ''), '团长/教练') AS author_name,
+                       p.avatar_url AS author_avatar
+                FROM club_broadcasts b
+                LEFT JOIN profiles p ON b.author_id = p.id
+                WHERE {where_sql}
+                ORDER BY b.is_pinned DESC, b.created_at DESC
+                LIMIT 20
+                """,
+                params,
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+            bids = [r["id"] for r in rows]
+            ack_counts: Dict[str, int] = {}
+            viewer_acks: set = set()
+            if bids:
+                ph = ",".join("?" for _ in bids)
+                cursor.execute(
+                    f"SELECT broadcast_id, COUNT(*) AS cnt FROM club_broadcast_receipts WHERE broadcast_id IN ({ph}) GROUP BY broadcast_id",
+                    tuple(bids),
+                )
+                for ar in cursor.fetchall():
+                    ack_counts[str(ar["broadcast_id"])] = int(ar["cnt"] or 0)
+                if canonical_viewer:
+                    cursor.execute(
+                        f"SELECT broadcast_id FROM club_broadcast_receipts WHERE broadcast_id IN ({ph}) AND user_id = ?",
+                        tuple(bids) + (canonical_viewer,),
+                    )
+                    viewer_acks = {str(vr[0]) for vr in cursor.fetchall()}
+
+        items: List[Dict[str, Any]] = []
+        pinned_item: Optional[Dict[str, Any]] = None
+        for r in rows:
+            if canonical_viewer and not LocalStore._broadcast_matches_viewer(
+                r,
+                mrow["role"] if mrow else None,
+                mrow["training_group"] if mrow else None,
+                mrow["joined_at"] if mrow else None,
+                is_leader=is_leader,
+            ):
+                continue
+            item = {
+                "id": r["id"],
+                "club_id": r["club_id"],
+                "club_name": crow["name"] or "跑团",
+                "author_id": r["author_id"],
+                "author_name": r["author_name"],
+                "author_avatar": r["author_avatar"] or "",
+                "category": r["category"] or "notice",
+                "title": r["title"],
+                "content": r["content"],
+                "target_audience": r["target_audience"] or "all",
+                "linked_event_id": r.get("linked_event_id"),
+                "is_pinned": bool(r.get("is_pinned")),
+                "expires_at": r.get("expires_at"),
+                "created_at": to_beijing_iso(r.get("created_at")),
+                "ack_count": ack_counts.get(r["id"], 0),
+                "member_count": max(1, member_count),
+                "viewer_acked": r["id"] in viewer_acks,
+            }
+            if item["is_pinned"] and (not item["expires_at"] or str(item["expires_at"]) >= now_iso) and pinned_item is None:
+                pinned_item = item
+            items.append(item)
+
+        return {"pinned_broadcast": pinned_item, "broadcasts": items}
+
+    @staticmethod
+    def ack_club_broadcast(broadcast_id: str, user_id: str) -> Dict[str, Any]:
+        """Records a member '收到 ✓' acknowledgement receipt for a club broadcast."""
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM club_broadcasts WHERE id = ?", (broadcast_id,))
+            if not cursor.fetchone():
+                raise ValueError("广播不存在")
+            cursor.execute(
+                "INSERT OR IGNORE INTO club_broadcast_receipts (id, broadcast_id, user_id, ack_at) VALUES (?, ?, ?, ?)",
+                (f"ack_{broadcast_id}_{canonical_uid}", broadcast_id, canonical_uid, now_iso),
+            )
+            conn.commit()
+            cursor.execute("SELECT COUNT(*) FROM club_broadcast_receipts WHERE broadcast_id = ?", (broadcast_id,))
+            cnt = int((cursor.fetchone() or [0])[0] or 0)
+        return {"broadcast_id": broadcast_id, "viewer_acked": True, "ack_count": cnt, "ack_at": now_iso}
+
+    @staticmethod
+    def unpin_club_broadcast(broadcast_id: str, operator_uid: str) -> Dict[str, Any]:
+        """Unpins a club broadcast (by author or club leader)."""
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, club_id, author_id FROM club_broadcasts WHERE id = ?", (broadcast_id,))
+            brow = cursor.fetchone()
+            if not brow:
+                raise ValueError("广播不存在")
+            if brow["author_id"] != canonical_op and not LocalStore._is_club_leader_raw(cursor, brow["club_id"], canonical_op):
+                raise PermissionError("无权取消置顶该广播")
+            cursor.execute("UPDATE club_broadcasts SET is_pinned = 0 WHERE id = ?", (broadcast_id,))
+            conn.commit()
+        return {"broadcast_id": broadcast_id, "is_pinned": False}
+
+    @staticmethod
+    def _batch_get_pulse_micro_cheers(
+        cursor,
+        pairs: List[Tuple[str, str]],
+        viewer_uid: Optional[str] = None,
+    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        """Batch-fetches micro-cheer counts and viewer selections keyed by (target_type, target_id)."""
+        out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        unique_ids = list({tid for _, tid in pairs if tid})
+        if not unique_ids:
+            return out
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else ""
+        ph = ",".join("?" for _ in unique_ids)
+        cursor.execute(
+            f"""
+            SELECT target_type, target_id, cheer_key, sender_id
+            FROM pulse_micro_cheers
+            WHERE target_id IN ({ph})
+            """,
+            tuple(unique_ids),
+        )
+        for r in cursor.fetchall():
+            key = (str(r["target_type"]), str(r["target_id"]))
+            entry = out.setdefault(key, {"counts_by_key": {}, "viewer_cheered_keys": [], "total_cheers": 0})
+            ck = str(r["cheer_key"])
+            entry["counts_by_key"][ck] = entry["counts_by_key"].get(ck, 0) + 1
+            entry["total_cheers"] += 1
+            if canonical_viewer and str(r["sender_id"]) == canonical_viewer and ck not in entry["viewer_cheered_keys"]:
+                entry["viewer_cheered_keys"].append(ck)
+        return out
+
+    @staticmethod
+    def toggle_pulse_micro_cheer(
+        sender_id: str,
+        target_type: str,
+        target_id: str,
+        recipient_id: str,
+        cheer_key: str,
+        club_id: str = "",
+    ) -> Dict[str, Any]:
+        """Toggles a one-tap micro-cheer pill and returns refreshed counts for the target card."""
+        canonical_sender = LocalStore.resolve_user_id(sender_id)
+        canonical_recipient = LocalStore.resolve_user_id(recipient_id) if recipient_id else ""
+        t_type = str(target_type or "activity").strip().lower()
+        if t_type not in ("activity", "newcomer", "pb_milestone"):
+            t_type = "activity"
+        c_key = str(cheer_key or "").strip().lower()
+        if c_key not in LocalStore.PULSE_CHEER_LABELS:
+            raise ValueError("不支持的微鼓励标签")
+        label = LocalStore.PULSE_CHEER_LABELS[c_key]
+        now_iso = get_beijing_iso()
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM pulse_micro_cheers
+                WHERE target_type = ? AND target_id = ? AND sender_id = ? AND cheer_key = ?
+                """,
+                (t_type, target_id, canonical_sender, c_key),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("DELETE FROM pulse_micro_cheers WHERE id = ?", (existing["id"],))
+                active = False
+            else:
+                cid = f"cheer_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+                cursor.execute(
+                    """
+                    INSERT INTO pulse_micro_cheers
+                    (id, target_type, target_id, club_id, sender_id, recipient_id, cheer_key, cheer_label, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (cid, t_type, target_id, club_id or "", canonical_sender, canonical_recipient, c_key, label, now_iso),
+                )
+                active = True
+                if canonical_recipient and canonical_recipient != canonical_sender:
+                    cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (canonical_sender,))
+                    srow = cursor.fetchone()
+                    sname = (srow["display_name"] if srow and srow["display_name"] else None) or "跑友"
+                    LocalStore._insert_notification_raw(
+                        cursor,
+                        canonical_recipient,
+                        f"{label} · 来自 {sname}",
+                        f"队友【{sname}】给你点了「{label}」，继续保持热爱！",
+                        "pulse_cheer",
+                        f"cheer:{t_type}:{target_id}",
+                    )
+            conn.commit()
+            summary = LocalStore._batch_get_pulse_micro_cheers(
+                cursor, [(t_type, target_id)], viewer_uid=canonical_sender
+            ).get((t_type, target_id), {"counts_by_key": {}, "viewer_cheered_keys": [], "total_cheers": 0})
+
+        return {
+            "active": active,
+            "target_type": t_type,
+            "target_id": target_id,
+            "cheer_key": c_key,
+            "cheer_label": label,
+            **summary,
+        }
+
+    @staticmethod
+    def get_home_social_pulse(
+        viewer_uid: str,
+        club_id: Optional[str] = None,
+        tab: str = "all",
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Compiles Home Club Pulse: pinned broadcast, buddy live rings with weekly PK summary,
+        anonymized 14-day newcomer icebreakers, upcoming group runs, and privacy-filtered activity pulse.
+        """
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid)
+        clubs = LocalStore.get_user_clubs(canonical_viewer) or []
+        target_club = None
+        if club_id:
+            target_club = next((c for c in clubs if c.get("id") == club_id), None)
+        if not target_club and clubs:
+            target_club = clubs[0]
+
+        eff_club_id = target_club["id"] if target_club else (club_id or "")
+        eff_club_name = target_club["name"] if target_club else ""
+        today = get_beijing_today()
+        today_str = today.isoformat()
+        week_start_str = (today - timedelta(days=today.weekday())).isoformat()
+
+        # Always compute mutual buddies + mentors for Buddy Live Rings even if user has no club yet
+        buddies_info = LocalStore.get_user_buddies_overview(canonical_viewer)
+        following_set = set(buddies_info.get("following_ids") or [])
+        buddy_rings: List[Dict[str, Any]] = []
+        norm_tab = str(tab or "all").strip().lower()
+        preloaded_events: List[Dict[str, Any]] = []
+        if eff_club_id and norm_tab in ("all", "broadcasts"):
+            ev_res = LocalStore.get_club_events(eff_club_id, user_id=canonical_viewer)
+            preloaded_events = (ev_res.get("upcoming") or ev_res.get("events") or []) if isinstance(ev_res, dict) else (ev_res or [])
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Weekly km for viewer
+            cursor.execute(
+                f"SELECT COALESCE(SUM(distance_meters), 0.0) FROM activities WHERE user_id = ? AND start_time >= ? AND {RUNNING_SQL_FILTER}",
+                (canonical_viewer, week_start_str),
+            )
+            my_week_km = round(float((cursor.fetchone() or [0])[0] or 0.0) / 1000.0, 1)
+
+            mutual_ids = [b["user_id"] for b in (buddies_info.get("mutual_buddies") or [])]
+            if mutual_ids:
+                ph = ",".join("?" for _ in mutual_ids)
+                cursor.execute(
+                    f"""
+                    SELECT user_id,
+                           SUM(CASE WHEN start_time >= ? THEN distance_meters ELSE 0 END) AS today_m,
+                           SUM(CASE WHEN start_time >= ? THEN distance_meters ELSE 0 END) AS week_m
+                    FROM activities
+                    WHERE user_id IN ({ph}) AND start_time >= ? AND {RUNNING_SQL_FILTER}
+                    GROUP BY user_id
+                    """,
+                    tuple([today_str, week_start_str] + mutual_ids + [min(today_str, week_start_str)]),
+                )
+                act_map = {str(r["user_id"]): r for r in cursor.fetchall()}
+
+                cursor.execute(
+                    f"""
+                    SELECT DISTINCT p.user_id
+                    FROM club_event_participants p
+                    JOIN club_events e ON p.event_id = e.id
+                    WHERE p.user_id IN ({ph}) AND p.status != 'cancelled' AND COALESCE(e.status, 'upcoming') = 'upcoming'
+                    """,
+                    tuple(mutual_ids),
+                )
+                upcoming_joined = {str(r[0]) for r in cursor.fetchall()}
+
+                week_kms = []
+                for b in buddies_info.get("mutual_buddies") or []:
+                    buid = b["user_id"]
+                    ar = act_map.get(buid)
+                    t_km = round(float(ar["today_m"] or 0.0) / 1000.0, 1) if ar else 0.0
+                    w_km = round(float(ar["week_m"] or 0.0) / 1000.0, 1) if ar else 0.0
+                    week_kms.append(w_km)
+                    buddy_rings.append({
+                        "user_id": buid,
+                        "display_name": b["display_name"],
+                        "avatar_url": b.get("avatar_url") or "",
+                        "age_group": b.get("age_group") or "未填",
+                        "ran_today": t_km > 0,
+                        "today_km": t_km,
+                        "week_km": w_km,
+                        "is_newcomer_14d": bool(b.get("is_newcomer_14d")),
+                        "joined_upcoming_run": buid in upcoming_joined,
+                        "relation_label": b.get("relation_label") or "⇄ 跑搭子",
+                    })
+                buddies_avg_km = round(sum(week_kms) / len(week_kms), 1) if week_kms else 0.0
+            else:
+                buddies_avg_km = 0.0
+
+            weekly_pk_summary = {
+                "my_week_km": my_week_km,
+                "buddies_avg_week_km": buddies_avg_km,
+                "mutual_count": len(buddy_rings),
+                "summary_text": (
+                    f"周PK：你 {my_week_km} km vs 搭子均跑 {buddies_avg_km} km"
+                    if buddy_rings
+                    else "互关同频跑友后即可开启本周里程友好 PK"
+                ),
+            }
+
+            pinned_broadcast = None
+            broadcasts_list: List[Dict[str, Any]] = []
+            if eff_club_id:
+                b_res = LocalStore.get_club_broadcasts(eff_club_id, viewer_uid=canonical_viewer, include_history=False)
+                pinned_broadcast = b_res.get("pinned_broadcast")
+                broadcasts_list = b_res.get("broadcasts") or []
+
+            # Build unified pulse_items
+            pulse_items: List[Dict[str, Any]] = []
+            cheer_pairs: List[Tuple[str, str]] = []
+
+            # 1) Newcomer Icebreakers (last 14 days, strictly anonymized — no DOB/real_name/phone/GPS)
+            if eff_club_id and norm_tab in ("all", "newcomers"):
+                cutoff_14d = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+                cursor.execute(
+                    """
+                    SELECT p.id, p.display_name, p.avatar_url, p.gender, p.date_of_birth,
+                           p.vo2max, p.marathon_pb, p.half_pb, p.ten_k_pb, p.five_k_pb,
+                           p.city, p.running_landmarks, p.usual_time_slot, p.allow_buddy_search_scope,
+                           m.joined_at, m.training_group
+                    FROM club_memberships m
+                    JOIN profiles p ON m.user_id = p.id
+                    WHERE m.club_id = ? AND m.status = 'active' AND m.joined_at >= ?
+                    ORDER BY m.joined_at DESC
+                    LIMIT 6
+                    """,
+                    (eff_club_id, cutoff_14d),
+                )
+                for nr in cursor.fetchall():
+                    n_dict = dict(nr)
+                    nuid = str(n_dict["id"])
+                    if nuid == canonical_viewer:
+                        continue
+                    vdot_val = LocalStore._compute_candidate_vdot(nuid, n_dict)
+                    lms = LocalStore.parse_running_landmarks(n_dict.get("running_landmarks"))
+                    card_id = f"newcomer_{eff_club_id}_{nuid}"
+                    cheer_pairs.append(("newcomer", card_id))
+                    pulse_items.append({
+                        "item_id": card_id,
+                        "kind": "newcomer_icebreaker",
+                        "created_at": to_beijing_iso(n_dict.get("joined_at")) or get_beijing_iso(),
+                        "user_id": nuid,
+                        "display_name": n_dict.get("display_name") or "新跑友",
+                        "avatar_url": n_dict.get("avatar_url") or "",
+                        "age_group": LocalStore.compute_age_bracket_5y(n_dict.get("date_of_birth")),
+                        "gender": n_dict.get("gender") or "",
+                        "vdot": vdot_val,
+                        "vdot_band": LocalStore._vdot_to_band_label(vdot_val),
+                        "city": str(n_dict.get("city") or ""),
+                        "running_landmarks": lms[:3],
+                        "usual_time_slot": str(n_dict.get("usual_time_slot") or ""),
+                        "training_group": n_dict.get("training_group") or "",
+                        "club_id": eff_club_id,
+                        "club_name": eff_club_name,
+                        "is_following": nuid in following_set,
+                        "micro_cheers": {"counts_by_key": {}, "viewer_cheered_keys": [], "total_cheers": 0},
+                    })
+
+            # 2) Club broadcasts & upcoming group_runs
+            if eff_club_id and norm_tab in ("all", "broadcasts"):
+                for b in broadcasts_list[:2]:
+                    pulse_items.append({
+                        "item_id": f"bcast_item_{b['id']}",
+                        "kind": "broadcast_event",
+                        "subtype": "broadcast",
+                        "created_at": b["created_at"],
+                        "broadcast": b,
+                    })
+                for ev in preloaded_events[:2]:
+                    if isinstance(ev, dict):
+                        pulse_items.append({
+                            "item_id": f"ev_item_{ev.get('id')}",
+                            "kind": "broadcast_event",
+                            "subtype": ev.get("event_type") or "group_run",
+                            "created_at": to_beijing_iso(ev.get("created_at")) or get_beijing_iso(),
+                            "event": {
+                                "id": ev.get("id"),
+                                "club_id": eff_club_id,
+                                "title": ev.get("title"),
+                                "meet_time": ev.get("meet_time"),
+                                "location": ev.get("location"),
+                                "pace_requirement": ev.get("pace_requirement"),
+                                "participant_count": ev.get("participant_count") or len(ev.get("participants") or []),
+                                "joined": bool(ev.get("joined") or ev.get("is_joined")),
+                            },
+                        })
+
+            # 3) Activities (club activities or followed buddies' check-ins — privacy filtered)
+            if norm_tab in ("all", "activities", "buddies"):
+                if norm_tab == "buddies":
+                    target_act_uids = [u for u in following_set if LocalStore.can_view_specific_workout_records(canonical_viewer, u)]
+                    acts_raw: List[Dict[str, Any]] = []
+                    if target_act_uids:
+                        ph = ",".join("?" for _ in target_act_uids)
+                        cursor.execute(
+                            f"""
+                            SELECT a.id, a.user_id, a.name, a.sport_type, a.start_time, a.distance_meters,
+                                   a.moving_time_seconds, a.elapsed_time_seconds, a.average_heartrate, a.max_heartrate,
+                                   a.average_cadence, a.avg_pace_str, a.ai_journal,
+                                   COALESCE(a.route_preview_json, a.gps_track_data) AS gps_track_data, a.map_image_url, a.exclude_mode,
+                                   COALESCE(NULLIF(p.display_name, ''), a.user_id) AS display_name, p.avatar_url,
+                                   p.id AS _owner_profile_id,
+                                   COALESCE(p.hide_gps_route, 0) AS _owner_hide_gps,
+                                   COALESCE(p.hide_biometrics, 0) AS _owner_hide_bio,
+                                   COALESCE(NULLIF(TRIM(p.canova_critique_visibility), ''), 'self') AS _owner_critique_vis,
+                                   COALESCE(NULLIF(TRIM(p.canova_critique_club_ids), ''), '[]') AS _owner_critique_clubs
+                            FROM activities a
+                            LEFT JOIN profiles p ON a.user_id = p.id
+                            WHERE a.user_id IN ({ph}) AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
+                            ORDER BY a.start_time DESC
+                            LIMIT ?
+                            """,
+                            tuple(target_act_uids) + (max(5, int(limit or 20)),),
+                        )
+                        acts_raw = LocalStore._enrich_club_feed_rows(
+                            [dict(r) for r in cursor.fetchall()], canonical_viewer, eff_club_id or ""
+                        )
+                elif eff_club_id:
+                    acts_raw, _ = LocalStore.get_club_recent_activities(
+                        eff_club_id, current_uid=canonical_viewer, limit=max(5, int(limit or 20)), offset=0
+                    )
+                else:
+                    acts_raw = []
+
+                for act in acts_raw:
+                    aid = str(act.get("id") or "")
+                    auid = str(act.get("user_id") or "")
+                    if not aid:
+                        continue
+                    cheer_pairs.append(("activity", aid))
+                    dist_km = round(float(act.get("distance_meters") or 0.0) / 1000.0, 2)
+                    pulse_items.append({
+                        "item_id": f"act_{aid}",
+                        "kind": "activity_checkin",
+                        "created_at": to_beijing_iso(act.get("start_time")) or get_beijing_iso(),
+                        "activity": {
+                            "id": aid,
+                            "user_id": auid,
+                            "display_name": act.get("display_name") or "跑友",
+                            "avatar_url": act.get("avatar_url") or "",
+                            "name": act.get("name") or "日常跑步",
+                            "distance_km": dist_km,
+                            "moving_time_seconds": act.get("moving_time_seconds") or 0,
+                            "avg_pace_str": act.get("avg_pace_str") or "",
+                            "average_heartrate": act.get("average_heartrate"),
+                            "is_gps_hidden": bool(act.get("is_gps_hidden")),
+                            "is_biometrics_hidden": bool(act.get("is_biometrics_hidden")),
+                            "is_critique_hidden": bool(act.get("is_critique_hidden")),
+                            "ai_journal": act.get("ai_journal"),
+                            "likes_count": act.get("likes_count", 0),
+                            "has_liked": bool(act.get("has_liked")),
+                            "comments_count": len(act.get("comments") or []),
+                        },
+                        "is_following": auid in following_set,
+                        "micro_cheers": {"counts_by_key": {}, "viewer_cheered_keys": [], "total_cheers": 0},
+                    })
+
+            if cheer_pairs:
+                cheer_map = LocalStore._batch_get_pulse_micro_cheers(cursor, cheer_pairs, viewer_uid=canonical_viewer)
+                for it in pulse_items:
+                    if it["kind"] == "newcomer_icebreaker":
+                        c = cheer_map.get(("newcomer", it["item_id"]))
+                        if c:
+                            it["micro_cheers"] = c
+                    elif it["kind"] == "activity_checkin":
+                        c = cheer_map.get(("activity", it["activity"]["id"]))
+                        if c:
+                            it["micro_cheers"] = c
+
+        pulse_items.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+        return {
+            "club_id": eff_club_id,
+            "club_name": eff_club_name,
+            "has_club": bool(target_club),
+            "clubs": [{"id": c["id"], "name": c["name"], "role": c.get("role")} for c in clubs],
+            "pinned_broadcast": pinned_broadcast,
+            "pending_targeted_invites": LocalStore.get_user_pending_targeted_invites(canonical_viewer),
+            "buddy_live_rings": buddy_rings,
+            "weekly_pk_summary": weekly_pk_summary,
+            "pulse_items": pulse_items[: max(1, min(50, int(limit or 20)))],
+            "cheer_options": [
+                {"key": k, "label": v}
+                for k, v in LocalStore.PULSE_CHEER_LABELS.items()
+                if k != "welcome_pat"
+            ],
+        }
+
+    # ── Phase 2: 6D Buddy Discovery, Follow & Weekly PK ──
+
+    @staticmethod
+    def discover_running_buddies(
+        viewer_uid: str,
+        scope: str = "org",
+        club_id: Optional[str] = None,
+        age_group: Optional[str] = None,
+        gender: Optional[str] = None,
+        vdot_min: Optional[float] = None,
+        vdot_max: Optional[float] = None,
+        match_my_vdot: bool = False,
+        monthly_km_min: Optional[float] = None,
+        monthly_km_max: Optional[float] = None,
+        city: Optional[str] = None,
+        landmark: Optional[str] = None,
+        tag: Optional[str] = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """6D privacy-preserving runner buddy discovery across club teammates, same-org alumni, and public city runners."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid)
+        norm_scope = str(scope or "org").strip().lower()
+        if norm_scope not in ("club", "org", "public"):
+            norm_scope = "org"
+
+        viewer_prof = LocalStore.get_profile(canonical_viewer) or {}
+        viewer_is_synth = LocalStore.is_synthetic_test_user(viewer_prof)
+        viewer_vdot = LocalStore._compute_candidate_vdot(canonical_viewer, viewer_prof)
+        viewer_city = str(viewer_prof.get("city") or "").strip()
+        viewer_landmarks = set(LocalStore.parse_running_landmarks(viewer_prof.get("running_landmarks")))
+        viewer_clubs = LocalStore.get_user_clubs(canonical_viewer) or []
+        viewer_club_ids = {c["id"] for c in viewer_clubs if c.get("id")}
+        viewer_orgs = LocalStore.get_user_organizations(canonical_viewer) or []
+        viewer_org_ids = {
+            o["id"] for o in viewer_orgs
+            if o.get("status") in ("confirmed", "temporary", "pending")
+            or o.get("role") in ("owner", "admin")
+            or o.get("owner_id") == canonical_viewer
+        }
+
+        if match_my_vdot and viewer_vdot:
+            vdot_min = max(20.0, round(viewer_vdot - 2.5, 1)) if vdot_min is None else vdot_min
+            vdot_max = min(85.0, round(viewer_vdot + 2.5, 1)) if vdot_max is None else vdot_max
+
+        cutoff_30d = (get_beijing_today() - timedelta(days=30)).isoformat()
+        cutoff_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT id, display_name, avatar_url, email, wechat_openid, invited_by,
+                       gender, date_of_birth, vo2max, marathon_pb, half_pb, ten_k_pb, five_k_pb,
+                       first_aid_cert_type, pacer_bio_tags,
+                       city, running_landmarks, usual_time_slot, looking_for_buddy,
+                       allow_buddy_search_scope, garmin_connected, coros_connected,
+                       apple_watch_connected, huawei_connected, suunto_connected,
+                       garmin_email, coros_account, huawei_account, created_at
+                FROM profiles
+                WHERE id != ? AND id NOT IN ('admin', 'super_admin')
+                """,
+                (canonical_viewer,),
+            )
+            all_rows = [dict(r) for r in cursor.fetchall()]
+
+            cursor.execute(
+                "SELECT followee_id FROM user_follows WHERE follower_id = ?",
+                (canonical_viewer,),
+            )
+            following_ids = {str(r[0]) for r in cursor.fetchall()}
+            cursor.execute(
+                "SELECT follower_id FROM user_follows WHERE followee_id = ?",
+                (canonical_viewer,),
+            )
+            follower_ids = {str(r[0]) for r in cursor.fetchall()}
+
+            # Batch active club memberships
+            cursor.execute(
+                """
+                SELECT m.user_id, m.club_id, m.role, m.joined_at, c.name AS club_name, c.city AS club_city, c.org_id
+                FROM club_memberships m
+                JOIN clubs c ON m.club_id = c.id
+                WHERE m.status = 'active' AND COALESCE(c.status, 'active') != 'deleted'
+                """
+            )
+            user_clubs_map: Dict[str, List[Dict[str, Any]]] = {}
+            for mr in cursor.fetchall():
+                uid_m = str(mr["user_id"])
+                user_clubs_map.setdefault(uid_m, []).append(dict(mr))
+
+            # Batch org memberships
+            cursor.execute(
+                """
+                SELECT om.user_id, om.org_id, om.status, o.name AS org_name
+                FROM organization_members om
+                JOIN organizations o ON om.org_id = o.id
+                WHERE om.status IN ('confirmed', 'temporary', 'pending')
+                """
+            )
+            user_orgs_map: Dict[str, List[Dict[str, Any]]] = {}
+            for orow in cursor.fetchall():
+                uid_o = str(orow["user_id"])
+                user_orgs_map.setdefault(uid_o, []).append(dict(orow))
+
+            # Batch 30d running mileage & frequency
+            cursor.execute(
+                f"""
+                SELECT user_id,
+                       COALESCE(SUM(distance_meters), 0.0) AS dist_m,
+                       COUNT(*) AS run_cnt
+                FROM activities
+                WHERE start_time >= ? AND {RUNNING_SQL_FILTER}
+                GROUP BY user_id
+                """,
+                (cutoff_30d,),
+            )
+            stats_30d = {
+                str(r["user_id"]): {"km": round(float(r["dist_m"] or 0.0) / 1000.0, 1), "cnt": int(r["run_cnt"] or 0)}
+                for r in cursor.fetchall()
+            }
+
+            # Mentors / official pacers / same upcoming race
+            cursor.execute("SELECT DISTINCT user_id FROM race_plans WHERE status = 'completed' AND was_official_pacer = 1")
+            pacer_uids = {str(r[0]) for r in cursor.fetchall()}
+            cursor.execute("SELECT name FROM race_plans WHERE user_id = ? AND status = 'upcoming'", (canonical_viewer,))
+            my_race_names = {str(r[0]).strip() for r in cursor.fetchall() if r[0]}
+            same_race_uids: set = set()
+            if my_race_names:
+                ph = ",".join("?" for _ in my_race_names)
+                cursor.execute(
+                    f"SELECT DISTINCT user_id FROM race_plans WHERE status = 'upcoming' AND name IN ({ph})",
+                    tuple(my_race_names),
+                )
+                same_race_uids = {str(r[0]) for r in cursor.fetchall()}
+
+        # Preserve test data visibility when tests create fixtures
+        non_synth_exist = any(not LocalStore.is_synthetic_test_user(r) for r in all_rows)
+        results: List[Dict[str, Any]] = []
+        target_city = str(city or "").strip()
+        target_landmark = str(landmark or "").strip().lower()
+        target_age_bracket = str(age_group or "").strip()
+        target_gender = str(gender or "").strip().lower()
+        target_tag = str(tag or "").strip().lower()
+
+        for row in all_rows:
+            if not viewer_is_synth and non_synth_exist and LocalStore.is_synthetic_test_user(row):
+                continue
+            cuid = str(row["id"])
+            buddy_scope = LocalStore.normalize_buddy_search_scope(row.get("allow_buddy_search_scope"))
+            if buddy_scope == "none":
+                continue
+
+            c_clubs = user_clubs_map.get(cuid, [])
+            c_club_ids = {c["club_id"] for c in c_clubs}
+            c_orgs = user_orgs_map.get(cuid, [])
+            c_org_ids = {o["org_id"] for o in c_orgs}
+
+            shared_club_ids = viewer_club_ids & c_club_ids
+            shared_org_ids = viewer_org_ids & c_org_ids
+
+            if norm_scope == "club":
+                if club_id:
+                    if club_id not in c_club_ids:
+                        continue
+                elif not shared_club_ids:
+                    continue
+            elif norm_scope == "org":
+                if not (shared_club_ids or shared_org_ids):
+                    continue
+            elif norm_scope == "public":
+                if buddy_scope != "public":
+                    continue
+
+            if buddy_scope == "org_and_clubs" and not (shared_club_ids or shared_org_ids):
+                continue
+
+            cand_bracket = LocalStore.compute_age_bracket_5y(row.get("date_of_birth"))
+            if target_age_bracket and target_age_bracket not in ("全部", "all") and cand_bracket != target_age_bracket:
+                continue
+
+            cand_gender = str(row.get("gender") or "").strip().lower()
+            if target_gender in ("male", "female", "男", "女"):
+                want_g = "female" if target_gender in ("female", "女") else "male"
+                if cand_gender != want_g:
+                    continue
+
+            cand_vdot = LocalStore._compute_candidate_vdot(cuid, row)
+            if vdot_min is not None and (cand_vdot is None or cand_vdot < float(vdot_min)):
+                continue
+            if vdot_max is not None and (cand_vdot is None or cand_vdot > float(vdot_max)):
+                continue
+
+            s30 = stats_30d.get(cuid, {"km": 0.0, "cnt": 0})
+            m30_km = s30["km"]
+            if monthly_km_min is not None and m30_km < float(monthly_km_min):
+                continue
+            if monthly_km_max is not None and m30_km > float(monthly_km_max):
+                continue
+
+            cand_city = str(row.get("city") or "").strip() or (str(c_clubs[0].get("club_city") or "") if c_clubs else "")
+            if target_city and target_city not in ("全部", "all"):
+                if target_city not in cand_city and cand_city not in target_city:
+                    continue
+
+            cand_lms = LocalStore.parse_running_landmarks(row.get("running_landmarks"))
+            if target_landmark:
+                if not any(target_landmark in lm.lower() for lm in cand_lms):
+                    continue
+
+            # Status tags
+            cand_tags: List[str] = []
+            is_new_14d = any(str(c.get("joined_at") or "") >= cutoff_14d_iso for c in c_clubs) or str(row.get("created_at") or "") >= cutoff_14d_iso
+            if is_new_14d:
+                cand_tags.append("newcomer_14d")
+            if cuid in same_race_uids:
+                cand_tags.append("same_race")
+            if cuid in pacer_uids or "官兔" in str(row.get("pacer_bio_tags") or ""):
+                cand_tags.append("official_pacer")
+            if row.get("first_aid_cert_type") or any(c.get("role") in ("owner", "coach") for c in c_clubs):
+                cand_tags.append("mentor_ready")
+            if target_tag and target_tag not in cand_tags:
+                continue
+
+            # Compute match score (65 - 99)
+            score = 68
+            if shared_club_ids:
+                score += 10
+            elif shared_org_ids:
+                score += 8
+            if viewer_vdot and cand_vdot:
+                diff = abs(viewer_vdot - cand_vdot)
+                if diff <= 1.5:
+                    score += 14
+                elif diff <= 3.0:
+                    score += 9
+                elif diff <= 5.0:
+                    score += 4
+            if viewer_landmarks and set(cand_lms) & viewer_landmarks:
+                score += 6
+            elif viewer_city and cand_city and (viewer_city in cand_city or cand_city in viewer_city):
+                score += 4
+            score = min(99, score)
+
+            is_following = cuid in following_ids
+            is_followed_by = cuid in follower_ids
+            results.append({
+                "user_id": cuid,
+                "display_name": row.get("display_name") or "跑者",
+                "avatar_url": row.get("avatar_url") or "",
+                "age_group": cand_bracket,
+                "gender": cand_gender or "unknown",
+                "vdot": cand_vdot,
+                "vdot_band": LocalStore._vdot_to_band_label(cand_vdot),
+                "monthly_km_30d": m30_km,
+                "monthly_runs_30d": s30["cnt"],
+                "city": cand_city,
+                "running_landmarks": cand_lms,
+                "usual_time_slot": str(row.get("usual_time_slot") or ""),
+                "looking_for_buddy": bool(row.get("looking_for_buddy", 1)),
+                "club_names": [c["club_name"] for c in c_clubs if c.get("club_name")][:3],
+                "org_names": [o["org_name"] for o in c_orgs if o.get("org_name")][:2],
+                "shared_club": bool(shared_club_ids),
+                "shared_org": bool(shared_org_ids),
+                "tags": cand_tags,
+                "watch_brands": LocalStore._extract_watch_brands(row),
+                "match_score": score,
+                "is_following": is_following,
+                "is_followed_by": is_followed_by,
+                "is_mutual_buddy": bool(is_following and is_followed_by),
+            })
+
+        results.sort(key=lambda x: (-x["match_score"], -x["monthly_km_30d"]))
+        total = len(results)
+        sliced = results[max(0, offset): max(0, offset) + max(1, min(100, limit))]
+        return {
+            "scope": norm_scope,
+            "viewer_vdot": viewer_vdot,
+            "total": total,
+            "candidates": sliced,
+            "age_bracket_options": list(LocalStore.AGE_BRACKET_OPTIONS),
+        }
+
+    @staticmethod
+    def follow_runner(follower_uid: str, target_uid: str) -> Dict[str, Any]:
+        """Follows a runner; automatically promotes to mutual '⇄ 跑搭子' if both follow each other."""
+        f_uid = LocalStore.resolve_user_id(follower_uid)
+        t_uid = LocalStore.resolve_user_id(target_uid)
+        if not f_uid or not t_uid or f_uid == t_uid:
+            raise ValueError("无效的关注对象")
+        now_iso = get_beijing_iso()
+        fid = f"follow_{f_uid}_{t_uid}"
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, display_name FROM profiles WHERE id = ?", (t_uid,))
+            trow = cursor.fetchone()
+            if not trow:
+                raise ValueError("未找到该跑友档案")
+            cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (f_uid,))
+            frow = cursor.fetchone()
+            fname = (frow["display_name"] if frow and frow["display_name"] else None) or "跑友"
+
+            cursor.execute(
+                "INSERT OR IGNORE INTO user_follows (id, follower_id, followee_id, created_at) VALUES (?, ?, ?, ?)",
+                (fid, f_uid, t_uid, now_iso),
+            )
+            cursor.execute(
+                "SELECT 1 FROM user_follows WHERE follower_id = ? AND followee_id = ? LIMIT 1",
+                (t_uid, f_uid),
+            )
+            is_mutual = cursor.fetchone() is not None
+            if is_mutual:
+                LocalStore._insert_notification_raw(
+                    cursor,
+                    t_uid,
+                    f"⇄ 与【{fname}】互相关注成为跑搭子",
+                    f"你与【{fname}】已互关成为「跑搭子」，可在首页查看每周跑量 PK 与约跑动态！",
+                    "buddy_mutual",
+                    f"buddy:{f_uid}",
+                )
+            else:
+                LocalStore._insert_notification_raw(
+                    cursor,
+                    t_uid,
+                    f"🤝 【{fname}】关注了你",
+                    f"跑友【{fname}】关注了你，回关即可升级「⇄ 跑搭子」并解锁周跑量友好 PK。",
+                    "buddy_follow",
+                    f"buddy:{f_uid}",
+                )
+            conn.commit()
+        return {
+            "follower_id": f_uid,
+            "target_uid": t_uid,
+            "is_following": True,
+            "is_mutual_buddy": is_mutual,
+        }
+
+    @staticmethod
+    def unfollow_runner(follower_uid: str, target_uid: str) -> Dict[str, Any]:
+        """Unfollows a runner."""
+        f_uid = LocalStore.resolve_user_id(follower_uid)
+        t_uid = LocalStore.resolve_user_id(target_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM user_follows WHERE follower_id = ? AND followee_id = ?",
+                (f_uid, t_uid),
+            )
+            conn.commit()
+        return {"follower_id": f_uid, "target_uid": t_uid, "is_following": False, "is_mutual_buddy": False}
+
+    @staticmethod
+    def get_user_buddies_overview(viewer_uid: str) -> Dict[str, Any]:
+        """Returns viewer's mutual buddies (user_follows mutual + active mentor relationships) and following list."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid)
+        cutoff_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT followee_id FROM user_follows WHERE follower_id = ?", (canonical_viewer,))
+            following_ids = [str(r[0]) for r in cursor.fetchall()]
+            cursor.execute("SELECT follower_id FROM user_follows WHERE followee_id = ?", (canonical_viewer,))
+            follower_ids = {str(r[0]) for r in cursor.fetchall()}
+
+            # Also include active 1-on-1 mentorship partners as close buddies
+            cursor.execute(
+                "SELECT mentor_id, mentee_id FROM mentor_relationships WHERE (mentor_id = ? OR mentee_id = ?) AND status = 'active'",
+                (canonical_viewer, canonical_viewer),
+            )
+            mentor_partner_ids = set()
+            for mr in cursor.fetchall():
+                m_a = LocalStore.resolve_user_id(mr["mentor_id"])
+                m_b = LocalStore.resolve_user_id(mr["mentee_id"])
+                if m_a == canonical_viewer and m_b != canonical_viewer:
+                    mentor_partner_ids.add(m_b)
+                elif m_b == canonical_viewer and m_a != canonical_viewer:
+                    mentor_partner_ids.add(m_a)
+
+            mutual_set = (set(following_ids) & follower_ids) | mentor_partner_ids
+            all_related = list(set(following_ids) | mutual_set)
+            mutual_buddies: List[Dict[str, Any]] = []
+            following_list: List[Dict[str, Any]] = []
+            if all_related:
+                ph = ",".join("?" for _ in all_related)
+                cursor.execute(
+                    f"""
+                    SELECT id, display_name, avatar_url, date_of_birth, city, running_landmarks, created_at
+                    FROM profiles
+                    WHERE id IN ({ph})
+                    """,
+                    tuple(all_related),
+                )
+                for pr in cursor.fetchall():
+                    uid_p = str(pr["id"])
+                    entry = {
+                        "user_id": uid_p,
+                        "display_name": pr["display_name"] or "跑友",
+                        "avatar_url": pr["avatar_url"] or "",
+                        "age_group": LocalStore.compute_age_bracket_5y(pr["date_of_birth"]),
+                        "city": str(pr["city"] or ""),
+                        "running_landmarks": LocalStore.parse_running_landmarks(pr["running_landmarks"]),
+                        "is_newcomer_14d": str(pr["created_at"] or "") >= cutoff_14d_iso,
+                        "is_mutual_buddy": uid_p in mutual_set,
+                        "relation_label": "🥋 师徒伴跑" if uid_p in mentor_partner_ids else "⇄ 跑搭子",
+                    }
+                    if uid_p in mutual_set:
+                        mutual_buddies.append(entry)
+                    if uid_p in following_ids:
+                        following_list.append(entry)
+
+        return {
+            "following_ids": following_ids,
+            "follower_ids": list(follower_ids),
+            "mutual_buddies": mutual_buddies,
+            "following_list": following_list,
+        }
+
+    @staticmethod
+    def get_buddy_weekly_pk(viewer_uid: str, target_uid: str) -> Dict[str, Any]:
+        """Returns weekly/monthly mileage comparison & shared upcoming group runs between viewer and a buddy."""
+        c_viewer = LocalStore.resolve_user_id(viewer_uid)
+        c_target = LocalStore.resolve_user_id(target_uid)
+        today = get_beijing_today()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        month_start = f"{today.year:04d}-{today.month:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM user_follows WHERE follower_id = ? AND followee_id = ? LIMIT 1",
+                (c_viewer, c_target),
+            )
+            f1 = cursor.fetchone() is not None
+            cursor.execute(
+                "SELECT 1 FROM user_follows WHERE follower_id = ? AND followee_id = ? LIMIT 1",
+                (c_target, c_viewer),
+            )
+            f2 = cursor.fetchone() is not None
+            is_mutual = f1 and f2
+            is_allowed = (
+                is_mutual
+                or LocalStore.are_in_same_club(c_viewer, c_target)
+                or LocalStore.is_mentor_of_runner(c_viewer, c_target)
+                or LocalStore.is_mentor_of_runner(c_target, c_viewer)
+            )
+            if not is_allowed and c_viewer != c_target:
+                raise PermissionError("仅互关「跑搭子」或同团队友支持开启周跑量 PK 面板")
+
+            cursor.execute(
+                """
+                SELECT id, display_name, avatar_url, date_of_birth, city, running_landmarks,
+                       vo2max, marathon_pb, half_pb, ten_k_pb, five_k_pb, hide_biometrics
+                FROM profiles WHERE id IN (?, ?)
+                """,
+                (c_viewer, c_target),
+            )
+            pmap = {str(r["id"]): dict(r) for r in cursor.fetchall()}
+            tprof = pmap.get(c_target)
+            if not tprof:
+                raise ValueError("未找到该跑友档案")
+
+            def _user_period_stats(uid_q: str) -> Dict[str, Any]:
+                cursor.execute(
+                    f"""
+                    SELECT
+                        COALESCE(SUM(CASE WHEN start_time >= ? THEN distance_meters ELSE 0 END), 0.0) AS wk_m,
+                        SUM(CASE WHEN start_time >= ? THEN 1 ELSE 0 END) AS wk_cnt,
+                        COALESCE(SUM(CASE WHEN start_time >= ? THEN distance_meters ELSE 0 END), 0.0) AS mo_m
+                    FROM activities
+                    WHERE user_id = ? AND start_time >= ? AND {RUNNING_SQL_FILTER}
+                    """,
+                    (week_start, week_start, month_start, uid_q, min(week_start, month_start)),
+                )
+                r = cursor.fetchone()
+                return {
+                    "week_km": round(float(r["wk_m"] or 0.0) / 1000.0, 1) if r else 0.0,
+                    "week_runs": int(r["wk_cnt"] or 0) if r else 0,
+                    "month_km": round(float(r["mo_m"] or 0.0) / 1000.0, 1) if r else 0.0,
+                }
+
+            v_stats = _user_period_stats(c_viewer)
+            t_stats = _user_period_stats(c_target)
+
+            # Shared clubs & upcoming group runs
+            cursor.execute(
+                """
+                SELECT c.id, c.name
+                FROM club_memberships m1
+                JOIN club_memberships m2 ON m1.club_id = m2.club_id
+                JOIN clubs c ON m1.club_id = c.id
+                WHERE m1.user_id = ? AND m2.user_id = ? AND m1.status = 'active' AND m2.status = 'active'
+                """,
+                (c_viewer, c_target),
+            )
+            shared_clubs = [{"id": r["id"], "name": r["name"]} for r in cursor.fetchall()]
+
+            cursor.execute(
+                "SELECT id, club_id, title, meet_time, location FROM club_events WHERE event_type = 'group_run' AND COALESCE(status, 'upcoming') = 'upcoming' AND start_date >= ? ORDER BY start_date ASC LIMIT 5",
+                (today.isoformat(),),
+            )
+            upcoming_runs = [dict(r) for r in cursor.fetchall()]
+
+        v_prof = pmap.get(c_viewer) or {}
+        return {
+            "is_mutual_buddy": is_mutual,
+            "week_range": f"{week_start} ~ {today.isoformat()}",
+            "viewer": {
+                "user_id": c_viewer,
+                "display_name": v_prof.get("display_name") or "我",
+                "avatar_url": v_prof.get("avatar_url") or "",
+                "vdot": LocalStore._compute_candidate_vdot(c_viewer, v_prof),
+                **v_stats,
+            },
+            "buddy": {
+                "user_id": c_target,
+                "display_name": tprof.get("display_name") or "跑搭子",
+                "avatar_url": tprof.get("avatar_url") or "",
+                "age_group": LocalStore.compute_age_bracket_5y(tprof.get("date_of_birth")),
+                "city": str(tprof.get("city") or ""),
+                "running_landmarks": LocalStore.parse_running_landmarks(tprof.get("running_landmarks")),
+                "vdot": LocalStore._compute_candidate_vdot(c_target, tprof),
+                "hide_biometrics": bool(tprof.get("hide_biometrics")),
+                **t_stats,
+            },
+            "shared_clubs": shared_clubs,
+            "suggested_group_runs": upcoming_runs[:3],
+        }
+
+    # ── Phase 3: Club & Coach Showcase Plaza, Verified Credentials & Photo Wall ──
+
+    @staticmethod
+    def _parse_json_list(val: Any) -> List[Any]:
+        if isinstance(val, list):
+            return val
+        if isinstance(val, str) and val.strip():
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+        return []
+
+    @staticmethod
+    def list_showcase_plaza(
+        viewer_uid: Optional[str] = None,
+        tab: str = "clubs",
+        city: Optional[str] = None,
+        landmark: Optional[str] = None,
+        style_tag: Optional[str] = None,
+        org_id: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lists visible club brand showcases and certified coach/captain resumes."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else None
+        visible_clubs = LocalStore.list_public_clubs(user_id=canonical_viewer, city=city, search=None)
+        if org_id and org_id.strip() not in ("", "all", "全部"):
+            visible_clubs = [c for c in visible_clubs if c.get("org_id") == org_id.strip()]
+
+        club_ids = [c["id"] for c in visible_clubs]
+        kw = str(search or "").strip().lower()
+        target_lm = str(landmark or "").strip().lower()
+        target_tag = str(style_tag or "").strip().lower()
+        today = get_beijing_today()
+        month_start = f"{today.year:04d}-{today.month:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            showcase_map: Dict[str, Dict[str, Any]] = {}
+            photos_map: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+            club_stats_map: Dict[str, Dict[str, Any]] = {}
+            club_leaders_map: Dict[str, List[Dict[str, Any]]] = {}
+
+            if club_ids:
+                ph = ",".join("?" for _ in club_ids)
+                cursor.execute(f"SELECT * FROM club_showcase_profiles WHERE club_id IN ({ph})", tuple(club_ids))
+                for sr in cursor.fetchall():
+                    showcase_map[str(sr["club_id"])] = dict(sr)
+
+                cursor.execute(
+                    f"""
+                    SELECT * FROM showcase_photos
+                    WHERE owner_type = 'club' AND owner_id IN ({ph})
+                    ORDER BY is_cover DESC, sort_order ASC, created_at DESC
+                    """,
+                    tuple(club_ids),
+                )
+                for pr in cursor.fetchall():
+                    photos_map.setdefault(("club", str(pr["owner_id"])), []).append(dict(pr))
+
+                cursor.execute(
+                    f"""
+                    SELECT m.club_id, m.user_id, m.role,
+                           p.display_name, p.avatar_url, p.first_aid_cert_type, p.pacer_bio_tags,
+                           p.marathon_pb, p.half_pb, p.ten_k_pb, p.five_k_pb, p.vo2max,
+                           p.garmin_connected, p.coros_connected, p.apple_watch_connected, p.huawei_connected, p.suunto_connected,
+                           p.garmin_email, p.coros_account, p.huawei_account
+                    FROM club_memberships m
+                    JOIN profiles p ON m.user_id = p.id
+                    WHERE m.club_id IN ({ph}) AND m.status = 'active' AND m.role IN ('owner', 'coach')
+                    ORDER BY CASE m.role WHEN 'owner' THEN 1 ELSE 2 END, m.joined_at ASC
+                    """,
+                    tuple(club_ids),
+                )
+                for lr in cursor.fetchall():
+                    ld = dict(lr)
+                    club_leaders_map.setdefault(str(ld["club_id"]), []).append(ld)
+
+                # Club verified stats (watch verified count, sub330/sub300 count, month total km)
+                cursor.execute(
+                    f"""
+                    SELECT m.club_id,
+                           COUNT(DISTINCT m.user_id) AS member_cnt,
+                           COUNT(DISTINCT CASE WHEN (p.garmin_connected=1 OR p.coros_connected=1 OR p.apple_watch_connected=1 OR p.huawei_connected=1 OR p.suunto_connected=1) THEN m.user_id END) AS watch_cnt,
+                           COUNT(DISTINCT CASE WHEN (p.marathon_pb IS NOT NULL AND p.marathon_pb > 7000 AND p.marathon_pb <= 10800) THEN m.user_id END) AS sub300_cnt,
+                           COUNT(DISTINCT CASE WHEN (p.marathon_pb IS NOT NULL AND p.marathon_pb > 7000 AND p.marathon_pb <= 12600) THEN m.user_id END) AS sub330_cnt
+                    FROM club_memberships m
+                    JOIN profiles p ON m.user_id = p.id
+                    WHERE m.club_id IN ({ph}) AND m.status = 'active'
+                    GROUP BY m.club_id
+                    """,
+                    tuple(club_ids),
+                )
+                for strw in cursor.fetchall():
+                    club_stats_map[str(strw["club_id"])] = {
+                        "member_count": int(strw["member_cnt"] or 0),
+                        "watch_verified_count": int(strw["watch_cnt"] or 0),
+                        "sub300_count": int(strw["sub300_cnt"] or 0),
+                        "sub330_count": int(strw["sub330_cnt"] or 0),
+                    }
+
+                cursor.execute(
+                    f"""
+                    SELECT m.club_id, COALESCE(SUM(a.distance_meters), 0.0) AS total_m
+                    FROM club_memberships m
+                    JOIN activities a ON m.user_id = a.user_id
+                    WHERE m.club_id IN ({ph}) AND m.status = 'active'
+                      AND a.start_time >= ? AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
+                    GROUP BY m.club_id
+                    """,
+                    tuple(club_ids) + (month_start,),
+                )
+                for kmr in cursor.fetchall():
+                    cs = club_stats_map.setdefault(str(kmr["club_id"]), {})
+                    cs["month_total_km"] = round(float(kmr["total_m"] or 0.0) / 1000.0, 1)
+
+            # Coach resumes
+            coach_uids = list({str(ld["user_id"]) for lds in club_leaders_map.values() for ld in lds})
+            coach_resume_map: Dict[str, Dict[str, Any]] = {}
+            coach_pacer_counts: Dict[str, int] = {}
+            if coach_uids:
+                cph = ",".join("?" for _ in coach_uids)
+                cursor.execute(f"SELECT * FROM coach_public_resumes WHERE user_id IN ({cph})", tuple(coach_uids))
+                for cr in cursor.fetchall():
+                    coach_resume_map[str(cr["user_id"])] = dict(cr)
+                cursor.execute(
+                    f"""
+                    SELECT * FROM showcase_photos
+                    WHERE owner_type = 'coach' AND owner_id IN ({cph})
+                    ORDER BY is_cover DESC, sort_order ASC, created_at DESC
+                    """,
+                    tuple(coach_uids),
+                )
+                for cpr in cursor.fetchall():
+                    photos_map.setdefault(("coach", str(cpr["owner_id"])), []).append(dict(cpr))
+                cursor.execute(
+                    f"""
+                    SELECT user_id, COUNT(*) AS cnt FROM race_plans
+                    WHERE user_id IN ({cph}) AND status = 'completed' AND was_official_pacer = 1
+                    GROUP BY user_id
+                    """,
+                    tuple(coach_uids),
+                )
+                coach_pacer_counts = {str(r["user_id"]): int(r["cnt"] or 0) for r in cursor.fetchall()}
+
+        club_cards: List[Dict[str, Any]] = []
+        for c in visible_clubs:
+            cid = c["id"]
+            sc = showcase_map.get(cid) or {}
+            if sc.get("is_published") == 0 and not c.get("is_member"):
+                continue
+            s_tags = [str(t) for t in LocalStore._parse_json_list(sc.get("style_tags"))]
+            h_lms = [str(l) for l in LocalStore._parse_json_list(sc.get("home_landmarks"))]
+            if target_tag and not any(target_tag in t.lower() for t in s_tags):
+                continue
+            if target_lm and not any(target_lm in l.lower() for l in h_lms):
+                continue
+            if kw:
+                hay = " ".join([c.get("name") or "", c.get("description") or "", sc.get("slogan") or "", c.get("org_name") or "", " ".join(h_lms)]).lower()
+                if kw not in hay:
+                    continue
+            c_photos = photos_map.get(("club", cid), [])
+            cover_url = sc.get("hero_cover_url") or (c_photos[0]["photo_url"] if c_photos else "") or ""
+            leaders = club_leaders_map.get(cid, [])
+            st = club_stats_map.get(cid, {})
+            club_cards.append({
+                "club_id": cid,
+                "name": c.get("name"),
+                "logo_url": c.get("logo_url"),
+                "city": c.get("city") or "上海",
+                "org_id": c.get("org_id"),
+                "org_name": c.get("org_name") or "",
+                "is_member": bool(c.get("is_member")),
+                "join_mode": c.get("join_mode") or "free",
+                "slogan": sc.get("slogan") or (c.get("description") or "")[:64],
+                "hero_cover_url": cover_url,
+                "style_tags": s_tags,
+                "home_landmarks": h_lms,
+                "schedule_summary": sc.get("schedule_summary") or "",
+                "photo_count": len(c_photos),
+                "photo_previews": [p["photo_url"] for p in c_photos[:4]],
+                "lead_coaches": [
+                    {
+                        "user_id": l["user_id"],
+                        "display_name": l.get("display_name") or "教练",
+                        "avatar_url": l.get("avatar_url") or "",
+                        "role": l.get("role"),
+                    }
+                    for l in leaders[:3]
+                ],
+                "verified_stats": {
+                    "member_count": st.get("member_count", c.get("member_count", 0)),
+                    "month_total_km": st.get("month_total_km", 0.0),
+                    "watch_verified_count": st.get("watch_verified_count", 0),
+                    "sub300_count": st.get("sub300_count", 0),
+                    "sub330_count": st.get("sub330_count", 0),
+                },
+            })
+
+        coach_cards: List[Dict[str, Any]] = []
+        seen_coaches: set = set()
+        for c in visible_clubs:
+            cid = c["id"]
+            for l in club_leaders_map.get(cid, []):
+                uid_l = str(l["user_id"])
+                if uid_l in seen_coaches:
+                    continue
+                seen_coaches.add(uid_l)
+                cr = coach_resume_map.get(uid_l) or {}
+                if cr.get("is_published") == 0 and canonical_viewer != uid_l:
+                    continue
+                specs = [str(s) for s in LocalStore._parse_json_list(cr.get("specialty_tags"))]
+                certs = LocalStore._parse_json_list(cr.get("certifications_json"))
+                if l.get("first_aid_cert_type"):
+                    certs = list(certs) + [{"title": l["first_aid_cert_type"], "verified": True}]
+                pb_meta = LocalStore.resolve_verified_runner_profile_and_pbs(uid_l, profile=l, query_activities=False)
+                watch_brands = LocalStore._extract_watch_brands(l)
+                c_photos = photos_map.get(("coach", uid_l), [])
+                if kw:
+                    hay = " ".join([l.get("display_name") or "", cr.get("headline") or "", c.get("name") or "", " ".join(specs)]).lower()
+                    if kw not in hay:
+                        continue
+                coach_cards.append({
+                    "user_id": uid_l,
+                    "display_name": l.get("display_name") or "团长/教练",
+                    "avatar_url": l.get("avatar_url") or "",
+                    "primary_club_id": cid,
+                    "primary_club_name": c.get("name"),
+                    "role": l.get("role"),
+                    "headline": cr.get("headline") or (f"{c.get('name')} {'团长' if l.get('role') == 'owner' else '主教练'}"),
+                    "specialty_tags": specs,
+                    "certifications": certs[:4],
+                    "watch_verified": bool(watch_brands),
+                    "watch_brands": watch_brands,
+                    "verified_marathon_pb": pb_meta.get("marathon_pb") or "",
+                    "verified_half_pb": pb_meta.get("half_pb") or "",
+                    "official_pacer_count": coach_pacer_counts.get(uid_l, 0),
+                    "accepting_runners": bool(cr.get("accepting_runners", 1)),
+                    "photo_count": len(c_photos),
+                    "photo_previews": [p["photo_url"] for p in c_photos[:4]],
+                })
+
+        return {
+            "tab": tab,
+            "clubs": club_cards,
+            "coaches": coach_cards,
+        }
+
+    @staticmethod
+    def get_club_showcase_detail(
+        club_id: str,
+        viewer_uid: Optional[str] = None,
+        invite_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Returns rich club brand showcase detail, verified stats, coaching roster, and categorized photo wall."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else None
+        is_admin_viewer = bool(canonical_viewer and LocalStore.is_super_admin(canonical_viewer))
+        today = get_beijing_today()
+        month_start = f"{today.year:04d}-{today.month:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT c.*, o.name AS org_name
+                FROM clubs c
+                LEFT JOIN organizations o ON c.org_id = o.id
+                WHERE c.id = ?
+                """,
+                (club_id,),
+            )
+            crow = cursor.fetchone()
+            if not crow:
+                raise ValueError("未找到该跑团")
+            club = dict(crow)
+            club.pop("invite_code", None)
+
+            viewer_membership = None
+            if canonical_viewer:
+                cursor.execute(
+                    "SELECT role, status, training_group, joined_at FROM club_memberships WHERE club_id = ? AND user_id = ?",
+                    (club_id, canonical_viewer),
+                )
+                mr = cursor.fetchone()
+                if mr:
+                    viewer_membership = dict(mr)
+
+            # Visibility check for org-bound clubs
+            if club.get("org_id") and not is_admin_viewer and not (viewer_membership and viewer_membership.get("status") == "active"):
+                org_ok = False
+                if canonical_viewer:
+                    cursor.execute(
+                        "SELECT 1 FROM organization_members WHERE org_id = ? AND user_id = ? AND status IN ('confirmed', 'temporary', 'pending') LIMIT 1",
+                        (club["org_id"], canonical_viewer),
+                    )
+                    org_ok = cursor.fetchone() is not None
+                token_ok = False
+                if invite_token:
+                    cursor.execute(
+                        "SELECT 1 FROM club_targeted_invites WHERE invite_token = ? AND club_id = ? AND status != 'expired' LIMIT 1",
+                        (invite_token.strip(), club_id),
+                    )
+                    token_ok = cursor.fetchone() is not None
+                if not (org_ok or token_ok):
+                    raise PermissionError("该跑团仅面向所属大群校友或受邀跑者开放浏览宣传页")
+
+            cursor.execute("SELECT * FROM club_showcase_profiles WHERE club_id = ?", (club_id,))
+            sc_row = cursor.fetchone()
+            sc = dict(sc_row) if sc_row else {}
+
+            cursor.execute(
+                """
+                SELECT * FROM showcase_photos
+                WHERE owner_type = 'club' AND owner_id = ?
+                ORDER BY is_cover DESC, sort_order ASC, created_at DESC
+                """,
+                (club_id,),
+            )
+            photos = [dict(r) for r in cursor.fetchall()]
+
+            cursor.execute(
+                """
+                SELECT m.user_id, m.role, m.training_group,
+                       p.display_name, p.avatar_url, p.first_aid_cert_type, p.pacer_bio_tags,
+                       p.marathon_pb, p.half_pb, p.ten_k_pb, p.five_k_pb, p.vo2max,
+                       p.garmin_connected, p.coros_connected, p.apple_watch_connected, p.huawei_connected, p.suunto_connected,
+                       p.garmin_email, p.coros_account, p.huawei_account,
+                       r.headline, r.specialty_tags, r.certifications_json
+                FROM club_memberships m
+                JOIN profiles p ON m.user_id = p.id
+                LEFT JOIN coach_public_resumes r ON m.user_id = r.user_id
+                WHERE m.club_id = ? AND m.status = 'active' AND m.role IN ('owner', 'coach')
+                ORDER BY CASE m.role WHEN 'owner' THEN 1 ELSE 2 END, m.joined_at ASC
+                """,
+                (club_id,),
+            )
+            coaching_team: List[Dict[str, Any]] = []
+            for lr in cursor.fetchall():
+                ld = dict(lr)
+                uid_l = str(ld["user_id"])
+                pb_meta = LocalStore.resolve_verified_runner_profile_and_pbs(uid_l, profile=ld, query_activities=False)
+                watch_brands = LocalStore._extract_watch_brands(ld)
+                coaching_team.append({
+                    "user_id": uid_l,
+                    "display_name": ld.get("display_name") or "教练",
+                    "avatar_url": ld.get("avatar_url") or "",
+                    "role": ld.get("role"),
+                    "headline": ld.get("headline") or ("主理人/团长" if ld.get("role") == "owner" else "认证教练"),
+                    "specialty_tags": LocalStore._parse_json_list(ld.get("specialty_tags")),
+                    "certifications": LocalStore._parse_json_list(ld.get("certifications_json")),
+                    "first_aid_cert_type": ld.get("first_aid_cert_type") or "",
+                    "verified_marathon_pb": pb_meta.get("marathon_pb") or "",
+                    "verified_half_pb": pb_meta.get("half_pb") or "",
+                    "watch_verified": bool(watch_brands),
+                    "watch_brands": watch_brands,
+                })
+
+            # Verified stats
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT m.user_id) AS member_cnt,
+                       COUNT(DISTINCT CASE WHEN (p.garmin_connected=1 OR p.coros_connected=1 OR p.apple_watch_connected=1 OR p.huawei_connected=1 OR p.suunto_connected=1) THEN m.user_id END) AS watch_cnt,
+                       COUNT(DISTINCT CASE WHEN (p.marathon_pb IS NOT NULL AND p.marathon_pb > 7000 AND p.marathon_pb <= 10800) THEN m.user_id END) AS sub300_cnt,
+                       COUNT(DISTINCT CASE WHEN (p.marathon_pb IS NOT NULL AND p.marathon_pb > 7000 AND p.marathon_pb <= 12600) THEN m.user_id END) AS sub330_cnt
+                FROM club_memberships m
+                JOIN profiles p ON m.user_id = p.id
+                WHERE m.club_id = ? AND m.status = 'active'
+                """,
+                (club_id,),
+            )
+            srw = cursor.fetchone()
+            cursor.execute(
+                f"""
+                SELECT COALESCE(SUM(a.distance_meters), 0.0) AS total_m
+                FROM club_memberships m
+                JOIN activities a ON m.user_id = a.user_id
+                WHERE m.club_id = ? AND m.status = 'active'
+                  AND a.start_time >= ? AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
+                """,
+                (club_id, month_start),
+            )
+            month_km = round(float((cursor.fetchone() or [0])[0] or 0.0) / 1000.0, 1)
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM club_memberships m
+                JOIN race_plans rp ON m.user_id = rp.user_id
+                WHERE m.club_id = ? AND m.status = 'active' AND rp.status = 'completed' AND rp.was_official_pacer = 1
+                """,
+                (club_id,),
+            )
+            pacer_race_cnt = int((cursor.fetchone() or [0])[0] or 0)
+            can_edit = LocalStore._is_club_leader_raw(cursor, club_id, canonical_viewer) if canonical_viewer else False
+
+        ev_res = LocalStore.get_club_events(club_id, user_id=canonical_viewer)
+        ev_list = (ev_res.get("upcoming") or ev_res.get("events") or []) if isinstance(ev_res, dict) else (ev_res or [])
+        upcoming_runs = [
+            {
+                "id": e.get("id"),
+                "title": e.get("title"),
+                "meet_time": e.get("meet_time"),
+                "location": e.get("location"),
+                "pace_requirement": e.get("pace_requirement"),
+                "participant_count": e.get("participant_count") or len(e.get("participants") or []),
+            }
+            for e in ev_list[:4] if isinstance(e, dict)
+        ]
+
+        cover_url = sc.get("hero_cover_url") or (photos[0]["photo_url"] if photos else "") or ""
+        return {
+            "club": {
+                "id": club["id"],
+                "name": club.get("name"),
+                "logo_url": club.get("logo_url"),
+                "description": club.get("description") or "",
+                "city": club.get("city") or "上海",
+                "org_id": club.get("org_id"),
+                "org_name": club.get("org_name") or "",
+                "join_mode": club.get("join_mode") or "free",
+            },
+            "showcase": {
+                "club_id": club_id,
+                "slogan": sc.get("slogan") or (club.get("description") or "")[:80],
+                "hero_cover_url": cover_url,
+                "style_tags": LocalStore._parse_json_list(sc.get("style_tags")),
+                "home_landmarks": LocalStore._parse_json_list(sc.get("home_landmarks")),
+                "schedule_summary": sc.get("schedule_summary") or "",
+                "group_paces": LocalStore._parse_json_list(sc.get("group_paces_json")),
+                "highlights_md": sc.get("highlights_md") or "",
+                "is_published": True if sc.get("is_published") is None else bool(sc.get("is_published")),
+                "updated_at": to_beijing_iso(sc.get("updated_at")),
+            },
+            "verified_stats": {
+                "member_count": int(srw["member_cnt"] or 0) if srw else 0,
+                "month_total_km": month_km,
+                "watch_verified_count": int(srw["watch_cnt"] or 0) if srw else 0,
+                "sub300_count": int(srw["sub300_cnt"] or 0) if srw else 0,
+                "sub330_count": int(srw["sub330_cnt"] or 0) if srw else 0,
+                "official_pacer_races_count": pacer_race_cnt,
+            },
+            "coaching_team": coaching_team,
+            "photos": photos,
+            "upcoming_group_runs": upcoming_runs,
+            "viewer_membership": viewer_membership,
+            "can_edit": can_edit,
+        }
+
+    @staticmethod
+    def upsert_club_showcase_profile(
+        club_id: str,
+        operator_uid: str,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Creates or updates club showcase brand profile (leaders only)."""
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_op):
+                raise PermissionError("仅跑团团长、教练或管理员可编辑跑团宣传主页")
+            cursor.execute("SELECT * FROM club_showcase_profiles WHERE club_id = ?", (club_id,))
+            ex = cursor.fetchone()
+            slogan = str(data.get("slogan") if data.get("slogan") is not None else (ex[1] if ex else "")).strip()[:120]
+            hero_cover_url = str(data.get("hero_cover_url") if data.get("hero_cover_url") is not None else (ex[2] if ex else "")).strip()
+            style_tags = json.dumps(
+                data.get("style_tags") if isinstance(data.get("style_tags"), list) else LocalStore._parse_json_list(ex[3] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            home_landmarks = json.dumps(
+                data.get("home_landmarks") if isinstance(data.get("home_landmarks"), list) else LocalStore._parse_json_list(ex[4] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            schedule_summary = str(data.get("schedule_summary") if data.get("schedule_summary") is not None else (ex[5] if ex else "")).strip()[:300]
+            group_paces_json = json.dumps(
+                data.get("group_paces") if isinstance(data.get("group_paces"), list) else LocalStore._parse_json_list(ex[6] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            highlights_md = str(data.get("highlights_md") if data.get("highlights_md") is not None else (ex[7] if ex else "")).strip()[:2000]
+            is_published = 1 if bool(data.get("is_published", ex[8] if ex else 1)) else 0
+
+            cursor.execute(
+                """
+                INSERT INTO club_showcase_profiles
+                (club_id, slogan, hero_cover_url, style_tags, home_landmarks, schedule_summary, group_paces_json, highlights_md, is_published, updated_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(club_id) DO UPDATE SET
+                    slogan = excluded.slogan,
+                    hero_cover_url = excluded.hero_cover_url,
+                    style_tags = excluded.style_tags,
+                    home_landmarks = excluded.home_landmarks,
+                    schedule_summary = excluded.schedule_summary,
+                    group_paces_json = excluded.group_paces_json,
+                    highlights_md = excluded.highlights_md,
+                    is_published = excluded.is_published,
+                    updated_by = excluded.updated_by,
+                    updated_at = excluded.updated_at
+                """,
+                (club_id, slogan, hero_cover_url, style_tags, home_landmarks, schedule_summary, group_paces_json, highlights_md, is_published, canonical_op, now_iso),
+            )
+            conn.commit()
+        return LocalStore.get_club_showcase_detail(club_id, viewer_uid=canonical_op)
+
+    @staticmethod
+    def get_coach_showcase_detail(
+        coach_uid: str,
+        viewer_uid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Returns coach/captain public credentials, watch-verified PBs & pacer badges, coaching impact & photo gallery."""
+        canonical_coach = LocalStore.resolve_user_id(coach_uid)
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else None
+        today = get_beijing_today()
+        month_start = f"{today.year:04d}-{today.month:02d}-01"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, display_name, avatar_url, gender, date_of_birth, bio,
+                       city, running_landmarks, years_running,
+                       marathon_pb, half_pb, ten_k_pb, five_k_pb, vo2max,
+                       first_aid_cert_type, pacer_bio_tags,
+                       garmin_connected, coros_connected, apple_watch_connected, huawei_connected, suunto_connected,
+                       garmin_email, coros_account, huawei_account
+                FROM profiles WHERE id = ?
+                """,
+                (canonical_coach,),
+            )
+            prow = cursor.fetchone()
+            if not prow:
+                raise ValueError("未找到该团长或教练档案")
+            prof = dict(prow)
+
+            cursor.execute("SELECT * FROM coach_public_resumes WHERE user_id = ?", (canonical_coach,))
+            rrow = cursor.fetchone()
+            resume = dict(rrow) if rrow else {}
+
+            cursor.execute(
+                """
+                SELECT * FROM showcase_photos
+                WHERE owner_type = 'coach' AND owner_id = ?
+                ORDER BY is_cover DESC, sort_order ASC, created_at DESC
+                """,
+                (canonical_coach,),
+            )
+            photos = [dict(r) for r in cursor.fetchall()]
+
+            # Completed races & official pacer badges
+            cursor.execute(
+                """
+                SELECT id, name, race_type, race_date, finish_time, target_time, was_official_pacer, pacer_target_time, photo_url
+                FROM race_plans
+                WHERE user_id = ? AND status = 'completed'
+                ORDER BY race_date DESC
+                LIMIT 15
+                """,
+                (canonical_coach,),
+            )
+            completed_races = [dict(r) for r in cursor.fetchall()]
+            pacer_races = [r for r in completed_races if r.get("was_official_pacer")]
+
+            # Coached clubs & active runner counts
+            cursor.execute(
+                """
+                SELECT c.id, c.name, c.logo_url, c.city, m.role,
+                       (SELECT COUNT(*) FROM club_memberships m2 WHERE m2.club_id = c.id AND m2.status = 'active') AS member_cnt
+                FROM club_memberships m
+                JOIN clubs c ON m.club_id = c.id
+                WHERE m.user_id = ? AND m.status = 'active' AND m.role IN ('owner', 'coach')
+                  AND COALESCE(c.status, 'active') != 'deleted'
+                """,
+                (canonical_coach,),
+            )
+            coached_clubs = [dict(r) for r in cursor.fetchall()]
+            coached_cids = [c["id"] for c in coached_clubs]
+
+            month_team_km = 0.0
+            if coached_cids:
+                ph = ",".join("?" for _ in coached_cids)
+                cursor.execute(
+                    f"""
+                    SELECT COALESCE(SUM(a.distance_meters), 0.0)
+                    FROM club_memberships m
+                    JOIN activities a ON m.user_id = a.user_id
+                    WHERE m.club_id IN ({ph}) AND m.status = 'active'
+                      AND a.start_time >= ? AND {RUNNING_SQL_FILTER.replace('sport_type', 'a.sport_type')}
+                    """,
+                    tuple(coached_cids) + (month_start,),
+                )
+                month_team_km = round(float((cursor.fetchone() or [0])[0] or 0.0) / 1000.0, 1)
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM mentor_relationships WHERE mentor_id = ? AND status = 'active'",
+                (canonical_coach,),
+            )
+            active_mentees = int((cursor.fetchone() or [0])[0] or 0)
+
+        pb_meta = LocalStore.resolve_verified_runner_profile_and_pbs(canonical_coach, profile=prof, query_activities=True)
+        watch_brands = LocalStore._extract_watch_brands(prof)
+        total_coached_runners = sum(int(c.get("member_cnt") or 0) for c in coached_clubs)
+        can_edit = bool(
+            canonical_viewer and (canonical_viewer == canonical_coach or LocalStore.is_super_admin(canonical_viewer))
+        )
+        return {
+            "coach_profile": {
+                "user_id": canonical_coach,
+                "display_name": prof.get("display_name") or "教练",
+                "avatar_url": prof.get("avatar_url") or "",
+                "age_group": LocalStore.compute_age_bracket_5y(prof.get("date_of_birth")),
+                "gender": prof.get("gender") or "",
+                "city": str(prof.get("city") or ""),
+                "running_landmarks": LocalStore.parse_running_landmarks(prof.get("running_landmarks")),
+                "years_running": prof.get("years_running"),
+                "first_aid_cert_type": prof.get("first_aid_cert_type") or "",
+                "pacer_bio_tags": prof.get("pacer_bio_tags") or "",
+            },
+            "resume": {
+                "user_id": canonical_coach,
+                "headline": resume.get("headline") or (f"{coached_clubs[0]['name']} 主理人/教练" if coached_clubs else "Canova 科学训练认证教练"),
+                "specialty_tags": LocalStore._parse_json_list(resume.get("specialty_tags")),
+                "certifications": LocalStore._parse_json_list(resume.get("certifications_json")),
+                "bio_story": resume.get("bio_story") or (prof.get("bio") or ""),
+                "coaching_philosophy": resume.get("coaching_philosophy") or "",
+                "featured_club_ids": LocalStore._parse_json_list(resume.get("featured_club_ids")) or coached_cids,
+                "accepting_runners": bool(resume.get("accepting_runners", 1)),
+                "is_published": bool(resume.get("is_published", 1)),
+                "updated_at": to_beijing_iso(resume.get("updated_at")),
+            },
+            "verified_achievements": {
+                "watch_verified": bool(watch_brands),
+                "watch_brands": watch_brands,
+                "verified_pbs": {
+                    "marathon_pb": pb_meta.get("marathon_pb") or "",
+                    "half_pb": pb_meta.get("half_pb") or "",
+                    "ten_k_pb": pb_meta.get("ten_k_pb") or "",
+                    "peak_vdot": pb_meta.get("peak_vdot"),
+                    "activity_verified_fm": LocalStore._format_duration_hms(pb_meta.get("best_fm_sec")),
+                    "activity_verified_hm": LocalStore._format_duration_hms(pb_meta.get("best_hm_sec")),
+                },
+                "official_pacer_count": len(pacer_races),
+                "official_pacer_races": pacer_races[:6],
+                "verified_races": completed_races[:8],
+            },
+            "coaching_impact": {
+                "coached_clubs": coached_clubs,
+                "total_coached_runners": total_coached_runners,
+                "active_mentees_count": active_mentees,
+                "month_team_km": month_team_km,
+            },
+            "photos": photos,
+            "can_edit": can_edit,
+        }
+
+    @staticmethod
+    def upsert_coach_public_resume(
+        coach_uid: str,
+        operator_uid: str,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Creates or updates a coach/captain public resume (self or super_admin only)."""
+        canonical_coach = LocalStore.resolve_user_id(coach_uid)
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        if canonical_op != canonical_coach and not LocalStore.is_super_admin(canonical_op):
+            raise PermissionError("仅本人或超级管理员可编辑该教练/团长风采主页")
+        if not LocalStore.is_user_coach_or_owner(canonical_coach) and not LocalStore.is_super_admin(canonical_op):
+            raise PermissionError("仅跑团团长或认证教练可开通名帅宣传主页")
+
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM coach_public_resumes WHERE user_id = ?", (canonical_coach,))
+            ex = cursor.fetchone()
+            headline = str(data.get("headline") if data.get("headline") is not None else (ex[1] if ex else "")).strip()[:100]
+            specialty_tags = json.dumps(
+                data.get("specialty_tags") if isinstance(data.get("specialty_tags"), list) else LocalStore._parse_json_list(ex[2] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            certifications_json = json.dumps(
+                data.get("certifications") if isinstance(data.get("certifications"), list) else LocalStore._parse_json_list(ex[3] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            bio_story = str(data.get("bio_story") if data.get("bio_story") is not None else (ex[4] if ex else "")).strip()[:1200]
+            coaching_philosophy = str(data.get("coaching_philosophy") if data.get("coaching_philosophy") is not None else (ex[5] if ex else "")).strip()[:600]
+            featured_club_ids = json.dumps(
+                data.get("featured_club_ids") if isinstance(data.get("featured_club_ids"), list) else LocalStore._parse_json_list(ex[6] if ex else "[]"),
+                ensure_ascii=False,
+            )
+            accepting_runners = 1 if bool(data.get("accepting_runners", ex[7] if ex else 1)) else 0
+            is_published = 1 if bool(data.get("is_published", ex[8] if ex else 1)) else 0
+
+            cursor.execute(
+                """
+                INSERT INTO coach_public_resumes
+                (user_id, headline, specialty_tags, certifications_json, bio_story, coaching_philosophy, featured_club_ids, accepting_runners, is_published, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    headline = excluded.headline,
+                    specialty_tags = excluded.specialty_tags,
+                    certifications_json = excluded.certifications_json,
+                    bio_story = excluded.bio_story,
+                    coaching_philosophy = excluded.coaching_philosophy,
+                    featured_club_ids = excluded.featured_club_ids,
+                    accepting_runners = excluded.accepting_runners,
+                    is_published = excluded.is_published,
+                    updated_at = excluded.updated_at
+                """,
+                (canonical_coach, headline, specialty_tags, certifications_json, bio_story, coaching_philosophy, featured_club_ids, accepting_runners, is_published, now_iso),
+            )
+            conn.commit()
+        return LocalStore.get_coach_showcase_detail(canonical_coach, viewer_uid=canonical_op)
+
+    @staticmethod
+    def add_showcase_photo(
+        owner_type: str,
+        owner_id: str,
+        uploader_uid: str,
+        photo_url: str,
+        category: str = "group_run",
+        caption: str = "",
+        is_cover: bool = False,
+    ) -> Dict[str, Any]:
+        """Adds a categorized showcase photo for a club or coach, enforcing permissions and max 36 photos."""
+        otype = "coach" if str(owner_type).strip().lower() == "coach" else "club"
+        oid = LocalStore.resolve_user_id(owner_id) if otype == "coach" else str(owner_id).strip()
+        canonical_up = LocalStore.resolve_user_id(uploader_uid)
+        cat = str(category or "group_run").strip().lower()
+        if cat not in ("group_run", "race_highlight", "certificate", "team_event"):
+            cat = "group_run"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if otype == "club":
+                if not LocalStore._is_club_leader_raw(cursor, oid, canonical_up):
+                    raise PermissionError("仅跑团团长或教练可上传跑团相册大片")
+            else:
+                if canonical_up != oid and not LocalStore.is_super_admin(canonical_up):
+                    raise PermissionError("仅本人或超级管理员可上传教练履历照片")
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM showcase_photos WHERE owner_type = ? AND owner_id = ?",
+                (otype, oid),
+            )
+            existing_cnt = int((cursor.fetchone() or [0])[0] or 0)
+            if existing_cnt >= 36:
+                raise ValueError("照片墙最多保留 36 张精选用图，请先清理旧照片再上传")
+
+            set_cover = 1 if (is_cover or (otype == "club" and existing_cnt == 0)) else 0
+            if set_cover:
+                cursor.execute(
+                    "UPDATE showcase_photos SET is_cover = 0 WHERE owner_type = ? AND owner_id = ?",
+                    (otype, oid),
+                )
+                if otype == "club":
+                    cursor.execute(
+                        """
+                        INSERT INTO club_showcase_profiles (club_id, hero_cover_url, updated_by, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(club_id) DO UPDATE SET hero_cover_url = excluded.hero_cover_url, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+                        """,
+                        (oid, photo_url, canonical_up, get_beijing_iso()),
+                    )
+
+            pid = f"sphoto_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+            now_iso = get_beijing_iso()
+            cursor.execute(
+                """
+                INSERT INTO showcase_photos
+                (id, owner_type, owner_id, uploader_id, photo_url, category, caption, sort_order, is_cover, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (pid, otype, oid, canonical_up, photo_url, cat, str(caption or "").strip()[:120], existing_cnt, set_cover, now_iso),
+            )
+            conn.commit()
+        return {
+            "id": pid,
+            "owner_type": otype,
+            "owner_id": oid,
+            "uploader_id": canonical_up,
+            "photo_url": photo_url,
+            "category": cat,
+            "caption": str(caption or "").strip()[:120],
+            "sort_order": existing_cnt,
+            "is_cover": bool(set_cover),
+            "created_at": now_iso,
+        }
+
+    @staticmethod
+    def update_showcase_photo(photo_id: str, operator_uid: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Updates caption, category, sort_order, or cover status of a showcase photo."""
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM showcase_photos WHERE id = ?", (photo_id,))
+            prow = cursor.fetchone()
+            if not prow:
+                raise ValueError("照片不存在")
+            p = dict(prow)
+            if p["owner_type"] == "club":
+                if not LocalStore._is_club_leader_raw(cursor, p["owner_id"], canonical_op):
+                    raise PermissionError("无权编辑该跑团照片")
+            else:
+                if canonical_op != p["owner_id"] and not LocalStore.is_super_admin(canonical_op):
+                    raise PermissionError("无权编辑该教练照片")
+
+            cat = str(data.get("category") or p["category"]).strip().lower()
+            if cat not in ("group_run", "race_highlight", "certificate", "team_event"):
+                cat = p["category"]
+            caption = str(data.get("caption") if data.get("caption") is not None else p["caption"]).strip()[:120]
+            sort_order = int(data.get("sort_order") if data.get("sort_order") is not None else (p.get("sort_order") or 0))
+            make_cover = data.get("is_cover")
+            is_cover_int = 1 if (make_cover is True or (make_cover is None and p.get("is_cover"))) else 0
+
+            if make_cover is True:
+                cursor.execute(
+                    "UPDATE showcase_photos SET is_cover = 0 WHERE owner_type = ? AND owner_id = ?",
+                    (p["owner_type"], p["owner_id"]),
+                )
+                if p["owner_type"] == "club":
+                    cursor.execute(
+                        """
+                        INSERT INTO club_showcase_profiles (club_id, hero_cover_url, updated_by, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(club_id) DO UPDATE SET hero_cover_url = excluded.hero_cover_url, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+                        """,
+                        (p["owner_id"], p["photo_url"], canonical_op, get_beijing_iso()),
+                    )
+            cursor.execute(
+                "UPDATE showcase_photos SET category = ?, caption = ?, sort_order = ?, is_cover = ? WHERE id = ?",
+                (cat, caption, sort_order, is_cover_int, photo_id),
+            )
+            conn.commit()
+            cursor.execute("SELECT * FROM showcase_photos WHERE id = ?", (photo_id,))
+            return dict(cursor.fetchone())
+
+    @staticmethod
+    def delete_showcase_photo(photo_id: str, operator_uid: str) -> Dict[str, Any]:
+        """Deletes a showcase photo (leader/owner/admin only)."""
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM showcase_photos WHERE id = ?", (photo_id,))
+            prow = cursor.fetchone()
+            if not prow:
+                raise ValueError("照片不存在")
+            p = dict(prow)
+            if p["owner_type"] == "club":
+                if not LocalStore._is_club_leader_raw(cursor, p["owner_id"], canonical_op):
+                    raise PermissionError("无权删除该跑团照片")
+            else:
+                if canonical_op != p["owner_id"] and not LocalStore.is_super_admin(canonical_op):
+                    raise PermissionError("无权删除该教练照片")
+            cursor.execute("DELETE FROM showcase_photos WHERE id = ?", (photo_id,))
+            conn.commit()
+        return {"deleted": True, "id": photo_id, "owner_type": p["owner_type"], "owner_id": p["owner_id"]}
+
+    # ── Phase 4: Non-Exclusive Multi-Club Targeted Recruitment & Funnel ──
+
+    @staticmethod
+    def search_recruit_candidates(
+        club_id: str,
+        operator_uid: str,
+        pool: str = "same_org",
+        preset: Optional[str] = None,
+        age_group: Optional[str] = None,
+        gender: Optional[str] = None,
+        vdot_min: Optional[float] = None,
+        vdot_max: Optional[float] = None,
+        monthly_km_min: Optional[float] = None,
+        city: Optional[str] = None,
+        landmark: Optional[str] = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Searches eligible candidates for club recruitment without excluding multi-club runners.
+        Strictly enforces candidate's allow_club_search_scope and 30d/90d invite cooldowns.
+        """
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        norm_pool = str(pool or "same_org").strip().lower()
+        if norm_pool not in ("same_org", "public_city", "event_visitors"):
+            norm_pool = "same_org"
+
+        # Apply tactical presets
+        p_key = str(preset or "").strip().lower()
+        if p_key == "female_gobi":
+            gender = "female"
+            monthly_km_min = 100.0 if monthly_km_min is None else monthly_km_min
+        elif p_key == "pacer_330":
+            vdot_min = 45.0 if vdot_min is None else vdot_min
+        elif p_key == "cross_club_elite":
+            vdot_min = 42.0 if vdot_min is None else vdot_min
+
+        cutoff_30d = (get_beijing_today() - timedelta(days=30)).isoformat()
+        cooldown_sent_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        cooldown_decline_iso = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        newcomer_org_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_op):
+                raise PermissionError("仅跑团团长、教练或管理员可使用靶向纳新雷达")
+            cursor.execute(
+                """
+                SELECT c.id, c.name, c.org_id, c.city, o.name AS org_name
+                FROM clubs c
+                LEFT JOIN organizations o ON c.org_id = o.id
+                WHERE c.id = ?
+                """,
+                (club_id,),
+            )
+            crow = cursor.fetchone()
+            if not crow:
+                raise ValueError("跑团不存在")
+            club_org_id = crow["org_id"]
+            club_org_name = crow["org_name"] or ""
+
+            # Already in THIS club (non-exclusive: membership in OTHER clubs is NOT excluded)
+            cursor.execute(
+                "SELECT user_id FROM club_memberships WHERE club_id = ? AND status = 'active'",
+                (club_id,),
+            )
+            already_in_this_club = {LocalStore.resolve_user_id(r[0]) for r in cursor.fetchall()}
+
+            # Same-org pool set
+            same_org_members: Dict[str, str] = {}
+            if club_org_id:
+                cursor.execute(
+                    "SELECT user_id, joined_at FROM organization_members WHERE org_id = ? AND status IN ('confirmed', 'temporary', 'pending')",
+                    (club_org_id,),
+                )
+                for orow in cursor.fetchall():
+                    same_org_members[LocalStore.resolve_user_id(orow["user_id"])] = str(orow["joined_at"] or "")
+
+            # Event visitors set
+            cursor.execute(
+                "SELECT DISTINCT user_id FROM club_event_participants WHERE club_id = ? AND status != 'cancelled'",
+                (club_id,),
+            )
+            event_visitor_uids = {LocalStore.resolve_user_id(r[0]) for r in cursor.fetchall()}
+
+            # Cooldown exclusions for THIS club only
+            cursor.execute(
+                """
+                SELECT target_user_id, status, created_at, responded_at
+                FROM club_targeted_invites
+                WHERE club_id = ? AND target_user_id IS NOT NULL
+                """,
+                (club_id,),
+            )
+            cooldown_blocked: set = set()
+            for ir in cursor.fetchall():
+                tuid = LocalStore.resolve_user_id(ir["target_user_id"])
+                st = str(ir["status"] or "")
+                if st in ("sent", "viewed") and str(ir["created_at"] or "") >= cooldown_sent_iso[:10]:
+                    cooldown_blocked.add(tuid)
+                elif st == "declined" and str(ir["responded_at"] or ir["created_at"] or "") >= cooldown_decline_iso[:10]:
+                    cooldown_blocked.add(tuid)
+
+            # Other clubs count (proves non-exclusive multi-club sharing!)
+            cursor.execute(
+                """
+                SELECT m.user_id, m.club_id, c.name AS club_name
+                FROM club_memberships m
+                JOIN clubs c ON m.club_id = c.id
+                WHERE m.club_id != ? AND m.status = 'active' AND COALESCE(c.status, 'active') != 'deleted'
+                """,
+                (club_id,),
+            )
+            other_clubs_map: Dict[str, List[str]] = {}
+            for omr in cursor.fetchall():
+                uid_m = LocalStore.resolve_user_id(omr["user_id"])
+                other_clubs_map.setdefault(uid_m, []).append(str(omr["club_name"] or ""))
+
+            cursor.execute(
+                f"""
+                SELECT user_id, COALESCE(SUM(distance_meters), 0.0) AS dist_m, COUNT(*) AS cnt
+                FROM activities
+                WHERE start_time >= ? AND {RUNNING_SQL_FILTER}
+                GROUP BY user_id
+                """,
+                (cutoff_30d,),
+            )
+            act_30d = {
+                str(r["user_id"]): {"km": round(float(r["dist_m"] or 0.0) / 1000.0, 1), "cnt": int(r["cnt"] or 0)}
+                for r in cursor.fetchall()
+            }
+
+            cursor.execute(
+                """
+                SELECT id, display_name, avatar_url, email, wechat_openid, invited_by,
+                       gender, date_of_birth, vo2max, marathon_pb, half_pb, ten_k_pb, five_k_pb,
+                       city, running_landmarks, usual_time_slot, allow_club_search_scope,
+                       garmin_connected, coros_connected, apple_watch_connected, huawei_connected, suunto_connected,
+                       garmin_email, coros_account, huawei_account, created_at
+                FROM profiles
+                WHERE id NOT IN ('admin', 'super_admin')
+                """
+            )
+            profiles_rows = [dict(r) for r in cursor.fetchall()]
+
+        op_prof = LocalStore.get_profile(canonical_op) or {}
+        op_is_synth = LocalStore.is_synthetic_test_user(op_prof)
+        non_synth_exist = any(not LocalStore.is_synthetic_test_user(r) for r in profiles_rows)
+
+        target_city = str(city or "").strip()
+        target_lm = str(landmark or "").strip().lower()
+        target_age = str(age_group or "").strip()
+        target_gender = str(gender or "").strip().lower()
+
+        candidates: List[Dict[str, Any]] = []
+        for row in profiles_rows:
+            if not op_is_synth and non_synth_exist and LocalStore.is_synthetic_test_user(row):
+                continue
+            cuid = LocalStore.resolve_user_id(row["id"])
+            if cuid == canonical_op or cuid in already_in_this_club or cuid in cooldown_blocked:
+                continue
+
+            club_scope = LocalStore.normalize_club_search_scope(row.get("allow_club_search_scope"))
+            if club_scope == "none":
+                continue
+
+            in_same_org = cuid in same_org_members
+            if norm_pool == "same_org":
+                if not (club_org_id and in_same_org and club_scope in ("same_org", "public")):
+                    continue
+            elif norm_pool == "public_city":
+                if club_scope != "public":
+                    continue
+            elif norm_pool == "event_visitors":
+                if cuid not in event_visitor_uids:
+                    continue
+
+            other_club_names = other_clubs_map.get(cuid, [])
+            if p_key == "cross_club_elite" and len(other_club_names) == 0:
+                continue
+            if p_key == "org_newcomers" and in_same_org:
+                if same_org_members.get(cuid, "") < newcomer_org_cutoff[:10]:
+                    continue
+
+            cand_bracket = LocalStore.compute_age_bracket_5y(row.get("date_of_birth"))
+            if target_age and target_age not in ("全部", "all") and cand_bracket != target_age:
+                continue
+
+            cand_gender = str(row.get("gender") or "").strip().lower()
+            if target_gender in ("male", "female", "男", "女"):
+                want_g = "female" if target_gender in ("female", "女") else "male"
+                if cand_gender != want_g:
+                    continue
+
+            cand_vdot = LocalStore._compute_candidate_vdot(cuid, row)
+            if vdot_min is not None and (cand_vdot is None or cand_vdot < float(vdot_min)):
+                continue
+            if vdot_max is not None and (cand_vdot is None or cand_vdot > float(vdot_max)):
+                continue
+
+            s30 = act_30d.get(cuid, {"km": 0.0, "cnt": 0})
+            if monthly_km_min is not None and s30["km"] < float(monthly_km_min):
+                continue
+
+            cand_city = str(row.get("city") or "").strip()
+            if target_city and target_city not in ("全部", "all"):
+                if target_city not in cand_city and cand_city not in target_city:
+                    continue
+
+            cand_lms = LocalStore.parse_running_landmarks(row.get("running_landmarks"))
+            if target_lm and not any(target_lm in l.lower() for l in cand_lms):
+                continue
+
+            # Suggested preassigned training group based on VDOT
+            suggested_group = "B组"
+            if cand_vdot and cand_vdot >= 48:
+                suggested_group = "A组"
+            elif cand_vdot and cand_vdot < 38:
+                suggested_group = "C组"
+
+            candidates.append({
+                "user_id": cuid,
+                "display_name": row.get("display_name") or "跑友",
+                "avatar_url": row.get("avatar_url") or "",
+                "age_group": cand_bracket,
+                "gender": cand_gender or "unknown",
+                "vdot": cand_vdot,
+                "vdot_band": LocalStore._vdot_to_band_label(cand_vdot),
+                "monthly_km_30d": s30["km"],
+                "monthly_runs_30d": s30["cnt"],
+                "city": cand_city,
+                "running_landmarks": cand_lms,
+                "shared_org_name": club_org_name if in_same_org else "",
+                "other_clubs_count": len(other_club_names),
+                "other_club_names": other_club_names[:2],
+                "suggested_group": suggested_group,
+                "allow_club_search_scope": club_scope,
+                "watch_brands": LocalStore._extract_watch_brands(row),
+            })
+
+        candidates.sort(key=lambda x: (-(x["vdot"] or 0.0), -x["monthly_km_30d"]))
+        total = len(candidates)
+        sliced = candidates[max(0, offset): max(0, offset) + max(1, min(100, limit))]
+        return {
+            "club_id": club_id,
+            "club_name": crow["name"],
+            "club_org_id": club_org_id,
+            "club_org_name": club_org_name,
+            "pool": norm_pool,
+            "non_exclusive_note": "同大群校友支持多团兼入（如同时参加班级分团、地区晨跑团与配速特训营），手表一次同步自动共享里程。",
+            "total": total,
+            "candidates": sliced,
+        }
+
+    @staticmethod
+    def create_targeted_invites(
+        club_id: str,
+        inviter_uid: str,
+        target_user_ids: List[str],
+        preassigned_group: str = "",
+        reason_tag: str = "",
+        custom_message: str = "",
+        attach_showcase: bool = True,
+    ) -> Dict[str, Any]:
+        """Creates up to 20 zero-code targeted club invitations (or a shareable link token) with showcase preview & preassigned group."""
+        canonical_inviter = LocalStore.resolve_user_id(inviter_uid)
+        clean_targets = []
+        seen_t: set = set()
+        for t in (target_user_ids or []):
+            ct = LocalStore.resolve_user_id(str(t).strip())
+            if ct and ct != canonical_inviter and ct not in seen_t:
+                seen_t.add(ct)
+                clean_targets.append(ct)
+        if len(clean_targets) > 20:
+            raise ValueError("单批最多同时发送 20 位跑友的定向特邀函")
+
+        now_bj = get_beijing_now()
+        created_at = get_beijing_iso()
+        expires_at = (now_bj + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        cooldown_sent_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        cooldown_decline_iso = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+
+        created_invites: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, str]] = []
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_inviter):
+                raise PermissionError("仅跑团团长、教练或管理员可发送定向特邀函")
+            cursor.execute("SELECT id, name FROM clubs WHERE id = ?", (club_id,))
+            crow = cursor.fetchone()
+            if not crow:
+                raise ValueError("跑团不存在")
+            club_name = crow["name"] or "跑团"
+
+            cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (canonical_inviter,))
+            irow = cursor.fetchone()
+            inviter_name = (irow["display_name"] if irow and irow["display_name"] else None) or "团长/教练"
+
+            def _insert_one(t_uid: Optional[str]) -> Dict[str, Any]:
+                tok = f"inv_{uuid.uuid4().hex[:14]}"
+                iid = f"tinv_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+                cursor.execute(
+                    """
+                    INSERT INTO club_targeted_invites
+                    (id, invite_token, club_id, inviter_id, target_user_id, preassigned_group, reason_tag, custom_message, attach_showcase, status, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?)
+                    """,
+                    (
+                        iid,
+                        tok,
+                        club_id,
+                        canonical_inviter,
+                        t_uid,
+                        str(preassigned_group or "").strip()[:24],
+                        str(reason_tag or "").strip()[:48],
+                        str(custom_message or "").strip()[:280],
+                        1 if attach_showcase else 0,
+                        created_at,
+                        expires_at,
+                    ),
+                )
+                return {
+                    "id": iid,
+                    "invite_token": tok,
+                    "club_id": club_id,
+                    "target_user_id": t_uid,
+                    "preassigned_group": str(preassigned_group or "").strip()[:24],
+                    "reason_tag": str(reason_tag or "").strip()[:48],
+                    "attach_showcase": bool(attach_showcase),
+                    "join_path": f"/join/{tok}",
+                    "miniapp_path": f"/pages/invite/invite?token={tok}",
+                }
+
+            if not clean_targets:
+                # Generate an open shareable WeChat / link targeted invite card
+                created_invites.append(_insert_one(None))
+            else:
+                for tuid in clean_targets:
+                    cursor.execute("SELECT id, allow_club_search_scope FROM profiles WHERE id = ?", (tuid,))
+                    prow = cursor.fetchone()
+                    if not prow:
+                        skipped.append({"user_id": tuid, "reason": "用户不存在"})
+                        continue
+                    if LocalStore.normalize_club_search_scope(prow["allow_club_search_scope"]) == "none":
+                        skipped.append({"user_id": tuid, "reason": "该跑友已关闭跑团招募搜索"})
+                        continue
+                    cursor.execute(
+                        "SELECT 1 FROM club_memberships WHERE club_id = ? AND user_id = ? AND status = 'active'",
+                        (club_id, tuid),
+                    )
+                    if cursor.fetchone():
+                        skipped.append({"user_id": tuid, "reason": "已在当前跑团内"})
+                        continue
+                    cursor.execute(
+                        """
+                        SELECT status, created_at, responded_at FROM club_targeted_invites
+                        WHERE club_id = ? AND target_user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
+                        (club_id, tuid),
+                    )
+                    last_inv = cursor.fetchone()
+                    if last_inv:
+                        lst = str(last_inv["status"] or "")
+                        if lst in ("sent", "viewed") and str(last_inv["created_at"] or "") >= cooldown_sent_iso[:10]:
+                            skipped.append({"user_id": tuid, "reason": "30天内已发过特邀"})
+                            continue
+                        if lst == "declined" and str(last_inv["responded_at"] or last_inv["created_at"] or "") >= cooldown_decline_iso[:10]:
+                            skipped.append({"user_id": tuid, "reason": "90天内曾婉拒特邀"})
+                            continue
+
+                    inv_rec = _insert_one(tuid)
+                    created_invites.append(inv_rec)
+                    grp_txt = f"（预编入 {preassigned_group}）" if preassigned_group else ""
+                    LocalStore._insert_notification_raw(
+                        cursor,
+                        tuid,
+                        f"✨ 【{club_name}】{inviter_name} 邀请您兼团加入",
+                        f"{reason_tag or '同频跑友招募'}{grp_txt} · 支持一人多团并行不冲突，免输邀请码一键加入并查看跑团宣传页！",
+                        "club_targeted_invite",
+                        f"targeted_invite:{inv_rec['invite_token']}",
+                    )
+            conn.commit()
+
+        primary_token = created_invites[0]["invite_token"] if created_invites else ""
+        return {
+            "club_id": club_id,
+            "club_name": club_name,
+            "created_count": len(created_invites),
+            "skipped": skipped,
+            "invites": created_invites,
+            "share_token": primary_token,
+            "share_join_path": f"/join/{primary_token}" if primary_token else "",
+            "share_miniapp_path": f"/pages/invite/invite?token={primary_token}" if primary_token else "",
+        }
+
+    @staticmethod
+    def get_targeted_invite_preview(
+        invite_token: str,
+        viewer_uid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Loads a Golden Targeted Invite landing preview with embedded club showcase & non-exclusive multi-club copy."""
+        canonical_viewer = LocalStore.resolve_user_id(viewer_uid) if viewer_uid else None
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT i.*, c.name AS club_name, c.logo_url AS club_logo, c.city AS club_city, c.org_id,
+                       COALESCE(NULLIF(p.display_name, ''), '团长/教练') AS inviter_name,
+                       p.avatar_url AS inviter_avatar
+                FROM club_targeted_invites i
+                JOIN clubs c ON i.club_id = c.id
+                LEFT JOIN profiles p ON i.inviter_id = p.id
+                WHERE i.invite_token = ?
+                """,
+                (invite_token.strip(),),
+            )
+            irow = cursor.fetchone()
+            if not irow:
+                raise ValueError("特邀函链接无效或已失效")
+            inv = dict(irow)
+
+            if inv.get("expires_at") and str(inv["expires_at"]) < now_iso and inv.get("status") in ("sent", "viewed"):
+                cursor.execute("UPDATE club_targeted_invites SET status = 'expired' WHERE id = ?", (inv["id"],))
+                conn.commit()
+                inv["status"] = "expired"
+
+            # Mark as viewed when opened by target or guest previewer
+            if inv.get("status") == "sent" and (
+                not inv.get("target_user_id")
+                or (canonical_viewer and canonical_viewer == LocalStore.resolve_user_id(inv["target_user_id"]))
+            ):
+                cursor.execute(
+                    "UPDATE club_targeted_invites SET status = 'viewed', viewed_at = COALESCE(viewed_at, ?) WHERE id = ?",
+                    (now_iso, inv["id"]),
+                )
+                conn.commit()
+                inv["status"] = "viewed"
+
+            viewer_already_member = False
+            viewer_other_clubs_count = 0
+            if canonical_viewer:
+                cursor.execute(
+                    "SELECT club_id FROM club_memberships WHERE user_id = ? AND status = 'active'",
+                    (canonical_viewer,),
+                )
+                v_cids = {str(r[0]) for r in cursor.fetchall()}
+                viewer_already_member = inv["club_id"] in v_cids
+                viewer_other_clubs_count = len([c for c in v_cids if c != inv["club_id"]])
+
+        showcase_preview = None
+        if inv.get("attach_showcase", 1):
+            try:
+                showcase_preview = LocalStore.get_club_showcase_detail(
+                    inv["club_id"], viewer_uid=canonical_viewer, invite_token=invite_token
+                )
+            except Exception:
+                showcase_preview = None
+
+        return {
+            "invite": {
+                "id": inv["id"],
+                "invite_token": inv["invite_token"],
+                "club_id": inv["club_id"],
+                "club_name": inv.get("club_name") or "跑团",
+                "club_logo": inv.get("club_logo") or "",
+                "club_city": inv.get("club_city") or "上海",
+                "inviter_id": inv["inviter_id"],
+                "inviter_name": inv.get("inviter_name") or "团长/教练",
+                "inviter_avatar": inv.get("inviter_avatar") or "",
+                "target_user_id": inv.get("target_user_id"),
+                "preassigned_group": inv.get("preassigned_group") or "",
+                "reason_tag": inv.get("reason_tag") or "",
+                "custom_message": inv.get("custom_message") or "",
+                "attach_showcase": bool(inv.get("attach_showcase", 1)),
+                "status": inv.get("status"),
+                "created_at": to_beijing_iso(inv.get("created_at")),
+                "expires_at": inv.get("expires_at"),
+            },
+            "non_exclusive_notice": "加入本团与您现有的其他分团（如班级团/晨跑团）完全并行不冲突，手表一次同步自动多团共享里程。",
+            "viewer_already_member": viewer_already_member,
+            "viewer_other_clubs_count": viewer_other_clubs_count,
+            "showcase_preview": showcase_preview,
+        }
+
+    @staticmethod
+    def respond_targeted_invite(
+        invite_token: str,
+        user_id: str,
+        action: str = "accept",
+    ) -> Dict[str, Any]:
+        """Accepts (zero-code multi-club non-exclusive join + preassigned_group) or declines a targeted invite."""
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        act = str(action or "accept").strip().lower()
+        if act not in ("accept", "decline"):
+            raise ValueError("action 仅支持 accept 或 decline")
+        now_iso = get_beijing_iso()
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM club_targeted_invites WHERE invite_token = ?", (invite_token.strip(),))
+            irow = cursor.fetchone()
+            if not irow:
+                raise ValueError("特邀函不存在或已失效")
+            inv = dict(irow)
+            if inv.get("target_user_id") and LocalStore.resolve_user_id(inv["target_user_id"]) != canonical_uid:
+                raise PermissionError("该定向特邀函仅限受邀跑友本人响应")
+            if inv.get("status") == "expired":
+                raise ValueError("该特邀函已过期")
+            if inv.get("expires_at") and str(inv["expires_at"]) < now_iso:
+                cursor.execute("UPDATE club_targeted_invites SET status = 'expired' WHERE id = ?", (inv["id"],))
+                conn.commit()
+                raise ValueError("该特邀函已过期")
+
+            club_id = inv["club_id"]
+            if act == "decline":
+                cursor.execute(
+                    "UPDATE club_targeted_invites SET status = 'declined', responded_at = ? WHERE id = ?",
+                    (now_iso, inv["id"]),
+                )
+                conn.commit()
+                return {"invite_token": invite_token, "status": "declined", "club_id": club_id}
+
+        # Accept OUTSIDE the first connection to prevent nested SQLite write locks:
+        # join club WITHOUT invite code check and WITHOUT altering any other club memberships
+        club_dict = LocalStore._fetch_club_row("id = ?", club_id)
+        if not club_dict:
+            raise ValueError("目标跑团不存在")
+        LocalStore._assert_club_open(club_dict)
+        LocalStore.validate_sub_club_join_eligibility(club_dict, canonical_uid, auto_join_org=True)
+        LocalStore._insert_active_club_membership(club_id, canonical_uid, privacy_consent=True)
+        if inv.get("preassigned_group"):
+            LocalStore.update_member_training_group(club_id, canonical_uid, inv["preassigned_group"])
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE club_targeted_invites
+                SET status = 'accepted',
+                    viewed_at = COALESCE(viewed_at, ?),
+                    responded_at = ?,
+                    accepted_by_uid = ?
+                WHERE id = ?
+                """,
+                (now_iso, now_iso, canonical_uid, inv["id"]),
+            )
+            cursor.execute("SELECT display_name FROM profiles WHERE id = ?", (canonical_uid,))
+            ur = cursor.fetchone()
+            uname = (ur["display_name"] if ur and ur["display_name"] else None) or "新跑友"
+            if inv.get("inviter_id") and LocalStore.resolve_user_id(inv["inviter_id"]) != canonical_uid:
+                LocalStore._insert_notification_raw(
+                    cursor,
+                    LocalStore.resolve_user_id(inv["inviter_id"]),
+                    f"🎉 {uname} 已接受【{club_dict.get('name')}】特邀入团",
+                    f"跑友【{uname}】通过您的定向特邀函免码入团"
+                    + (f"（已编入 {inv['preassigned_group']}）" if inv.get("preassigned_group") else "")
+                    + "！欢迎在首页派发破冰欢迎。",
+                    "club_targeted_invite_accepted",
+                    f"club:{club_id}",
+                )
+            conn.commit()
+
+        return {
+            "invite_token": invite_token,
+            "status": "accepted",
+            "club_id": club_id,
+            "club_name": club_dict.get("name"),
+            "preassigned_group": inv.get("preassigned_group") or "",
+        }
+
+    @staticmethod
+    def get_club_recruit_funnel(club_id: str, operator_uid: str) -> Dict[str, Any]:
+        """Returns 4-stage targeted recruitment conversion funnel and recent invites for a club."""
+        canonical_op = LocalStore.resolve_user_id(operator_uid)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if not LocalStore._is_club_leader_raw(cursor, club_id, canonical_op):
+                raise PermissionError("仅跑团团长、教练或管理员可查看招募漏斗")
+
+            cursor.execute(
+                """
+                SELECT i.*,
+                       COALESCE(NULLIF(pt.display_name, ''), CASE WHEN i.target_user_id IS NULL THEN '微信/链接特邀卡' ELSE i.target_user_id END) AS target_name,
+                       pt.avatar_url AS target_avatar,
+                       COALESCE(NULLIF(pa.display_name, ''), '') AS accepted_name
+                FROM club_targeted_invites i
+                LEFT JOIN profiles pt ON i.target_user_id = pt.id
+                LEFT JOIN profiles pa ON i.accepted_by_uid = pa.id
+                WHERE i.club_id = ?
+                ORDER BY i.created_at DESC
+                LIMIT 50
+                """,
+                (club_id,),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            sent_count = len(rows)
+            viewed_count = sum(1 for r in rows if r.get("viewed_at") or r.get("status") in ("viewed", "accepted", "declined"))
+            accepted_rows = [r for r in rows if r.get("status") == "accepted"]
+            accepted_count = len(accepted_rows)
+
+            first_week_run_count = 0
+            for ar in accepted_rows:
+                auid = LocalStore.resolve_user_id(ar.get("accepted_by_uid") or ar.get("target_user_id") or "")
+                r_at = str(ar.get("responded_at") or ar.get("created_at") or "")[:10]
+                if not auid or not r_at:
+                    continue
+                try:
+                    end_7d = (date.fromisoformat(r_at) + timedelta(days=7)).isoformat()
+                except Exception:
+                    end_7d = "9999-12-31"
+                cursor.execute(
+                    f"""
+                    SELECT 1 FROM activities
+                    WHERE user_id = ? AND start_time >= ? AND substr(start_time, 1, 10) <= ? AND {RUNNING_SQL_FILTER}
+                    LIMIT 1
+                    """,
+                    (auid, r_at, end_7d),
+                )
+                has_act = cursor.fetchone() is not None
+                has_ev = False
+                if not has_act:
+                    cursor.execute(
+                        "SELECT 1 FROM club_event_participants WHERE club_id = ? AND user_id = ? AND joined_at >= ? LIMIT 1",
+                        (club_id, auid, r_at),
+                    )
+                    has_ev = cursor.fetchone() is not None
+                if has_act or has_ev:
+                    first_week_run_count += 1
+
+        return {
+            "club_id": club_id,
+            "funnel": {
+                "sent_count": sent_count,
+                "viewed_count": viewed_count,
+                "accepted_count": accepted_count,
+                "first_week_run_count": first_week_run_count,
+            },
+            "recent_invites": [
+                {
+                    "id": r["id"],
+                    "invite_token": r["invite_token"],
+                    "target_user_id": r.get("target_user_id"),
+                    "target_name": r.get("accepted_name") or r.get("target_name") or "微信特邀卡",
+                    "target_avatar": r.get("target_avatar") or "",
+                    "preassigned_group": r.get("preassigned_group") or "",
+                    "reason_tag": r.get("reason_tag") or "",
+                    "status": r.get("status") or "sent",
+                    "created_at": to_beijing_iso(r.get("created_at")),
+                    "responded_at": to_beijing_iso(r.get("responded_at")),
+                }
+                for r in rows[:20]
+            ],
+        }
+
+    @staticmethod
+    def get_user_pending_targeted_invites(user_id: str) -> List[Dict[str, Any]]:
+        """Returns active non-expired 'sent'|'viewed' targeted club invitations addressed to user_id."""
+        canonical_uid = LocalStore.resolve_user_id(user_id)
+        now_iso = get_beijing_iso()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT i.*, c.name AS club_name, c.logo_url AS club_logo, c.city AS club_city,
+                       COALESCE(NULLIF(p.display_name, ''), '团长/教练') AS inviter_name
+                FROM club_targeted_invites i
+                JOIN clubs c ON i.club_id = c.id
+                LEFT JOIN profiles p ON i.inviter_id = p.id
+                WHERE i.target_user_id = ?
+                  AND i.status IN ('sent', 'viewed')
+                  AND (i.expires_at IS NULL OR i.expires_at >= ?)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM club_memberships m
+                      WHERE m.club_id = i.club_id AND m.user_id = ? AND m.status = 'active'
+                  )
+                ORDER BY i.created_at DESC
+                LIMIT 10
+                """,
+                (canonical_uid, now_iso, canonical_uid),
+            )
+            out = []
+            for r in cursor.fetchall():
+                d = dict(r)
+                d["created_at"] = to_beijing_iso(d.get("created_at"))
+                d["join_path"] = f"/join/{d['invite_token']}"
+                d["miniapp_path"] = f"/pages/invite/invite?token={d['invite_token']}"
+                out.append(d)
+            return out
+
 
 
 

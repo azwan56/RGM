@@ -321,6 +321,15 @@
 
           <!-- ── 次要功能精简捷径条（替代 8 行冗长菜单） ── -->
           <view class="t3-utility-row">
+            <view class="t3-util-chip" @click="goToSubpage('/pages/showcase/showcase')">
+              <text class="t3-util-txt">🏛️ 选团展厅</text>
+            </view>
+            <view class="t3-util-chip" @click="goToSubpage('/pages/discover/discover')">
+              <text class="t3-util-txt">🤝 寻搭子</text>
+            </view>
+            <view v-if="currentClub && !currentClub.is_virtual_unaffiliated" class="t3-util-chip" @click="goToSubpage(`/pages/showcase/showcase?club_id=${encodeURIComponent(currentClub.id)}`)">
+              <text class="t3-util-txt">🖼️ 宣传页</text>
+            </view>
             <view class="t3-util-chip" @click="showPersonalReportModal = true">
               <text class="t3-util-txt">个人战报</text>
             </view>
@@ -435,6 +444,36 @@
           </view>
           <view class="tool-content">
             <text class="tool-main-title">发起跑团挑战赛</text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
+
+        <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev" class="owner-tool-item" @click="goToSubpage(`/pages/recruit/recruit?tab=broadcast&club_id=${encodeURIComponent(currentClub?.id || '')}`)">
+          <view class="tool-icon-box bg-orange">
+            <text class="tool-icon">📣</text>
+          </view>
+          <view class="tool-content">
+            <text class="tool-main-title">发布跑团置顶广播</text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
+
+        <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev" class="owner-tool-item" @click="goToSubpage(`/pages/recruit/recruit?club_id=${encodeURIComponent(currentClub?.id || '')}`)">
+          <view class="tool-icon-box bg-gold">
+            <text class="tool-icon">🎯</text>
+          </view>
+          <view class="tool-content">
+            <text class="tool-main-title">靶向纳新与免码特邀卡</text>
+          </view>
+          <text class="arrow-right">›</text>
+        </view>
+
+        <view v-if="currentRole === 'owner' || currentRole === 'coach' || isOwnerOrDev" class="owner-tool-item" @click="goToSubpage(`/pages/showcase/showcase?mode=studio&club_id=${encodeURIComponent(currentClub?.id || '')}`)">
+          <view class="tool-icon-box bg-green">
+            <text class="tool-icon">🖼️</text>
+          </view>
+          <view class="tool-content">
+            <text class="tool-main-title">装修宣传页与照片墙上传</text>
           </view>
           <text class="arrow-right">›</text>
         </view>
@@ -812,6 +851,14 @@
           <view class="rgm-seg-item" :class="{ active: d1Mode === 'discover' }" @click="d1Mode = 'discover'">推荐跑团</view>
           <view class="rgm-seg-item" :class="{ active: d1Mode === 'code' }" @click="d1Mode = 'code'">凭邀请码</view>
           <view class="rgm-seg-item" :class="{ active: d1Mode === 'solo' }" @click="d1Mode = 'solo'">自由独跑</view>
+        </view>
+        <view class="t3-utility-row" style="margin-top: 14rpx;">
+          <view class="t3-util-chip" @click="goToSubpage('/pages/showcase/showcase')">
+            <text class="t3-util-txt">🏛️ 选团与名帅展厅 ›</text>
+          </view>
+          <view class="t3-util-chip" @click="goToSubpage('/pages/discover/discover')">
+            <text class="t3-util-txt">🤝 同城六维寻搭子 ›</text>
+          </view>
         </view>
       </view>
 
@@ -6832,15 +6879,22 @@ async function loadClubData(preferredClubId?: string) {
         currentSuspensionReason.value = "";
       }
 
-      // Load events, members, coach cockpit, leaderboard, and 2-row feed preview with user_id
+      // Load events, members, (role-gated) coach cockpit, leaderboard, and 2-row feed preview with user_id
+      const isCoachRole =
+        currentRole.value === "owner" ||
+        currentRole.value === "coach" ||
+        currentRole.value === "admin" ||
+        isOwnerOrDev.value;
       try {
         const [evtRes, memRes, coachRes, lbRes, feedRes] = await Promise.all([
           request(`/api/team/${clubId}/events?user_id=${uid}`).catch((e: any) => ({ error: e })),
           request(`/api/team/${clubId}/members?user_id=${uid}`).catch((e: any) => ({ error: e })),
-          request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`).catch((e: any) => ({ error: e })),
+          isCoachRole
+            ? request(`/api/team/${clubId}/coach-cockpit?coach_uid=${uid}`).catch((e: any) => ({ error: e }))
+            : Promise.resolve(null),
           // 首页排名预览（我的排名 + 前三名）
           request(`/api/team/${clubId}/leaderboard?user_id=${uid}`).catch((e: any) => ({ error: e })),
-          request(`/api/team/${clubId}/feed?uid=${uid}`).catch(() => ({ feed: [] })),
+          request(`/api/team/${clubId}/feed?uid=${uid}&limit=2`).catch(() => ({ feed: [] })),
         ]);
 
         if (evtRes?.error && (evtRes.error?.statusCode === 403 || String(evtRes.error?.message).includes("暂停"))) {
@@ -6853,7 +6907,7 @@ async function loadClubData(preferredClubId?: string) {
           events.value = evtRes?.events || [];
           members.value = memRes?.members || [];
           newMembersData.value = null;
-          coachCockpit.value = coachRes || null;
+          coachCockpit.value = isCoachRole ? coachRes || null : null;
           leaderboard.value = lbRes?.error ? [] : (lbRes?.leaderboard || []);
           clubFeedPreview.value = (feedRes?.feed || []).slice(0, 2);
           if (
@@ -9384,6 +9438,9 @@ function handleAddToCalendar(evt: any) {
   uni.showToast({ title: "已在小程序内开启提醒！", icon: "success" });
 }
 
+let lastTeamLoadedAt = 0;
+let lastTeamClubId = "";
+
 onShow(() => {
   applySystemTheme(currentTheme.value);
   try {
@@ -9413,28 +9470,65 @@ onShow(() => {
     activeSection.value = "manage";
     (async () => {
       if (pendingReport.club_id) setActiveClubId(pendingReport.club_id);
+      lastTeamLoadedAt = Date.now();
       await loadClubData(pendingReport.club_id);
+      lastTeamClubId = String(currentClub.value?.id || getActiveClubId() || "");
       firstLoadPending.value = false;
       openReportModal();
     })();
     return;
   }
   if (firstLoadPending.value) {
+    lastTeamLoadedAt = Date.now();
     const timer = setTimeout(() => (firstLoadPending.value = false), 8000);
     Promise.resolve(loadClubData())
+      .then(() => {
+        lastTeamClubId = String(currentClub.value?.id || getActiveClubId() || "");
+      })
       .catch(() => {})
       .finally(() => {
         clearTimeout(timer);
         firstLoadPending.value = false;
       });
   } else {
-    loadClubData();
+    const storedNow = getStoredUser();
+    const uidChanged = Boolean(storedNow?.id && storedNow.id !== user.value?.id);
+    let activeCid = "";
+    let mutTs = 0;
+    let isDirty = false;
+    try {
+      activeCid = String(uni.getStorageSync("rgm_active_club_id") || "");
+      mutTs = Number(uni.getStorageSync("rgm_last_mutation_ts") || 0);
+      isDirty = Boolean(uni.getStorageSync("rgm_dashboard_dirty"));
+    } catch (_) {}
+
+    if (
+      !pendingSection &&
+      !pendingCreateClub &&
+      !uidChanged &&
+      !isDirty &&
+      lastTeamLoadedAt > 0 &&
+      activeCid === lastTeamClubId &&
+      mutTs <= lastTeamLoadedAt &&
+      Date.now() - lastTeamLoadedAt < 30000
+    ) {
+      return;
+    }
+
+    lastTeamLoadedAt = Date.now();
+    Promise.resolve(loadClubData())
+      .then(() => {
+        lastTeamClubId = String(currentClub.value?.id || getActiveClubId() || "");
+      })
+      .catch(() => {});
   }
 });
 
 onPullDownRefresh(async () => {
   try {
+    lastTeamLoadedAt = Date.now();
     const ok = await loadClubData();
+    lastTeamClubId = String(currentClub.value?.id || getActiveClubId() || "");
     if (ok === false) {
       uni.showToast({ title: "刷新失败，请检查网络后重试", icon: "none" });
     } else if (ok === true) {
@@ -9674,6 +9768,10 @@ onShareAppMessage((res: any) => {
 onShareTimeline(() => {
   return getUnifiedShareTimeline();
 });
+
+function goToSubpage(url: string) {
+  uni.navigateTo({ url });
+}
 </script>
 
 <style scoped>

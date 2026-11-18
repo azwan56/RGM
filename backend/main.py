@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from config import settings
 from middleware.auth import SupabaseAuthMiddleware
 
-from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization, notifications
+from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization, notifications, community
 from scheduler.tasks import start_scheduler
 
 @asynccontextmanager
@@ -61,6 +61,10 @@ race_photos_dir = os.path.join(os.path.dirname(__file__), "data", "race_photos")
 os.makedirs(race_photos_dir, exist_ok=True)
 app.mount("/api/race-photos", StaticFiles(directory=race_photos_dir), name="race_photos")
 
+showcase_photos_dir = os.path.join(os.path.dirname(__file__), "data", "showcase_photos")
+os.makedirs(showcase_photos_dir, exist_ok=True)
+app.mount("/api/showcase-photos", StaticFiles(directory=showcase_photos_dir), name="showcase_photos")
+
 # 4. Include Routers
 app.include_router(auth.router,     prefix="/api/auth",     tags=["认证与佳明直连"])
 app.include_router(sync.router,     prefix="/api/sync",     tags=["Garmin 数据同步"])
@@ -72,6 +76,7 @@ app.include_router(organization.router, prefix="/api/org",  tags=["大群体与�
 app.include_router(miniapp.router,  prefix="/api/miniapp",  tags=["微信小程序专用接口"])
 app.include_router(admin.router,    prefix="/api/admin",    tags=["平台超级管理员"])
 app.include_router(notifications.router, prefix="/api",     tags=["系统通知与消息推送"])
+app.include_router(community.router, prefix="/api/community", tags=["社区脉冲·寻搭子·宣传展厅·靶向纳新"])
 
 from fastapi import Header
 from typing import Optional
