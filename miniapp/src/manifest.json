@@ -2,8 +2,8 @@
   "name": "万跑跑团助手",
   "appid": "__UNI__RGM_CN",
   "description": "万跑跑团助手：跑团管理与 Canova 科学耐力训练系统",
-  "versionName": "2.0.0",
-  "versionCode": "200",
+  "versionName": "2.0.1",
+  "versionCode": "201",
   "transformPx": false,
   "uniStatistics": {
     "enable": false
@@ -95,14 +95,8 @@
     "uniStatistics": {
       "enable": false
     },
-    "permission": {
-      "scope.userLocation": {
-        "desc": "用于跑步轨迹记录与约跑集合地点地图选点"
-      }
-    },
     "requiredPrivateInfos": [
-      "chooseLocation",
-      "getLocation"
+      "chooseLocation"
     ]
   }
 }

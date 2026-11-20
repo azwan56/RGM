@@ -45,6 +45,10 @@
         </view>
       </view>
 
+      <view v-if="candidates.length === 0 && emptyReason" class="rgm-card box">
+        <text class="cand-sub">{{ emptyReason }}</text>
+      </view>
+
       <view v-for="cand in candidates" :key="cand.user_id" class="rgm-card cand-box" @click="toggleSelect(cand.user_id)">
         <view class="row-between">
           <view>
@@ -56,7 +60,22 @@
       </view>
 
       <view class="rgm-card box">
-        <text class="lbl">预编组别 & 推荐理由</text>
+        <text class="lbl">特邀卡预览（综合跑团主要信息与图片 · 对方点击直接进跑团）</text>
+        <view v-if="clubShareInfo" class="preview-card-mini">
+          <image
+            v-if="clubShareInfo.hero_cover_url || clubShareInfo.logo_url"
+            :src="resolveAssetUrl(clubShareInfo.hero_cover_url || clubShareInfo.logo_url)"
+            class="preview-cover-mini"
+            mode="aspectFill"
+          />
+          <view class="preview-info-mini">
+            <text class="cand-name">【{{ clubShareInfo.name }}】预编入 {{ groupLabels[grpIdx] }}</text>
+            <text class="cand-sub">
+              📍 {{ clubShareInfo.city || '上海' }} · {{ clubShareInfo.verified_stats?.member_count ?? clubShareInfo.member_count ?? 1 }}人 · 本月 {{ clubShareInfo.verified_stats?.month_total_km ?? 0 }}km · ⌚破330 {{ clubShareInfo.verified_stats?.sub330_count ?? 0 }}人
+            </text>
+          </view>
+        </view>
+        <text class="lbl" style="margin-top: 14rpx;">预编组别 & 推荐理由</text>
         <picker :range="groupLabels" @change="(e: any) => grpIdx = Number(e?.detail?.value || 0)">
           <view class="inp picker-line">{{ groupLabels[grpIdx] }} ▾</view>
         </picker>
@@ -78,13 +97,15 @@
 import { ref } from "vue";
 import { onLoad, onShow, onShareAppMessage } from "@dcloudio/uni-app";
 import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
-import { getActiveClubId, getStoredUser, request } from "../../utils/api";
+import { getActiveClubId, getStoredUser, request, resolveAssetUrl } from "../../utils/api";
 
 const clubId = ref("");
 const mode = ref<"recruit" | "broadcast">("recruit");
 const pool = ref<"same_org" | "public_city">("same_org");
 const preset = ref("");
 const candidates = ref<any[]>([]);
+const emptyReason = ref("");
+const clubShareInfo = ref<any>(null);
 const selected = ref<string[]>([]);
 const funnel = ref<any>(null);
 const sending = ref(false);
@@ -123,12 +144,15 @@ async function loadRecruitData() {
   if (!u?.id || !clubId.value) return;
   try {
     const q = `operator_uid=${encodeURIComponent(u.id)}&pool=${pool.value}${preset.value ? `&preset=${preset.value}` : ""}`;
-    const [cRes, fRes]: any = await Promise.all([
+    const [cRes, fRes, sRes]: any = await Promise.all([
       request(`/api/community/clubs/${encodeURIComponent(clubId.value)}/recruit-candidates?${q}`),
       request(`/api/community/clubs/${encodeURIComponent(clubId.value)}/recruit-funnel?operator_uid=${encodeURIComponent(u.id)}`),
+      request(`/api/team/${encodeURIComponent(clubId.value)}/share-info?user_id=${encodeURIComponent(u.id)}`).catch(() => null),
     ]);
     candidates.value = cRes?.candidates || [];
+    emptyReason.value = cRes?.empty_reason || "";
     funnel.value = fRes?.funnel || null;
+    if (sRes) clubShareInfo.value = sRes;
   } catch (e: any) {
     uni.showToast({ title: e?.message || "加载候选池失败", icon: "none" });
   }
@@ -149,12 +173,23 @@ async function ensureShareToken() {
   } catch {}
 }
 
-onShareAppMessage(() => ({
-  title: `✨ 诚邀免码兼团加入 · 预编入 ${groupLabels[grpIdx.value]}（支持看展厅后加入）`,
-  path: shareToken.value
-    ? `/pages/invite/invite?token=${encodeURIComponent(shareToken.value)}`
-    : `/pages/team/team?club_id=${encodeURIComponent(clubId.value)}`,
-}));
+onShareAppMessage(() => {
+  const cName = clubShareInfo.value?.name || "跑团";
+  const mCnt = clubShareInfo.value?.verified_stats?.member_count ?? clubShareInfo.value?.member_count ?? 0;
+  const bestImg =
+    clubShareInfo.value?.share_card_image_url ||
+    clubShareInfo.value?.hero_cover_url ||
+    clubShareInfo.value?.photos?.[0]?.photo_url ||
+    clubShareInfo.value?.logo_url ||
+    "";
+  return {
+    title: `✨【${cName}】诚邀免码入团（预编入 ${groupLabels[grpIdx.value]}）${mCnt ? ` · ${mCnt}人同跑` : ""} · 点击直接进跑团`,
+    path: shareToken.value
+      ? `/pages/invite/invite?token=${encodeURIComponent(shareToken.value)}&auto_join=1`
+      : `/pages/team/team?club_id=${encodeURIComponent(clubId.value)}&action=join_club&auto_join=1`,
+    imageUrl: bestImg ? resolveAssetUrl(bestImg) : "/static/logo-square.png",
+  };
+});
 
 function switchPool(p: "same_org" | "public_city") {
   pool.value = p;
@@ -254,6 +289,9 @@ async function sendTargetedBatch() {
 .tarea { width: 100%; min-height: 150rpx; padding: 16rpx 20rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); color: var(--rgm-text); font-size: 24rpx; box-sizing: border-box; margin-bottom: 16rpx; }
 .btn-row { display: flex; gap: 14rpx; margin-top: 18rpx; }
 .flex-1 { flex: 1; }
+.preview-card-mini { display: flex; align-items: center; gap: 16rpx; padding: 14rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); }
+.preview-cover-mini { width: 96rpx; height: 96rpx; border-radius: 14rpx; flex-shrink: 0; }
+.preview-info-mini { flex: 1; min-width: 0; }
 .primary-btn { margin-top: 18rpx; height: 76rpx; line-height: 76rpx; border-radius: 18rpx; background: var(--rgm-brand); color: #fff; font-size: 24rpx; font-weight: 900; margin-left: 0; margin-right: 0; }
 .wx-btn { margin-top: 18rpx; height: 76rpx; line-height: 76rpx; border-radius: 18rpx; background: #07c160; color: #fff; font-size: 24rpx; font-weight: 900; margin-left: 0; margin-right: 0; }
 </style>

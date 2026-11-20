@@ -5,7 +5,7 @@
       <view class="m3-hero-top">
         <view class="m3-hero-meta">
           <text class="m3-hero-title">帮助与使用手册</text>
-          <text class="m3-hero-sub">手表绑表 · 跑团实名 · 训练体系问答</text>
+          <text class="m3-hero-sub">手表绑表 · 跑团实名 · 常见问题说明</text>
         </view>
         <view class="m3-wizard-pill" @click="goToWizard">
           <RgmIcon name="zap" :size="24" color="#ffffff" />

@@ -238,8 +238,9 @@
 
             <!-- Practical Coach Critique -->
             <view class="prm-critique-box">
-              <text class="prm-critique-title">💡 教练周期实战复盘与建议</text>
+              <text class="prm-critique-title">💡 教练周期实战复盘与建议（AI生成）</text>
               <text class="prm-critique-txt">{{ reportData.canova_critique }}</text>
+              <text style="display:block;margin-top:8rpx;font-size:19rpx;color:var(--rgm-text-3);">本复盘内容由人工智能（AI）生成，仅供参考</text>
             </view>
 
             <!-- Footer QR Code (Pure Miniapp QR, no club invite) -->
@@ -901,7 +902,7 @@ function generatePersonalPosterImage(): Promise<string> {
     );
     ctx.setFontSize(22);
     ctx.setFillStyle(isLight ? "#0F172A" : "#c084fc");
-    ctx.fillText("💡 教练周期实战复盘与建议", 62, crY + 38);
+    ctx.fillText("💡 教练周期复盘建议（AI生成，仅供参考）", 62, crY + 38);
 
     ctx.setFontSize(18);
     ctx.setFillStyle(isLight ? "#334155" : "#e4e4e7");

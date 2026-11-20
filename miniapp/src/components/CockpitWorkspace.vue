@@ -217,14 +217,6 @@
           </view>
         </view>
 
-        <!-- 全团选兔雷达 · 官方配速员与拉练领跑兔选拔 -->
-        <PacerClubRadarSection
-          v-if="currentClub?.id && user?.id"
-          :club-id="currentClub.id"
-          :operator-uid="user.id"
-          :club-name="currentClub.name"
-        ></PacerClubRadarSection>
-
         <!-- Dense ~63px Traffic-Light Student Rows (Tap to Expand) -->
         <view class="cw-students-list">
           <view
@@ -240,7 +232,7 @@
                 <view class="cw-stu-avatar-wrap">
                   <image
                     class="cw-stu-avatar"
-                    :src="s.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                    :src="s.avatar_url || '/static/defaults/default-avatar.svg'"
                     mode="aspectFill"
                   />
                   <view class="cw-stu-status-dot" :class="'is-' + (s.status_level || 'optimal')" />
@@ -398,7 +390,7 @@
               <view class="cwb-fc-user">
                 <image
                   class="cwb-fc-avatar"
-                  :src="currentFeedActivity.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="currentFeedActivity.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <view>
@@ -426,7 +418,7 @@
             </view>
 
             <view v-if="formatAiJournal(currentFeedActivity.ai_journal)" class="rgm-coach-box" style="margin-bottom: 14rpx;">
-              <text class="cwb-fcc-label">AI 信号复盘：</text>
+              <text class="cwb-fcc-label">AI 信号复盘（人工智能生成，仅供参考）：</text>
               <text class="cwb-fcc-text">{{ formatAiJournal(currentFeedActivity.ai_journal) }}</text>
             </view>
             <view v-if="currentFeedActivity.captain_cheer" class="cwb-fc-canova cwb-fc-captain">
@@ -750,7 +742,7 @@
             </view>
 
             <view v-if="coachReportData.canova_critique" class="cwb-fc-canova" style="margin-top: 14rpx;">
-              <text class="cwb-fcc-label">💡 团队复盘：</text>
+              <text class="cwb-fcc-label">💡 团队复盘（AI生成，人工智能生成仅供参考）：</text>
               <text class="cwb-fcc-text">{{ coachReportData.canova_critique }}</text>
             </view>
 
@@ -826,7 +818,7 @@
           <view class="pm-student-row">
             <image
               class="pm-avatar"
-              :src="activeStudent.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              :src="activeStudent.avatar_url || '/static/defaults/default-avatar.svg'"
               mode="aspectFill"
             />
             <view class="pm-student-info">
@@ -1826,7 +1818,6 @@
 import { themeClass } from "../utils/theme";
 import PageSkeleton from "./PageSkeleton.vue";
 import MapPinPickerModal from "./MapPinPickerModal.vue";
-import PacerClubRadarSection from "./PacerClubRadarSection.vue";
 import RgmIcon from "./RgmIcon.vue";
 import { explainTerm } from "../utils/glossary";
 import { trackClick, trackModal, trackSubView, trackFunnelStep } from "../utils/telemetry";
@@ -2930,7 +2921,7 @@ async function handlePostCoachComment(act: any) {
     const authorName = (user.value.display_name || "认证教练") + " (教练)";
     const authorAvatar =
       user.value.avatar_url ||
-      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80";
+      "/static/defaults/default-avatar.svg";
     const res = await request(`/api/team/activities/${act.id}/comments`, "POST", {
       user_id: user.value.id,
       content,

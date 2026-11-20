@@ -5,46 +5,109 @@
       <text class="err-txt">{{ errMsg }}</text>
     </view>
     <template v-else-if="preview?.invite">
-      <!-- Golden Invite Banner -->
-      <view class="rgm-card invite-hero">
-        <text class="gold-pill">✨ 免输入邀请码 · 定向兼团特邀函</text>
-        <text class="hero-title">
-          【{{ preview.invite.club_name }}】{{ preview.invite.inviter_name }} 诚邀加入
-        </text>
-        <text v-if="preview.invite.preassigned_group" class="group-tag">
-          预编组：{{ preview.invite.preassigned_group }}
-        </text>
-        <text class="hero-desc">{{ preview.invite.reason_tag || preview.non_exclusive_notice }}</text>
-        <view class="non-excl-box">
-          <text class="non-excl-txt">🛡️ {{ preview.non_exclusive_notice }}</text>
-        </view>
-      </view>
+      <!-- Unified Synthesized Club Invitation Card (Click Card to Join & Enter Club Directly) -->
+      <view class="rgm-card unified-invite-card" @click="respond('accept')">
+        <image
+          v-if="heroCoverUrl"
+          :src="resolveAssetUrl(heroCoverUrl)"
+          class="hero-cover-img"
+          mode="aspectFill"
+        />
+        <view class="invite-hero-body">
+          <view class="pill-top-row">
+            <text class="gold-pill">✨ 跑团特邀卡 · 点击卡片直接进跑团</text>
+            <text v-if="preview.invite.preassigned_group" class="group-tag">
+              预编组：{{ preview.invite.preassigned_group }}
+            </text>
+          </view>
 
-      <!-- Embedded Club Showcase & Photos Preview -->
-      <view v-if="preview.showcase_preview" class="rgm-card box">
-        <text class="sec-title">🏛️ 跑团品牌宣传与实拍相册</text>
-        <text class="club-slogan">{{ preview.showcase_preview.showcase?.slogan }}</text>
-        <view class="stat-row">
-          <text class="st-pill">{{ preview.showcase_preview.verified_stats?.member_count ?? 0 }} 位队友</text>
-          <text class="st-pill">⌚ 破330 {{ preview.showcase_preview.verified_stats?.sub330_count ?? 0 }} 人</text>
-          <text class="st-pill">📸 {{ (preview.showcase_preview.photos || []).length }} 张大片</text>
+          <view class="club-head-row">
+            <image
+              v-if="preview.invite.club_logo"
+              :src="resolveAssetUrl(preview.invite.club_logo)"
+              class="club-logo-img"
+              mode="aspectFill"
+            />
+            <view class="club-head-info">
+              <text class="hero-title">
+                【{{ preview.invite.club_name }}】{{ preview.invite.inviter_name }} 诚邀加入
+              </text>
+              <text class="club-slogan">
+                {{ showcaseData?.slogan || preview.invite.reason_tag || preview.non_exclusive_notice }}
+              </text>
+            </view>
+          </view>
+
+          <view class="meta-chips-row">
+            <text class="st-pill">📍 {{ preview.invite.club_city || '上海' }}</text>
+            <text
+              v-for="lm in (showcaseData?.home_landmarks || []).slice(0, 3)"
+              :key="lm"
+              class="st-pill"
+            >
+              {{ lm }}
+            </text>
+            <text v-if="showcaseData?.schedule_summary" class="st-pill sched-pill">
+              🗓️ {{ showcaseData.schedule_summary }}
+            </text>
+          </view>
+
+          <!-- Synthesized Verified Stats Grid -->
+          <view class="stat-grid-row">
+            <view class="stat-cell">
+              <text class="stat-val">{{ verifiedStats?.member_count ?? 1 }}人</text>
+              <text class="stat-lbl">活跃队员</text>
+            </view>
+            <view class="stat-cell">
+              <text class="stat-val brand-val">{{ verifiedStats?.month_total_km ?? 0 }}km</text>
+              <text class="stat-lbl">本月实跑</text>
+            </view>
+            <view class="stat-cell">
+              <text class="stat-val green-val">{{ verifiedStats?.sub330_count ?? 0 }}人</text>
+              <text class="stat-lbl">⌚ 破330</text>
+            </view>
+            <view class="stat-cell">
+              <text class="stat-val">{{ verifiedStats?.official_pacer_races_count ?? 0 }}场</text>
+              <text class="stat-lbl">🐰 认证官兔</text>
+            </view>
+          </view>
+
+          <!-- Core Coaches Strip -->
+          <view v-if="coachesList.length" class="coach-strip">
+            <text class="coach-strip-lbl">🎖️ 核心教练：</text>
+            <text
+              v-for="ch in coachesList.slice(0, 2)"
+              :key="ch.user_id"
+              class="coach-chip"
+            >
+              {{ ch.display_name }}{{ ch.verified_marathon_pb ? ` (PB ${ch.verified_marathon_pb})` : '' }}
+            </text>
+          </view>
+
+          <!-- Synthesized Showcase Photos Strip -->
+          <scroll-view v-if="photosList.length" scroll-x class="photo-strip" @click.stop>
+            <image
+              v-for="(p, idx) in photosList.slice(0, 6)"
+              :key="p.id || idx"
+              :src="resolveAssetUrl(p.photo_url)"
+              class="strip-img"
+              mode="aspectFill"
+              @click.stop="respond('accept')"
+            />
+          </scroll-view>
+
+          <view class="non-excl-box">
+            <text class="non-excl-txt">🛡️ {{ preview.non_exclusive_notice }}</text>
+            <text class="click-hint-txt">👆 点击本邀请卡任意区域即可免码直接进跑团 ›</text>
+          </view>
         </view>
-        <scroll-view v-if="(preview.showcase_preview.photos || []).length" scroll-x class="photo-strip">
-          <image
-            v-for="p in preview.showcase_preview.photos.slice(0, 6)"
-            :key="p.id"
-            :src="resolveAssetUrl(p.photo_url)"
-            class="strip-img"
-            mode="aspectFill"
-          />
-        </scroll-view>
       </view>
 
       <!-- Action Footer -->
       <view class="action-bar">
         <button class="decline-btn" :disabled="submitting" @click="respond('decline')">暂不加入</button>
         <button class="accept-btn" :disabled="submitting" @click="respond('accept')">
-          {{ preview.viewer_already_member ? '已在该团 · 进入跑团 ›' : `免码一键兼入${preview.invite.preassigned_group ? ` (${preview.invite.preassigned_group})` : ''}` }}
+          {{ preview.viewer_already_member ? '已在该团 · 直接进入跑团 ›' : `一键免码进跑团${preview.invite.preassigned_group ? ` (${preview.invite.preassigned_group})` : ''}` }}
         </button>
       </view>
     </template>
@@ -52,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
 import {
@@ -70,6 +133,12 @@ const loading = ref(true);
 const errMsg = ref("");
 const submitting = ref(false);
 
+const showcaseData = computed(() => preview.value?.showcase_summary || preview.value?.showcase_preview?.showcase || preview.value?.invite || {});
+const verifiedStats = computed(() => preview.value?.showcase_summary?.verified_stats || preview.value?.showcase_preview?.verified_stats || preview.value?.invite?.verified_stats || {});
+const photosList = computed<any[]>(() => preview.value?.showcase_summary?.photos || preview.value?.showcase_preview?.photos || preview.value?.invite?.photos || []);
+const coachesList = computed<any[]>(() => preview.value?.showcase_summary?.coaching_team || preview.value?.showcase_preview?.coaching_team || preview.value?.invite?.coaching_team || []);
+const heroCoverUrl = computed(() => showcaseData.value?.hero_cover_url || photosList.value[0]?.photo_url || "");
+
 onShow(() => {
   applySystemTheme(currentTheme.value);
 });
@@ -85,6 +154,12 @@ onLoad(async (opts?: any) => {
     const existing = getStoredUser() || (await silentCheckExistingWechatUser());
     const q = existing?.id ? `?viewer_uid=${encodeURIComponent(existing.id)}` : "";
     preview.value = await request(`/api/community/invites/${encodeURIComponent(token.value)}${q}`);
+
+    // 若从微信特邀卡点击进入 (auto_join=1) 且已识别用户身份，直接自动入团并进入跑团主页
+    if (String(opts?.auto_join || "") === "1" && existing?.id && preview.value?.invite) {
+      await respond("accept");
+      return;
+    }
   } catch (e: any) {
     errMsg.value = e?.message || "特邀函已失效";
   } finally {
@@ -138,19 +213,34 @@ async function respond(action: "accept" | "decline") {
 .box { margin-top: 20rpx; padding: 24rpx; }
 .center-txt { text-align: center; font-size: 24rpx; color: var(--rgm-text-2); padding: 60rpx 24rpx; }
 .err-txt { color: var(--rgm-red); font-weight: 800; }
-.invite-hero { padding: 28rpx; background: var(--rgm-amber-tint); border: 1rpx solid var(--rgm-amber-line); }
+.unified-invite-card { overflow: hidden; padding: 0; background: var(--rgm-amber-tint); border: 2rpx solid var(--rgm-amber-line); }
+.hero-cover-img { width: 100%; height: 280rpx; background: var(--rgm-card-2); }
+.invite-hero-body { padding: 26rpx; }
+.pill-top-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12rpx; }
 .gold-pill { display: inline-block; padding: 6rpx 16rpx; border-radius: 999rpx; background: var(--rgm-brand); color: #fff; font-size: 20rpx; font-weight: 900; }
-.hero-title { font-size: 34rpx; font-weight: 900; color: var(--rgm-text); display: block; margin-top: 14rpx; }
-.group-tag { display: inline-block; margin-top: 10rpx; padding: 4rpx 14rpx; border-radius: 10rpx; background: var(--rgm-green-tint); color: var(--rgm-green); font-size: 22rpx; font-weight: 800; }
-.hero-desc { font-size: 24rpx; color: var(--rgm-text-2); display: block; margin-top: 10rpx; }
-.non-excl-box { margin-top: 16rpx; padding: 14rpx 18rpx; border-radius: 16rpx; background: var(--rgm-card); }
-.non-excl-txt { font-size: 21rpx; color: var(--rgm-text-2); line-height: 1.45; }
-.sec-title { font-size: 28rpx; font-weight: 900; color: var(--rgm-text); display: block; }
-.club-slogan { font-size: 24rpx; color: var(--rgm-brand); font-weight: 700; display: block; margin-top: 8rpx; }
-.stat-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 14rpx; }
-.st-pill { padding: 6rpx 14rpx; border-radius: 10rpx; background: var(--rgm-card-2); font-size: 20rpx; color: var(--rgm-text); font-weight: 700; }
+.group-tag { display: inline-block; padding: 6rpx 14rpx; border-radius: 999rpx; background: var(--rgm-green-tint); color: var(--rgm-green); font-size: 20rpx; font-weight: 800; }
+.club-head-row { display: flex; align-items: center; gap: 18rpx; margin-top: 16rpx; }
+.club-logo-img { width: 96rpx; height: 96rpx; border-radius: 20rpx; flex-shrink: 0; border: 2rpx solid var(--rgm-brand); }
+.club-head-info { flex: 1; min-width: 0; }
+.hero-title { font-size: 32rpx; font-weight: 900; color: var(--rgm-text); display: block; }
+.club-slogan { font-size: 23rpx; color: var(--rgm-brand); font-weight: 700; display: block; margin-top: 6rpx; }
+.meta-chips-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 14rpx; }
+.st-pill { padding: 6rpx 14rpx; border-radius: 10rpx; background: var(--rgm-card); font-size: 20rpx; color: var(--rgm-text); font-weight: 700; }
+.sched-pill { color: var(--rgm-brand); }
+.stat-grid-row { display: flex; gap: 10rpx; margin-top: 16rpx; }
+.stat-cell { flex: 1; padding: 14rpx 8rpx; border-radius: 14rpx; background: var(--rgm-card); text-align: center; }
+.stat-val { font-size: 24rpx; font-weight: 900; color: var(--rgm-text); display: block; }
+.brand-val { color: var(--rgm-brand); }
+.green-val { color: var(--rgm-green); }
+.stat-lbl { font-size: 18rpx; color: var(--rgm-text-2); display: block; margin-top: 4rpx; }
+.coach-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 10rpx; margin-top: 14rpx; }
+.coach-strip-lbl { font-size: 20rpx; font-weight: 800; color: var(--rgm-text); }
+.coach-chip { font-size: 20rpx; padding: 4rpx 12rpx; border-radius: 10rpx; background: var(--rgm-card); color: var(--rgm-text-2); font-weight: 700; }
 .photo-strip { white-space: nowrap; margin-top: 16rpx; }
-.strip-img { display: inline-block; width: 200rpx; height: 150rpx; border-radius: 14rpx; margin-right: 12rpx; }
+.strip-img { display: inline-block; width: 190rpx; height: 140rpx; border-radius: 14rpx; margin-right: 12rpx; }
+.non-excl-box { margin-top: 16rpx; padding: 14rpx 18rpx; border-radius: 16rpx; background: var(--rgm-card); }
+.non-excl-txt { font-size: 20rpx; color: var(--rgm-text-2); line-height: 1.45; display: block; }
+.click-hint-txt { font-size: 21rpx; font-weight: 900; color: var(--rgm-brand); display: block; margin-top: 6rpx; }
 .action-bar { display: flex; gap: 16rpx; margin-top: 28rpx; }
 .decline-btn { flex: 1; height: 82rpx; line-height: 82rpx; border-radius: 20rpx; background: var(--rgm-card-2); color: var(--rgm-text-2); font-size: 26rpx; font-weight: 800; margin: 0; }
 .accept-btn { flex: 2; height: 82rpx; line-height: 82rpx; border-radius: 20rpx; background: var(--rgm-brand); color: #fff; font-size: 26rpx; font-weight: 900; margin: 0; }

@@ -48,7 +48,6 @@
           :longitude="mapCenterLng"
           :scale="mapScale"
           :markers="mapMarkers"
-          show-location
           @tap="onMapTap"
           @regionchange="onMapRegionChange"
         />
@@ -170,21 +169,6 @@ watch(
       pinLng.value = Number(props.initialLng);
       mapCenterLat.value = Number(props.initialLat);
       mapCenterLng.value = Number(props.initialLng);
-    } else {
-      // 尝试获取用户当前位置作为默认地图中心
-      if (typeof uni !== "undefined" && typeof uni.getLocation === "function") {
-        uni.getLocation({
-          type: "gcj02",
-          success: (loc) => {
-            if (loc?.latitude && loc?.longitude) {
-              pinLat.value = Number(loc.latitude);
-              pinLng.value = Number(loc.longitude);
-              mapCenterLat.value = Number(loc.latitude);
-              mapCenterLng.value = Number(loc.longitude);
-            }
-          },
-        });
-      }
     }
   },
   { immediate: true }

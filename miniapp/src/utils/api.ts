@@ -151,7 +151,7 @@ const _inflightGetRequests = new Map<string, Promise<any>>();
  */
 export async function request<T = any>(
   url: string,
-  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" = "GET",
+  method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
   data?: any,
   _retried401 = false
 ): Promise<T> {
@@ -278,7 +278,7 @@ export async function request<T = any>(
           if (err.errMsg.includes("url not in domain list")) {
             errDesc = "域名未授权：请在微信开发者工具右上角【详情】->【本地设置】勾选【不校验合法域名】";
           } else if (err.errMsg.includes("timeout")) {
-            errDesc = "连接超时：佳明官方服务器验证较慢，请稍后重试";
+            errDesc = "连接超时：手表官方服务器响应较慢，请稍后重试";
           } else {
             errDesc = `网络连接异常 (${err.errMsg})`;
           }
@@ -1103,11 +1103,12 @@ export async function chooseAndImportScreenshot(
           source_brand: sourceBrand,
         });
       } catch (b64Err: any) {
-        // If server returned an explicit 400 validation error, rethrow immediately
-        if (b64Err?.statusCode === 400) {
+        // Never duplicate expensive OCR work when server already received or rejected the request
+        const sc = Number(b64Err?.statusCode || 0);
+        if ([400, 401, 403, 413, 429, 500, 502, 503, 504].includes(sc)) {
           throw b64Err;
         }
-        // Fallback to multipart uploadFile
+        // Fallback to multipart uploadFile only for client-side readFile/transfer failure or 404/405
         singleRes = await new Promise<any>((resolve, reject) => {
           const token = getToken();
           uni.uploadFile({
@@ -1699,6 +1700,7 @@ export function resolveAssetUrl(url?: string | null): string {
   const s = String(url || "").trim();
   if (!s) return "";
   if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  if (s.startsWith("/static/")) return s;
   if (s.startsWith("/")) return `${API_BASE_URL}${s}`;
   return s;
 }

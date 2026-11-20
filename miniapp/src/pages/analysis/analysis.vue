@@ -22,7 +22,7 @@
           <view style="display: flex; align-items: center; gap: 16rpx;">
             <image
               style="width: 88rpx; height: 88rpx; border-radius: 50%; border: 2rpx solid rgba(252,76,2,0.4);"
-              :src="scienceData?.basic_status?.avatar_url || scienceData?.student_profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              :src="scienceData?.basic_status?.avatar_url || scienceData?.student_profile?.avatar_url || '/static/defaults/default-avatar.svg'"
               mode="aspectFill"
             />
             <view style="display: flex; flex-direction: column; gap: 6rpx;">
@@ -144,7 +144,7 @@
 
         <!-- Canova 一句话结论 -->
         <view v-if="scienceData?.canova_matrix?.canova_one_line_summary" class="canova-summary-pill">
-          <text class="canova-summary-text">💡 {{ scienceData.canova_matrix.canova_one_line_summary }}</text>
+          <text class="canova-summary-text">💡 {{ scienceData.canova_matrix.canova_one_line_summary }}（AI生成，仅供参考）</text>
         </view>
 
         <!-- Canova 专项五维矩阵 (紧凑进度条) -->
@@ -242,13 +242,6 @@
           {{ scienceData.race_predictions.endurance_note }}
         </text>
       </view>
-
-      <!-- ── 马拉松官兔六维胜任度评估 ── -->
-      <PacerEvaluationCard
-        v-if="effectiveRunnerUid"
-        :uid="effectiveRunnerUid"
-        :viewer-uid="viewerUidRef"
-      />
     </view>
 
     <!-- ── CARD 2: 生理恢复与健康历史趋势 (30天) ── -->
@@ -381,13 +374,14 @@
       </view>
     </view>
     </template>
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
 import { currentTheme, themeClass, applySystemTheme, chartPalette } from "../../utils/theme";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import PageSkeleton from "../../components/PageSkeleton.vue";
-import PacerEvaluationCard from "../../components/PacerEvaluationCard.vue";
 import { explainTerm } from "../../utils/glossary";
 import { ref, onMounted, nextTick } from "vue";
 import { onPullDownRefresh, onShow, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
@@ -445,8 +439,6 @@ const showCanovaZones = ref(false);
 const showTaperDetail = ref(false);
 const targetUid = ref("");
 const targetName = ref("");
-const effectiveRunnerUid = ref("");
-const viewerUidRef = ref("");
 const isInspectingOther = ref(false);
 const healthTrend = ref<any[]>([]);
 const activeHrvTooltip = ref<any>(null);
@@ -766,8 +758,6 @@ async function loadData() {
   if (!user || !user.id) return;
   const currentUid = user.id;
   const uid = targetUid.value || currentUid;
-  effectiveRunnerUid.value = uid;
-  viewerUidRef.value = currentUid;
   isInspectingOther.value = Boolean(targetUid.value && targetUid.value !== currentUid);
   const viewerQuery = isInspectingOther.value ? `?viewer_uid=${encodeURIComponent(currentUid)}` : "";
 

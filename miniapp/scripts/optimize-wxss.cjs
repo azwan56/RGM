@@ -33,9 +33,6 @@ const SUBPACKAGE_COMPONENTS = {
     "PersonalReportModal",
     "MapPinPickerModal",
     "GoalSheetModal",
-    "PacerClubRadarSection",
-    "PacerEvaluationCard",
-    "PacerResumeModal",
   ],
   "pages/cockpit": [
     "CockpitWorkspace",

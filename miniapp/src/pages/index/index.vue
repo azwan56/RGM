@@ -70,15 +70,37 @@
       <text class="h3-org-alert-cta">去填写 ›</text>
     </view>
 
-    <!-- ── M12 金色定向兼团特邀横幅（若有）── -->
+    <!-- ── M12 金色定向兼团特邀卡（综合跑团信息与图片 · 点击卡片直接进跑团）── -->
     <view
       v-if="homeSocialPulse?.pending_targeted_invites?.length"
       class="h3-bcast-capsule is-invite"
-      @click="goToInviteLanding(homeSocialPulse.pending_targeted_invites[0].invite_token)"
+      @click="acceptAndEnterInvitedClub(homeSocialPulse.pending_targeted_invites[0])"
     >
-      <text class="h3-bcast-txt">
-        ✨ {{ homeSocialPulse.pending_targeted_invites[0].club_name }} 诚邀免码兼团 ›
-      </text>
+      <view class="h3-bcast-top">
+        <image
+          v-if="homeSocialPulse.pending_targeted_invites[0].hero_cover_url || homeSocialPulse.pending_targeted_invites[0].club_logo"
+          :src="resolveAssetUrl(homeSocialPulse.pending_targeted_invites[0].hero_cover_url || homeSocialPulse.pending_targeted_invites[0].club_logo)"
+          style="width: 72rpx; height: 72rpx; border-radius: 14rpx; flex-shrink: 0;"
+          mode="aspectFill"
+        />
+        <view style="flex: 1; min-width: 0;">
+          <text class="h3-bcast-txt" style="display: block;">
+            ✨ 【{{ homeSocialPulse.pending_targeted_invites[0].club_name }}】{{ homeSocialPulse.pending_targeted_invites[0].inviter_name }} 诚邀入团
+            {{ homeSocialPulse.pending_targeted_invites[0].preassigned_group ? `(${homeSocialPulse.pending_targeted_invites[0].preassigned_group})` : '' }}
+          </text>
+          <text class="h3-bcast-body" style="margin-top: 4rpx;">
+            📍 {{ homeSocialPulse.pending_targeted_invites[0].club_city || '同城' }} ·
+            {{ homeSocialPulse.pending_targeted_invites[0].verified_stats?.member_count ?? 1 }}人 ·
+            本月 {{ homeSocialPulse.pending_targeted_invites[0].verified_stats?.month_total_km ?? 0 }}km · 点击卡片直接进团 ›
+          </text>
+        </view>
+        <text
+          class="h3-bcast-ack"
+          @click.stop="goToInviteLanding(homeSocialPulse.pending_targeted_invites[0].invite_token)"
+        >
+          展厅
+        </text>
+      </view>
     </view>
 
     <!-- ── M11 置顶广播折叠胶囊（团长/教练置顶72h）── -->
@@ -355,51 +377,157 @@
         </view>
       </view>
 
-      <!-- 模块 6 · 跑搭子同频环 & 跑团社交脉搏（置于底部，保持首屏训练聚焦） -->
-      <view id="rgm-mod-feed" class="rgm-card h3-pulse-card" :style="{ order: getModuleOrder('feed') }">
-        <view class="h3-pulse-head">
-          <view>
-            <text class="h3-pulse-title">⚡ 跑搭子与跑团脉搏</text>
-            <text class="h3-pulse-sub">{{ homeSocialPulse?.weekly_pk_summary?.summary_text || '关注同频跑友解锁周跑量 PK' }}</text>
+      <!-- 模块 6 · 活跃跑团 + 搭子周 PK（3 对大小比例头像人偶）+ 醒目寻搭子 / 选团展厅双擎大入口 -->
+      <view id="rgm-mod-feed" class="h3-social-stack" :style="{ order: getModuleOrder('feed') }">
+        <!-- 6.1 活跃跑团头像卡 -->
+        <view class="rgm-card h3-pulse-card">
+          <view class="h3-ca-head">
+            <text class="h3-ca-title">活跃跑团</text>
+            <text
+              class="h3-ca-subhint"
+              @click="topActiveClubs.length > 0 ? enterClubFeed(topActiveClubs[0].id) : goSubpage('/pages/showcase/showcase')"
+            >
+              {{ topActiveClubs.length > 0 ? '点头像进动态 ›' : '选团入驻 ›' }}
+            </text>
           </view>
-          <view class="h3-pulse-links">
-            <text class="h3-pulse-link" @click="goSubpage('/pages/discover/discover')">寻搭子</text>
-            <text class="h3-pulse-link is-alt" @click="goSubpage('/pages/showcase/showcase')">选团展厅</text>
+
+          <view v-if="topActiveClubs.length > 0" class="h3-ca-row">
+            <view
+              v-for="c in topActiveClubs"
+              :key="c.id"
+              class="h3-ca-item"
+              @click="enterClubFeed(c.id)"
+            >
+              <view class="h3-ca-avatar-wrap" :class="{ active: (c.today_checkin_count || 0) > 0 }">
+                <image
+                  class="h3-ca-img"
+                  :src="c.logo_url ? resolveAssetUrl(c.logo_url) : '/static/logo-square.png'"
+                  mode="aspectFill"
+                />
+                <text v-if="(c.today_checkin_count || 0) > 0" class="h3-ca-badge">{{ c.today_checkin_count }}</text>
+                <view v-if="isDefaultClubLogo(c.logo_url)" class="h3-ca-fallback-bar">
+                  <text class="h3-ca-fallback-txt">{{ c.name }}</text>
+                </view>
+              </view>
+              <text class="h3-ca-count" :class="{ active: (c.today_checkin_count || 0) > 0 }">
+                今日 {{ c.today_checkin_count || 0 }} 人打卡
+              </text>
+            </view>
+          </view>
+
+          <view v-else class="h3-ca-empty-row" @click="goSubpage('/pages/showcase/showcase')">
+            <text class="h3-ca-empty-txt">暂未加入跑团 · 点击下方「选团展厅」查看实拍风采并快速加入 ›</text>
           </view>
         </view>
 
-        <scroll-view v-if="homeSocialPulse?.buddy_live_rings?.length" scroll-x class="h3-rings-row">
-          <view
-            v-for="b in homeSocialPulse.buddy_live_rings.slice(0, 8)"
-            :key="b.user_id"
-            class="h3-ring-item"
-            @click="goSubpage('/pages/discover/discover')"
-          >
-            <view class="h3-ring-circle" :class="{ active: b.ran_today }">
-              <text class="h3-ring-init">{{ String(b.display_name || '跑').slice(0, 1) }}</text>
+        <!-- 6.2 搭子周 PK：3 对大小比例头像跑者人偶 -->
+        <view class="rgm-card h3-pk-card" :class="'tone-' + pkHeaderSummary.tone">
+          <view class="h3-pk-head">
+            <view class="h3-pk-head-left">
+              <RgmIcon name="users" :size="28" :color="pkHeaderSummary.iconColor" />
+              <text class="h3-pk-title">搭子周 PK</text>
+              <text class="h3-pk-summary-pill" :class="'is-' + pkHeaderSummary.tone">
+                {{ pkHeaderSummary.badgeText }}
+              </text>
             </view>
-            <text class="h3-ring-name">{{ b.display_name }}</text>
-            <text class="h3-ring-km">{{ b.week_km }}k</text>
+            <text class="h3-pk-more" @click="goSubpage('/pages/discover/discover')">
+              {{ pkHeaderSummary.rightText }}
+            </text>
           </view>
-        </scroll-view>
 
-        <view
-          v-for="it in (homeSocialPulse?.pulse_items || []).slice(0, 2)"
-          :key="it.item_id"
-          class="h3-pulse-item"
-        >
-          <template v-if="it.kind === 'newcomer_icebreaker'">
-            <view class="h3-pi-row">
-              <text class="h3-pi-txt">👋 {{ it.display_name }}（{{ it.age_group }} · {{ it.vdot_band }}）</text>
-              <text class="h3-pi-btn" @click="quickCheer('newcomer', it.item_id, it.user_id, 'welcome_pat')">拍肩欢迎</text>
+          <view class="h3-pk-grid">
+            <view
+              v-for="pair in homeBuddyPkPairs"
+              :key="pair.key"
+              class="h3-pk-pod"
+              :class="['is-' + pair.status, { 'is-ghost': pair.isGhost }]"
+              @click="handleHomePkPodClick(pair)"
+            >
+              <text class="h3-pk-pod-tag" :class="'is-' + pair.status">{{ pair.tagText }}</text>
+
+              <view class="h3-pk-stage">
+                <!-- 我方跑者人偶（朝右向搭子奔跑） -->
+                <view class="h3-pk-doll" :style="{ transform: 'scale(' + pair.meScale + ')' }">
+                  <image v-if="pair.meWins" class="h3-pk-crown is-right" :src="pkCrownSvgUri" mode="aspectFit" />
+                  <view class="h3-pk-head-wrap is-right" :style="{ borderColor: pair.meColor }">
+                    <image v-if="myAvatarForPk" class="h3-pk-head-img" :src="myAvatarForPk" mode="aspectFill" />
+                    <text v-else class="h3-pk-head-ini" :style="{ color: pair.meColor }">我</text>
+                  </view>
+                  <image class="h3-pk-body-img" :src="pair.meBodyUri" mode="aspectFit" />
+                </view>
+
+                <text class="h3-pk-vs">VS</text>
+
+                <!-- 搭子 / 虚线空位人偶（朝左向我方奔跑） -->
+                <view class="h3-pk-doll" :style="{ transform: 'scale(' + pair.buddyScale + ')' }">
+                  <image v-if="pair.buddyWins" class="h3-pk-crown is-left" :src="pkCrownSvgUri" mode="aspectFit" />
+                  <view
+                    class="h3-pk-head-wrap is-left"
+                    :class="{ 'is-ghost': pair.isGhost }"
+                    :style="{ borderColor: pair.buddyColor }"
+                  >
+                    <image
+                      v-if="!pair.isGhost && pair.buddyAvatar"
+                      class="h3-pk-head-img"
+                      :src="pair.buddyAvatar"
+                      mode="aspectFill"
+                    />
+                    <text v-else class="h3-pk-head-ini" :style="{ color: pair.buddyColor }">
+                      {{ pair.buddyInitial }}
+                    </text>
+                  </view>
+                  <image class="h3-pk-body-img" :src="pair.buddyBodyUri" mode="aspectFit" />
+                </view>
+
+                <view class="h3-pk-floor" />
+              </view>
+
+              <view class="h3-pk-scores">
+                <text class="h3-pk-km" :class="{ 'is-win': pair.meWins, 'is-tie': pair.status === 'tie' }">
+                  {{ pair.myKmText }}
+                </text>
+                <text class="h3-pk-colon">:</text>
+                <text class="h3-pk-km" :class="{ 'is-lose': pair.buddyWins, 'is-ghost': pair.isGhost }">
+                  {{ pair.buddyKmText }}
+                </text>
+              </view>
+
+              <view class="h3-pk-names">
+                <text class="h3-pk-who is-me">我</text>
+                <text class="h3-pk-who" :class="{ 'is-ghost': pair.isGhost }">{{ pair.buddyName }}</text>
+              </view>
             </view>
-          </template>
-          <template v-else-if="it.kind === 'activity_checkin' && it.activity">
-            <view class="h3-pi-row">
-              <text class="h3-pi-txt">🏃 {{ it.activity.display_name }} · {{ it.activity.distance_km }}km ({{ it.activity.avg_pace_str || '--' }})</text>
-              <text class="h3-pi-btn" @click="quickCheer('activity', it.activity.id, it.activity.user_id, 'steady_aerobic')">👏 有氧稳</text>
+          </view>
+
+          <view class="h3-pk-foot">
+            <text class="h3-pk-foot-txt">{{ pkHeaderSummary.footerHint }}</text>
+            <text class="h3-pk-foot-unit">km</text>
+          </view>
+        </view>
+
+        <!-- 6.3 醒目双擎发现大入口砖块（寻搭子 & 选团展厅） -->
+        <view class="h3-entry-tiles">
+          <view class="rgm-card h3-entry-tile is-buddy" @click="goSubpage('/pages/discover/discover')">
+            <view class="h3-et-icon is-brand">
+              <RgmIcon name="users" :size="36" color="brand" />
             </view>
-          </template>
+            <view class="h3-et-body">
+              <text class="h3-et-title">寻搭子</text>
+              <text class="h3-et-sub">六维同频 · 约跑PK</text>
+            </view>
+            <RgmIcon name="chevron-right" :size="28" color="brand" />
+          </view>
+
+          <view class="rgm-card h3-entry-tile is-showcase" @click="goSubpage('/pages/showcase/showcase')">
+            <view class="h3-et-icon is-blue">
+              <RgmIcon name="gallery" :size="36" color="blue" />
+            </view>
+            <view class="h3-et-body">
+              <text class="h3-et-title">选团展厅</text>
+              <text class="h3-et-sub">名帅资历 · 9图实拍</text>
+            </view>
+            <RgmIcon name="chevron-right" :size="28" color="blue" />
+          </view>
         </view>
       </view>
     </view>
@@ -736,9 +864,9 @@
             <view class="critique-header-row">
               <text class="critique-header-icon">{{ isWorkoutCritiqueNotif(selectedCritiqueNotif) ? '🎯' : '🔔' }}</text>
               <text class="modal-title">{{ isWorkoutCritiqueNotif(selectedCritiqueNotif) ? 'Canova教练专属复盘' : '系统与跑团通知' }}</text>
-              <text v-if="isWorkoutCritiqueNotif(selectedCritiqueNotif)" class="ai-header-badge">生理量化</text>
+              <text v-if="isWorkoutCritiqueNotif(selectedCritiqueNotif)" class="ai-header-badge">AI生成</text>
             </view>
-            <text class="critique-header-sub">{{ isWorkoutCritiqueNotif(selectedCritiqueNotif) ? '仅供参考' : formatNotifTime(selectedCritiqueNotif.created_at) }}</text>
+            <text class="critique-header-sub">{{ isWorkoutCritiqueNotif(selectedCritiqueNotif) ? '本内容由人工智能（AI）生成，仅供参考' : formatNotifTime(selectedCritiqueNotif.created_at) }}</text>
           </view>
           <view class="close-hit" @click="selectedCritiqueNotif = null">
             <text class="close-btn">✕</text>
@@ -925,7 +1053,6 @@
           <view class="checkin-field-group">
             <view class="a6-row-between">
               <text class="checkin-field-label">打卡照片 ({{ checkinForm.workout_photos.length + checkinForm.new_photos_preview.length }}/3)</text>
-              <text class="a6-ask-coach-link" @click="goAskCoachFromCheckin">问 Canova AI 教练 ›</text>
             </view>
             <view class="checkin-photo-uploader-grid">
               <view
@@ -1001,7 +1128,7 @@
           <button class="qn-avatar-btn" open-type="chooseAvatar" @chooseavatar="onQuickChooseAvatar">
             <image
               class="qn-avatar-img"
-              :src="quickAvatarUrl || dashboardData?.user?.avatar_url || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              :src="quickAvatarUrl || dashboardData?.user?.avatar_url || user?.avatar_url || '/static/defaults/default-avatar.svg'"
               mode="aspectFill"
             />
             <text class="qn-avatar-tip">换头像</text>
@@ -1024,6 +1151,29 @@
             ✓ 保存
           </button>
         </view>
+      </view>
+    </view>
+
+    <!-- ── 首页 1v1 搭子周跑量 PK 详情弹窗 ── -->
+    <view v-if="homePkDetail" class="modal-mask" @click="homePkDetail = null" @touchmove.stop.prevent>
+      <view class="rgm-card h3-pk-modal" @click.stop>
+        <view class="h3-pk-modal-head">
+          <text class="h3-pk-modal-title">🏃 搭子周跑量 PK 详情</text>
+          <text class="qn-close" @click="homePkDetail = null">✕</text>
+        </view>
+        <view class="h3-pk-modal-grid">
+          <view class="h3-pk-modal-col is-me">
+            <text class="h3-pk-modal-who">{{ homePkDetail.viewer?.display_name || '我' }}</text>
+            <text class="h3-pk-modal-val">{{ homePkDetail.viewer?.week_km ?? myWeekKmForPk }} km</text>
+            <text class="h3-pk-modal-sub">本月 {{ homePkDetail.viewer?.month_km ?? 0 }} km</text>
+          </view>
+          <view class="h3-pk-modal-col">
+            <text class="h3-pk-modal-who">{{ homePkDetail.buddy?.display_name || '跑搭子' }}</text>
+            <text class="h3-pk-modal-val">{{ homePkDetail.buddy?.week_km ?? 0 }} km</text>
+            <text class="h3-pk-modal-sub">本月 {{ homePkDetail.buddy?.month_km ?? 0 }} km</text>
+          </view>
+        </view>
+        <button class="h3-pk-modal-btn" @click="goToDiscoverFromPkModal">去「寻搭子」看更多同频跑友 ›</button>
       </view>
     </view>
 
@@ -1073,6 +1223,9 @@ import {
   navigateToDeviceBinding,
   OrgReminderInfo,
   formatBeijingTime,
+  resolveAssetUrl,
+  getActiveClubId,
+  setActiveClubId,
 } from "../../utils/api";
 
 const pendingOrgReminder = ref<OrgReminderInfo | null>(null);
@@ -1882,7 +2035,7 @@ const DEFAULT_HOME_MODULE_ORDER: HomeModuleKey[] = [
 ];
 const HOME_MODULE_META: Record<HomeModuleKey, { icon: string; title: string; desc: string }> = {
   nextrun: { icon: '🏃', title: '我的下一场约跑', desc: '已报名且未结束的跑团约跑活动提醒' },
-  feed: { icon: '⚡', title: '跑搭子与跑团脉搏', desc: '同频跑搭子周PK、新人破冰与跑团动态' },
+  feed: { icon: '🏆', title: '活跃跑团动态', desc: '动态最多的 3 个跑团头像与今日打卡数，点击直达动态' },
   today: { icon: '📅', title: '今日训练课表', desc: '今日教练训练安排、一键打卡与感受照片记录' },
   goal: { icon: '🎯', title: '周/月目标完成度', desc: '周/月同屏完成度饼图、7日打卡条与同步分享' },
   status: { icon: '🔋', title: '生理状态与跑力诊断', desc: '电量/睡眠、HRV、静息心率与 VDOT' },
@@ -2434,14 +2587,6 @@ const FEELING_TAG_OPTIONS = [
   "肌肉酸紧",
 ];
 
-function goAskCoachFromCheckin() {
-  showCheckinLogModal.value = false;
-  try {
-    uni.setStorageSync("rgm_coach_open_chat", "1");
-  } catch (_) {}
-  goToCoachPage();
-}
-
 const showCheckinLogModal = ref(false);
 const isAnyHomePageModalOpen = computed(() =>
   Boolean(
@@ -2551,7 +2696,7 @@ async function saveCheckinLog() {
   if (!tw || !tw.plan_id) return;
   savingCheckinLog.value = true;
   try {
-    const res: any = await request(`/api/coach/plan/${tw.plan_id}/workout`, "PATCH", {
+    const res: any = await request(`/api/coach/plan/${tw.plan_id}/workout`, "PUT", {
       week_index: tw.week_index,
       day_index: tw.day_index,
       completed: true,
@@ -2584,7 +2729,7 @@ async function handleTodayWorkoutToggle() {
   togglingWorkout.value = true;
   try {
     const newCompleted = !tw.completed;
-    const res = await request(`/api/coach/plan/${tw.plan_id}/workout`, "PATCH", {
+    const res = await request(`/api/coach/plan/${tw.plan_id}/workout`, "PUT", {
       week_index: tw.week_index,
       day_index: tw.day_index,
       completed: newCompleted,
@@ -3386,19 +3531,55 @@ onPullDownRefresh(async () => {
 const homeSocialPulse = ref<any>(null);
 const bcastExpanded = ref(false);
 
+const topActiveClubs = computed(() => {
+  const list = Array.isArray(homeSocialPulse.value?.clubs) ? [...homeSocialPulse.value.clubs] : [];
+  list.sort((a: any, b: any) => {
+    const sa = Number(a?.today_checkin_count || 0) * 10 + Number(a?.recent_7d_runs || 0);
+    const sb = Number(b?.today_checkin_count || 0) * 10 + Number(b?.recent_7d_runs || 0);
+    if (sb !== sa) return sb - sa;
+    const td = Number(b?.today_checkin_count || 0) - Number(a?.today_checkin_count || 0);
+    if (td !== 0) return td;
+    const r7 = Number(b?.recent_7d_runs || 0) - Number(a?.recent_7d_runs || 0);
+    if (r7 !== 0) return r7;
+    return Number(b?.member_count || 0) - Number(a?.member_count || 0);
+  });
+  return list.slice(0, 3);
+});
+
+function isDefaultClubLogo(url?: string): boolean {
+  const s = String(url || "").trim().toLowerCase();
+  return !s || s.includes("rgm-logo.png") || s.includes("logo-square.png");
+}
+
 async function loadHomeSocialPulse(uid: string) {
   if (!uid) return;
+  const cacheKey = `rgm_home_pulse_v3_${uid}`;
   try {
-    const cached = uni.getStorageSync(`rgm_home_pulse_${uid}`);
+    const cached = uni.getStorageSync(cacheKey);
     if (cached && !homeSocialPulse.value) homeSocialPulse.value = cached;
   } catch {}
   try {
-    const res: any = await request(`/api/community/home-pulse?viewer_uid=${encodeURIComponent(uid)}&limit=4`);
+    const res: any = await request(
+      `/api/community/home-pulse?viewer_uid=${encodeURIComponent(uid)}&limit=1`
+    );
     if (res) {
       homeSocialPulse.value = res;
-      uni.setStorageSync(`rgm_home_pulse_${uid}`, res);
+      uni.setStorageSync(cacheKey, res);
     }
   } catch {}
+}
+
+function enterClubFeed(cid?: string) {
+  const targetCid = String(cid || homeSocialPulse.value?.club_id || getActiveClubId() || "").trim();
+  if (targetCid) {
+    setActiveClubId(targetCid);
+    trackClick("home_enter_club_feed", "首页点击跑团头像进入动态", { club_id: targetCid });
+    uni.navigateTo({
+      url: `/pages/rank/rank?section=feed&club_id=${encodeURIComponent(targetCid)}`,
+    });
+  } else {
+    uni.switchTab({ url: "/pages/team/team" });
+  }
 }
 
 async function ackPinnedBroadcast(bid: string) {
@@ -3413,29 +3594,281 @@ async function ackPinnedBroadcast(bid: string) {
   } catch {}
 }
 
-async function quickCheer(targetType: string, targetId: string, recipientId: string, cheerKey: string) {
-  const uid = user.value?.id;
-  if (!uid || !targetId) return;
-  try {
-    await request("/api/community/micro-cheer", "POST", {
-      sender_id: uid,
-      target_type: targetType,
-      target_id: targetId,
-      recipient_id: recipientId,
-      cheer_key: cheerKey,
-      club_id: homeSocialPulse.value?.club_id || "",
-    });
-    uni.showToast({ title: "已送出鼓励 👏", icon: "none" });
-  } catch {}
-}
-
 function goSubpage(url: string) {
   uni.navigateTo({ url });
+}
+
+interface HomeBuddyPkPair {
+  key: string;
+  isGhost: boolean;
+  buddyUid: string;
+  buddyName: string;
+  buddyInitial: string;
+  buddyAvatar: string;
+  myKm: number;
+  buddyKm: number | null;
+  myKmText: string;
+  buddyKmText: string;
+  meScale: number;
+  buddyScale: number;
+  meWins: boolean;
+  buddyWins: boolean;
+  status: "win" | "lose" | "tie" | "ghost";
+  tagText: string;
+  meColor: string;
+  buddyColor: string;
+  meBodyUri: string;
+  buddyBodyUri: string;
+}
+
+const homePkDetail = ref<any>(null);
+
+const pkCrownSvgUri = computed(() => {
+  const col = isVolt.value ? "#D97706" : "#F59E0B";
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 18">` +
+    `<polygon points="3,15 1.5,5 7.5,9.5 12,2.5 16.5,9.5 22.5,5 21,15" fill="${col}"/>` +
+    `</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+});
+
+function buildRunnerBodySvgUri(col: string, dirX: 1 | -1, isGhost: boolean): string {
+  const fx = (u: number) => +(22 + u * dirX).toFixed(1);
+  if (isGhost) {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 48">` +
+      `<ellipse cx="${fx(1)}" cy="46" rx="11" ry="2" fill="${col}" fill-opacity="0.14"/>` +
+      `<line x1="${fx(0)}" y1="23" x2="${fx(-7)}" y2="34" stroke="${col}" stroke-width="3.2" stroke-opacity="0.45" stroke-dasharray="3 2.5" stroke-linecap="round"/>` +
+      `<line x1="${fx(-7)}" y1="34" x2="${fx(-12.5)}" y2="44.5" stroke="${col}" stroke-width="3" stroke-opacity="0.45" stroke-dasharray="3 2.5" stroke-linecap="round"/>` +
+      `<line x1="${fx(0)}" y1="23" x2="${fx(8)}" y2="34" stroke="${col}" stroke-width="3.2" stroke-opacity="0.58" stroke-dasharray="3 2.5" stroke-linecap="round"/>` +
+      `<line x1="${fx(8)}" y1="34" x2="${fx(6.5)}" y2="45.8" stroke="${col}" stroke-width="3" stroke-opacity="0.58" stroke-dasharray="3 2.5" stroke-linecap="round"/>` +
+      `<line x1="${fx(0)}" y1="23" x2="${fx(3.2)}" y2="6.5" stroke="${col}" stroke-width="5.2" stroke-opacity="0.45" stroke-dasharray="3 2.5" stroke-linecap="round"/>` +
+      `<line x1="${fx(1.8)}" y1="8.5" x2="${fx(-7.5)}" y2="16.5" stroke="${col}" stroke-width="2.6" stroke-opacity="0.45" stroke-linecap="round"/>` +
+      `</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
+  const torso = `M${fx(5.8)},5.8 L${fx(-2.5)},7.0 L${fx(-4.2)},24.0 L${fx(3.5)},24.0 Z`;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 48">` +
+    `<ellipse cx="${fx(1)}" cy="46" rx="12" ry="2.2" fill="${col}" fill-opacity="0.22"/>` +
+    `<line x1="${fx(-0.5)}" y1="23.5" x2="${fx(-7.5)}" y2="34.5" stroke="${col}" stroke-width="4.4" stroke-opacity="0.68" stroke-linecap="round"/>` +
+    `<line x1="${fx(-7.5)}" y1="34.5" x2="${fx(-13.5)}" y2="45.2" stroke="${col}" stroke-width="4.0" stroke-opacity="0.68" stroke-linecap="round"/>` +
+    `<line x1="${fx(2.2)}" y1="6.8" x2="${fx(-8.2)}" y2="15.0" stroke="${col}" stroke-width="3.2" stroke-opacity="0.65" stroke-linecap="round"/>` +
+    `<line x1="${fx(-8.2)}" y1="15.0" x2="${fx(-4.5)}" y2="22.0" stroke="${col}" stroke-width="3.0" stroke-opacity="0.65" stroke-linecap="round"/>` +
+    `<path d="${torso}" fill="${col}" stroke="${col}" stroke-width="1.2" stroke-linejoin="round"/>` +
+    `<line x1="${fx(-0.5)}" y1="23.5" x2="${fx(8.5)}" y2="34.5" stroke="${col}" stroke-width="4.6" stroke-linecap="round"/>` +
+    `<line x1="${fx(8.5)}" y1="34.5" x2="${fx(6.5)}" y2="46.2" stroke="${col}" stroke-width="4.2" stroke-linecap="round"/>` +
+    `<line x1="${fx(2.2)}" y1="6.8" x2="${fx(1.5)}" y2="17.5" stroke="${col}" stroke-width="3.5" stroke-linecap="round"/>` +
+    `<line x1="${fx(1.5)}" y1="17.5" x2="${fx(9.8)}" y2="14.5" stroke="${col}" stroke-width="3.2" stroke-linecap="round"/>` +
+    `</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function computePairScales(kmA: number, kmB: number): [number, number] {
+  const a = Math.max(0, Number(kmA || 0));
+  const b = Math.max(0, Number(kmB || 0));
+  if (Math.abs(a - b) <= 0.2) return [0.9, 0.9];
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const q = (lo + 3.0) / (hi + 3.0);
+  const sLeader = Number(Math.min(1.12, 1.0 + 0.14 * (1.0 - Math.pow(q, 0.85))).toFixed(3));
+  const sTrailer = Number(Math.max(0.46, Math.min(0.88, 0.44 + 0.46 * Math.pow(q, 1.2))).toFixed(3));
+  return a > b ? [sLeader, sTrailer] : [sTrailer, sLeader];
+}
+
+const myWeekKmForPk = computed(() => {
+  const fromPulse = homeSocialPulse.value?.weekly_pk_summary?.my_week_km;
+  const fromDash = dashboardData.value?.weekly_progress?.current_week_km;
+  const raw = fromPulse != null ? Number(fromPulse) : Number(fromDash || 0);
+  return Number.isFinite(raw) ? Math.round(raw * 10) / 10 : 0;
+});
+
+const myAvatarForPk = computed(() => {
+  const raw = dashboardData.value?.user?.avatar_url || user.value?.avatar_url || "";
+  return raw ? resolveAssetUrl(raw) : "";
+});
+
+const homeBuddyPkPairs = computed<HomeBuddyPkPair[]>(() => {
+  const meKm = myWeekKmForPk.value;
+  const buddiesRaw = Array.isArray(homeSocialPulse.value?.buddy_live_rings)
+    ? [...homeSocialPulse.value.buddy_live_rings]
+    : [];
+  buddiesRaw.sort((a: any, b: any) => Number(b?.week_km || 0) - Number(a?.week_km || 0));
+
+  const volt = isVolt.value;
+  const colGreen = volt ? "#059669" : "#10B981";
+  const colBrand = "#FC4C02";
+  const colBlue = volt ? "#0284C7" : "#38BDF8";
+  const colMuted = volt ? "#64748B" : "#71717A";
+
+  return [0, 1, 2].map((slotIdx) => {
+    const b = buddiesRaw[slotIdx];
+    if (!b) {
+      return {
+        key: `ghost_${slotIdx}`,
+        isGhost: true,
+        buddyUid: "",
+        buddyName: "去匹配",
+        buddyInitial: "?",
+        buddyAvatar: "",
+        myKm: meKm,
+        buddyKm: null,
+        myKmText: `${meKm}`,
+        buddyKmText: "+寻",
+        meScale: 0.96,
+        buddyScale: 0.78,
+        meWins: false,
+        buddyWins: false,
+        status: "ghost",
+        tagText: "+ 虚位以待",
+        meColor: colBrand,
+        buddyColor: colMuted,
+        meBodyUri: buildRunnerBodySvgUri(colBrand, 1, false),
+        buddyBodyUri: buildRunnerBodySvgUri(colMuted, -1, true),
+      };
+    }
+
+    const bKm = Math.round(Number(b?.week_km || 0) * 10) / 10;
+    const diff = Math.round((meKm - bKm) * 10) / 10;
+    const rawName = String(b?.display_name || "搭子").trim();
+    const shortName = rawName.length > 4 ? `${rawName.slice(0, 4)}` : rawName;
+    const initial = rawName.slice(0, 1) || "友";
+    const avatar = b?.avatar_url ? resolveAssetUrl(b.avatar_url) : "";
+    const [sMe, sBd] = computePairScales(meKm, bKm);
+
+    if (Math.abs(diff) <= 0.2) {
+      return {
+        key: String(b.user_id || slotIdx),
+        isGhost: false,
+        buddyUid: String(b.user_id || ""),
+        buddyName: shortName,
+        buddyInitial: initial,
+        buddyAvatar: avatar,
+        myKm: meKm,
+        buddyKm: bKm,
+        myKmText: `${meKm}`,
+        buddyKmText: `${bKm}`,
+        meScale: sMe,
+        buddyScale: sBd,
+        meWins: false,
+        buddyWins: false,
+        status: "tie",
+        tagText: "势均力敌",
+        meColor: colBlue,
+        buddyColor: colMuted,
+        meBodyUri: buildRunnerBodySvgUri(colBlue, 1, false),
+        buddyBodyUri: buildRunnerBodySvgUri(colMuted, -1, false),
+      };
+    }
+
+    const meWins = diff > 0;
+    const meColor = meWins ? colGreen : colMuted;
+    const buddyColor = meWins ? colMuted : colBrand;
+    return {
+      key: String(b.user_id || slotIdx),
+      isGhost: false,
+      buddyUid: String(b.user_id || ""),
+      buddyName: shortName,
+      buddyInitial: initial,
+      buddyAvatar: avatar,
+      myKm: meKm,
+      buddyKm: bKm,
+      myKmText: `${meKm}`,
+      buddyKmText: `${bKm}`,
+      meScale: sMe,
+      buddyScale: sBd,
+      meWins,
+      buddyWins: !meWins,
+      status: meWins ? "win" : "lose",
+      tagText: meWins ? `领先 +${diff}k` : `差 ${Math.abs(diff)}k`,
+      meColor,
+      buddyColor,
+      meBodyUri: buildRunnerBodySvgUri(meColor, 1, false),
+      buddyBodyUri: buildRunnerBodySvgUri(buddyColor, -1, false),
+    };
+  });
+});
+
+const pkHeaderSummary = computed(() => {
+  const realPairs = homeBuddyPkPairs.value.filter((p) => !p.isGhost);
+  const count = realPairs.length;
+  const meKm = myWeekKmForPk.value;
+  if (count === 0) {
+    return {
+      tone: "brand",
+      iconColor: "brand",
+      badgeText: `待匹配 · 本周 ${meKm}k`,
+      rightText: "寻搭子 ›",
+      footerHint: "互关同频跑友后解锁 3 对人偶同场 PK",
+    };
+  }
+  const wins = realPairs.filter((p) => p.meWins).length;
+  const losses = realPairs.filter((p) => p.buddyWins).length;
+  const totalMutual = Number(homeSocialPulse.value?.weekly_pk_summary?.mutual_count || count);
+  const tone = wins > losses ? "green" : losses > wins ? "amber" : "brand";
+  return {
+    tone,
+    iconColor: tone === "green" ? "green" : tone === "amber" ? "amber" : "brand",
+    badgeText: `${wins} 胜 ${losses} 负 · 本周 ${meKm}k`,
+    rightText: totalMutual > 3 ? `全部 ${totalMutual} 人 ›` : "寻更多 ›",
+    footerHint: "领先者人偶更大 · 体型比例随本周公里差动态变化",
+  };
+});
+
+async function handleHomePkPodClick(pair: HomeBuddyPkPair) {
+  if (pair.isGhost || !pair.buddyUid) {
+    trackClick("home_pk_empty_discover", "首页搭子PK空位跳寻搭子", {});
+    uni.navigateTo({ url: "/pages/discover/discover" });
+    return;
+  }
+  const uid = user.value?.id;
+  if (!uid) return;
+  trackClick("home_pk_pair_detail", "首页点击搭子PK人偶查看详情", { target_uid: pair.buddyUid });
+  try {
+    const res: any = await request(
+      `/api/community/buddies/${encodeURIComponent(pair.buddyUid)}/pk?viewer_uid=${encodeURIComponent(uid)}`
+    );
+    if (res) {
+      homePkDetail.value = res;
+      return;
+    }
+  } catch {}
+  uni.navigateTo({ url: "/pages/discover/discover" });
+}
+
+function goToDiscoverFromPkModal() {
+  homePkDetail.value = null;
+  uni.navigateTo({ url: "/pages/discover/discover" });
 }
 
 function goToInviteLanding(tok: string) {
   if (!tok) return;
   uni.navigateTo({ url: `/pages/invite/invite?token=${encodeURIComponent(tok)}` });
+}
+
+async function acceptAndEnterInvitedClub(inv: any) {
+  const tok = String(inv?.invite_token || "").trim();
+  if (!tok) return;
+  const u = getStoredUser();
+  if (!u?.id) {
+    goToInviteLanding(tok);
+    return;
+  }
+  try {
+    const res: any = await request(`/api/community/invites/${encodeURIComponent(tok)}/respond`, "POST", {
+      user_id: u.id,
+      action: "accept",
+    });
+    const cid = res?.club_id || inv?.club_id || "";
+    if (cid) setActiveClubId(cid);
+    uni.showToast({ title: `🎉 已直接加入【${res?.club_name || inv?.club_name || "跑团"}】`, icon: "success" });
+    setTimeout(() => {
+      uni.switchTab({ url: "/pages/team/team" });
+    }, 400);
+  } catch {
+    goToInviteLanding(tok);
+  }
 }
 </script>
 
@@ -8788,23 +9221,107 @@ function goToInviteLanding(tok: string) {
 .h3-bcast-ack { font-size: 20rpx; padding: 4rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); font-weight: 800; flex-shrink: 0; }
 .h3-bcast-ack.acked { background: var(--rgm-green-tint); color: var(--rgm-green); }
 .h3-bcast-body { display: block; font-size: 21rpx; color: var(--rgm-text-2); margin-top: 10rpx; line-height: 1.45; }
-.h3-pulse-card { padding: 24rpx; margin-bottom: 0; }
-.h3-pulse-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12rpx; }
-.h3-pulse-title { font-size: 28rpx; font-weight: 900; color: var(--rgm-text); display: block; }
-.h3-pulse-sub { font-size: 20rpx; color: var(--rgm-text-2); display: block; margin-top: 4rpx; }
-.h3-pulse-links { display: flex; gap: 10rpx; flex-shrink: 0; }
-.h3-pulse-link { font-size: 20rpx; font-weight: 800; padding: 6rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); }
-.h3-pulse-link.is-alt { background: var(--rgm-card-2); color: var(--rgm-text); border: 1rpx solid var(--rgm-line); }
-.h3-rings-row { white-space: nowrap; margin-top: 16rpx; }
-.h3-ring-item { display: inline-flex; flex-direction: column; align-items: center; width: 92rpx; margin-right: 14rpx; }
-.h3-ring-circle { width: 68rpx; height: 68rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 2rpx solid var(--rgm-line); display: flex; align-items: center; justify-content: center; }
-.h3-ring-circle.active { border-color: var(--rgm-green); border-width: 4rpx; }
-.h3-ring-init { font-size: 26rpx; font-weight: 900; color: var(--rgm-text); }
-.h3-ring-name { font-size: 19rpx; color: var(--rgm-text); margin-top: 4rpx; max-width: 88rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.h3-ring-km { font-size: 18rpx; color: var(--rgm-text-3); }
-.h3-pulse-item { margin-top: 12rpx; padding: 14rpx 16rpx; border-radius: 14rpx; background: var(--rgm-card-2); }
-.h3-pi-row { display: flex; justify-content: space-between; align-items: center; gap: 10rpx; }
-.h3-pi-txt { flex: 1; font-size: 22rpx; color: var(--rgm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.h3-pi-btn { font-size: 20rpx; font-weight: 800; padding: 4rpx 14rpx; border-radius: 999rpx; background: var(--rgm-brand-tint); color: var(--rgm-brand); flex-shrink: 0; }
+.h3-social-stack { display: flex; flex-direction: column; gap: 16rpx; width: 100%; }
+.h3-pulse-card { padding: 20rpx 22rpx 22rpx; margin-bottom: 0; }
+.h3-ca-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16rpx; }
+.h3-ca-title { font-size: 25rpx; font-weight: 800; color: var(--rgm-text); }
+.h3-ca-subhint { font-size: 20rpx; font-weight: 600; color: var(--rgm-text-3); }
+.h3-ca-row { display: flex; align-items: flex-start; justify-content: space-around; gap: 16rpx; }
+.h3-ca-item { display: flex; flex-direction: column; align-items: center; flex: 1; max-width: 210rpx; }
+.h3-ca-avatar-wrap { position: relative; width: 108rpx; height: 108rpx; border-radius: 28rpx; padding: 4rpx; background: var(--rgm-card-2); border: 2rpx solid var(--rgm-line); box-sizing: border-box; }
+.h3-ca-avatar-wrap.active { border-color: var(--rgm-brand); }
+.h3-ca-img { width: 100%; height: 100%; border-radius: 24rpx; display: block; background: var(--rgm-card); }
+.h3-ca-badge { position: absolute; top: -10rpx; right: -10rpx; min-width: 34rpx; height: 34rpx; padding: 0 8rpx; border-radius: 999rpx; background: var(--rgm-brand); color: #ffffff; font-size: 19rpx; font-weight: 900; line-height: 34rpx; text-align: center; box-sizing: border-box; border: 3rpx solid var(--rgm-card); }
+.h3-ca-fallback-bar { position: absolute; left: 4rpx; right: 4rpx; bottom: 4rpx; padding: 3rpx 6rpx; border-bottom-left-radius: 22rpx; border-bottom-right-radius: 22rpx; background: rgba(11, 11, 14, 0.72); }
+.h3-ca-fallback-txt { display: block; font-size: 16rpx; font-weight: 800; color: #ffffff; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-ca-count { margin-top: 10rpx; font-size: 20rpx; font-weight: 700; color: var(--rgm-text-3); white-space: nowrap; }
+.h3-ca-count.active { color: var(--rgm-green); font-weight: 800; }
+.h3-ca-empty-row { padding: 14rpx 18rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1rpx dashed var(--rgm-line-2); }
+.h3-ca-empty-txt { font-size: 22rpx; font-weight: 600; color: var(--rgm-text-2); line-height: 1.45; }
+
+/* 搭子周 PK：3 对大小比例头像跑者人偶卡片 */
+.h3-pk-card { padding: 20rpx 22rpx 18rpx; margin-bottom: 0; border-top: 4rpx solid var(--rgm-brand); }
+.h3-pk-card.tone-green { border-top-color: var(--rgm-green); }
+.h3-pk-card.tone-amber { border-top-color: var(--rgm-amber); }
+.h3-pk-head { display: flex; align-items: center; justify-content: space-between; gap: 10rpx; margin-bottom: 16rpx; }
+.h3-pk-head-left { display: flex; align-items: center; gap: 10rpx; flex: 1; min-width: 0; }
+.h3-pk-title { font-size: 26rpx; font-weight: 800; color: var(--rgm-text); flex-shrink: 0; }
+.h3-pk-summary-pill { padding: 4rpx 12rpx; border-radius: 999rpx; font-size: 19rpx; font-weight: 800; background: var(--rgm-brand-tint); color: var(--rgm-brand); border: 1rpx solid var(--rgm-brand-line); white-space: nowrap; }
+.h3-pk-summary-pill.is-green { background: var(--rgm-green-tint); color: var(--rgm-green); border-color: var(--rgm-green-line); }
+.h3-pk-summary-pill.is-amber { background: var(--rgm-amber-tint); color: var(--rgm-amber); border-color: var(--rgm-amber-line); }
+.h3-pk-more { font-size: 21rpx; font-weight: 700; color: var(--rgm-text-3); flex-shrink: 0; }
+
+.h3-pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12rpx; }
+.h3-pk-pod { position: relative; background: var(--rgm-card-2); border: 1.5rpx solid var(--rgm-line); border-radius: 20rpx; padding: 12rpx 8rpx 12rpx; display: flex; flex-direction: column; align-items: center; box-sizing: border-box; }
+.h3-pk-pod.is-win { border-color: var(--rgm-green-line); }
+.h3-pk-pod.is-lose { border-color: var(--rgm-amber-line); }
+.h3-pk-pod.is-tie { border-color: var(--rgm-blue-line); }
+.h3-pk-pod.is-ghost { border-style: dashed; border-color: var(--rgm-line-2); }
+
+.h3-pk-pod-tag { max-width: 100%; padding: 4rpx 12rpx; border-radius: 999rpx; font-size: 18rpx; font-weight: 800; background: var(--rgm-brand-tint); color: var(--rgm-brand); border: 1rpx solid var(--rgm-brand-line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h3-pk-pod-tag.is-win { background: var(--rgm-green-tint); color: var(--rgm-green); border-color: var(--rgm-green-line); }
+.h3-pk-pod-tag.is-lose { background: var(--rgm-amber-tint); color: var(--rgm-amber); border-color: var(--rgm-amber-line); }
+.h3-pk-pod-tag.is-tie { background: var(--rgm-blue-tint); color: var(--rgm-blue); border-color: var(--rgm-blue-line); }
+
+.h3-pk-stage { position: relative; width: 100%; height: 146rpx; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 6rpx 6rpx; box-sizing: border-box; }
+.h3-pk-doll { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; transform-origin: bottom center; transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.h3-pk-crown { width: 22rpx; height: 16rpx; display: block; margin-bottom: 2rpx; }
+.h3-pk-crown.is-right { margin-left: 8rpx; }
+.h3-pk-crown.is-left { margin-right: 8rpx; }
+.h3-pk-head-wrap { width: 40rpx; height: 40rpx; border-radius: 50%; border: 3.5rpx solid var(--rgm-brand); background: var(--rgm-card); display: flex; align-items: center; justify-content: center; margin-bottom: -10rpx; position: relative; z-index: 3; overflow: hidden; box-sizing: border-box; }
+.h3-pk-head-wrap.is-right { margin-left: 8rpx; }
+.h3-pk-head-wrap.is-left { margin-right: 8rpx; }
+.h3-pk-head-wrap.is-ghost { border-style: dashed; border-width: 2.5rpx; }
+.h3-pk-head-img { width: 100%; height: 100%; display: block; }
+.h3-pk-head-ini { font-size: 19rpx; font-weight: 900; line-height: 1; }
+.h3-pk-body-img { width: 52rpx; height: 56rpx; display: block; }
+.h3-pk-vs { font-size: 16rpx; font-weight: 900; color: var(--rgm-text-3); margin-bottom: 18rpx; opacity: 0.72; z-index: 1; }
+.h3-pk-floor { position: absolute; left: 8rpx; right: 8rpx; bottom: 6rpx; height: 3rpx; background: var(--rgm-line-2); border-radius: 2rpx; z-index: 1; }
+
+.h3-pk-scores { width: 100%; display: flex; align-items: baseline; justify-content: space-around; margin-top: 8rpx; }
+.h3-pk-km { flex: 1; text-align: center; font-size: 24rpx; font-weight: 900; color: var(--rgm-text); font-variant-numeric: tabular-nums; }
+.h3-pk-km.is-win { color: var(--rgm-green); }
+.h3-pk-km.is-lose { color: var(--rgm-brand); }
+.h3-pk-km.is-tie { color: var(--rgm-blue); }
+.h3-pk-km.is-ghost { font-size: 21rpx; color: var(--rgm-brand); }
+.h3-pk-colon { font-size: 20rpx; font-weight: 700; color: var(--rgm-text-3); }
+
+.h3-pk-names { width: 100%; display: flex; align-items: center; justify-content: space-around; margin-top: 4rpx; }
+.h3-pk-who { flex: 1; text-align: center; font-size: 19rpx; font-weight: 600; color: var(--rgm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h3-pk-who.is-me { font-weight: 800; color: var(--rgm-text); }
+.h3-pk-who.is-ghost { color: var(--rgm-brand); font-weight: 700; }
+
+.h3-pk-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14rpx; padding: 0 4rpx; }
+.h3-pk-foot-txt { font-size: 19rpx; font-weight: 600; color: var(--rgm-text-3); }
+.h3-pk-foot-unit { font-size: 19rpx; font-weight: 700; color: var(--rgm-text-3); }
+
+/* 醒目双擎发现大入口砖块（寻搭子 & 选团展厅） */
+.h3-entry-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; width: 100%; }
+.h3-entry-tile { margin-bottom: 0; padding: 20rpx 18rpx; display: flex; align-items: center; gap: 14rpx; border-radius: 24rpx; box-sizing: border-box; }
+.h3-entry-tile.is-buddy { background: var(--rgm-brand-tint); border: 1.5rpx solid var(--rgm-brand-line); }
+.h3-entry-tile.is-showcase { background: var(--rgm-blue-tint); border: 1.5rpx solid var(--rgm-blue-line); }
+.theme-volt .h3-entry-tile.is-buddy { background: var(--rgm-card); border-color: var(--rgm-brand-line); }
+.theme-volt .h3-entry-tile.is-showcase { background: var(--rgm-card); border-color: var(--rgm-blue-line); }
+.h3-et-icon { width: 68rpx; height: 68rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.h3-et-icon.is-brand { background: rgba(252, 76, 2, 0.16); }
+.h3-et-icon.is-blue { background: rgba(56, 189, 248, 0.16); }
+.theme-volt .h3-et-icon.is-brand { background: var(--rgm-brand-tint); }
+.theme-volt .h3-et-icon.is-blue { background: var(--rgm-blue-tint); }
+.h3-et-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.h3-et-title { font-size: 30rpx; font-weight: 900; color: var(--rgm-text); line-height: 1.15; }
+.h3-et-sub { font-size: 20rpx; font-weight: 600; color: var(--rgm-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 首页 1v1 搭子 PK 快速详情弹窗 */
+.h3-pk-modal { width: 650rpx; padding: 28rpx; }
+.h3-pk-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22rpx; }
+.h3-pk-modal-title { font-size: 30rpx; font-weight: 900; color: var(--rgm-text); }
+.h3-pk-modal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; margin-bottom: 24rpx; }
+.h3-pk-modal-col { background: var(--rgm-card-2); border: 1.5rpx solid var(--rgm-line); border-radius: 20rpx; padding: 20rpx 16rpx; text-align: center; }
+.h3-pk-modal-col.is-me { border-color: var(--rgm-brand-line); background: var(--rgm-brand-tint); }
+.h3-pk-modal-who { display: block; font-size: 24rpx; font-weight: 800; color: var(--rgm-text-2); }
+.h3-pk-modal-val { display: block; margin-top: 8rpx; font-size: 40rpx; font-weight: 900; color: var(--rgm-text); font-variant-numeric: tabular-nums; }
+.h3-pk-modal-col.is-me .h3-pk-modal-val { color: var(--rgm-brand); }
+.h3-pk-modal-sub { display: block; margin-top: 6rpx; font-size: 20rpx; color: var(--rgm-text-3); }
+.h3-pk-modal-btn { width: 100%; height: 76rpx; line-height: 76rpx; border-radius: 20rpx; background: var(--rgm-brand); color: #ffffff; font-size: 26rpx; font-weight: 800; margin: 0; }
 
 </style>

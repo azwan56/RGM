@@ -63,7 +63,7 @@
           <view class="grh-main" @click="goToTeamEvents">
             <image
               class="grh-cover-image"
-              :src="featuredGroupRun.cover_image || 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80'"
+              :src="featuredGroupRun.cover_image || '/static/defaults/default-run.svg'"
               mode="aspectFill"
             />
             <view class="grh-info-col">
@@ -104,7 +104,7 @@
             <view class="grh-organizer">
               <image
                 class="grh-org-avatar"
-                :src="featuredGroupRun.creator_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                :src="featuredGroupRun.creator_avatar || '/static/defaults/default-avatar.svg'"
                 mode="aspectFill"
               />
               <text class="grh-org-name">{{ featuredGroupRun.creator_name || '发起人' }}</text>
@@ -120,7 +120,7 @@
                   :key="p.user_id || idx"
                   class="grh-stack-avatar"
                   :style="{ zIndex: 10 - idx }"
-                  :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="p.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
               </view>
@@ -218,7 +218,7 @@
             >
               <image
                 class="rk-podium-avatar"
-                :src="slot.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                :src="slot.avatar_url || '/static/defaults/default-avatar.svg'"
                 mode="aspectFill"
               />
               <text class="rk-podium-name">{{ slot.display_name }}</text>
@@ -261,7 +261,7 @@
                 </view>
                 <image
                   class="user-avatar"
-                  :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="item.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <view class="user-info">
@@ -399,7 +399,7 @@
             <view class="feed-header">
               <image
                 class="feed-avatar"
-                :src="act.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                :src="act.avatar_url || '/static/defaults/default-avatar.svg'"
                 mode="aspectFill"
               />
               <view class="feed-user-meta">
@@ -457,7 +457,7 @@
               @click="toggleExpandFeedNote(act.id)"
             >
               <view class="rk-cb-head">
-                <text class="rk-cb-title">Canova 教练点评</text>
+                <text class="rk-cb-title">Canova 教练点评 · AI生成（人工智能生成，仅供参考）</text>
                 <text class="rk-cb-toggle">{{ expandedFeedNoteIds[act.id] ? '收起' : '展开' }}</text>
               </view>
               <text
@@ -524,7 +524,7 @@
                 >
                   <image
                     class="liker-avatar"
-                    :src="lk.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                    :src="lk.avatar_url || '/static/defaults/default-avatar.svg'"
                     mode="aspectFill"
                   />
                   <text class="liker-name">{{ lk.display_name || '跑友' }}</text>
@@ -544,7 +544,7 @@
                 <view class="cmt-root-row" @click="handleOpenCommentModal(act, thread)">
                   <image
                     class="cmt-avatar"
-                    :src="thread.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                    :src="thread.author_avatar || '/static/defaults/default-avatar.svg'"
                     mode="aspectFill"
                   />
                   <view class="cmt-body">
@@ -574,7 +574,7 @@
                   >
                     <image
                       class="cmt-avatar mini"
-                      :src="rep.author_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                      :src="rep.author_avatar || '/static/defaults/default-avatar.svg'"
                       mode="aspectFill"
                     />
                     <view class="cmt-body">
@@ -1723,7 +1723,7 @@ async function handleSendComment() {
       author_name: user.value?.display_name || "跑友",
       author_avatar:
         user.value?.avatar_url ||
-        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",
+        "/static/defaults/default-avatar.svg",
     };
     if (replyTargetComment.value) {
       payload.parent_id = replyTargetComment.value.parent_id || replyTargetComment.value.id;
@@ -1882,6 +1882,15 @@ onPullDownRefresh(async () => {
 
 onLoad((options: any) => {
   initShareMenu();
+  if (options?.club_id) {
+    try {
+      const targetCid = decodeURIComponent(String(options.club_id));
+      if (targetCid) {
+        setActiveClubId(targetCid);
+        lastRankClubId = "";
+      }
+    } catch (_) {}
+  }
   if (options?.section === "feed") {
     activeRankTab.value = "feed";
     pendingScrollToFeed = true;

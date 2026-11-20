@@ -216,7 +216,7 @@
               >
                 <image
                   class="t3-podium-avatar"
-                  :src="slot.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="slot.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <text class="t3-podium-name">{{ slot.display_name }}</text>
@@ -244,7 +244,7 @@
               <view v-for="act in clubFeedPreview" :key="act.id" class="t3-feed-row">
                 <image
                   class="t3-feed-avatar"
-                  :src="act.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                  :src="act.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <view class="t3-feed-mid">
@@ -659,7 +659,7 @@
           <view class="gr-cover-wrap">
             <image
               class="gr-cover-img"
-              :src="evt.cover_image || 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80'"
+              :src="evt.cover_image || '/static/defaults/default-run.svg'"
               mode="aspectFill"
             />
             <view class="gr-cover-gradient" />
@@ -692,7 +692,7 @@
               <view class="gr-org-left">
                 <image
                   class="gr-org-avatar"
-                  :src="evt.creator_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&auto=format&fit=crop&q=80'"
+                  :src="evt.creator_avatar || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <view class="gr-org-meta">
@@ -745,7 +745,7 @@
                     v-for="(p, pidx) in evt.participants.slice(0, 6)"
                     :key="pidx"
                     class="gr-stacked-avatar"
-                    :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                    :src="p.avatar_url || '/static/defaults/default-avatar.svg'"
                     mode="aspectFill"
                   />
                   <view v-if="evt.participants.length > 6" class="gr-avatar-more">
@@ -1027,7 +1027,7 @@
         </view>
         <view v-if="unaffiliatedPreviewList.length > 0" class="d1-peer-list">
           <view v-for="m in unaffiliatedPreviewList" :key="m.user_id" class="d1-peer-row" @click="openMemberRunnerAnalysis(m)">
-            <image class="d1-peer-avatar" :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+            <image class="d1-peer-avatar" :src="m.avatar_url || '/static/defaults/default-avatar.svg'" mode="aspectFill" />
             <view class="d1-peer-info">
               <view class="d1-peer-top">
                 <text class="d1-peer-name">{{ m.display_name || '自由跑友' }}</text>
@@ -1182,7 +1182,7 @@
               <view class="nm-user-left">
                 <image
                   class="nm-avatar"
-                  :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+                  :src="m.avatar_url || '/static/defaults/default-avatar.svg'"
                   mode="aspectFill"
                 />
                 <view class="nm-user-meta">
@@ -1423,7 +1423,7 @@
         <scroll-view scroll-y class="members-scroll">
           <view v-for="m in filteredMembers" :key="m.user_id" class="member-row">
             <view class="m-left">
-              <image class="m-avatar" :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <image class="m-avatar" :src="m.avatar_url || '/static/defaults/default-avatar.svg'" mode="aspectFill" />
               <view class="m-info">
                 <view class="m-name-line">
                   <text class="m-name">{{ m.display_name || '跑友' }}</text>
@@ -1480,7 +1480,7 @@
         <view class="danger-modal-body">
           <view class="danger-target-card">
             <image
-              :src="targetMemberToRemove.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              :src="targetMemberToRemove.avatar_url || '/static/defaults/default-avatar.svg'"
               mode="aspectFill"
               class="danger-target-avatar"
             />
@@ -1625,7 +1625,7 @@
           <view class="modal-body">
             <!-- 👤 约跑发起人展示 -->
             <view class="ecp-creator-card" v-if="eventType === 'group_run'">
-              <image class="ecp-avatar" :src="user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <image class="ecp-avatar" :src="user?.avatar_url || '/static/defaults/default-avatar.svg'" mode="aspectFill" />
               <view class="ecp-info">
                 <view class="ecp-line">
                   <text class="ecp-label">本次约跑发起人：</text>
@@ -1996,7 +1996,7 @@
         <view class="pm-creator-banner" v-if="selectedEventForParticipants?.creator_name">
           <image
             class="pm-cb-avatar"
-            :src="selectedEventForParticipants?.creator_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&auto=format&fit=crop&q=80'"
+            :src="selectedEventForParticipants?.creator_avatar || '/static/defaults/default-avatar.svg'"
             mode="aspectFill"
           />
           <view class="pm-cb-meta">
@@ -2019,7 +2019,7 @@
               :key="pidx"
               class="pm-user-item"
             >
-              <image class="pm-avatar" :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <image class="pm-avatar" :src="p.avatar_url || '/static/defaults/default-avatar.svg'" mode="aspectFill" />
               <view class="pm-user-meta">
                 <view class="pm-name-line">
                   <text class="pm-name">{{ p.display_name || p.real_name || '跑友' }}</text>
@@ -2091,29 +2091,77 @@
       </view>
     </view>
 
-    <!-- ── 跑团受邀专属直达弹窗 (微信卡片受邀免输码直接加入) ── -->
+    <!-- ── 跑团受邀专属直达弹窗 (综合跑团主要信息与实拍图片 · 点击邀请卡直接进跑团) ── -->
     <view v-if="showClubInviteModal" class="modal-mask" @click="closeClubInviteModal" @touchmove.stop.prevent>
       <view class="modal-content club-invite-modal-box" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
-            <text class="modal-title">🎉 跑团入团邀请</text>
-            <text class="invite-badge-pill">微信专属</text>
+            <text class="modal-title">🎉 跑团入团邀请卡</text>
+            <text class="invite-badge-pill">点击卡片直接进团</text>
           </view>
           <text class="close-btn" @click="closeClubInviteModal">✕</text>
         </view>
 
         <view class="modal-body invite-body">
-          <view class="invite-club-card">
-            <image class="invite-club-logo" :src="invitedClubInfo?.logo_url || '/static/logo-square.png'" mode="aspectFill" />
-            <view class="invite-club-info">
-              <text class="invite-club-name">{{ invitedClubInfo?.name }}</text>
-              <view class="invite-meta-row">
-                <text v-if="invitedClubInfo?.city" class="invite-pill">📍 {{ invitedClubInfo.city }}</text>
-                <text class="invite-pill">👥 {{ invitedClubInfo?.member_count || 1 }} 位团员</text>
-                <text v-if="invitedClubInfo?.org_name" class="invite-pill org-pill">🏛️ {{ invitedClubInfo.org_name }}</text>
+          <!-- 综合跑团封面/实拍、核心战绩、据点排期与教练的一体化邀请卡（支持点击卡片直接入团） -->
+          <view class="invite-club-card" @click="handleAcceptClubInvite">
+            <image
+              v-if="invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url"
+              class="invite-hero-cover"
+              :src="resolveAssetUrl(invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url)"
+              mode="aspectFill"
+            />
+            <view class="invite-club-head-row">
+              <image class="invite-club-logo" :src="resolveAssetUrl(invitedClubInfo?.logo_url) || '/static/logo-square.png'" mode="aspectFill" />
+              <view class="invite-club-info">
+                <text class="invite-club-name">{{ invitedClubInfo?.name }}</text>
+                <view class="invite-meta-row">
+                  <text v-if="invitedClubInfo?.city" class="invite-pill">📍 {{ invitedClubInfo.city }}</text>
+                  <text class="invite-pill">👥 {{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }} 位团员</text>
+                  <text v-if="invitedClubInfo?.org_name" class="invite-pill org-pill">🏛️ {{ invitedClubInfo.org_name }}</text>
+                  <text
+                    v-for="lm in (invitedClubInfo?.home_landmarks || []).slice(0, 2)"
+                    :key="lm"
+                    class="invite-pill"
+                  >
+                    {{ lm }}
+                  </text>
+                </view>
+                <text v-if="invitedClubInfo?.slogan || invitedClubInfo?.description" class="invite-club-desc">
+                  {{ invitedClubInfo?.slogan || invitedClubInfo?.description }}
+                </text>
               </view>
-              <text v-if="invitedClubInfo?.description" class="invite-club-desc">{{ invitedClubInfo.description }}</text>
             </view>
+
+            <view v-if="invitedClubInfo?.schedule_summary" class="invite-sched-row">
+              <text class="invite-sched-txt">🗓️ 合练排期：{{ invitedClubInfo.schedule_summary }}</text>
+            </view>
+
+            <view class="invite-stat-grid">
+              <view class="invite-stat-cell">
+                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }}人</text>
+                <text class="invite-stat-lbl">活跃队员</text>
+              </view>
+              <view class="invite-stat-cell">
+                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.month_total_km ?? 0 }}km</text>
+                <text class="invite-stat-lbl">本月全团实跑</text>
+              </view>
+              <view class="invite-stat-cell">
+                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.sub330_count ?? 0 }}人</text>
+                <text class="invite-stat-lbl">⌚ 核验破330</text>
+              </view>
+            </view>
+
+            <scroll-view v-if="(invitedClubInfo?.photos || []).length > 0" scroll-x class="invite-photo-strip" @click.stop>
+              <image
+                v-for="(p, idx) in (invitedClubInfo?.photos || []).slice(0, 5)"
+                :key="p.id || idx"
+                :src="resolveAssetUrl(p.photo_url)"
+                class="invite-strip-img"
+                mode="aspectFill"
+                @click.stop="handleAcceptClubInvite"
+              />
+            </scroll-view>
           </view>
 
           <!-- 新用户一键同步微信昵称与头像（告别“跑者_xxxx”代号） -->
@@ -2755,7 +2803,7 @@
         <scroll-view scroll-y class="members-scroll">
           <view v-for="m in filteredOrgMembers" :key="m.user_id" class="member-row org-member-row">
             <view class="m-left">
-              <image class="m-avatar" :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'" mode="aspectFill" />
+              <image class="m-avatar" :src="m.avatar_url || '/static/defaults/default-avatar.svg'" mode="aspectFill" />
               <view class="m-info">
                 <view class="m-name-line">
                   <text class="m-name">{{ m.real_name || m.display_name }}</text>
@@ -3581,7 +3629,7 @@
                     <view class="ppc-rank-badge">{{ idx === 0 ? '🥇 冠军' : idx === 1 ? '🥈 亚军' : '🥉 季军' }}</view>
                     <image
                       class="ppc-avatar"
-                      :src="p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                      :src="p.avatar_url || '/static/defaults/default-avatar.svg'"
                       mode="aspectFill"
                     />
                     <view class="ppc-name-col">
@@ -3638,7 +3686,7 @@
                       <text class="ppt-rank-num">{{ idx + 1 }}</text>
                       <image
                         class="ppt-mini-avatar"
-                        :src="item.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                        :src="item.avatar_url || '/static/defaults/default-avatar.svg'"
                         mode="aspectFill"
                       />
                       <text class="ppt-name-text">{{ item.display_name }}</text>
@@ -3663,9 +3711,10 @@
               <view class="poster-canova-quote">
                 <view class="pcq-header">
                   <text class="pcq-icon">💡</text>
-                  <text class="pcq-title">Renato Canova 科学耐力团队复盘</text>
+                  <text class="pcq-title">Renato Canova 科学耐力团队复盘 · AI生成</text>
                 </view>
                 <text class="pcq-text">“{{ reportData.canova_critique }}”</text>
+                <text style="display:block;margin-top:8rpx;font-size:19rpx;color:var(--rgm-text-3);">本复盘内容由人工智能（AI）生成，仅供参考</text>
               </view>
 
               <!-- Bottom Watermark & Stamp -->
@@ -3797,7 +3846,7 @@
                     <text class="mtc-rank-badge" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</text>
                     <image
                       class="mtc-avatar"
-                      :src="m.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'"
+                      :src="m.avatar_url || '/static/defaults/default-avatar.svg'"
                       mode="aspectFill"
                     />
                     <view class="mtc-name-col">
@@ -4514,7 +4563,7 @@
           <button class="qn-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
             <image
               class="qn-avatar-img"
-              :src="joinRunnerAvatar || user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'"
+              :src="joinRunnerAvatar || user?.avatar_url || '/static/defaults/default-avatar.svg'"
               mode="aspectFill"
             />
             <text class="qn-avatar-tip">换头像</text>
@@ -4568,6 +4617,8 @@ import {
   getInviteNewRunnerShareMessage,
 } from "../../utils/share";
 import {
+  API_BASE_URL,
+  getToken,
   request,
   uploadAvatarFile,
   getStoredUser,
@@ -4779,32 +4830,32 @@ const PRESET_COVERS = [
   {
     id: "sunrise",
     title: "🌅 晨曦破晓",
-    url: "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-banner.svg"
   },
   {
     id: "night",
     title: "🌃 滨江夜跑",
-    url: "https://images.unsplash.com/photo-1513593771513-7b58b6c4af38?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-run.svg"
   },
   {
     id: "park",
     title: "🌳 绿道森林",
-    url: "https://images.unsplash.com/photo-1452626038306-9aae5e071dd3?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-club.svg"
   },
   {
     id: "track",
     title: "🏟️ 专业跑道",
-    url: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-run.svg"
   },
   {
     id: "trail",
     title: "⛰️ 山野越野",
-    url: "https://images.unsplash.com/photo-1486218119243-13883505764c?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-banner.svg"
   },
   {
     id: "group",
     title: "🏃‍♂️ 跑团大合练",
-    url: "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=800&auto=format&fit=crop&q=80"
+    url: "/static/defaults/default-club.svg"
   }
 ];
 
@@ -7905,7 +7956,7 @@ function generatePosterImage(): Promise<string> {
     );
     ctx.setFontSize(22);
     ctx.setFillStyle(isLight ? "#0F172A" : "#bf5af2");
-    ctx.fillText("💡 Renato Canova 科学耐力团队复盘", 58, cY + 34);
+    ctx.fillText("💡 Renato Canova 团队复盘（AI生成，仅供参考）", 58, cY + 34);
 
     ctx.setFontSize(17);
     ctx.setFillStyle(isLight ? "#334155" : "#d1d5db");
@@ -9156,10 +9207,14 @@ function handleUploadCover() {
       const tempPath = res.tempFilePaths[0];
       if (!tempPath) return;
       uni.showLoading({ title: "上传题头图中..." });
+      const tk = getToken();
       uni.uploadFile({
-        url: "https://rgm.vanpower.net/api/team/upload-logo",
+        url: `${API_BASE_URL}/api/team/upload-logo`,
         filePath: tempPath,
         name: "file",
+        header: {
+          ...(tk ? { Authorization: `Bearer ${tk}` } : {}),
+        },
         success: (uploadRes) => {
           uni.hideLoading();
           try {
@@ -9596,10 +9651,10 @@ async function handleInviteFromWeChat(options: any) {
     return;
   }
 
-  // 1. Club Invite (跑团受邀入团)
+  // 1. Club Invite (跑团受邀入团：点击微信邀请卡或扫码后，若具备免码直入资格则直接入团并进入跑团)
   //    注意：教练罗盘跳转报告时会带 ?action=report&club_id=，不能被当成入团邀请
   if (action === "join_club" || (clubId && !orgId && !action)) {
-    uni.showLoading({ title: "正在读取跑团邀请...", mask: true });
+    uni.showLoading({ title: "正在为您直连跑团...", mask: true });
     try {
       const u = user.value || getStoredUser() || (await wechatLogin());
       const uid = u?.id || "";
@@ -9608,15 +9663,43 @@ async function handleInviteFromWeChat(options: any) {
       );
       uni.hideLoading();
       if (res?.is_club_member) {
-        uni.showToast({ title: `您已是【${res.club?.name}】团员`, icon: "none" });
+        uni.showToast({ title: `已进入【${res.club?.name}】`, icon: "none" });
         setActiveClubId(clubId);
-        await loadClubData();
+        await loadClubData(clubId);
       } else if (res?.club) {
+        const canDirectJoin = Boolean(res.one_click_join ?? res.is_code_valid);
         invitedClubInfo.value = res.club;
         invitedClubCode.value = code;
-        invitedClubOneClick.value = Boolean(res.one_click_join ?? res.is_code_valid);
+        invitedClubOneClick.value = canDirectJoin;
         invitedClubIsOrgMember.value = Boolean(res.is_org_member && res.org_status !== "expired");
         invitedClubDeadlineDays.value = res.profile_deadline_days || 14;
+
+        // 用户点击微信邀请卡后，若已拥有有效昵称且邀请有效，直接自动入团并进入跑团主页
+        if (canDirectJoin && uid && !needsWechatNickname.value) {
+          try {
+            const joinRes = await request("/api/team/join-club", "POST", {
+              user_id: uid,
+              club_id: res.club.id || clubId,
+              invite_code: code || undefined,
+              privacy_consent: true,
+              inviter_uid: invitedByUid.value || undefined,
+              via_invite: true,
+            });
+            trackFunnelStep("club_join_success", `点击邀请卡直接加入跑团：${res.club.name}`, {
+              club_id: res.club.id || clubId,
+              via: "invite_card_direct",
+            });
+            syncUserNicknameAfterJoin(joinRes);
+            setActiveClubId(res.club.id || clubId);
+            await loadClubData(res.club.id || clubId);
+            if (!promptOrgProfileLater(joinRes?.org_membership, res.club.name)) {
+              uni.showToast({ title: `🎉 已直接加入【${res.club.name}】！`, icon: "success" });
+            }
+            return;
+          } catch (autoErr) {
+            console.warn("auto join club on invite card click fallback to modal:", autoErr);
+          }
+        }
         showClubInviteModal.value = true;
       }
     } catch (err: any) {
@@ -9750,6 +9833,7 @@ onShareAppMessage((res: any) => {
 
   if (shareType === "club") {
     const club = {
+      ...(currentClub.value || {}),
       id: dataset.clubId || dataset["club-id"] || currentClub.value?.id,
       name: dataset.clubName || dataset["club-name"] || currentClub.value?.name,
       logo_url: currentClub.value?.logo_url,
@@ -16066,55 +16150,58 @@ function goToSubpage(url: string) {
 .invite-club-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
   padding-bottom: 24rpx;
   border-bottom: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
 }
-
+.invite-hero-cover { width: 100%; height: 220rpx; border-radius: 20rpx; margin-bottom: 18rpx; }
+.invite-club-head-row { display: flex; align-items: center; gap: 20rpx; }
 .invite-club-logo {
-  width: 140rpx;
-  height: 140rpx;
-  border-radius: 28rpx;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 24rpx;
   border: 3rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.4));
-  margin-bottom: 18rpx;
+  flex-shrink: 0;
   box-shadow: 0 6rpx 20rpx var(--rgm-shadow, rgba(0, 0, 0, 0.4));
 }
-
+.invite-club-info { flex: 1; min-width: 0; }
 .invite-club-name {
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: bold;
   color: var(--rgm-text, #ffffff);
-  margin-bottom: 12rpx;
+  display: block;
+  margin-bottom: 8rpx;
 }
-
 .invite-meta-row {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 12rpx;
-  margin-bottom: 16rpx;
+  gap: 10rpx;
+  margin-bottom: 10rpx;
 }
-
 .invite-pill {
   font-size: 20rpx;
   color: var(--rgm-text-2, #9ca3af);
   background: var(--rgm-tint, rgba(255, 255, 255, 0.06));
-  padding: 6rpx 16rpx;
-  border-radius: 12rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 10rpx;
 }
-
 .invite-pill.org-pill {
   color: var(--rgm-brand-text, #c084fc);
   background: var(--rgm-brand-tint, rgba(168, 85, 247, 0.15));
 }
-
 .invite-club-desc {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: var(--rgm-text-2, #9ca3af);
-  line-height: 1.5;
-  padding: 0 10rpx;
+  line-height: 1.45;
+  display: block;
 }
+.invite-sched-row { margin-top: 14rpx; padding: 10rpx 16rpx; border-radius: 14rpx; background: var(--rgm-tint, rgba(255, 255, 255, 0.05)); }
+.invite-sched-txt { font-size: 21rpx; font-weight: 700; color: var(--rgm-brand, #fc4c02); }
+.invite-stat-grid { display: flex; gap: 12rpx; margin-top: 16rpx; }
+.invite-stat-cell { flex: 1; padding: 12rpx; border-radius: 14rpx; background: var(--rgm-tint, rgba(255, 255, 255, 0.05)); text-align: center; }
+.invite-stat-val { font-size: 24rpx; font-weight: 900; color: var(--rgm-text, #ffffff); display: block; }
+.invite-stat-lbl { font-size: 18rpx; color: var(--rgm-text-2, #9ca3af); display: block; margin-top: 4rpx; }
+.invite-photo-strip { white-space: nowrap; margin-top: 16rpx; }
+.invite-strip-img { display: inline-block; width: 160rpx; height: 120rpx; border-radius: 14rpx; margin-right: 12rpx; }
 
 .invite-status-strip {
   display: flex;

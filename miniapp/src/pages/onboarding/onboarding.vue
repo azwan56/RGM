@@ -666,11 +666,13 @@
       </view>
     </view>
 
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
 import { currentTheme, themeClass, applySystemTheme, isVolt } from "@/utils/theme";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import {

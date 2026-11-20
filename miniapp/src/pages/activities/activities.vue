@@ -76,7 +76,7 @@
 
         <!-- Coach Journal preview -->
         <view v-if="act.ai_journal?.evaluation || (typeof act.ai_journal === 'string' && act.ai_journal)" class="rgm-coach-box a3-coach-box">
-          <text class="a3-coach-lbl">教练点评</text>
+          <text class="a3-coach-lbl">教练点评 · AI生成（人工智能生成，仅供参考）</text>
           <text class="journal-text">{{ act.ai_journal?.evaluation || act.ai_journal }}</text>
         </view>
 
@@ -120,12 +120,14 @@
       :activity-id="shareCardActivityId"
       @close="showPersonalShareModal = false"
     />
+    <PrivacyPopup />
   </view>
 
 </template>
 
 <script setup lang="ts">
 import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import { ref } from "vue";
 import { onShow, onPullDownRefresh, onLoad, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { initShareMenu, getUnifiedShareAppMessage, getUnifiedShareTimeline } from "../../utils/share";

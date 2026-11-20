@@ -213,6 +213,12 @@ function buildShapes(name: string, c: string, sw: number): string {
         `<path d="M8.5 10.5V7.8A3.5 3.5 0 0 1 15.5 7.8V10.5" ${common}/>` +
         `<circle cx="12" cy="15" r="1.2" fill="${c}"/>`
       );
+    case "gallery":
+      return (
+        `<rect x="3.5" y="5" width="17" height="14" rx="2.6" ${common}/>` +
+        `<polyline points="5.8,16 9.8,11.5 13,14.5 15.8,10.8 18.5,16" ${common}/>` +
+        `<circle cx="8.5" cy="9" r="1.4" fill="${c}"/>`
+      );
     default:
       return `<circle cx="12" cy="12" r="7" ${common}/>`;
   }

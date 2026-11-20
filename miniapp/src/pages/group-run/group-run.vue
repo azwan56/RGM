@@ -803,14 +803,17 @@
       id="groupRunPosterCanvas"
       style="width: 750px; height: 1320px; position: fixed; left: -9999px; top: -9999px; pointer-events: none;"
     ></canvas>
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { onLoad, onShow, onPullDownRefresh, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import {
   request,
+  resolveAssetUrl,
   getStoredUser,
   authenticateWechatUser,
   silentCheckExistingWechatUser,
@@ -1215,7 +1218,7 @@ function goToHomePage() {
 }
 
 function goToMyProfile() {
-  uni.switchTab({ url: "/pages/my/my" });
+  uni.switchTab({ url: "/pages/profile/profile" });
 }
 
 /**
@@ -1511,10 +1514,11 @@ async function fetchEventPosterAssets(): Promise<{ localQr: string; localCover: 
 }
 
 function downloadImageLocal(url: string): Promise<string> {
-  if (!url) return Promise.resolve("");
+  const fullUrl = resolveAssetUrl(url);
+  if (!fullUrl) return Promise.resolve("");
   return new Promise((resolve) => {
     uni.downloadFile({
-      url,
+      url: fullUrl,
       success: (res) => {
         if (res.statusCode === 200 && res.tempFilePath) resolve(res.tempFilePath);
         else resolve("");
@@ -1528,10 +1532,10 @@ const posterHeroImage = computed(() => {
   const ev = event.value;
   if (!ev) return "";
   const cov = String(ev.cover_image || "");
-  if (ev.club_logo && (!cov || cov.includes("images.unsplash.com"))) {
-    return ev.club_logo;
+  if (ev.club_logo && (!cov || cov.includes("/default-"))) {
+    return resolveAssetUrl(ev.club_logo);
   }
-  return cov || ev.club_logo || "";
+  return resolveAssetUrl(cov || ev.club_logo || "");
 });
 
 function formatPosterClubSlogan(ev: any): string {
@@ -1655,7 +1659,7 @@ async function generateGroupRunPosterCanvas() {
     const imgH = 400;
     drawRoundedBox(ctx, imgX, imgY, imgW, imgH, 24, "#1E293B", "rgba(252,76,2,0.45)");
     const rawCov = String(ev.cover_image || "");
-    const preferClubImg = localLogo && (!rawCov || rawCov.includes("images.unsplash.com"));
+    const preferClubImg = localLogo && (!rawCov || rawCov.includes("/default-"));
     const heroSrc = preferClubImg ? localLogo : localCover || localLogo;
     if (heroSrc) {
       const heroDim = await getImageDimensions(heroSrc);

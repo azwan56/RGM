@@ -351,9 +351,9 @@
               <view class="critique-header-left">
                 <text class="critique-robot">🎯</text>
                 <text class="critique-title">Canova 教练复盘</text>
-                <text class="ai-generated-tag">量化评估</text>
+                <text class="ai-generated-tag">AI生成</text>
               </view>
-              <text class="critique-compliance-tip">仅供参考</text>
+              <text class="critique-compliance-tip">人工智能生成 · 仅供参考</text>
             </view>
             <text class="critique-content">{{ coachCritique }}</text>
           </view>

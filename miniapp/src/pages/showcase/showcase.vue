@@ -171,11 +171,17 @@
           <image v-if="c.hero_cover_url" :src="resolveAssetUrl(c.hero_cover_url)" class="plaza-cover" mode="aspectFill" />
           <view class="plaza-body">
             <view class="row-between">
-              <text class="plaza-name">{{ c.name }}</text>
-              <text class="plaza-badge">📸 {{ c.photo_count }}张</text>
+              <view class="plaza-title-wrap">
+                <text class="plaza-name">{{ c.name }}</text>
+                <text v-if="c.org_name" class="org-pill">{{ c.org_name }}</text>
+                <text v-if="c.is_decorated" class="deco-pill">✨ 已装修</text>
+              </view>
+              <text class="plaza-badge" :class="{ muted: !c.photo_count }">📸 {{ c.photo_count }}张</text>
             </view>
             <text class="plaza-slogan">{{ c.slogan }}</text>
-            <text class="plaza-stats">{{ c.verified_stats?.member_count ?? 0 }}人 · 破330 {{ c.verified_stats?.sub330_count ?? 0 }}人 · 看相册与教练 ›</text>
+            <text class="plaza-stats">
+              {{ c.verified_stats?.member_count ?? 0 }}人 · 近30天 {{ c.verified_stats?.recent_30d_checkins ?? 0 }}次打卡{{ (c.verified_stats?.recent_30d_events ?? 0) > 0 ? ` · ${c.verified_stats.recent_30d_events}场活动` : '' }} · 看相册与教练 ›
+            </text>
           </view>
         </view>
       </view>
@@ -183,11 +189,16 @@
       <view v-else>
         <view v-for="ch in plazaCoaches" :key="ch.user_id" class="rgm-card sec-card" @click="openCoachDetail(ch.user_id)">
           <view class="row-between">
-            <text class="plaza-name">{{ ch.display_name }}</text>
+            <view class="plaza-title-wrap">
+              <text class="plaza-name">{{ ch.display_name }}</text>
+              <text v-if="ch.is_decorated" class="deco-pill">✨ 已装修</text>
+            </view>
             <text v-if="ch.watch_verified" class="verify-pill">⌚ 手表核验</text>
           </view>
           <text class="plaza-slogan">{{ ch.headline }}</text>
-          <text class="plaza-stats">全马PB {{ ch.verified_marathon_pb || '教练认证' }} · 官兔 ×{{ ch.official_pacer_count }} · 风采照 {{ ch.photo_count }} 张 ›</text>
+          <text class="plaza-stats">
+            全马PB {{ ch.verified_marathon_pb || '教练认证' }} · 近30天打卡 {{ ch.recent_30d_checkins ?? 0 }}次 · 风采照 {{ ch.photo_count }} 张 ›
+          </text>
         </view>
       </view>
     </template>
@@ -411,8 +422,12 @@ function previewPhoto(url: string) {
 .plaza-card { margin-top: 20rpx; overflow: hidden; padding: 0; }
 .plaza-cover { width: 100%; height: 240rpx; background: var(--rgm-card-2); }
 .plaza-body { padding: 22rpx 24rpx; }
+.plaza-title-wrap { display: flex; align-items: center; gap: 10rpx; min-width: 0; flex: 1; flex-wrap: wrap; }
 .plaza-name { font-size: 30rpx; font-weight: 900; color: var(--rgm-text); }
-.plaza-badge { font-size: 20rpx; font-weight: 800; color: var(--rgm-brand); }
+.org-pill { font-size: 18rpx; font-weight: 800; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(59, 130, 246, 0.16); color: #60a5fa; flex-shrink: 0; }
+.deco-pill { font-size: 18rpx; font-weight: 800; padding: 4rpx 12rpx; border-radius: 999rpx; background: rgba(252, 76, 2, 0.16); color: var(--rgm-brand); flex-shrink: 0; }
+.plaza-badge { font-size: 20rpx; font-weight: 800; color: var(--rgm-brand); flex-shrink: 0; margin-left: 12rpx; }
+.plaza-badge.muted { color: var(--rgm-text-3); font-weight: 600; }
 .plaza-slogan { font-size: 24rpx; color: var(--rgm-text-2); display: block; margin-top: 8rpx; }
 .plaza-stats { font-size: 21rpx; color: var(--rgm-text-3); display: block; margin-top: 10rpx; }
 .hero-card { overflow: hidden; padding: 0; margin-bottom: 20rpx; }

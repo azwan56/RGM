@@ -5285,7 +5285,7 @@ async function handleSaveRaceInfo(race: any) {
     }
     const res = await request(
       `/api/profile/${uid}/races/${encodeURIComponent(raceId)}/info`,
-      "PATCH",
+      "PUT",
       { race_info: cleaned }
     );
     if (res?.races) {

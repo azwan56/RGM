@@ -5,11 +5,13 @@
       :refresh-tick="refreshTick"
       @refresh-done="handleRefreshDone"
     />
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import { onLoad, onShow, onPullDownRefresh, onShareAppMessage, onShareTimeline } from "@dcloudio/uni-app";
 import { currentTheme, themeClass, applySystemTheme } from "../../utils/theme";
 import { syncTabBarIndex } from "../../utils/api";

@@ -67,8 +67,17 @@ export function getInviteNewRunnerShareMessage(user?: any): ShareMessageResult {
   };
 }
 
+function resolveShareImageUrl(rawUrl?: string | null): string {
+  const s = String(rawUrl || "").trim();
+  if (!s) return "/static/logo-square.png";
+  if (s.startsWith("/static/")) return s;
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  if (s.startsWith("/")) return `https://rgm.vanpower.net${s}`;
+  return s;
+}
+
 /**
- * 获取跑团专属微信邀请卡片配置
+ * 获取跑团专属微信邀请卡片配置（综合跑团主要信息与封面/实拍大图，支持点击卡片直接进跑团）
  */
 export function getClubShareAppMessage(club: any, inviterName?: string, inviterUid?: string): ShareMessageResult {
   if (!club) return getUnifiedShareAppMessage(inviterUid);
@@ -76,15 +85,38 @@ export function getClubShareAppMessage(club: any, inviterName?: string, inviterU
   const clubId = club.id || club.club_id || "";
   const inviteCode = club.invite_code || "";
   const uid = getCurrentInviterUid(inviterUid);
-  const title = inviterName
-    ? `🏃‍♂️【${name}】${inviterName} 邀请您加入跑团，点击立即入团！`
-    : `🏃‍♂️ 诚邀您加入【${name}】跑团，点击立即入团！`;
+
+  const city = club.city || "";
+  const landmarks: string[] = Array.isArray(club.home_landmarks) ? club.home_landmarks : [];
+  const locPart = landmarks.length ? `${city ? city + "·" : ""}${landmarks[0]}` : city;
+  const memberCnt = club.verified_stats?.member_count ?? club.member_count ?? 0;
+  const sub330Cnt = club.verified_stats?.sub330_count ?? 0;
+  const statPart = [
+    locPart,
+    memberCnt > 0 ? `${memberCnt}人同跑` : "",
+    sub330Cnt > 0 ? `破330×${sub330Cnt}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const inviterPrefix = inviterName ? `${inviterName}邀您入团` : "诚邀加入";
+  const title = statPart
+    ? `🏃‍♂️【${name}】${inviterPrefix}｜${statPart} · 点击直接进跑团`
+    : `🏃‍♂️【${name}】${inviterPrefix}，点击卡片直接进跑团！`;
+
   const uidParam = uid ? `&inviter_uid=${encodeURIComponent(uid)}` : "";
-  const path = `/pages/team/team?club_id=${encodeURIComponent(clubId)}&invite_code=${encodeURIComponent(inviteCode)}&action=join_club${uidParam}`;
+  const path = `/pages/team/team?club_id=${encodeURIComponent(clubId)}&invite_code=${encodeURIComponent(inviteCode)}&action=join_club&auto_join=1${uidParam}`;
+  const bestImg =
+    club.share_card_image_url ||
+    club.hero_cover_url ||
+    (Array.isArray(club.photos) && club.photos[0]?.photo_url) ||
+    club.logo_url ||
+    "/static/logo-square.png";
+
   return {
     title,
     path,
-    imageUrl: club.logo_url || "/static/logo-square.png",
+    imageUrl: resolveShareImageUrl(bestImg),
   };
 }
 
@@ -127,10 +159,16 @@ export function getClubShareTimeline(club: any, inviterUid?: string): ShareTimel
   const inviteCode = club.invite_code || "";
   const uid = getCurrentInviterUid(inviterUid);
   const uidParam = uid ? `&inviter_uid=${encodeURIComponent(uid)}` : "";
+  const bestImg =
+    club.share_card_image_url ||
+    club.hero_cover_url ||
+    (Array.isArray(club.photos) && club.photos[0]?.photo_url) ||
+    club.logo_url ||
+    "/static/logo-square.png";
   return {
-    title: `🏃‍♂️ 加入【${club.name || '跑团'}】，与跑友科学训练备战！`,
-    query: `club_id=${encodeURIComponent(clubId)}&invite_code=${encodeURIComponent(inviteCode)}&action=join_club${uidParam}`,
-    imageUrl: club.logo_url || "/static/logo-square.png",
+    title: `🏃‍♂️ 加入【${club.name || '跑团'}】，点击直接进跑团与队友科学合练！`,
+    query: `club_id=${encodeURIComponent(clubId)}&invite_code=${encodeURIComponent(inviteCode)}&action=join_club&auto_join=1${uidParam}`,
+    imageUrl: resolveShareImageUrl(bestImg),
   };
 }
 

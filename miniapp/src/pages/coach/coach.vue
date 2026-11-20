@@ -1,6 +1,6 @@
 <template>
   <view class="coach-page coach-v3" :class="[themeClass, { 'has-preview-bar': isPreviewPlan }]">
-    <!-- ── 极简顶栏二合一：[ 课表 | 体能 ] + 对话气泡 + 定制滑块 ── -->
+    <!-- ── 极简顶栏二合一：[ 课表 | 体能 ] + 定制滑块 ── -->
     <view class="c3-topbar">
       <view class="rgm-seg-bar c3-seg">
         <view class="rgm-seg-item" :class="{ active: activeTab === 'plan' }" @click="activeTab = 'plan'">
@@ -12,9 +12,6 @@
       </view>
 
       <view class="c3-top-actions">
-        <view class="rgm-icon-btn" @click="openCoachChatModal">
-          <RgmIcon name="chat" :size="32" color="blue" />
-        </view>
         <view class="rgm-icon-btn" :class="{ active: showPlanConfig }" @click="showPlanConfig = !showPlanConfig">
           <RgmIcon name="sliders" :size="32" :color="showPlanConfig ? 'brand' : 'text2'" />
         </view>
@@ -182,12 +179,17 @@
         </view>
 
         <button class="primary-btn" :loading="generatingPlan" @click="handleGeneratePlan">
-          <text class="btn-text">{{ generatingPlan ? '推演中...' : '生成新课表预览' }}</text>
+          <text class="btn-text">{{ generatingPlan ? '推演中...' : '生成新课表预览（AI生成）' }}</text>
         </button>
+        <text class="ai-compliance-banner">✨ 提示：训练课表由 AI 生成（人工智能生成），仅供参考，请结合自身状态调整。</text>
       </view>
 
       <!-- Active Plan Body (L1 Tabs-1: 首卡目标微环 + 次卡8周阶梯柱 + 7日紧凑课表) -->
       <view v-if="plan && plan.schedule_data" class="c3-plan-body">
+        <view class="ai-notice-strip">
+          <text class="ai-notice-tag">AI生成</text>
+          <text class="ai-notice-txt">本训练课表及复盘建议由人工智能（AI）生成，仅供参考</text>
+        </view>
         <!-- 首卡：备赛目标 + 右侧空心进度环 -->
         <view class="rgm-card c3-goal-hero">
           <view class="c3-gh-left">
@@ -245,7 +247,7 @@
             v-if="activeMiniWeek?.coach_weekly_diagnosis || plan.coach_review_note"
             class="rgm-coach-box c3-coach-line"
           >
-            <RgmIcon name="chat" :size="24" color="blue" />
+            <text class="ai-notice-tag">AI生成</text>
             <text class="c3-coach-line-txt">
               {{ activeMiniWeek?.coach_weekly_diagnosis || plan.coach_review_note }}
             </text>
@@ -344,7 +346,7 @@
           <RgmIcon name="gauge" :size="34" color="purple" />
           <view class="c3-bs-text">
             <text class="c3-bs-title">完整 VDOT 雷达与 30 天生理趋势</text>
-            <text class="c3-bs-sub">查看 HRV、静息心率、官兔雷达与赛后评估</text>
+            <text class="c3-bs-sub">查看 HRV、静息心率与赛后评估</text>
           </view>
         </view>
         <RgmIcon name="chevron-right" :size="26" color="muted" />
@@ -449,9 +451,13 @@
 
       <!-- Main Diagnosis Cards -->
       <view v-if="analysis" class="content-box">
+        <view class="ai-notice-strip">
+          <text class="ai-notice-tag">AI生成</text>
+          <text class="ai-notice-txt">以下训练诊断、备赛战术、关键课与恢复指导由人工智能（AI）生成，仅供参考</text>
+        </view>
         <view class="hero-card">
           <view class="phase-badge" @click.stop="explainTerm('canova_model')">
-            <text class="phase-text">阶段：{{ analysis.periodization_phase || "专项准备期" }} ⓘ</text>
+            <text class="phase-text">阶段：{{ analysis.periodization_phase || "专项准备期" }} · AI生成 ⓘ</text>
           </view>
           <text class="summary-title">{{ analysis.summary }}</text>
           <text class="fitness-detail">{{ analysis.fitness_status }}</text>
@@ -560,8 +566,8 @@
       <view v-else class="empty-card">
         <RgmIcon name="zap" :size="48" color="brand" />
         <text class="empty-title">Canova 教练就绪</text>
-        <text class="empty-desc">配置目标赛事后即可生成训练诊断</text>
-        <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成训练诊断</button>
+        <text class="empty-desc">配置目标赛事后即可生成训练诊断（AI生成，人工智能生成仅供参考）</text>
+        <button class="primary-btn" :loading="loading" @click="handleReAnalyze">生成训练诊断（AI生成）</button>
       </view>
     </view>
 
@@ -736,61 +742,6 @@
       @close="showCoachPersonalReport = false"
     />
 
-    <!-- AI 科学教练实时问答抽屉 -->
-    <view v-if="showCoachChatModal" class="modal-overlay" @click="showCoachChatModal = false" @touchmove.stop.prevent>
-      <view class="modal-card c3-chat-drawer" @click.stop>
-        <view class="modal-header">
-          <text class="modal-title">问 Canova 科学教练</text>
-          <text class="modal-close" @click="showCoachChatModal = false">✕</text>
-        </view>
-
-        <view class="c3-chat-presets">
-          <view
-            v-for="qp in ['累了怎么调课？', '周日LSD配速建议', '如何提速有氧配速？']"
-            :key="qp"
-            class="c3-chat-preset-pill"
-            @click="sendCoachChatMessage(qp)"
-          >
-            <text class="c3-chat-preset-txt">{{ qp }}</text>
-          </view>
-        </view>
-
-        <scroll-view scroll-y class="c3-chat-scroll">
-          <view
-            v-for="(msg, mIdx) in coachChatMessages"
-            :key="mIdx"
-            class="c3-chat-row"
-            :class="{ user: msg.role === 'user' }"
-          >
-            <view class="c3-chat-bubble" :class="{ user: msg.role === 'user' }">
-              <text class="c3-chat-text">{{ msg.content }}</text>
-            </view>
-          </view>
-          <view v-if="sendingCoachChat" class="c3-chat-typing">
-            <text class="c3-chat-typing-txt">教练正在结合 CTL/ATL 与睡眠基线推演建议...</text>
-          </view>
-        </scroll-view>
-
-        <view class="c3-chat-input-bar">
-          <input
-            v-model="coachChatInput"
-            class="modal-input c3-chat-input"
-            placeholder="追问配速、心率或伤痛恢复..."
-            confirm-type="send"
-            @confirm="sendCoachChatMessage()"
-          />
-          <button
-            class="modal-save-btn c3-chat-send"
-            :loading="sendingCoachChat"
-            :disabled="sendingCoachChat"
-            @click="sendCoachChatMessage()"
-          >
-            发送
-          </button>
-        </view>
-      </view>
-    </view>
-
     <GoalSheetModal
       :visible="showCoachGoalSheet"
       :default-tab="coachGoalSheetTab"
@@ -813,11 +764,13 @@
         </button>
       </view>
     </view>
+    <PrivacyPopup />
   </view>
 </template>
 
 <script setup lang="ts">
 import { currentTheme, themeClass, applySystemTheme, isVolt } from "../../utils/theme";
+import PrivacyPopup from "../../components/PrivacyPopup.vue";
 import { explainTerm } from "../../utils/glossary";
 import { trackClick, trackSubView, trackFunnelStep } from "../../utils/telemetry";
 import { ref, computed, watch, onMounted, nextTick } from "vue";
@@ -868,54 +821,6 @@ const rollingBackPlan = ref(false);
 const savedPlanBackup = ref<any>(null);
 const isPreviewPlan = ref(false);
 const confirmingPlan = ref(false);
-
-// AI Coach Chat State
-const showCoachChatModal = ref(false);
-const coachChatInput = ref("");
-const sendingCoachChat = ref(false);
-const coachChatMessages = ref<Array<{ role: "user" | "assistant"; content: string }>>([
-  {
-    role: "assistant",
-    content: "您好！我是您的 Canova 科学耐力教练。我已同步您的近期跑量、负荷曲线（CTL/ATL/TSB）与当前周期课表，随时可向我咨询今日调课、目标配速或伤痛恢复方案。",
-  },
-]);
-
-function openCoachChatModal() {
-  trackClick("coach_open_ai_chat", "训练页打开AI科学教练咨询");
-  showCoachChatModal.value = true;
-}
-
-async function sendCoachChatMessage(presetQuestion?: string) {
-  const q = String(presetQuestion ?? coachChatInput.value ?? "").trim();
-  if (!q || sendingCoachChat.value) return;
-  if (!presetQuestion) coachChatInput.value = "";
-
-  user.value = getStoredUser();
-  if (!user.value) {
-    user.value = await checkAndAutoLogin();
-  }
-  if (!user.value?.id) return;
-
-  const historySnapshot = coachChatMessages.value.slice(-4);
-  coachChatMessages.value.push({ role: "user", content: q });
-  sendingCoachChat.value = true;
-  try {
-    const res = await request("/api/coach/chat", "POST", {
-      uid: user.value.id,
-      message: q,
-      history: historySnapshot,
-    });
-    const reply = String(res?.reply || "教练已收到问题，建议先保持有氧稳态跑并关注晨起静息心率与体感反馈。");
-    coachChatMessages.value.push({ role: "assistant", content: reply });
-  } catch (err: any) {
-    coachChatMessages.value.push({
-      role: "assistant",
-      content: err?.message || "网络连接稍有波动，请稍后再试。",
-    });
-  } finally {
-    sendingCoachChat.value = false;
-  }
-}
 const planLoading = ref(false);
 const generatingPlan = ref(false);
 const showPlanConfig = ref(false);
@@ -1659,7 +1564,7 @@ async function handleUndoSwapWorkout() {
       payload.plan_payload = plan.value;
       payload.schedule_data = plan.value?.schedule_data;
     }
-    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PUT", payload);
     if (res?.success && res?.plan) {
       plan.value = res.plan;
       editModalOpen.value = false;
@@ -1708,7 +1613,7 @@ async function handleSaveWorkout() {
       payload.plan_payload = plan.value;
       payload.schedule_data = plan.value?.schedule_data;
     }
-    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PUT", payload);
     if (res?.success && res?.plan) {
       trackFunnelStep("coach_save_workout_rpe", "保存课表打卡与体感反馈");
       plan.value = res.plan;
@@ -1755,7 +1660,7 @@ async function handleToggleComplete(wIdx: number, dIdx: number, day: any) {
       completed: newCompleted,
       operator_uid: user.value.id
     };
-    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PATCH", payload);
+    const res = await request(`/api/coach/plan/${plan.value.id}/workout`, "PUT", payload);
     if (res?.success && res?.plan) {
       if (newCompleted) {
         trackFunnelStep("coach_workout_checkin", "完成单日训练课表打卡");
@@ -2085,13 +1990,6 @@ let lastCoachLoadedAt = 0;
 onShow(() => {
   applySystemTheme(currentTheme.value);
   syncTabBarIndex();
-  try {
-    const openChat = uni.getStorageSync("rgm_coach_open_chat");
-    if (openChat === "1") {
-      uni.removeStorageSync("rgm_coach_open_chat");
-      openCoachChatModal();
-    }
-  } catch (_) {}
 
   const storedNow = getStoredUser();
   const uidChanged = Boolean(storedNow?.id && storedNow.id !== user.value?.id);
@@ -2116,7 +2014,7 @@ onShow(() => {
   Promise.all([loadLatestReport(), loadUserPlan()]);
 });
 
-const isAnyCoachPageModalOpen = computed(() => Boolean(editModalOpen.value || showCoachChatModal.value));
+const isAnyCoachPageModalOpen = computed(() => Boolean(editModalOpen.value));
 watch(isAnyCoachPageModalOpen, (open) => setTabBarHidden(open, "coach_page"));
 
 onPullDownRefresh(async () => {
@@ -5170,103 +5068,37 @@ onShareTimeline(() => {
   opacity: 0.55;
 }
 
-.c3-chat-drawer {
-  max-height: 82vh;
+.ai-notice-strip {
   display: flex;
-  flex-direction: column;
-}
-
-.c3-chat-presets {
-  padding: 12rpx 24rpx;
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 10rpx;
-  border-bottom: 1rpx solid var(--rgm-line);
-}
-
-.c3-chat-preset-pill {
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
+  padding: 12rpx 18rpx;
+  margin-bottom: 16rpx;
+  border-radius: 14rpx;
   background: var(--rgm-brand-tint);
   border: 1rpx solid var(--rgm-brand-line);
 }
-
-.c3-chat-preset-txt {
-  font-size: 21rpx;
-  color: var(--rgm-brand-text);
-  font-weight: 700;
-}
-
-.c3-chat-scroll {
-  flex: 1;
-  min-height: 360rpx;
-  max-height: 52vh;
-  padding: 20rpx 24rpx;
-  box-sizing: border-box;
-}
-
-.c3-chat-row {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: 16rpx;
-}
-
-.c3-chat-row.user {
-  justify-content: flex-end;
-}
-
-.c3-chat-bubble {
-  max-width: 90%;
-  padding: 16rpx 22rpx;
-  border-radius: 20rpx 20rpx 20rpx 6rpx;
-  background: var(--rgm-card-2);
-  border: 1rpx solid var(--rgm-line-solid);
-  color: var(--rgm-text);
-}
-
-.c3-chat-bubble.user {
-  max-width: 84%;
-  border-radius: 20rpx 20rpx 6rpx 20rpx;
+.ai-notice-tag {
+  flex-shrink: 0;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
   background: var(--rgm-brand);
-  border-color: var(--rgm-brand);
   color: #ffffff;
+  font-size: 19rpx;
+  font-weight: 800;
 }
-
-.c3-chat-text {
-  font-size: 24rpx;
-  line-height: 1.55;
-  white-space: pre-wrap;
+.ai-notice-txt {
+  font-size: 21rpx;
+  line-height: 1.4;
+  color: var(--rgm-text-2);
 }
-
-.c3-chat-typing {
-  padding: 8rpx 4rpx;
-}
-
-.c3-chat-typing-txt {
-  font-size: 22rpx;
+.ai-compliance-banner {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 20rpx;
+  line-height: 1.45;
   color: var(--rgm-text-3);
-}
-
-.c3-chat-input-bar {
-  padding: 16rpx 24rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  border-top: 1rpx solid var(--rgm-line);
-}
-
-.c3-chat-input {
-  flex: 1;
-  margin: 0;
-}
-
-.c3-chat-send {
-  flex: 0 0 auto;
-  width: auto;
-  padding: 0 28rpx;
-  height: 72rpx;
-  line-height: 72rpx;
-  margin: 0;
+  text-align: center;
 }
 
 </style>
