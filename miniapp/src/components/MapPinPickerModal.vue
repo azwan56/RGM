@@ -150,28 +150,16 @@ function moveMapTo(lat: number, lng: number, nextScale?: number) {
   pinLat.value = cleanLat;
   pinLng.value = cleanLng;
 
-  // Ensure reactive prop diff fires even if map was dragged away from previous center value
-  if (Math.abs(mapCenterLat.value - cleanLat) < 0.000001 && Math.abs(mapCenterLng.value - cleanLng) < 0.000001) {
-    mapCenterLat.value = Number((cleanLat + 0.00001).toFixed(6));
-    mapCenterLng.value = Number((cleanLng + 0.00001).toFixed(6));
-  }
+  // Always nudge reactive center props slightly first so <map> reliably re-centers
+  // even after user drags the map, without calling mapCtx.moveToLocation (which triggers GPS auth)
+  mapCenterLat.value = Number((cleanLat + 0.00001).toFixed(6));
+  mapCenterLng.value = Number((cleanLng + 0.00001).toFixed(6));
 
   nextTick(() => {
     mapCenterLat.value = cleanLat;
     mapCenterLng.value = cleanLng;
     if (typeof nextScale === "number") {
       mapScale.value = Math.max(5, Math.min(18, Math.round(nextScale)));
-    }
-    try {
-      const mapCtx = uni.createMapContext("pinPickerMap", instance?.proxy as any);
-      if (mapCtx && typeof (mapCtx as any).moveToLocation === "function") {
-        (mapCtx as any).moveToLocation({
-          latitude: cleanLat,
-          longitude: cleanLng,
-        });
-      }
-    } catch {
-      // ignore on non-weixin environments
     }
   });
 }

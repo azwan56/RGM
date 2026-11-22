@@ -95,6 +95,11 @@
     "uniStatistics": {
       "enable": false
     },
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于在发起或查看跑团约跑活动时地图选点与导航"
+      }
+    },
     "requiredPrivateInfos": [
       "chooseLocation"
     ]
