@@ -16,17 +16,37 @@ export function sanitizeMeetTimeStr(meetTimeStr: string): string {
   return s;
 }
 
+/** 解析集合时间（兼容单数小时与后缀星期文，避免 iOS Safari/WebView 返回 NaN） */
+export function parseMeetDate(meetTimeStr: string): Date | null {
+  if (!meetTimeStr) return null;
+  const cleaned = sanitizeMeetTimeStr(String(meetTimeStr));
+  const m = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    const dt = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      m[4] != null ? Number(m[4]) : 6,
+      m[5] != null ? Number(m[5]) : 30,
+      m[6] != null ? Number(m[6]) : 0
+    );
+    if (!isNaN(dt.getTime())) return dt;
+  }
+  const fallback = new Date(cleaned.replace(/-/g, "/"));
+  return isNaN(fallback.getTime()) ? null : fallback;
+}
+
 /** 集合时间的毫秒时间戳；解析失败返回 NaN */
 export function meetTimestamp(evt: any): number {
   const raw = evt?.meet_time || evt?.start_date || "";
-  if (!raw) return NaN;
-  return new Date(sanitizeMeetTimeStr(raw).replace(/-/g, "/")).getTime();
+  const dt = parseMeetDate(raw);
+  return dt ? dt.getTime() : NaN;
 }
 
 export function formatMeetTime(meetTimeStr: string): string {
   if (!meetTimeStr) return "待定";
-  const d = new Date(sanitizeMeetTimeStr(meetTimeStr).replace(/-/g, "/"));
-  if (isNaN(d.getTime())) return meetTimeStr;
+  const d = parseMeetDate(meetTimeStr);
+  if (!d) return meetTimeStr;
   const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
@@ -35,9 +55,9 @@ export function formatMeetTime(meetTimeStr: string): string {
 
 export function getCountdownText(meetTimeStr: string): string {
   if (!meetTimeStr) return "";
-  const targetDate = new Date(sanitizeMeetTimeStr(meetTimeStr).replace(/-/g, "/"));
+  const targetDate = parseMeetDate(meetTimeStr);
+  if (!targetDate) return "";
   const target = targetDate.getTime();
-  if (isNaN(target)) return "";
   const nowDate = new Date();
   const diffMs = target - nowDate.getTime();
   if (diffMs < 0) return diffMs > -4 * 3600 * 1000 ? "🔥 正在进行中" : "已结束";
@@ -126,14 +146,14 @@ export function isGroupRunArchived(evt: any): boolean {
 }
 
 /**
- * 查询「我已报名、尚未结束」的最近一场约跑（汇总所有已加入的跑团）。
- * 开跑后 4 小时内仍视为进行中；已完成归档约跑自动排除；没有则返回 null。
+ * 查询「我已报名、尚未结束」的所有近期约跑（汇总所有已加入的跑团，按集合时间升序排列，最近的一场在 index 0）。
+ * 开跑后 4 小时内仍视为进行中；已完成/归档约跑自动排除；没有则返回 []。
  */
-export async function fetchMyNextGroupRun(uid: string): Promise<any | null> {
-  if (!uid || uid === "runner_001") return null;
+export async function fetchMyUpcomingGroupRuns(uid: string): Promise<any[]> {
+  if (!uid || uid === "runner_001") return [];
   const myRes: any = await request(`/api/team/my-clubs/${uid}`).catch(() => null);
   const clubs: any[] = (myRes?.clubs || []).filter((c: any) => !c.is_access_suspended).slice(0, 8);
-  if (!clubs.length) return null;
+  if (!clubs.length) return [];
   const results = await Promise.all(
     clubs.map((c: any) =>
       request(`/api/team/${c.id}/events?user_id=${encodeURIComponent(uid)}`)
@@ -142,15 +162,34 @@ export async function fetchMyNextGroupRun(uid: string): Promise<any | null> {
     )
   );
   const cutoff = Date.now() - 4 * 3600 * 1000;
-  const upcoming = ([] as any[])
-    .concat(...results)
-    .filter((e) => e.is_joined && !isGroupRunArchived(e) && (e.event_type === "group_run" || e.meet_time))
-    .filter((e) => {
-      const ts = meetTimestamp(e);
-      return !isNaN(ts) && ts >= cutoff;
-    })
-    .sort((a, b) => meetTimestamp(a) - meetTimestamp(b));
-  return upcoming[0] || null;
+  const seenIds = new Set<string>();
+  const upcoming: any[] = [];
+  for (const e of ([] as any[]).concat(...results)) {
+    if (!e || !e.is_joined || isGroupRunArchived(e) || !(e.event_type === "group_run" || e.meet_time)) {
+      continue;
+    }
+    const ts = meetTimestamp(e);
+    if (isNaN(ts) || ts < cutoff) continue;
+    const eid = String(e.id || "");
+    if (eid && seenIds.has(eid)) continue;
+    if (eid) seenIds.add(eid);
+    upcoming.push(e);
+  }
+  upcoming.sort((a, b) => {
+    const diff = meetTimestamp(a) - meetTimestamp(b);
+    if (diff !== 0) return diff;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+  return upcoming;
+}
+
+/**
+ * 查询「我已报名、尚未结束」的最近一场约跑（汇总所有已加入的跑团）。
+ * 开跑后 4 小时内仍视为进行中；已完成归档约跑自动排除；没有则返回 null。
+ */
+export async function fetchMyNextGroupRun(uid: string): Promise<any | null> {
+  const list = await fetchMyUpcomingGroupRuns(uid);
+  return list[0] || null;
 }
 
 /** 跳到跑团 Tab 并打开「约跑与拉练活动」子页面 */

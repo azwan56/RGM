@@ -494,11 +494,15 @@ def get_miniapp_dashboard_data(
                 preloaded_has_activities=True if local_acts else None,
                 unread_notif_out=unread_fallback,
             )
+            upcoming_group_runs = LocalStore.get_user_upcoming_group_runs(
+                eff_uid, preloaded_clubs=user_clubs, limit=10
+            )
             extra_bundle = {
                 "unread_notif_count": unread_notif_holder[0] if unread_notif_holder else 0,
                 "onboarding_status": onboarding_status,
                 "organizations": user_orgs or [],
-                "next_group_run": LocalStore.get_user_next_group_run(eff_uid, preloaded_clubs=user_clubs),
+                "next_group_run": upcoming_group_runs[0] if upcoming_group_runs else None,
+                "upcoming_group_runs": upcoming_group_runs,
             }
 
         payload = {

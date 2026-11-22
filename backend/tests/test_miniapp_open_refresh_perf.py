@@ -310,6 +310,9 @@ def test_miniapp_dashboard_bundle_perf_and_compat(isolated_db):
     assert len(d_cold["organizations"]) == 1
     assert d_cold["next_group_run"] is not None
     assert d_cold["next_group_run"]["id"] == "evt_perf_next"
+    assert isinstance(d_cold.get("upcoming_group_runs"), list)
+    assert len(d_cold["upcoming_group_runs"]) == 1
+    assert d_cold["upcoming_group_runs"][0]["id"] == "evt_perf_next"
     assert d_cold["current_month_info"]["total_count"] == 5
     assert len(d_cold["current_month_activities"]) == 3
 
@@ -363,3 +366,74 @@ def test_profile_miniapp_bundle(isolated_db):
     assert len(data["yearly_stats"]["monthly_breakdown"]) == 12
     assert "vdot" in data
     assert "support_tickets" in data and len(data["support_tickets"]) == 1
+
+
+def test_miniapp_dashboard_multiple_upcoming_group_runs_sorted_nearest_first(isolated_db):
+    uid = "u_perf_multi_run_1"
+    _seed_runner_with_club_org_and_events(isolated_db, uid=uid)
+    headers = {"Authorization": f"Bearer {_make_jwt(uid)}", "x-user-id": uid}
+    client = TestClient(app)
+
+    now_bj = datetime.utcnow() + timedelta(hours=8)
+    now_iso = datetime.utcnow().isoformat()
+    soon_dt = now_bj + timedelta(hours=4)
+    soon_date = soon_dt.strftime("%Y-%m-%d")
+    soon_mt = f"{soon_date} {soon_dt.hour}:{soon_dt.minute:02d}"
+
+    unjoined_dt = now_bj + timedelta(hours=2)
+    past_dt = now_bj - timedelta(hours=6)
+    far_day = (now_bj + timedelta(days=5)).strftime("%Y-%m-%d")
+
+    with real_sqlite3.connect(isolated_db) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO clubs (id, name, owner_id, org_id, invite_code, status, created_at)
+            VALUES (?, ?, ?, NULL, ?, 'active', ?)
+            """,
+            ("club_perf_2", "紫金山越野分队", uid, "CLUBPERF2", now_iso),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at)
+            VALUES (?, ?, ?, 'member', 'active', ?)
+            """,
+            ("cm_perf_2", "club_perf_2", uid, now_iso),
+        )
+        # Intentionally inserted in scrambled chronological order + single-digit hour "5:30" vs "06:00"
+        extra_events = [
+            ("evt_far_later", "club_perf_2", "五日后6点公路跑", far_day, f"{far_day} 06:00", True),
+            ("evt_far_morning", "club_perf_1", "五日后5点半早跑", far_day, f"{far_day} 5:30", True),
+            ("evt_soonest", "club_perf_2", "最近一场临时拉练", soon_date, soon_mt, True),
+            ("evt_unjoined", "club_perf_2", "未报名约跑应过滤", unjoined_dt.strftime("%Y-%m-%d"), unjoined_dt.strftime("%Y-%m-%d %H:%M"), False),
+            ("evt_past_archived", "club_perf_1", "6小时前已结束约跑", past_dt.strftime("%Y-%m-%d"), past_dt.strftime("%Y-%m-%d %H:%M"), True),
+        ]
+        for idx, (eid, cid, title, sdate, mtime, joined) in enumerate(extra_events):
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO club_events
+                (id, club_id, title, event_type, start_date, meet_time, location, creator_id, status, created_at)
+                VALUES (?, ?, ?, 'group_run', ?, ?, '玄武湖玄武门', ?, 'upcoming', ?)
+                """,
+                (eid, cid, title, sdate, mtime, uid, now_iso),
+            )
+            if joined:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO club_event_participants
+                    (id, event_id, club_id, user_id, status, pace_group, runner_role, joined_at)
+                    VALUES (?, ?, ?, ?, 'joined', '🏃 有氧组', '跟跑团员', ?)
+                    """,
+                    (f"part_extra_{idx}", eid, cid, uid, now_iso),
+                )
+        conn.commit()
+
+    res = client.get(
+        f"/api/miniapp/dashboard/{uid}?include_home_extras=1&lite_activities=1",
+        headers=headers,
+    )
+    assert res.status_code == 200
+    data = res.json()
+    ids = [e["id"] for e in data.get("upcoming_group_runs") or []]
+    assert ids == ["evt_soonest", "evt_perf_next", "evt_far_morning", "evt_far_later"]
+    assert data["next_group_run"]["id"] == "evt_soonest"
+    assert data["upcoming_group_runs"][0]["club_name"] == "紫金山越野分队"

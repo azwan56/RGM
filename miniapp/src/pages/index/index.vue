@@ -121,28 +121,28 @@
 
     <!-- ── 首页四大核心图形模块容器（支持 E5 Flex order 自定义排序）── -->
     <view class="home-modules-container h3-modules">
-      <!-- 模块 1 · 登机牌式约跑票根（有近期已报名约跑时置顶） -->
+      <!-- 模块 1 · 登机牌式约跑票根（有近期已报名约跑时置顶；多场时优先展示最近一场且支持左右滑动） -->
       <view
-        v-if="myNextRun"
+        v-if="myUpcomingRuns.length === 1"
         id="rgm-mod-nextrun"
         class="rgm-ticket h3-ticket-card"
         :style="{ order: getModuleOrder('nextrun') }"
-        @click="openGroupRunDetail(myNextRun.club_id, myNextRun.id, isGroupRunPostStage(myNextRun) ? 'post' : 'pre')"
+        @click="openGroupRunDetail(myUpcomingRuns[0].club_id, myUpcomingRuns[0].id, isGroupRunPostStage(myUpcomingRuns[0]) ? 'post' : 'pre')"
       >
         <view class="h3-ticket-top">
           <view class="h3-ticket-time-row">
             <view class="h3-pulse-orange" />
             <text class="h3-ticket-countdown">
-              {{ getCountdownText(myNextRun.meet_time || myNextRun.start_date) }} · {{ formatMeetTime(myNextRun.meet_time || myNextRun.start_date) }}
+              {{ getCountdownText(myUpcomingRuns[0].meet_time || myUpcomingRuns[0].start_date) }} · {{ formatMeetTime(myUpcomingRuns[0].meet_time || myUpcomingRuns[0].start_date) }}
             </text>
           </view>
-          <button class="h3-ticket-share-btn" open-type="share" :data-share-type="'group_run'" @click.stop>
+          <button class="h3-ticket-share-btn" open-type="share" :data-share-type="'group_run'" :data-run-index="0" @click.stop>
             <RgmIcon name="share" :size="26" color="brand" />
           </button>
         </view>
 
         <view class="h3-ticket-title-row">
-          <text class="h3-ticket-title">{{ myNextRun.title }}</text>
+          <text class="h3-ticket-title">{{ myUpcomingRuns[0].title }}</text>
           <RgmIcon name="chevron-right" :size="28" color="brand" />
         </view>
 
@@ -153,9 +153,90 @@
         <view class="h3-ticket-bottom">
           <view class="h3-ticket-loc">
             <RgmIcon name="pin" :size="24" color="brand" />
-            <text class="h3-ticket-loc-txt">{{ myNextRun.location || '跑团集合点' }}</text>
+            <text class="h3-ticket-loc-txt">{{ myUpcomingRuns[0].location || '跑团集合点' }}</text>
           </view>
-          <text class="h3-ticket-club">{{ myNextRun.club_name || '跑团约跑' }}</text>
+          <text class="h3-ticket-club">{{ myUpcomingRuns[0].club_name || '跑团约跑' }}</text>
+        </view>
+      </view>
+
+      <view
+        v-else-if="myUpcomingRuns.length > 1"
+        id="rgm-mod-nextrun"
+        class="h3-nextrun-carousel"
+        :style="{ order: getModuleOrder('nextrun') }"
+      >
+        <swiper
+          class="h3-ticket-swiper"
+          :current="activeNextRunIdx"
+          :circular="false"
+          :duration="260"
+          next-margin="28rpx"
+          @change="onNextRunSwiperChange"
+        >
+          <swiper-item
+            v-for="(runItem, rIdx) in myUpcomingRuns"
+            :key="runItem.id || rIdx"
+            class="h3-ticket-slide"
+            :class="{ 'is-last': rIdx === myUpcomingRuns.length - 1 }"
+          >
+            <view
+              class="rgm-ticket h3-ticket-card in-swiper"
+              @click="openGroupRunDetail(runItem.club_id, runItem.id, isGroupRunPostStage(runItem) ? 'post' : 'pre')"
+            >
+              <view class="h3-ticket-top">
+                <view class="h3-ticket-time-row">
+                  <view class="h3-pulse-orange" />
+                  <text class="h3-ticket-countdown">
+                    {{ getCountdownText(runItem.meet_time || runItem.start_date) }} · {{ formatMeetTime(runItem.meet_time || runItem.start_date) }}
+                  </text>
+                </view>
+                <view class="h3-ticket-actions-right">
+                  <text class="h3-ticket-seq-pill" :class="{ 'is-nearest': rIdx === 0 }">
+                    {{ rIdx === 0 ? `最近 · 1/${myUpcomingRuns.length}` : `${rIdx + 1}/${myUpcomingRuns.length}` }}
+                  </text>
+                  <button
+                    class="h3-ticket-share-btn"
+                    open-type="share"
+                    :data-share-type="'group_run'"
+                    :data-run-index="rIdx"
+                    @click.stop
+                  >
+                    <RgmIcon name="share" :size="26" color="brand" />
+                  </button>
+                </view>
+              </view>
+
+              <view class="h3-ticket-title-row">
+                <text class="h3-ticket-title">{{ runItem.title }}</text>
+                <RgmIcon name="chevron-right" :size="28" color="brand" />
+              </view>
+
+              <view class="rgm-ticket-perf">
+                <view class="rgm-ticket-perf-line" />
+              </view>
+
+              <view class="h3-ticket-bottom">
+                <view class="h3-ticket-loc">
+                  <RgmIcon name="pin" :size="24" color="brand" />
+                  <text class="h3-ticket-loc-txt">{{ runItem.location || '跑团集合点' }}</text>
+                </view>
+                <text class="h3-ticket-club">{{ runItem.club_name || '跑团约跑' }}</text>
+              </view>
+            </view>
+          </swiper-item>
+        </swiper>
+
+        <view class="h3-ticket-pager">
+          <view class="h3-ticket-dots">
+            <view
+              v-for="(runDot, dIdx) in myUpcomingRuns"
+              :key="runDot.id || dIdx"
+              class="h3-ticket-dot"
+              :class="{ active: dIdx === activeNextRunIdx }"
+              @click.stop="activeNextRunIdx = dIdx"
+            />
+          </view>
+          <text class="h3-ticket-swipe-tip">已报 {{ myUpcomingRuns.length }} 场约跑 · 左右滑动查看</text>
         </view>
       </view>
 
@@ -1225,6 +1306,9 @@ import {
   openGroupRunDetail,
   isGroupRunPostStage,
   buildGroupRunSharePayload,
+  fetchMyUpcomingGroupRuns,
+  meetTimestamp,
+  isGroupRunArchived,
 } from "../../utils/groupRun";
 import {
   request,
@@ -1249,19 +1333,64 @@ import {
 
 const pendingOrgReminder = ref<OrgReminderInfo | null>(null);
 
-// ── 我的下一场约跑（首页卡片） ──
-const myNextRun = ref<any>(null);
+// ── 我的近期已报约跑（首页卡片：优先展示最近一场，多场支持左右滑动） ──
+const myUpcomingRuns = ref<any[]>([]);
+const activeNextRunIdx = ref<number>(0);
+const myNextRun = computed<any>(
+  () => myUpcomingRuns.value[activeNextRunIdx.value] || myUpcomingRuns.value[0] || null
+);
+
+function normalizeUpcomingRunsList(rawList?: any[] | null, fallbackSingle?: any): any[] {
+  const source = Array.isArray(rawList) && rawList.length > 0
+    ? rawList
+    : fallbackSingle
+    ? [fallbackSingle]
+    : [];
+  const cutoff = Date.now() - 4 * 3600 * 1000;
+  const seen = new Set<string>();
+  const valid: any[] = [];
+  for (const item of source) {
+    if (!item || isGroupRunArchived(item)) continue;
+    const eid = String(item.id || item.event_id || "");
+    if (eid && seen.has(eid)) continue;
+    const ts = meetTimestamp(item);
+    if (!isNaN(ts) && ts < cutoff) continue;
+    if (eid) seen.add(eid);
+    valid.push(item);
+  }
+  valid.sort((a, b) => {
+    const ta = meetTimestamp(a);
+    const tb = meetTimestamp(b);
+    if (!isNaN(ta) && !isNaN(tb) && ta !== tb) return ta - tb;
+    if (!isNaN(ta) && isNaN(tb)) return -1;
+    if (isNaN(ta) && !isNaN(tb)) return 1;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+  return valid;
+}
+
+function onNextRunSwiperChange(e: any) {
+  const idx = Number(e?.detail?.current ?? 0);
+  if (!isNaN(idx) && idx >= 0 && idx < myUpcomingRuns.value.length) {
+    activeNextRunIdx.value = idx;
+  }
+}
+
 async function loadMyNextRun(explicitUid?: string) {
   const uid = explicitUid || user.value?.id || getStoredUser()?.id;
   if (!uid) {
-    myNextRun.value = null;
+    myUpcomingRuns.value = [];
+    activeNextRunIdx.value = 0;
     return;
   }
   try {
-    myNextRun.value = await fetchMyNextGroupRun(uid);
+    const list = await fetchMyUpcomingGroupRuns(uid);
+    myUpcomingRuns.value = normalizeUpcomingRunsList(list);
+    activeNextRunIdx.value = 0;
   } catch (e) {
     // 约跑卡片是附加信息，失败时静默隐藏
-    myNextRun.value = null;
+    myUpcomingRuns.value = [];
+    activeNextRunIdx.value = 0;
   }
 }
 function goToFillRequiredFields() {
@@ -1763,12 +1892,18 @@ onLoad(async (options: any) => {
 onShareAppMessage((res: any) => {
   const dataset = res?.target?.dataset || {};
   const shareType = dataset.shareType || dataset["share-type"];
-  if (shareType === "group_run" && myNextRun.value) {
-    return buildGroupRunSharePayload(
-      myNextRun.value,
-      myNextRun.value.club_name,
-      user.value?.id || getStoredUser()?.id
-    );
+  if (shareType === "group_run") {
+    const rawIdx = Number(dataset.runIndex ?? dataset["run-index"]);
+    const targetRun =
+      (!isNaN(rawIdx) && myUpcomingRuns.value[rawIdx]) ||
+      myNextRun.value;
+    if (targetRun) {
+      return buildGroupRunSharePayload(
+        targetRun,
+        targetRun.club_name,
+        user.value?.id || getStoredUser()?.id
+      );
+    }
   }
   return getUnifiedShareAppMessage();
 });
@@ -1945,7 +2080,8 @@ function writeCachedDashboardSnapshot(uid: string, data: any) {
       ...data,
       current_month_activities: slimMonth,
       recent_activities: sameRecentAsMonth ? undefined : slimActs(data.recent_activities),
-      next_group_run: "next_group_run" in data ? data.next_group_run : myNextRun.value,
+      next_group_run: "next_group_run" in data ? data.next_group_run : (myUpcomingRuns.value[0] || null),
+      upcoming_group_runs: Array.isArray(data.upcoming_group_runs) ? data.upcoming_group_runs : myUpcomingRuns.value,
       unread_notif_count:
         typeof data.unread_notif_count === "number" ? data.unread_notif_count : unreadNotifCount.value,
     };
@@ -1956,8 +2092,12 @@ function writeCachedDashboardSnapshot(uid: string, data: any) {
 const initialStoredUser = getStoredUser();
 const initialCachedDashboard = readCachedDashboardSnapshot(initialStoredUser?.id);
 if (initialCachedDashboard) {
-  if ("next_group_run" in initialCachedDashboard) {
-    myNextRun.value = initialCachedDashboard.next_group_run || null;
+  if (Array.isArray(initialCachedDashboard.upcoming_group_runs)) {
+    myUpcomingRuns.value = normalizeUpcomingRunsList(initialCachedDashboard.upcoming_group_runs);
+    activeNextRunIdx.value = 0;
+  } else if ("next_group_run" in initialCachedDashboard) {
+    myUpcomingRuns.value = normalizeUpcomingRunsList([], initialCachedDashboard.next_group_run);
+    activeNextRunIdx.value = 0;
   }
   if (typeof initialCachedDashboard.unread_notif_count === "number") {
     unreadNotifCount.value = initialCachedDashboard.unread_notif_count;
@@ -3157,8 +3297,15 @@ async function loadDashboard() {
         scheduleFitnessChart(120);
       });
 
-      if ("next_group_run" in data) {
-        myNextRun.value = data.next_group_run || null;
+      if (Array.isArray(data.upcoming_group_runs)) {
+        myUpcomingRuns.value = normalizeUpcomingRunsList(data.upcoming_group_runs);
+        activeNextRunIdx.value = 0;
+      } else if ("next_group_run" in data) {
+        myUpcomingRuns.value = normalizeUpcomingRunsList([], data.next_group_run);
+        activeNextRunIdx.value = 0;
+        if (data.next_group_run) {
+          loadMyNextRun(uid);
+        }
       } else {
         loadMyNextRun(uid);
       }
@@ -3548,6 +3695,7 @@ onShow(() => {
     Date.now() - lastDashboardFetchAt >= 45000;
 
   if (!shouldRefresh) {
+    activeNextRunIdx.value = 0;
     nextTick(() => {
       scheduleFitnessChart(120);
     });
@@ -8748,15 +8896,53 @@ async function acceptAndEnterInvitedClub(inv: any) {
   gap: 20rpx;
 }
 
+.h3-nextrun-carousel {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.h3-ticket-swiper {
+  width: 100%;
+  height: 240rpx;
+}
+
+.font-large .h3-ticket-swiper {
+  height: 258rpx;
+}
+
+.font-xlarge .h3-ticket-swiper {
+  height: 276rpx;
+}
+
+.h3-ticket-slide {
+  padding-right: 14rpx;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.h3-ticket-slide.is-last {
+  padding-right: 0;
+}
+
 .h3-ticket-card {
   padding: 24rpx 24rpx 20rpx;
   background: linear-gradient(160deg, var(--rgm-brand-tint) 0%, var(--rgm-card) 58%);
+}
+
+.h3-ticket-card.in-swiper {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .h3-ticket-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10rpx;
   margin-bottom: 10rpx;
 }
 
@@ -8764,6 +8950,8 @@ async function acceptAndEnterInvitedClub(inv: any) {
   display: flex;
   align-items: center;
   gap: 10rpx;
+  flex: 1;
+  min-width: 0;
 }
 
 .h3-pulse-orange {
@@ -8771,12 +8959,40 @@ async function acceptAndEnterInvitedClub(inv: any) {
   height: 12rpx;
   border-radius: 50%;
   background: var(--rgm-brand);
+  flex-shrink: 0;
 }
 
 .h3-ticket-countdown {
   font-size: 22rpx;
   font-weight: 700;
   color: var(--rgm-brand-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.h3-ticket-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+
+.h3-ticket-seq-pill {
+  font-size: 20rpx;
+  font-weight: 800;
+  padding: 4rpx 14rpx;
+  border-radius: 9999rpx;
+  background: var(--rgm-tint-2, rgba(255, 255, 255, 0.08));
+  color: var(--rgm-text-2);
+  border: 1rpx solid var(--rgm-line);
+  white-space: nowrap;
+}
+
+.h3-ticket-seq-pill.is-nearest {
+  background: var(--rgm-brand-tint);
+  color: var(--rgm-brand-text);
+  border-color: var(--rgm-brand-line);
 }
 
 .h3-ticket-share-btn {
@@ -8790,6 +9006,38 @@ async function acceptAndEnterInvitedClub(inv: any) {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.h3-ticket-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8rpx;
+}
+
+.h3-ticket-dots {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.h3-ticket-dot {
+  width: 14rpx;
+  height: 10rpx;
+  border-radius: 9999rpx;
+  background: var(--rgm-line-2, rgba(255, 255, 255, 0.22));
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.h3-ticket-dot.active {
+  width: 34rpx;
+  background: var(--rgm-brand);
+}
+
+.h3-ticket-swipe-tip {
+  font-size: 20rpx;
+  color: var(--rgm-text-3);
+  font-weight: 600;
 }
 
 .h3-ticket-title-row {

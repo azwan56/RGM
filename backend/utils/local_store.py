@@ -5123,21 +5123,22 @@ class LocalStore:
             return visible_clubs
 
     @staticmethod
-    def get_user_next_group_run(
+    def get_user_upcoming_group_runs(
         uid: str,
         preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
         """
-        Finds the user's nearest upcoming or ongoing joined club/org group run across up to 8 active clubs
-        (matching MiniApp groupRun.ts::fetchMyNextGroupRun + get_club_events enrichment), in 1 connection.
+        Finds the user's upcoming or ongoing joined club/org group runs across up to 8 active clubs,
+        strictly ordered nearest-first by Beijing meet time, in 1 DB connection.
         """
         if not uid or str(uid).strip() == "runner_001":
-            return None
+            return []
         eff_uid = LocalStore.resolve_user_id(uid)
         clubs = preloaded_clubs if preloaded_clubs is not None else LocalStore.get_user_clubs(eff_uid)
         active_clubs = [c for c in clubs if not c.get("is_access_suspended") and c.get("id")][:8]
         if not active_clubs:
-            return None
+            return []
 
         club_by_id: Dict[str, Dict[str, Any]] = {str(c["id"]): c for c in active_clubs}
         org_to_clubs: Dict[str, List[Dict[str, Any]]] = {}
@@ -5181,7 +5182,7 @@ class LocalStore:
             )
             rows = cursor.fetchall()
             if not rows:
-                return None
+                return []
 
             candidates: List[Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]] = []
             seen_ids = set()
@@ -5224,83 +5225,104 @@ class LocalStore:
                 candidates.append((lc.get("sort_key") or "", ev, matched_club, lc))
 
             if not candidates:
-                return None
+                return []
 
-            candidates.sort(key=lambda item: item[0])
-            _, best_ev, best_club, best_lc = candidates[0]
-            evt_id = str(best_ev["id"])
-            best_cid = str(best_club["id"])
+            candidates.sort(key=lambda item: (item[0], str(item[1].get("id") or "")))
+            selected = candidates[: max(1, int(limit or 10))]
+            selected_ids = [str(item[1]["id"]) for item in selected]
 
-            club_owner_id = best_ev.pop("_club_owner_id", None)
-            cr_display_name = best_ev.pop("_cr_display_name", None)
-            cr_avatar_url = best_ev.pop("_cr_avatar_url", None)
-            cr_real_name = best_ev.pop("_cr_real_name", None)
-            cr_club_role = best_ev.pop("_cr_club_role", None)
-
-            if best_lc["sanitized_meet_time"] and best_ev.get("meet_time"):
-                best_ev["meet_time"] = best_lc["sanitized_meet_time"]
-            best_ev["club_id"] = best_cid
-            best_ev["club_name"] = best_club.get("name") or "跑团约跑"
-            best_ev["is_org_event"] = bool(best_ev.get("is_org_event"))
-            best_ev["org_id"] = best_ev.get("org_id") or best_club.get("org_id")
-            best_ev["org_name"] = best_club.get("org_name") if best_ev["is_org_event"] else None
-            best_ev["is_archived"] = False
-            best_ev["lifecycle_status"] = best_lc["lifecycle_status"]
-            best_ev["visibility_mode"] = best_ev.get("visibility_mode") or "registered_only"
-            best_ev["recap_note"] = best_ev.get("recap_note") or ""
-            best_ev["repeat_rule"] = best_ev.get("repeat_rule") or "none"
-            if not best_ev.get("cover_image"):
-                best_ev["cover_image"] = "/api/avatars/default-run.svg"
-
+            ev_ph = ",".join(["?"] * len(selected_ids))
             cursor.execute(
-                """
-                SELECT p.id as participant_id, p.user_id, p.joined_at, p.status,
+                f"""
+                SELECT p.event_id, p.id as participant_id, p.user_id, p.joined_at, p.status,
                        p.pace_group, p.runner_role, p.checkin_note,
                        p.manual_distance_km, p.manual_pace_str, p.manual_duration_str,
                        p.activity_id, COALESCE(p.likes_count, 0) as likes_count,
                        pr.display_name, pr.avatar_url, pr.real_name
                 FROM club_event_participants p
                 LEFT JOIN profiles pr ON p.user_id = pr.id
-                WHERE p.event_id = ? AND p.status = 'joined'
+                WHERE p.event_id IN ({ev_ph}) AND p.status = 'joined'
                 ORDER BY p.joined_at ASC
                 """,
-                (evt_id,),
+                selected_ids,
             )
-            participants = []
+            participants_by_evt: Dict[str, List[Dict[str, Any]]] = {}
             for pr_row in cursor.fetchall():
                 p_dict = dict(pr_row)
+                eid_key = str(p_dict.pop("event_id", "") or "")
                 p_dict["display_name"] = p_dict.get("display_name") or p_dict.get("real_name") or "跑友"
                 p_dict["pace_group"] = p_dict.get("pace_group") or "🏃 有氧组"
                 p_dict["runner_role"] = p_dict.get("runner_role") or "跟跑团员"
-                participants.append(p_dict)
+                participants_by_evt.setdefault(eid_key, []).append(p_dict)
 
-            best_ev["participants"] = participants
-            best_ev["participant_count"] = len(participants)
-            best_ev["is_joined"] = True
+            enriched_list: List[Dict[str, Any]] = []
+            for _, best_ev_raw, best_club, best_lc in selected:
+                best_ev = dict(best_ev_raw)
+                evt_id = str(best_ev["id"])
+                best_cid = str(best_club["id"])
 
-            creator_id = best_ev.get("creator_id") or club_owner_id or best_club.get("owner_id")
-            if creator_id:
-                best_ev["creator_id"] = creator_id
-                if cr_display_name is not None or cr_real_name is not None or cr_avatar_url is not None:
-                    best_ev["creator_name"] = cr_display_name or cr_real_name or "跑团跑友"
-                    best_ev["creator_avatar"] = cr_avatar_url or ""
+                club_owner_id = best_ev.pop("_club_owner_id", None)
+                cr_display_name = best_ev.pop("_cr_display_name", None)
+                cr_avatar_url = best_ev.pop("_cr_avatar_url", None)
+                cr_real_name = best_ev.pop("_cr_real_name", None)
+                cr_club_role = best_ev.pop("_cr_club_role", None)
+
+                if best_lc["sanitized_meet_time"] and best_ev.get("meet_time"):
+                    best_ev["meet_time"] = best_lc["sanitized_meet_time"]
+                best_ev["club_id"] = best_cid
+                best_ev["club_name"] = best_club.get("name") or "跑团约跑"
+                best_ev["is_org_event"] = bool(best_ev.get("is_org_event"))
+                best_ev["org_id"] = best_ev.get("org_id") or best_club.get("org_id")
+                best_ev["org_name"] = best_club.get("org_name") if best_ev["is_org_event"] else None
+                best_ev["is_archived"] = False
+                best_ev["lifecycle_status"] = best_lc["lifecycle_status"]
+                best_ev["visibility_mode"] = best_ev.get("visibility_mode") or "registered_only"
+                best_ev["recap_note"] = best_ev.get("recap_note") or ""
+                best_ev["repeat_rule"] = best_ev.get("repeat_rule") or "none"
+                if not best_ev.get("cover_image"):
+                    best_ev["cover_image"] = "/api/avatars/default-run.svg"
+
+                participants = participants_by_evt.get(evt_id, [])
+                best_ev["participants"] = participants
+                best_ev["participant_count"] = len(participants)
+                best_ev["is_joined"] = True
+
+                creator_id = best_ev.get("creator_id") or club_owner_id or best_club.get("owner_id")
+                if creator_id:
+                    best_ev["creator_id"] = creator_id
+                    if cr_display_name is not None or cr_real_name is not None or cr_avatar_url is not None:
+                        best_ev["creator_name"] = cr_display_name or cr_real_name or "跑团跑友"
+                        best_ev["creator_avatar"] = cr_avatar_url or ""
+                    else:
+                        best_ev["creator_name"] = "跑团发起"
+                        best_ev["creator_avatar"] = ""
+                    if best_ev["is_org_event"]:
+                        best_ev["creator_role"] = "🏛️ 大群联合"
+                    elif cr_club_role == "owner" or (club_owner_id or best_club.get("owner_id")) == creator_id:
+                        best_ev["creator_role"] = "团长"
+                    elif cr_club_role == "coach":
+                        best_ev["creator_role"] = "教练"
+                    else:
+                        best_ev["creator_role"] = "发起人"
                 else:
-                    best_ev["creator_name"] = "跑团发起"
-                    best_ev["creator_avatar"] = ""
-                if best_ev["is_org_event"]:
-                    best_ev["creator_role"] = "🏛️ 大群联合"
-                elif cr_club_role == "owner" or (club_owner_id or best_club.get("owner_id")) == creator_id:
-                    best_ev["creator_role"] = "团长"
-                elif cr_club_role == "coach":
-                    best_ev["creator_role"] = "教练"
-                else:
-                    best_ev["creator_role"] = "发起人"
-            else:
-                best_ev["creator_name"] = "跑团组织"
-                best_ev["creator_avatar"] = None
-                best_ev["creator_role"] = "🏛️ 大群联合" if best_ev["is_org_event"] else "发起人"
+                    best_ev["creator_name"] = "跑团组织"
+                    best_ev["creator_avatar"] = None
+                    best_ev["creator_role"] = "🏛️ 大群联合" if best_ev["is_org_event"] else "发起人"
 
-            return best_ev
+                enriched_list.append(best_ev)
+
+            return enriched_list
+
+    @staticmethod
+    def get_user_next_group_run(
+        uid: str,
+        preloaded_clubs: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Backward-compatible wrapper returning the user's nearest upcoming or ongoing joined group run.
+        """
+        runs = LocalStore.get_user_upcoming_group_runs(uid, preloaded_clubs=preloaded_clubs, limit=1)
+        return runs[0] if runs else None
 
     @staticmethod
     def is_user_coach_or_owner(
@@ -6633,27 +6655,38 @@ class LocalStore:
 
         meet_dt: Optional[datetime] = None
         if candidate_str:
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+            m_dt = re.match(
+                r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
+                candidate_str.strip(),
+            )
+            if m_dt:
                 try:
-                    meet_dt = datetime.strptime(candidate_str[:19] if "S" in fmt else candidate_str[:16], fmt)
-                    break
+                    meet_dt = datetime(
+                        int(m_dt.group(1)),
+                        int(m_dt.group(2)),
+                        int(m_dt.group(3)),
+                        int(m_dt.group(4)) if m_dt.group(4) is not None else 6,
+                        int(m_dt.group(5)) if m_dt.group(5) is not None else 30,
+                        int(m_dt.group(6)) if m_dt.group(6) is not None else 0,
+                    )
                 except ValueError:
-                    continue
+                    meet_dt = None
 
         if meet_dt is not None:
-            sort_key = meet_dt.strftime("%Y-%m-%d %H:%M")
+            sort_key = meet_dt.strftime("%Y-%m-%d %H:%M:%S")
+            display_mt = meet_dt.strftime("%Y-%m-%d %H:%M")
             if now_bj >= meet_dt + timedelta(hours=4):
                 return {
                     "is_archived": True,
                     "lifecycle_status": "archived",
-                    "sanitized_meet_time": mt_clean or sort_key,
+                    "sanitized_meet_time": mt_clean or display_mt,
                     "sort_key": sort_key,
                 }
             if now_bj >= meet_dt:
                 return {
                     "is_archived": False,
                     "lifecycle_status": "ongoing",
-                    "sanitized_meet_time": mt_clean or sort_key,
+                    "sanitized_meet_time": mt_clean or display_mt,
                     "sort_key": sort_key,
                 }
 
