@@ -17,3 +17,10 @@ CREATE TABLE IF NOT EXISTS race_intel_cache (
   source TEXT DEFAULT 'official_web_search',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE IF EXISTS public.race_intel_cache ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can read race_intel_cache"
+  ON public.race_intel_cache FOR SELECT
+  TO authenticated
+  USING (true);

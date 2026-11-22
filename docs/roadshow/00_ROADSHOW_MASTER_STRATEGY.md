@@ -5,23 +5,24 @@
 
 ---
 
-## 一、三专场「四阶梯次演进」全景对照表（共 22 页）
+## 一、三专场「四阶梯次演进」全景对照表（共 25 页）
 
-| 演进阶梯 | 第一场：面向严肃跑者 / 队员 (`03_PITCH_FOR_SERIOUS_RUNNERS.md` · 8页) | 第二场：面向跑团组织者 / 会长 (`02_PITCH_FOR_ORGANIZERS.md` · 6页) | 第三场：面向专业教练 (`01_PITCH_FOR_COACHES.md` · 8页) |
+| 演进阶梯 | 第一场：面向严肃跑者 / 队员 (`03_PITCH_FOR_SERIOUS_RUNNERS.md` · 9页) | 第二场：面向跑团组织者 / 会长 (`02_PITCH_FOR_ORGANIZERS.md` · 7页) | 第三场：面向专业教练 (`01_PITCH_FOR_COACHES.md` · 9页) |
 | :--- | :--- | :--- | :--- |
 | **第一阶：现状与痛点起点** | **装备控、数据控的困惑**：戴佳明/高驰/苹果/华为/颂拓跑表监测数据，积极参加跑团合练；但面对满屏 `CTL/ATL/HRV/RHR/VO2Max` 曲线，不知究竟该如何训练提高。 | **满腔热血建团后的混乱**：五大品牌手表数据不通；周末接龙被刷屏、领跑兔全靠猜；共享表格收身份证面临泄露风险、过期账号难清退。 | **手工时代的产能枷锁**：周日熬夜改几十份 Excel（或每周机械重复拷贝）；微信爬楼看截图如同“盲人摸象”，看不见水面下的 `CTL/ATL/HRV` 隐性疲劳。 |
 | **第二阶：困境升级与遗憾** | **缺乏教练与生理洞察的恶果**：① 被虚高手表 VO2Max 误导或天天混氧垃圾量，**成绩停步不前**；② 无视 HRV/RHR/ATL 警告硬顶大课，**过度训练伤病退赛留下遗憾**。 | **缺乏科学督导与隐私分权的恶果**：① 前 5% 大神霸榜 + 公开批评怕伤面子，**80% 普通队员沉默流失**；② 盲目拼量+领跑兔带崩导致**赛前伤退**。 | **执教生涯最痛的三重遗憾**：① 学员隐瞒疲劳/照虚高 VO2Max 硬练或出差乱补课，**赛前伤退**；② **独门课表零门槛外泄**；③ 精力锁死在 30 人上限。 |
 | **第三阶：核心渴望（AI 破题）** | **渴望一位懂生理、说大白话、守隐私的 AI 教练**：升级 Canova v4 全视角点评 + **4档隐私默认仅自己可见**，公开「团长加油」不伤自尊。 | **渴望一套两级 Bento 数据底座 + 有温度的 AI 管家**：大群自动清退过期分团成员，全员配发 AI 私教，用「团长加油」+「1对1 师徒制」凝心聚力。 | **渴望听命于教练的数据雷达 + Canova AI 外骨骼**：同步全员 `CTL/ATL/TSB` 与夜间真实 HRV，内置 Canova 漏斗引擎 + OCR 导表 + 私有加密资产，**1v30 ➔ 1v300**。 |
-| **第四阶：RGM 数据+AI 破局** | 1. **重点专章：读懂 `CTL/ATL` 疲劳指数 × `HRV/静息心率` 的训练指导含义** + 24h 夜间戴表校验护栏<br/>2. 五大跑表不互踢同步 + 实战 Effective VDOT + **「陪跑模式 (`ignore_vdot`)」**<br/>3. 路跑×越野双模 + **赛前 7 天 Taper 推演** + 出差 `Day Swap`<br/>4. A/B/C 多赛事 + 千人千面督导 + **官兔 6 维自测 / 1对1 师徒 / 团长加油** | 1. **两级 Bento 大群中心 (`OrgManagementHub`)** + 14 天过期分团自动清退 + AES-256 脱敏 + Web 微信小程序码扫码免密登录<br/>2. **全团官兔 6 维雷达 (`PacerClubRadarPanel`)** + 跨分团 **1对1 师徒传帮带** + 手表无感考勤<br/>3. 「目标完成率榜」+「团长加油」+ **周/月达标战报高清海报 1 秒存入相册** | 1. **方法论内核专题：深度拆解使用的 5 大 Renato Canova 核心训练思想**（漏斗周期、100%马配锚定、快慢交替浮休、3:1波浪、分龄恢复与 A/B/C）<br/>2. **执教实战指南专题**：适用人群边界 + 4 大启用时机 + 6 大安全注意事项<br/>3. 红黄绿生理负荷驾驶舱（含 HRV 警报与一键降载）<br/>4. 8 大漏斗模版 + **OCR 智能周课表导入器** + 私有加密模版库<br/>5. 每日 v4 感知 + `roll-next-week` 滚动审核 + 合练广播与官兔雷达 |
+| **第四阶：RGM 数据+AI 破局** | 1. **重点专章：读懂 `CTL/ATL` 疲劳指数 × `HRV/静息心率` 的训练指导含义** + 24h 夜间戴表校验护栏<br/>2. 五大跑表不互踢同步 + 实战 Effective VDOT + **「陪跑模式 (`ignore_vdot`)」**<br/>3. 路跑×越野双模 + **赛前 7 天 Taper 推演** + 出差 `Day Swap`<br/>4. A/B/C 多赛事 + 官兔 6 维自测 / 1对1 师徒<br/>5. **极简双主题 (`dark/volt`) × 3档无障碍字号 × 无团 4K 海报 × 首页脉搏/6维寻搭子PK/展厅兼团** | 1. **两级 Bento 大群中心 (`OrgManagementHub`)** + 14 天过期分团自动清退 + AES-256 脱敏 + Web 微信小程序码扫码免密登录<br/>2. **全团官兔 6 维雷达 (`PacerClubRadarPanel`)** + 跨分团 **1对1 师徒传帮带** + 手表无感考勤<br/>3. 「目标完成率榜」+「团长加油」+ **周/月达标战报高清海报 1 秒存入相册**<br/>4. **团长经营驾驶舱 (`CaptainExecutiveCockpit`) × 72h 置顶已读回执 × 9 图品牌展厅 × 金色预编组靶向纳新雷达** | 1. **方法论内核专题：深度拆解使用的 5 大 Renato Canova 核心训练思想**（漏斗周期、100%马配锚定、快慢交替浮休、3:1波浪、分龄恢复与 A/B/C）<br/>2. **执教实战指南专题**：适用人群边界 + 4 大启用时机 + 6 大安全注意事项<br/>3. 红黄绿生理负荷驾驶舱（含 HRV 警报与一键降载）<br/>4. 8 大漏斗模版 + **OCR 智能周课表导入器** + 私有加密模版库<br/>5. `roll-next-week` 滚动审核 + 合练广播<br/>6. **名帅个人品牌展厅 (`accepting_runners`) × `Coach Batch` 六枚预设标签批量秒评** |
 
 ---
 
 ## 二、路演材料清单与使用方式
 
-1. **在线可交互演示 PPT（浏览器全屏直接路演 · 22 页）**：
+1. **在线可交互视觉演示 PPT（浏览器全屏直接路演 · 25 页 · 图文实证精简版）**：
    - 项目内路径：[`interactive_pitch_deck.html`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/interactive_pitch_deck.html)
-   - 包含顶部 **「四阶梯次演进导航条」**、3 场路演共 **22 页** 高精度幻灯片（含 View Transitions 方向切页动画与 `prefers-reduced-motion` 无障碍支持）、**9 个现场可点击交互沙盘**（新增：**CTL/ATL × HRV/静息心率 4场景交叉决策沙盘**、**Canova 漏斗 5 阶逐周进化演示**、**Canova 适用人群/启用时机/注意事项三维执教手册**）以及按 `N` 键呼出的演讲者逐字提词器。
+   - **视觉化重构亮点**：页面可见文字较纯文本版**大幅精简超 56%**（平均每页仅 ~280 字），以 **13 组实拍系统截图 / UI 界面图 / 高清暗黑场景插画** 与 **全屏 `<dialog>` 放大镜 + 图面 ①②③ 交互标注热点** 取代文字墙；完整口播细节全部收进按 `N` 键呼出的演讲者逐字提词器。
+   - **全页增强交互（25/25 页均可现场互动）**：含 View Transitions 方向切页动画、`prefers-reduced-motion` 无障碍支持、**LIVE CTL/ATL×HRV 双滑块状态仪表盘**、**赛前 7 天 Taper SVG 柱线图与出差日历对调 (`Day Swap`)**、**LIVE 小程序 Dark ⇄ Volt 换肤与字号缩放 + 4 枚实时递增微加油**、**Canova 3D 漏斗原理与红线切换**、**10 秒 OCR 拆表模拟**以及 **Coach Batch 0/6 ➔ 6/6 队列连批进度演练**。
 2. **三场分众路演逐字演讲稿**：
-   - 第一场（严肃跑者/队员 · 8页）：[`03_PITCH_FOR_SERIOUS_RUNNERS.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/03_PITCH_FOR_SERIOUS_RUNNERS.md)
-   - 第二场（跑团组织者/戈友会长 · 6页）：[`02_PITCH_FOR_ORGANIZERS.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/02_PITCH_FOR_ORGANIZERS.md)
-   - 第三场（专业教练 · 8页）：[`01_PITCH_FOR_COACHES.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/01_PITCH_FOR_COACHES.md)
+   - 第一场（严肃跑者/队员 · 9页）：[`03_PITCH_FOR_SERIOUS_RUNNERS.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/03_PITCH_FOR_SERIOUS_RUNNERS.md)
+   - 第二场（跑团组织者/戈友会长 · 7页）：[`02_PITCH_FOR_ORGANIZERS.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/02_PITCH_FOR_ORGANIZERS.md)
+   - 第三场（专业教练 · 9页）：[`01_PITCH_FOR_COACHES.md`](file:///Users/azwan/Projects/rgm-cn/docs/roadshow/01_PITCH_FOR_COACHES.md)

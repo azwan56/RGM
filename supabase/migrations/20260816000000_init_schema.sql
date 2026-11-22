@@ -259,11 +259,11 @@ ALTER TABLE public.teams ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.coach_reports ENABLE ROW LEVEL SECURITY;
 
--- 允许用户读写属于自己的 profile 数据；所有认证用户可读取基本资料用于跑团榜
-CREATE POLICY "Users can view all public profiles for leaderboard"
+-- 仅允许认证用户读取自己的完整 profile（防止敏感凭证/PII 跨账号泄露；排行榜应走后端脱敏聚合视图）
+CREATE POLICY "Users can view own profile"
     ON public.profiles FOR SELECT
     TO authenticated
-    USING (true);
+    USING (auth.uid() = id);
 
 CREATE POLICY "Users can update own profile"
     ON public.profiles FOR UPDATE
@@ -276,21 +276,11 @@ CREATE POLICY "Users can manage own goals"
     TO authenticated
     USING (auth.uid() = user_id);
 
-CREATE POLICY "Authenticated users can read goals for leaderboard"
-    ON public.goals FOR SELECT
-    TO authenticated
-    USING (true);
-
--- Activities 策略
+-- Activities 策略（默认仅本人可读，同跑团隐私访问应走后端/专用脱敏视图）
 CREATE POLICY "Users can view own activities"
     ON public.activities FOR ALL
     TO authenticated
     USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can read teammates activities"
-    ON public.activities FOR SELECT
-    TO authenticated
-    USING (true);
 
 -- Daily Health 策略
 CREATE POLICY "Users can manage own health metrics"

@@ -55,3 +55,16 @@ CREATE INDEX IF NOT EXISTS idx_miniapp_events_session ON public.miniapp_events(s
 CREATE INDEX IF NOT EXISTS idx_miniapp_events_user ON public.miniapp_events(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_miniapp_events_type ON public.miniapp_events(event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_miniapp_events_page ON public.miniapp_events(page_path, created_at DESC);
+
+ALTER TABLE IF EXISTS public.miniapp_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.miniapp_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own miniapp_sessions"
+    ON public.miniapp_sessions FOR SELECT
+    TO authenticated
+    USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can read own miniapp_events"
+    ON public.miniapp_events FOR SELECT
+    TO authenticated
+    USING (auth.uid()::text = user_id);
