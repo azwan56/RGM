@@ -30,6 +30,66 @@ export default function AnalysisPage() {
   const [activeTaperKey, setActiveTaperKey] = useState<string>("taper_50");
   const [showCanovaZones, setShowCanovaZones] = useState<boolean>(false);
   const [shareCardModalOpen, setShareCardModalOpen] = useState<boolean>(false);
+  const [pendingAnalysisIntent, setPendingAnalysisIntent] = useState<{
+    open?: string | null;
+    scrollTo?: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncAnalysisIntent = (hrefOverride?: string) => {
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const sp = new URLSearchParams(searchStr);
+      const qOpen = sp.get("open");
+      const qScroll = sp.get("scroll_to");
+      if (qOpen || qScroll) {
+        setPendingAnalysisIntent({ open: qOpen, scrollTo: qScroll });
+      }
+    };
+    syncAnalysisIntent();
+    const onPop = () => syncAnalysisIntent();
+    const onNav = (e: Event) => {
+      const href = String((e as CustomEvent)?.detail?.href || "");
+      if (href.startsWith("/dashboard/analysis")) {
+        syncAnalysisIntent(href);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("rgm-nav-intent", onNav);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("rgm-nav-intent", onNav);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !pendingAnalysisIntent) return;
+    const { open, scrollTo } = pendingAnalysisIntent;
+    setPendingAnalysisIntent(null);
+    if (open === "share-card") {
+      setShareCardModalOpen(true);
+    } else if (open === "pace-zones") {
+      setShowCanovaZones(true);
+      window.setTimeout(() => {
+        document
+          .getElementById("section-pace-zones")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    }
+    if (scrollTo === "pacer") {
+      window.setTimeout(() => {
+        document.getElementById("pacer")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 140);
+    } else if (scrollTo === "taper") {
+      window.setTimeout(() => {
+        document
+          .getElementById("section-taper")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 140);
+    }
+  }, [loading, pendingAnalysisIntent]);
 
   useEffect(() => {
     let queryTarget = "";
@@ -94,7 +154,7 @@ export default function AnalysisPage() {
       <Navbar />
 
       <div className="rgm-web3-page">
-      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="rgm-page-container py-6 space-y-6">
         {/* Coach / Mentor Inspection Banner */}
         {isInspectingOther && (
           <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-emerald-500/15 via-cyan-500/10 to-transparent border border-emerald-500/35 rounded-2xl px-5 py-4">
@@ -208,7 +268,7 @@ export default function AnalysisPage() {
                   src={
                     scienceData?.basic_status?.avatar_url ||
                     scienceData?.student_profile?.avatar_url ||
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                    "/defaults/default-avatar.svg"
                   }
                   alt={scienceData?.basic_status?.display_name || "跑友"}
                   className="w-16 h-16 rounded-full object-cover border-2 border-cyan-500/40"
@@ -455,12 +515,14 @@ export default function AnalysisPage() {
 
         {/* ── CARD 1.5: 马拉松官方配速员（官兔）六维胜任度评估 ── */}
         {activeRunnerUid && (
-          <PacerEvaluationCard uid={activeRunnerUid} viewerUid={user?.id} />
+          <div id="pacer" className="scroll-mt-24">
+            <PacerEvaluationCard uid={activeRunnerUid} viewerUid={user?.id} />
+          </div>
         )}
 
         {/* ── CARD 2: 赛前 7 天减量 (Taper) 状态推演模拟器 ── */}
         {scienceData?.taper_simulation?.scenarios?.length > 0 && (
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div id="section-taper" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -737,7 +799,7 @@ export default function AnalysisPage() {
         </div>
 
         {/* ── CARD 4: Renato Canova 配速矩阵 (默认折叠，按需展开) ── */}
-        <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl">
+        <div id="section-pace-zones" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl scroll-mt-24">
           <div
             className="flex items-center justify-between cursor-pointer"
             onClick={() => setShowCanovaZones(!showCanovaZones)}

@@ -34,6 +34,7 @@ export interface RacePlan {
 
 import GarminConnectModal from "@/components/GarminConnectModal";
 import PersonalShareCardModal from "@/components/PersonalShareCardModal";
+import { dispatchRgmNavIntent } from "@/components/web3/CommandPaletteModal";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<any>(null);
@@ -115,38 +116,87 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
   const [allowBuddySearchScope, setAllowBuddySearchScope] = useState<"org_and_clubs" | "public" | "none">("org_and_clubs");
   const [allowClubSearchScope, setAllowClubSearchScope] = useState<"same_org" | "public" | "none">("same_org");
   const [savingSearchPrivacy, setSavingSearchPrivacy] = useState(false);
+  const [showHomeBuddyPk, setShowHomeBuddyPk] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("rgm_home_show_buddy_pk");
+      setShowHomeBuddyPk(raw === "1" || raw === "true");
+    } catch {
+      setShowHomeBuddyPk(false);
+    }
+  }, []);
+
+  function toggleHomeBuddyPk(nextVal: boolean) {
+    const flag = Boolean(nextVal);
+    setShowHomeBuddyPk(flag);
+    try {
+      localStorage.setItem("rgm_home_show_buddy_pk", flag ? "1" : "0");
+      window.dispatchEvent(new Event("rgm-home-pk-pref-changed"));
+    } catch {}
+    showToast(flag ? "已在首页开启搭子周 PK" : "已关闭首页搭子周 PK（保留寻搭子与选团展厅）", "info");
+  }
 
   const [showPurgeConfirmModal, setShowPurgeConfirmModal] = useState(false);
   const [purgingPrivacy, setPurgingPrivacy] = useState(false);
   const [userOrgs, setUserOrgs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<"bento" | "profile" | "device" | "training">("bento");
   const [highlightPulse, setHighlightPulse] = useState(false);
+  const [pendingScrollTarget, setPendingScrollTarget] = useState<{
+    id: string;
+    highlight?: boolean;
+  } | null>(null);
 
-  function scrollToSection(elementId: string) {
-    setActiveTab("profile");
-    setTimeout(() => {
-      if (typeof document !== "undefined") {
-        const el = document.getElementById(elementId);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
+  function switchProfileTab(nextTab: "bento" | "profile" | "device" | "training") {
+    setActiveTab(nextTab);
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      if (nextTab === "bento") {
+        sp.delete("tab");
+      } else {
+        sp.set("tab", nextTab);
       }
-    }, 120);
+      sp.delete("open");
+      sp.delete("scroll_to");
+      sp.delete("scroll_to_required");
+      const q = sp.toString();
+      const targetHref = q ? `/dashboard/profile?${q}` : "/dashboard/profile";
+      window.history.replaceState(null, "", targetHref);
+      dispatchRgmNavIntent(targetHref);
+    }
+  }
+
+  function scrollToSection(
+    elementId: string,
+    targetTab: "profile" | "training" = "profile"
+  ) {
+    switchProfileTab(targetTab);
+    setPendingScrollTarget({ id: elementId, highlight: false });
   }
 
   function scrollToRequiredFields() {
-    setActiveTab("profile");
-    setTimeout(() => {
+    switchProfileTab("profile");
+    setPendingScrollTarget({ id: "required-personal-fields", highlight: true });
+  }
+
+  useEffect(() => {
+    if (loading || !pendingScrollTarget) return;
+    const { id, highlight } = pendingScrollTarget;
+    const timer = window.setTimeout(() => {
       if (typeof document !== "undefined") {
-        const el = document.getElementById("required-personal-fields");
+        const el = document.getElementById(id);
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "start" });
-          setHighlightPulse(true);
-          setTimeout(() => setHighlightPulse(false), 3200);
+          if (highlight) {
+            setHighlightPulse(true);
+            window.setTimeout(() => setHighlightPulse(false), 3200);
+          }
+          setPendingScrollTarget(null);
         }
       }
-    }, 150);
-  }
+    }, 140);
+    return () => window.clearTimeout(timer);
+  }, [loading, activeTab, pendingScrollTarget]);
 
   useEffect(() => {
     const syncTabFromQuery = (hrefOverride?: string) => {
@@ -156,6 +206,8 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         : window.location.search;
       const urlParams = new URLSearchParams(searchStr);
       const tabParam = urlParams.get("tab");
+      const openParam = urlParams.get("open");
+      const scrollToParam = urlParams.get("scroll_to");
       const shouldScroll =
         urlParams.get("scroll_to_required") === "1" ||
         sessionStorage.getItem("auto_scroll_to_required_fields") === "1";
@@ -170,9 +222,35 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
         setActiveTab("bento");
       }
 
+      if (openParam === "bind-garmin") {
+        setActiveTab("device");
+        setModalBrand("garmin");
+        setGarminModalOpen(true);
+      } else if (openParam === "bind-coros") {
+        setActiveTab("device");
+        setModalBrand("coros");
+        setGarminModalOpen(true);
+      } else if (openParam === "share-card") {
+        setShareCardModalOpen(true);
+      }
+
       if (shouldScroll) {
         sessionStorage.removeItem("auto_scroll_to_required_fields");
         scrollToRequiredFields();
+      } else if (scrollToParam === "privacy") {
+        scrollToSection("section-privacy-controls", "profile");
+      } else if (scrollToParam === "body-org") {
+        scrollToSection("section-body-and-org", "profile");
+      } else if (scrollToParam === "data-lifecycle") {
+        scrollToSection("section-data-lifecycle", "profile");
+      } else if (scrollToParam === "pb") {
+        scrollToSection("section-pb-records", "training");
+      } else if (scrollToParam === "physio") {
+        scrollToSection("section-physio-metrics", "training");
+      } else if (scrollToParam === "goals") {
+        scrollToSection("section-mileage-goals", "training");
+      } else if (scrollToParam === "races") {
+        scrollToSection("section-race-plans", "training");
       }
     };
 
@@ -1103,7 +1181,10 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
   function renderPhysioMetricsCard(showPrivacyBadge = false) {
     return (
-      <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <div
+        id={!showPrivacyBadge ? "section-physio-metrics" : undefined}
+        className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24"
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -1286,7 +1367,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             ) : compactRedirect ? (
               <button
                 type="button"
-                onClick={() => setActiveTab("device")}
+                onClick={() => switchProfileTab("device")}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-200 hover:bg-white/10 transition"
               >
                 前往绑定 ›
@@ -1344,7 +1425,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
             ) : compactRedirect ? (
               <button
                 type="button"
-                onClick={() => setActiveTab("device")}
+                onClick={() => switchProfileTab("device")}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 text-zinc-200 hover:bg-white/10 transition"
               >
                 前往绑定 ›
@@ -1369,81 +1450,54 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
     <div className="min-h-screen rgm-web3-page bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
-      <main className={`${activeTab === "bento" ? "max-w-[1440px]" : "max-w-4xl"} mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8`}>
+      <main className="rgm-page-container py-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--rgm-text)]">
               {activeTab === "bento"
-                ? "三栏一屏档案与隐私工作台"
+                ? "个人档案与隐私总览"
                 : activeTab === "device"
-                ? "手表连接明细"
+                ? "手表连接管理"
                 : activeTab === "training"
                 ? "训练与赛事目标"
-                : "隐私设定明细"}
+                : "隐私与资料设置"}
             </h1>
-            <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              集中检查并管理实名加密资料、身体参数、GPS/HRV 保密、Canova 评语可见范围与数据源授权
+            <p className="text-xs sm:text-sm text-[var(--rgm-text-2)] mt-1">
+              管理实名资料、身体参数、隐私可见范围与手表账号绑定
             </p>
           </div>
           <Link
             href="/dashboard/manual"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 transition self-start sm:self-auto shrink-0 shadow-sm"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] border border-[var(--rgm-border)] transition self-start sm:self-auto shrink-0 shadow-sm"
           >
             <BookOpen className="w-3.5 h-3.5 text-[#FC4C02]" />
-            <span>📖 用户手册 ›</span>
+            <span>用户手册 ›</span>
           </Link>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-white/10 mb-7 space-x-2 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTab("bento")}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
-              activeTab === "bento"
-                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
-                : "text-zinc-400 border-transparent hover:text-zinc-200"
-            }`}
-          >
-            <span>🗂️</span>
-            <span>三栏一屏工作台</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("profile")}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
-              activeTab === "profile"
-                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
-                : "text-zinc-400 border-transparent hover:text-zinc-200"
-            }`}
-          >
-            <span>🛡️</span>
-            <span>隐私设定明细</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("device")}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
-              activeTab === "device"
-                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
-                : "text-zinc-400 border-transparent hover:text-zinc-200"
-            }`}
-          >
-            <span>⌚</span>
-            <span>手表连接明细</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("training")}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap ${
-              activeTab === "training"
-                ? "text-[#FC4C02] border-[#FC4C02] bg-white/[0.03]"
-                : "text-zinc-400 border-transparent hover:text-zinc-200"
-            }`}
-          >
-            <span>🏃</span>
-            <span>训练与赛事目标</span>
-          </button>
+        <div className="flex border-b border-[var(--rgm-border)] mb-7 space-x-2 overflow-x-auto">
+          {(
+            [
+              { key: "bento" as const, label: "档案总览" },
+              { key: "profile" as const, label: "隐私与资料" },
+              { key: "device" as const, label: "手表绑定" },
+              { key: "training" as const, label: "赛事与目标" },
+            ]
+          ).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => switchProfileTab(t.key)}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm sm:text-base font-bold transition-all relative border-b-2 -mb-px whitespace-nowrap cursor-pointer ${
+                activeTab === t.key
+                  ? "text-[#FC4C02] border-[#FC4C02] bg-[var(--rgm-brand-tint)]/60"
+                  : "text-[var(--rgm-text-2)] border-transparent hover:text-[var(--rgm-text)]"
+              }`}
+            >
+              <span>{t.label}</span>
+            </button>
+          ))}
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
@@ -1596,7 +1650,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                         <span>身体生理档案已填 {bodyFilledCount}/6 项 · VO2max {vo2max || "—"}</span>
                         <button
                           type="button"
-                          onClick={() => setActiveTab("profile")}
+                          onClick={() => switchProfileTab("profile")}
                           className="text-[#FC4C02] hover:underline font-bold"
                         >
                           编辑实名与身体参数 →
@@ -1702,7 +1756,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                         </button>
                         <button
                           type="button"
-                          onClick={() => setActiveTab("device")}
+                          onClick={() => switchProfileTab("device")}
                           className="text-[11px] font-bold text-[#FC4C02] hover:underline"
                         >
                           手表明细 →
@@ -1722,7 +1776,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                         </div>
                         <button
                           type="button"
-                          onClick={() => setActiveTab("training")}
+                          onClick={() => switchProfileTab("training")}
                           className="text-[11px] font-bold text-[#FC4C02] hover:underline shrink-0"
                         >
                           调整规划 →
@@ -1892,6 +1946,26 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                         </span>
                       </button>
 
+                      <button
+                        type="button"
+                        onClick={() => toggleHomeBuddyPk(!showHomeBuddyPk)}
+                        className="w-full p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 flex items-center justify-between gap-2 transition"
+                      >
+                        <div className="text-left">
+                          <div className="text-xs font-bold text-white">🏆 首页显示「搭子周 PK」</div>
+                          <div className="text-[10px] text-zinc-400">默认关闭；关闭后保留「寻搭子」与「选团展厅」</div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0 ${
+                            showHomeBuddyPk
+                              ? "bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/40"
+                              : "bg-white/10 text-zinc-300"
+                          }`}
+                        >
+                          {showHomeBuddyPk ? "已开启" : "已关闭"}
+                        </span>
+                      </button>
+
                       {/* Quick Buddy & Club Search Privacy Summary Pills */}
                       <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
                         <div className="flex items-center justify-between gap-2 text-xs">
@@ -1952,7 +2026,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setActiveTab("profile")}
+                      onClick={() => switchProfileTab("profile")}
                       className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-zinc-200 transition"
                     >
                       打开完整明细表单
@@ -1975,7 +2049,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           {/* TAB 1: 隐私设定 (Unified Personal Data & Privacy Center)            */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {activeTab === "profile" && (
-            <div className="space-y-8">
+            <div className="max-w-5xl space-y-8">
               {/* ── 顶部总览与快速跳转 ── */}
               <div className="bg-[#121215] border border-emerald-500/20 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2130,6 +2204,32 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                   </label>
                 </div>
 
+                <label className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4 cursor-pointer hover:border-[#FC4C02]/40 transition">
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                      <span>🏆 首页显示「搭子周 PK」</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                          showHomeBuddyPk
+                            ? "bg-[#FC4C02]/15 text-[#FC4C02]"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        {showHomeBuddyPk ? "已开启" : "默认关闭"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      默认关闭；开启后在首页展示搭子周跑量 PK，关闭后不影响首页「寻搭子」与「选团展厅」入口
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={showHomeBuddyPk}
+                    onChange={(e) => toggleHomeBuddyPk(e.target.checked)}
+                    className="w-5 h-5 accent-[#FC4C02] rounded shrink-0 cursor-pointer"
+                  />
+                </label>
+
                 {/* Canova Critique 4-tier Visibility */}
                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2251,7 +2351,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                     <div>
                       <div className="text-xs font-bold text-white">🔍 寻搭子与跑团靶向邀约授权开关（无排他兼团保护）</div>
                       <p className="text-[11px] text-zinc-400 mt-0.5">
-                        跑团之间无排他性；开启后仅按 5 岁年龄段、VDOT 与公园地标脱敏匹配，随时可一键关闭
+                        跑团之间无排他性；开启后仅按年龄组别（青年组/中坚组/壮年组/大师组）、VDOT 与公园地标脱敏匹配，随时可一键关闭
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-xs font-bold text-zinc-200 cursor-pointer">
@@ -2268,7 +2368,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <div className="text-[11px] font-bold text-zinc-300">1. 可被跑友搜索范围 (`allow_buddy_search_scope`)</div>
+                      <div className="text-[11px] font-bold text-zinc-300">1. 可被跑友搜索范围</div>
                       <div className="flex flex-wrap gap-1.5">
                         {[
                           { v: "org_and_clubs", l: "同团+大群校友" },
@@ -2293,7 +2393,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
                     </div>
 
                     <div className="space-y-2">
-                      <div className="text-[11px] font-bold text-zinc-300">2. 可被跑团/教练邀约范围 (`allow_club_search_scope`)</div>
+                      <div className="text-[11px] font-bold text-zinc-300">2. 可被跑团/教练邀约范围</div>
                       <div className="flex flex-wrap gap-1.5">
                         {[
                           { v: "same_org", l: "同大群分团可邀(兼团)" },
@@ -3085,7 +3185,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           {/* TAB 2: 手表连接 (Device Connections & Sync)                       */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {activeTab === "device" && (
-            <div className="space-y-8">
+            <div className="max-w-5xl space-y-8">
               {renderWatchConnectionsCard(false)}
             </div>
           )}
@@ -3094,9 +3194,9 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           {/* TAB 3: 训练档案 (Training Metrics & Races)                        */}
           {/* ══════════════════════════════════════════════════════════════════ */}
           {activeTab === "training" && (
-            <div className="space-y-8">
+            <div className="max-w-5xl space-y-8">
               {/* ── CARD 2: 最佳成绩 (PB) - 从 Garmin 导入 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div id="section-pb-records" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -3171,7 +3271,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
               {renderPhysioMetricsCard(false)}
 
               {/* ── CARD 4: 跑量目标 ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div id="section-mileage-goals" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Target className="w-5 h-5 text-cyan-400" />
@@ -3359,7 +3459,7 @@ const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"];
           </div>
 
           {/* ── CARD 1: 比赛计划 (Race Plans) ── */}
-          <div className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div id="section-race-plans" className="bg-[#121215] border border-white/[0.08] rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 scroll-mt-24">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-lg">🏁</span>

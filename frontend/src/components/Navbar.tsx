@@ -25,17 +25,21 @@ import {
   Crown,
   Target,
   Sparkles,
-  BarChart3,
-  Wrench,
   Watch,
+  Mic,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import AuthModal from "./AuthModal";
 import CoachChatBox from "./CoachChatBox";
 import CommandPaletteModal, { dispatchRgmNavIntent } from "./web3/CommandPaletteModal";
+import AiOperationAssistant, { openAiOperationAssistant } from "./web3/AiOperationAssistant";
 
-type RolePerspective = "runner" | "leader" | "admin";
-
-function resolvePageMeta(pathname: string | null, searchStr: string): { title: string; subtitle: string } {
+function resolvePageContext(
+  pathname: string | null,
+  searchStr: string
+): { group: string; title: string; subtitle: string } {
   const sp = new URLSearchParams(searchStr || "");
   const tab = sp.get("tab") || "";
   const mode = sp.get("mode") || "";
@@ -43,65 +47,152 @@ function resolvePageMeta(pathname: string | null, searchStr: string): { title: s
 
   if (pathname === "/dashboard/coach") {
     if (tab === "report") {
-      return { title: "Canova 战略诊断报告", subtitle: "多赛事周期路线图 · A/B/C 优先级冲突排查 · 专项配速" };
+      return {
+        group: "训练",
+        title: "周期训练报告",
+        subtitle: "多赛事备赛节奏与各阶段训练强度概览",
+      };
     }
-    return { title: "Canova 科学训练中心", subtitle: "W1–W8 周期化动态课表 · 双栏 AI 教练实时调课" };
+    return {
+      group: "训练",
+      title: "AI 教练与课表",
+      subtitle: "每周动态训练课表 · 双栏 AI 教练实时调课",
+    };
   }
   if (pathname === "/dashboard/analysis") {
-    return { title: "运动生理与轨迹复盘", subtitle: "有效 VDOT · Taper 减量推演 · 官兔潜能评估 · 4K 战报" };
+    return {
+      group: "训练",
+      title: "生理与轨迹",
+      subtitle: "有效跑力变化 · 赛前减量参考 · 完赛能力评估",
+    };
   }
   if (pathname === "/dashboard/discover") {
-    return { title: "六维同频寻搭子", subtitle: "5岁年龄段与地标脱敏筛选 · 互关周跑量 PK · 自主检索隐私" };
+    return {
+      group: "跑团",
+      title: "同频寻搭子",
+      subtitle: "按配速与活动范围筛选同城训练伙伴，互相关注并对比周跑量",
+    };
   }
   if (pathname === "/dashboard/plaza") {
-    return { title: "选团与名帅风采展厅", subtitle: "手表防伪核验战绩 · 教练认证履历 · 合练赛场实拍墙" };
+    return {
+      group: "跑团",
+      title: "选团与名帅",
+      subtitle: "浏览本地认证跑团、教练资质与日常合练风采",
+    };
   }
-  if (pathname === "/dashboard/team-coach" || (pathname === "/dashboard/team" && tab === "coach")) {
+  if (
+    pathname === "/dashboard/team-coach" ||
+    (pathname === "/dashboard/team" && (tab === "coach" || mode === "batch-critique"))
+  ) {
     if (mode === "batch-critique") {
-      return { title: "教练 5 秒连续批阅三栏舱", subtitle: "异常置顶队列 · AI 遥测对照 · 快捷词条连续发送" };
+      return {
+        group: "管理",
+        title: "连续批阅排课",
+        subtitle: "按异常优先级集中审阅队员训练并快速发送反馈",
+      };
     }
-    return { title: "教练工作台与选兔雷达", subtitle: "红黄绿灰体能信号灯 · 跨视角审课 · 批量派发" };
+    return {
+      group: "管理",
+      title: "教练工作台",
+      subtitle: "查看全团体能状态分布、出勤情况与快速调课",
+    };
   }
   if (pathname === "/dashboard/team") {
     if (orgAction === "audit") {
-      return { title: "大群 14 天实名准入核验", subtitle: "AES-256 脱敏花名册审计 · 转正与解冻核准" };
+      return {
+        group: "管理",
+        title: "大群实名核验",
+        subtitle: "核验大群成员身份信息与入群资格状态",
+      };
     }
     if (tab === "president") {
-      return { title: "团长运营驾驶舱", subtitle: "全团达标率圆环 · 激活漏斗 · 邀请码与成员精细管理" };
+      return {
+        group: "管理",
+        title: "团长驾驶舱",
+        subtitle: "全团达标概览 · 邀请码生成与成员角色管理",
+      };
     }
     if (tab === "events") {
-      return { title: "周末约跑与配速列车", subtitle: "公园门岗锚点 · 300–430 列车编组 · 赛后 92% 战报" };
+      return {
+        group: "跑团",
+        title: "约跑活动",
+        subtitle: "按配速分队报名周末合练与赛前配速列车",
+      };
     }
-    return { title: "跑团社交主页与大群生态", subtitle: "完成率/跑量双模榜 · 教练精评蓝框 · 师徒结对" };
+    return {
+      group: "跑团",
+      title: "我的跑团",
+      subtitle: "查看跑团动态、完成率与跑量双模排行榜",
+    };
   }
   if (pathname === "/dashboard/profile") {
     if (tab === "device") {
-      return { title: "运动手表双区直连设置", subtitle: "Garmin 中国区 (garmin.cn) / 国际区 · COROS 高驰同步" };
+      return {
+        group: "账户",
+        title: "手表绑定",
+        subtitle: "连接 Garmin（中国区 / 国际区）或 COROS 高驰自动同步跑步记录",
+      };
     }
     if (tab === "training") {
-      return { title: "赛事档案与跑量规划", subtitle: "A/B/C 赛事计划 · AI 情报检索 · 手表成绩匹配" };
+      return {
+        group: "账户",
+        title: "赛事与目标",
+        subtitle: "管理全年 A/B/C 目标赛事与阶段跑量规划",
+      };
     }
-    return { title: "档案、绑表与 4 级隐私中心", subtitle: "三栏一屏重构 · AES-256 加密底账 · 14 天大群准入" };
+    return {
+      group: "账户",
+      title: "档案与隐私",
+      subtitle: "个人跑力档案、绑定状态与展示范围设置",
+    };
   }
   if (pathname === "/dashboard/admin") {
     if (tab === "analytics") {
-      return { title: "平台超管 · 增长漏斗与遥测", subtitle: "小程序 + Web 双端 DAU · 激活转化漏斗 · 单跑者钻取" };
+      return {
+        group: "管理",
+        title: "增长与数据概览",
+        subtitle: "双端活跃度、绑定转化漏斗与使用趋势统计",
+      };
     }
     if (tab === "support") {
-      return { title: "平台超管 · 设备与 AI 运维", subtitle: "佳明双区/高驰健康监控 · Canova AI 队列 · 工单秒修" };
+      return {
+        group: "管理",
+        title: "设备与服务运维",
+        subtitle: "手表同步通道状态检查与常见异常排查",
+      };
     }
     if (tab === "unaffiliated") {
-      return { title: "平台超管 · 自由跑者待激活池", subtitle: "已绑表未入团跑友识别 · 一键推送周边跑团邀请" };
+      return {
+        group: "管理",
+        title: "自由跑者池",
+        subtitle: "管理已绑定手表但尚未加入跑团的跑友并发送邀请",
+      };
     }
     if (tab === "clubs") {
-      return { title: "平台超管 · 跑团全生命周期治理", subtitle: "新建/编辑跑团 · 指派团长 · 暂停锁定与防误删确认" };
+      return {
+        group: "管理",
+        title: "跑团管理",
+        subtitle: "新建或编辑跑团信息、指派团长并管理跑团状态",
+      };
     }
-    return { title: "平台超管控制台", subtitle: "全站大群与分团架构树 · 实名核验 · 运维与遥测总控" };
+    return {
+      group: "管理",
+      title: "平台总控台",
+      subtitle: "管理大群与分团结构、成员核验及平台运维",
+    };
   }
   if (pathname === "/dashboard/manual") {
-    return { title: "新用户操作手册与 FAQ", subtitle: "佳明双区切换 · 14 天实名准入与常见排障说明" };
+    return {
+      group: "账户",
+      title: "帮助手册",
+      subtitle: "新手指引、佳明双区切换与常见问题解答",
+    };
   }
-  return { title: "跑者全息工作台", subtitle: "今日 Canova 处方 · 三维跑量圆环 · 30 天负荷与团榜" };
+  return {
+    group: "训练",
+    title: "首页工作台",
+    subtitle: "今日训练任务、周跑量进度与跑团近期动态",
+  };
 }
 
 export default function Navbar() {
@@ -112,6 +203,7 @@ export default function Navbar() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const [notifOpen, setNotifOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [hasManagedOrg, setHasManagedOrg] = useState(false);
@@ -119,8 +211,6 @@ export default function Navbar() {
   const [watchConnected, setWatchConnected] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [searchStr, setSearchStr] = useState("");
-
-  const [rolePerspective, setRolePerspective] = useState<RolePerspective>("runner");
 
   const [isCoachOrOwner, setIsCoachOrOwner] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -217,7 +307,7 @@ export default function Navbar() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Track URL query string & sync active role perspective contextually
+  // Track URL query string & close transient menus on navigation
   useEffect(() => {
     if (typeof window === "undefined") return;
     const syncFromUrl = (customHref?: string) => {
@@ -225,32 +315,15 @@ export default function Navbar() {
         ? `?${customHref.split("?")[1]}`
         : window.location.search;
       setSearchStr(q);
-      const sp = new URLSearchParams(q);
-      const tab = sp.get("tab") || "";
-      const mode = sp.get("mode") || "";
-      const orgAct = sp.get("org_action") || "";
-
-      if (pathname === "/dashboard/admin" || orgAct === "audit") {
-        setRolePerspective("admin");
-        localStorage.setItem("rgm_role_perspective", "admin");
-      } else if (
-        pathname === "/dashboard/team-coach" ||
-        (pathname === "/dashboard/team" && (tab === "president" || tab === "coach" || mode === "batch-critique"))
-      ) {
-        setRolePerspective("leader");
-        localStorage.setItem("rgm_role_perspective", "leader");
-      } else {
-        const savedRole = localStorage.getItem("rgm_role_perspective") as RolePerspective | null;
-        if (savedRole === "runner" || savedRole === "leader" || savedRole === "admin") {
-          setRolePerspective(savedRole);
-        }
-      }
+      setUserMenuOpen(false);
+      setNotifOpen(false);
     };
 
     syncFromUrl();
     const onPop = () => syncFromUrl();
     const onNavIntent = (e: Event) => {
-      const href = (e as CustomEvent)?.detail?.href;
+      const detail = (e as CustomEvent)?.detail;
+      const href = detail?.href;
       syncFromUrl(typeof href === "string" ? href : undefined);
     };
     window.addEventListener("popstate", onPop);
@@ -374,198 +447,258 @@ export default function Navbar() {
         user.is_admin)
   );
 
-  // Mobile 5-Tab Nav aligned with MiniApp
-  const mobileNavItems = [
-    { label: "首页", href: "/dashboard", icon: Activity, matchPaths: ["/dashboard"] },
-    { label: "训练", href: "/dashboard/coach", icon: Zap, matchPaths: ["/dashboard/coach", "/dashboard/analysis"] },
-    { label: "跑团", href: "/dashboard/team", icon: Users, matchPaths: ["/dashboard/team"] },
-    ...(isCoachOrOwner
-      ? [{ label: "教练", href: "/dashboard/team-coach", icon: ClipboardCheck, matchPaths: ["/dashboard/team-coach"] }]
-      : []),
-    { label: "我的", href: "/dashboard/profile", icon: User, matchPaths: ["/dashboard/profile"] },
-  ];
+  const sp = new URLSearchParams(searchStr);
+  const curTab = sp.get("tab") || "";
+  const curMode = sp.get("mode") || "";
+  const curOrgAct = sp.get("org_action") || "";
+  const canCoach = Boolean(isCoachOrOwner || isSuperAdmin);
+  const canManage = Boolean(isCoachOrOwner || hasManagedOrg || isSuperAdmin);
 
-  // Role-specific desktop sidebar navigation list
-  const sidebarNavItems: {
+  // Mobile 5-Tab Nav aligned 1:1 with desktop groups
+  const mobileNavItems: {
     key: string;
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
-    badge?: string;
     isActive: boolean;
-  }[] = (() => {
-    const sp = new URLSearchParams(searchStr);
-    const curTab = sp.get("tab") || "";
-    const curMode = sp.get("mode") || "";
-    const curOrgAct = sp.get("org_action") || "";
-    const curOpen = sp.get("open") || "";
+  }[] = [
+    {
+      key: "home",
+      label: "首页",
+      href: "/dashboard",
+      icon: Activity,
+      isActive: pathname === "/dashboard",
+    },
+    {
+      key: "train",
+      label: "训练",
+      href: "/dashboard/coach",
+      icon: Zap,
+      isActive: pathname === "/dashboard/coach" || pathname === "/dashboard/analysis",
+    },
+    {
+      key: "team",
+      label: "跑团",
+      href: "/dashboard/team",
+      icon: Users,
+      isActive: canManage
+        ? pathname === "/dashboard/discover" ||
+          pathname === "/dashboard/plaza" ||
+          (pathname === "/dashboard/team" &&
+            curOrgAct !== "audit" &&
+            curTab !== "coach" &&
+            curTab !== "president" &&
+            curMode !== "batch-critique")
+        : pathname === "/dashboard/team" && curOrgAct !== "audit",
+    },
+    canManage
+      ? {
+          key: "manage",
+          label: "管理",
+          href: canCoach
+            ? "/dashboard/team?tab=coach"
+            : hasManagedOrg && !isSuperAdmin
+            ? "/dashboard/team?org_action=audit"
+            : "/dashboard/admin?tab=orgs",
+          icon: ClipboardCheck,
+          isActive:
+            pathname === "/dashboard/team-coach" ||
+            pathname === "/dashboard/admin" ||
+            (pathname === "/dashboard/team" &&
+              (curOrgAct === "audit" ||
+                curTab === "coach" ||
+                curTab === "president" ||
+                curMode === "batch-critique")),
+        }
+      : {
+          key: "discover",
+          label: "发现",
+          href: "/dashboard/discover",
+          icon: Target,
+          isActive: pathname === "/dashboard/discover" || pathname === "/dashboard/plaza",
+        },
+    {
+      key: "me",
+      label: "我的",
+      href: "/dashboard/profile",
+      icon: User,
+      isActive: pathname === "/dashboard/profile" || pathname === "/dashboard/manual",
+    },
+  ];
 
-    if (rolePerspective === "leader") {
-      return [
+  type SidebarNavItem = {
+    key: string;
+    label: string;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    isActive: boolean;
+    statusDot?: "connected" | "disconnected";
+    statusTitle?: string;
+  };
+
+  type SidebarNavGroup = {
+    key: string;
+    label: string;
+    items: SidebarNavItem[];
+  };
+
+  const manageItems: SidebarNavItem[] = [
+    ...(canCoach
+      ? [
+          {
+            key: "teamcoach",
+            label: "教练工作台",
+            href: "/dashboard/team?tab=coach",
+            icon: ClipboardCheck,
+            isActive:
+              pathname === "/dashboard/team-coach" ||
+              (pathname === "/dashboard/team" && (curTab === "coach" || curMode === "batch-critique")),
+          },
+          {
+            key: "captain",
+            label: "团长驾驶舱",
+            href: "/dashboard/team?tab=president",
+            icon: Crown,
+            isActive: pathname === "/dashboard/team" && curTab === "president",
+          },
+        ]
+      : []),
+    ...(hasManagedOrg && !isSuperAdmin
+      ? [
+          {
+            key: "orgaudit",
+            label: "大群实名核验",
+            href: "/dashboard/team?org_action=audit",
+            icon: ShieldCheck,
+            isActive: (pathname === "/dashboard/team" && curOrgAct === "audit") || pathname === "/dashboard/admin",
+          },
+        ]
+      : []),
+    ...(isSuperAdmin
+      ? [
+          {
+            key: "admin",
+            label: "平台总控台",
+            href: "/dashboard/admin?tab=orgs",
+            icon: Shield,
+            isActive: pathname === "/dashboard/admin" || (pathname === "/dashboard/team" && curOrgAct === "audit"),
+          },
+        ]
+      : []),
+  ];
+
+  // Permanent 4-group sidebar navigation (no role-switching disorientation)
+  const sidebarNavGroups: SidebarNavGroup[] = [
+    {
+      key: "training",
+      label: "训练",
+      items: [
         {
-          key: "captain",
-          label: "团长驾驶舱",
-          href: "/dashboard/team?tab=president",
-          icon: Crown,
-          isActive: pathname === "/dashboard/team" && curTab === "president" && curOpen !== "club-report",
+          key: "home",
+          label: "首页工作台",
+          href: "/dashboard",
+          icon: Activity,
+          isActive: pathname === "/dashboard",
         },
         {
-          key: "radar",
-          label: "选兔与约跑",
+          key: "coach",
+          label: "AI 教练与课表",
+          href: "/dashboard/coach",
+          icon: Zap,
+          isActive: pathname === "/dashboard/coach",
+        },
+        {
+          key: "analysis",
+          label: "生理与轨迹",
+          href: "/dashboard/analysis",
+          icon: Compass,
+          isActive: pathname === "/dashboard/analysis",
+        },
+      ],
+    },
+    {
+      key: "club",
+      label: "跑团",
+      items: [
+        {
+          key: "team",
+          label: "我的跑团",
+          href: "/dashboard/team",
+          icon: Users,
+          isActive:
+            pathname === "/dashboard/team" &&
+            curOrgAct !== "audit" &&
+            curTab !== "events" &&
+            curTab !== "coach" &&
+            curTab !== "president" &&
+            curMode !== "batch-critique",
+        },
+        {
+          key: "events",
+          label: "约跑活动",
           href: "/dashboard/team?tab=events",
-          icon: Target,
+          icon: Calendar,
           isActive: pathname === "/dashboard/team" && curTab === "events",
         },
         {
-          key: "teamcoach",
-          label: "教练信号灯",
-          href: "/dashboard/team-coach?tab=coach",
-          icon: ClipboardCheck,
-          badge: "雷达",
-          isActive: (pathname === "/dashboard/team-coach" || (pathname === "/dashboard/team" && curTab === "coach")) && curMode !== "batch-critique",
+          key: "discover",
+          label: "同频寻搭子",
+          href: "/dashboard/discover",
+          icon: Target,
+          isActive: pathname === "/dashboard/discover",
         },
         {
-          key: "critique",
-          label: "5秒批阅排课",
-          href: "/dashboard/team-coach?mode=batch-critique",
+          key: "plaza",
+          label: "选团与名帅",
+          href: "/dashboard/plaza",
           icon: Sparkles,
-          badge: "5s",
-          isActive: (pathname === "/dashboard/team-coach" || pathname === "/dashboard/team") && curMode === "batch-critique",
+          isActive: pathname === "/dashboard/plaza",
+        },
+      ],
+    },
+    ...(manageItems.length > 0
+      ? [
+          {
+            key: "manage",
+            label: "管理",
+            items: manageItems,
+          },
+        ]
+      : []),
+    {
+      key: "account",
+      label: "账户",
+      items: [
+        {
+          key: "profile",
+          label: "档案与隐私",
+          href: "/dashboard/profile",
+          icon: User,
+          isActive: pathname === "/dashboard/profile" && curTab !== "device",
         },
         {
-          key: "report",
-          label: "战报播报室",
-          href: "/dashboard/team?tab=president&open=club-report",
-          icon: BarChart3,
-          isActive: pathname === "/dashboard/team" && curOpen === "club-report",
-        },
-      ];
-    }
-
-    if (rolePerspective === "admin") {
-      return [
-        {
-          key: "orgaudit",
-          label: "大群实名核验",
-          href: hasManagedOrg ? "/dashboard/team?org_action=audit" : "/dashboard/admin?tab=orgs",
-          icon: ShieldCheck,
-          badge: "14天",
-          isActive: (pathname === "/dashboard/team" && curOrgAct === "audit") || (pathname === "/dashboard/admin" && !curTab),
+          key: "watch",
+          label: "手表绑定",
+          href: "/dashboard/profile?tab=device",
+          icon: Watch,
+          isActive: pathname === "/dashboard/profile" && curTab === "device",
+          statusDot: watchConnected ? "connected" : "disconnected",
+          statusTitle: watchStatusLabel,
         },
         {
-          key: "orgs",
-          label: "大群与分团树",
-          href: "/dashboard/admin?tab=orgs",
-          icon: Shield,
-          isActive: pathname === "/dashboard/admin" && (curTab === "orgs" || curTab === "clubs"),
+          key: "manual",
+          label: "帮助手册",
+          href: "/dashboard/manual",
+          icon: BookOpen,
+          isActive: pathname === "/dashboard/manual",
         },
-        {
-          key: "unaffiliated",
-          label: "自由跑者池",
-          href: "/dashboard/admin?tab=unaffiliated",
-          icon: Users,
-          isActive: pathname === "/dashboard/admin" && curTab === "unaffiliated",
-        },
-        {
-          key: "analytics",
-          label: "全站增长遥测",
-          href: "/dashboard/admin?tab=analytics",
-          icon: BarChart3,
-          isActive: pathname === "/dashboard/admin" && curTab === "analytics",
-        },
-        {
-          key: "support",
-          label: "设备与AI运维",
-          href: "/dashboard/admin?tab=support",
-          icon: Wrench,
-          isActive: pathname === "/dashboard/admin" && curTab === "support",
-        },
-      ];
-    }
-
-    return [
-      {
-        key: "home",
-        label: "首页工作台",
-        href: "/dashboard",
-        icon: Activity,
-        isActive: pathname === "/dashboard",
-      },
-      {
-        key: "coach",
-        label: "Canova 训练",
-        href: "/dashboard/coach",
-        icon: Zap,
-        badge: "AI",
-        isActive: pathname === "/dashboard/coach",
-      },
-      {
-        key: "analysis",
-        label: "生理与轨迹",
-        href: "/dashboard/analysis",
-        icon: Compass,
-        isActive: pathname === "/dashboard/analysis",
-      },
-      {
-        key: "team",
-        label: "跑团与大群",
-        href: "/dashboard/team",
-        icon: Users,
-        isActive: pathname === "/dashboard/team" && curOrgAct !== "audit" && curTab !== "president",
-      },
-      {
-        key: "discover",
-        label: "同频寻搭子",
-        href: "/dashboard/discover",
-        icon: Target,
-        badge: "6维",
-        isActive: pathname === "/dashboard/discover",
-      },
-      {
-        key: "plaza",
-        label: "选团与名帅",
-        href: "/dashboard/plaza",
-        icon: Sparkles,
-        isActive: pathname === "/dashboard/plaza",
-      },
-      {
-        key: "profile",
-        label: "档案与隐私",
-        href: "/dashboard/profile",
-        icon: User,
-        badge: "14天",
-        isActive: pathname === "/dashboard/profile",
-      },
-      {
-        key: "manual",
-        label: "帮助手册",
-        href: "/dashboard/manual",
-        icon: BookOpen,
-        isActive: pathname === "/dashboard/manual",
-      },
-    ];
-  })();
-
-  function handleRoleSwitch(nextRole: RolePerspective) {
-    setRolePerspective(nextRole);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("rgm_role_perspective", nextRole);
-    }
-    const targetHref =
-      nextRole === "leader"
-        ? isCoachOrOwner || isSuperAdmin
-          ? "/dashboard/team-coach"
-          : "/dashboard/team?tab=president"
-        : nextRole === "admin"
-        ? hasManagedOrg && !isSuperAdmin
-          ? "/dashboard/team?org_action=audit"
-          : "/dashboard/admin?tab=orgs"
-        : "/dashboard";
-    dispatchRgmNavIntent(targetHref);
-    router.push(targetHref);
-  }
+      ],
+    },
+  ];
 
   function handleNavClick(href: string) {
+    setUserMenuOpen(false);
+    setNotifOpen(false);
     dispatchRgmNavIntent(href);
   }
 
@@ -576,7 +709,7 @@ export default function Navbar() {
     user?.user_metadata?.display_name ||
     user?.email ||
     "跑者";
-  const pageMeta = resolvePageMeta(pathname, searchStr);
+  const pageMeta = resolvePageContext(pathname, searchStr);
 
   const notificationBellBlock = user && (
     <div className="relative">
@@ -585,6 +718,7 @@ export default function Navbar() {
         onClick={() => {
           const next = !notifOpen;
           setNotifOpen(next);
+          if (next) setUserMenuOpen(false);
           if (next && user?.id) loadNotifications(user.id);
         }}
         title="站内系统与教练通知"
@@ -706,6 +840,17 @@ export default function Navbar() {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
+                onClick={() => openAiOperationAssistant()}
+                title="AI 操作助手：输入或语音说出目的，直接带你去对应入口 (⌘/)"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/35 text-xs font-extrabold text-[#FC4C02] hover:bg-[#FC4C02] hover:text-white transition cursor-pointer"
+              >
+                <Mic className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">AI 操作助手</span>
+                <span className="sm:hidden">向导</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleToggleTheme}
                 title={themeMode === "dark" ? "切换为 Volt Light v3.0 竞技亮色" : "切换为 Obsidian Dark 曜石暗黑"}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-xs font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition cursor-pointer"
@@ -746,16 +891,25 @@ export default function Navbar() {
         </header>
 
         <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+        <AiOperationAssistant
+          user={user}
+          isCoachOrOwner={isCoachOrOwner}
+          isSuperAdmin={isSuperAdmin}
+          hasManagedOrg={hasManagedOrg}
+          themeMode={themeMode}
+          onToggleTheme={handleToggleTheme}
+          onOpenAuth={() => setAuthOpen(true)}
+        />
       </>
     );
   }
 
-  // Branch B: Dashboard Workbench Shell (Fixed Left Role-Adaptive Sidebar + Top Command Bar + Mobile 5-Tab)
+  // Branch B: Dashboard Workbench Shell (Fixed Permanent Grouped Sidebar + Top Command Bar + Mobile 5-Tab)
   return (
     <>
-      {/* ── Fixed Left Role-Adaptive Sidebar (lg: 72px icon rail / xl: 224px full) ── */}
+      {/* ── Fixed Left Permanent Grouped Sidebar (lg: 72px icon rail / xl: 224px full) ── */}
       <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 lg:w-[72px] xl:w-[224px] flex-col justify-between bg-[var(--rgm-sidebar)] border-r border-[var(--rgm-border)] transition-all duration-200">
-        <div className="p-3 xl:p-3.5 space-y-4 overflow-y-auto no-scrollbar">
+        <div className="p-3 xl:p-3.5 space-y-3 overflow-y-auto no-scrollbar">
           {/* Brand Logo */}
           <Link
             href="/dashboard"
@@ -779,151 +933,74 @@ export default function Navbar() {
             </div>
           </Link>
 
-          {/* 3-Role Perspective Switcher (跑者 | 团/教 | 管理) */}
-          <div className="hidden xl:block space-y-1.5">
-            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]">
-              {(
-                [
-                  { key: "runner", label: "跑者" },
-                  { key: "leader", label: "团/教" },
-                  { key: "admin", label: "管理" },
-                ] as const
-              ).map((r) => {
-                const act = rolePerspective === r.key;
-                return (
-                  <button
-                    key={r.key}
-                    type="button"
-                    onClick={() => handleRoleSwitch(r.key)}
-                    className={`py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                      act
-                        ? "bg-[#FC4C02] text-white shadow-sm"
-                        : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="px-1 text-[10px] font-bold text-[var(--rgm-text-muted)]">
-              {rolePerspective === "runner"
-                ? "普通跑者视角"
-                : rolePerspective === "leader"
-                ? "团长 / 教练视角"
-                : "大群 / 超管视角"}
-            </div>
-          </div>
-
-          {/* Role-Adaptive Navigation List */}
+          {/* Permanent 4-Group Navigation List */}
           <nav className="space-y-1">
-            {sidebarNavItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  title={item.label}
-                  onClick={() => handleNavClick(item.href)}
-                  className={`relative flex items-center justify-center xl:justify-between gap-2.5 px-2.5 xl:px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                    item.isActive
-                      ? "bg-[var(--rgm-brand-tint)] text-[#FC4C02] border border-[#FC4C02]/35"
-                      : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] border border-transparent"
+            {sidebarNavGroups.map((group, groupIdx) => (
+              <div key={group.key} className="space-y-0.5">
+                {groupIdx > 0 && (
+                  <div className="xl:hidden h-px bg-[var(--rgm-border)] mx-2 my-2" />
+                )}
+                <div
+                  className={`hidden xl:block px-3 pb-1 text-[10px] font-black uppercase tracking-wider text-[var(--rgm-text-muted)] ${
+                    groupIdx === 0 ? "pt-1" : "pt-3"
                   }`}
                 >
-                  {item.isActive && (
-                    <span className="hidden xl:block absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-[#FC4C02]" />
-                  )}
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="hidden xl:inline truncate">{item.label}</span>
-                  </span>
-                  {item.badge && (
-                    <span
-                      className={`hidden xl:inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${
+                  {group.label}
+                </div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.key}
+                      href={item.href}
+                      title={item.statusTitle ? `${item.label} · ${item.statusTitle}` : item.label}
+                      onClick={() => handleNavClick(item.href)}
+                      className={`relative flex items-center justify-center xl:justify-between gap-2.5 px-2.5 xl:px-3 py-2 rounded-xl text-xs font-bold transition ${
                         item.isActive
-                          ? "bg-[#FC4C02] text-white"
-                          : "bg-[var(--rgm-card-3)] text-[var(--rgm-text-muted)]"
+                          ? "bg-[var(--rgm-brand-tint)] text-[#FC4C02] border border-[#FC4C02]/35"
+                          : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] border border-transparent"
                       }`}
                     >
-                      {item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+                      {item.isActive && (
+                        <span className="hidden xl:block absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-[#FC4C02]" />
+                      )}
+                      <span className="flex items-center gap-2.5 min-w-0">
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="hidden xl:inline truncate">{item.label}</span>
+                      </span>
+                      {item.statusDot && (
+                        <span
+                          title={item.statusTitle}
+                          className={`hidden xl:inline-block w-2 h-2 rounded-full shrink-0 ${
+                            item.statusDot === "connected" ? "bg-emerald-500" : "bg-amber-500"
+                          }`}
+                        />
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
         </div>
 
-        {/* Bottom Watch Status & Dual-Theme Switcher */}
-        <div className="p-3 xl:p-3.5 space-y-2.5 border-t border-[var(--rgm-border)]">
-          <Link
-            href="/dashboard/profile?tab=device"
-            onClick={() => handleNavClick("/dashboard/profile?tab=device")}
-            title={watchStatusLabel}
-            className="flex items-center justify-center xl:justify-start gap-2.5 p-2.5 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 transition"
-          >
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                watchConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-              }`}
-            />
-            <div className="hidden xl:block min-w-0">
-              <div className="text-[11px] font-bold text-[var(--rgm-text)] leading-tight flex items-center gap-1">
-                <Watch className="w-3 h-3 text-[#FC4C02]" />
-                手表实时直连
-              </div>
-              <div
-                className={`text-[10px] font-semibold truncate mt-0.5 ${
-                  watchConnected ? "text-emerald-500" : "text-amber-500"
-                }`}
-              >
-                {watchStatusLabel}
-              </div>
-            </div>
-          </Link>
-
-          {/* Compact Toggle for lg (icon-only rail) */}
+        {/* Single Bottom Theme Switcher */}
+        <div className="p-3 xl:p-3.5 border-t border-[var(--rgm-border)]">
           <button
             type="button"
             onClick={handleToggleTheme}
             title={themeMode === "dark" ? "切换明亮模式" : "切换暗黑模式"}
-            className="xl:hidden w-full h-9 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] flex items-center justify-center text-[var(--rgm-text-2)] cursor-pointer"
+            className="w-full h-9 px-2.5 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 flex items-center justify-center xl:justify-start gap-2 text-xs font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition cursor-pointer"
           >
-            {themeMode === "dark" ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#FC4C02]" />}
+            {themeMode === "dark" ? (
+              <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+            ) : (
+              <Moon className="w-4 h-4 text-[#FC4C02] shrink-0" />
+            )}
+            <span className="hidden xl:inline truncate">
+              {themeMode === "dark" ? "切换明亮" : "切换暗黑"}
+            </span>
           </button>
-
-          {/* Full Dual-Theme Segmented Pill (暗黑 | 明亮) for xl */}
-          <div className="hidden xl:grid grid-cols-2 gap-1 p-1 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]">
-            <button
-              type="button"
-              onClick={() => {
-                if (themeMode !== "dark") handleToggleTheme();
-              }}
-              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                themeMode === "dark"
-                  ? "bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] shadow-sm"
-                  : "text-[var(--rgm-text-muted)] hover:text-[var(--rgm-text)]"
-              }`}
-            >
-              <Moon className="w-3 h-3" />
-              暗黑
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (themeMode !== "light") handleToggleTheme();
-              }}
-              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                themeMode === "light"
-                  ? "bg-[#FC4C02] text-white shadow-sm"
-                  : "text-[var(--rgm-text-muted)] hover:text-[var(--rgm-text)]"
-              }`}
-            >
-              <Sun className="w-3 h-3" />
-              明亮
-            </button>
-          </div>
         </div>
       </aside>
 
@@ -946,13 +1023,23 @@ export default function Navbar() {
             <span className="text-[var(--rgm-text)]">万跑助手</span>
           </Link>
 
-          {/* Desktop Dynamic Context Page Title & Subtitle */}
+          {/* Desktop Dynamic Context Breadcrumb & Subtitle */}
           <div className="hidden lg:block min-w-0">
-            <div className="text-sm font-black text-[var(--rgm-text)] truncate">{pageMeta.title}</div>
-            <div className="text-[11px] text-[var(--rgm-text-muted)] truncate">{pageMeta.subtitle}</div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-bold text-[var(--rgm-text-muted)] shrink-0">
+                {pageMeta.group}
+              </span>
+              <ChevronRight className="w-3 h-3 text-[var(--rgm-text-muted)] shrink-0" />
+              <div className="text-sm font-black text-[var(--rgm-text)] truncate">
+                {pageMeta.title}
+              </div>
+            </div>
+            <div className="text-[11px] text-[var(--rgm-text-muted)] truncate mt-0.5">
+              {pageMeta.subtitle}
+            </div>
           </div>
 
-          {/* Global Search (⌘K) + Utility Controls */}
+          {/* Global Search (⌘K) + Deduplicated Utility Controls */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
@@ -961,11 +1048,21 @@ export default function Navbar() {
             >
               <span className="flex items-center gap-2 truncate">
                 <Search className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">搜索跑者 / 课表 / 跑团</span>
+                <span className="truncate">搜索功能 / 跑者 / 跑团</span>
               </span>
               <kbd className="px-1.5 py-0.5 rounded bg-[var(--rgm-card-3)] text-[10px] font-bold shrink-0">
                 ⌘K
               </kbd>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openAiOperationAssistant()}
+              title="语音/文字操作向导：说出想做的事，直接带你过去 (⌘/)"
+              aria-label="操作向导"
+              className="w-9 h-9 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/45 text-[#FC4C02] flex items-center justify-center transition cursor-pointer shrink-0"
+            >
+              <Mic className="w-4 h-4" />
             </button>
 
             {user?.id && (
@@ -980,23 +1077,31 @@ export default function Navbar() {
               </button>
             )}
 
-            {/* Mobile Theme Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleTheme}
-              title={themeMode === "dark" ? "切换为明亮模式" : "切换为暗黑模式"}
-              className="flex lg:hidden items-center justify-center w-9 h-9 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] cursor-pointer"
-            >
-              {themeMode === "dark" ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#FC4C02]" />}
-            </button>
+            {!user && (
+              <button
+                type="button"
+                onClick={handleToggleTheme}
+                title={themeMode === "dark" ? "切换为明亮模式" : "切换为暗黑模式"}
+                className="flex lg:hidden items-center justify-center w-9 h-9 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] cursor-pointer"
+              >
+                {themeMode === "dark" ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#FC4C02]" />}
+              </button>
+            )}
 
             {notificationBellBlock}
 
             {user ? (
-              <div className="flex items-center gap-2 pl-1">
-                <Link
-                  href="/dashboard/profile"
-                  className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 transition"
+              <div className="relative pl-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !userMenuOpen;
+                    setUserMenuOpen(next);
+                    if (next) setNotifOpen(false);
+                  }}
+                  aria-expanded={userMenuOpen}
+                  title={displayName}
+                  className="flex items-center gap-2 px-2 py-1 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 transition cursor-pointer"
                 >
                   <span className="w-6 h-6 rounded-full bg-[#FC4C02] text-white text-[11px] font-black flex items-center justify-center shrink-0">
                     {String(displayName || "跑").slice(0, 1)}
@@ -1004,16 +1109,97 @@ export default function Navbar() {
                   <span className="hidden xl:inline text-xs font-bold text-[var(--rgm-text)] max-w-[100px] truncate">
                     {displayName}
                   </span>
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => supabase.auth.signOut()}
-                  title="退出登录"
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-xs font-semibold text-[var(--rgm-text-muted)] hover:text-rose-400 transition cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline">退出</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--rgm-text-muted)] shrink-0" />
                 </button>
+
+                {userMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setUserMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 top-11 w-56 bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-2xl shadow-2xl overflow-hidden z-50 py-1.5">
+                      <div className="px-3.5 py-2.5 border-b border-[var(--rgm-border)]">
+                        <div className="text-xs font-black text-[var(--rgm-text)] truncate">
+                          {displayName}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1 text-[10px] font-semibold text-[var(--rgm-text-muted)] truncate">
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              watchConnected ? "bg-emerald-500" : "bg-amber-500"
+                            }`}
+                          />
+                          <span className="truncate">{watchStatusLabel}</span>
+                        </div>
+                      </div>
+
+                      <div className="py-1">
+                        <Link
+                          href="/dashboard/profile"
+                          onClick={() => handleNavClick("/dashboard/profile")}
+                          className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] transition"
+                        >
+                          <User className="w-3.5 h-3.5 shrink-0" />
+                          我的档案
+                        </Link>
+                        <Link
+                          href="/dashboard/profile?tab=device"
+                          onClick={() => handleNavClick("/dashboard/profile?tab=device")}
+                          className="flex items-center justify-between gap-2 px-3.5 py-2 text-xs font-semibold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] transition"
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <Watch className="w-3.5 h-3.5 shrink-0" />
+                            手表绑定
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              watchConnected ? "text-emerald-500" : "text-amber-500"
+                            }`}
+                          >
+                            {watchConnected ? "已连接" : "未绑定"}
+                          </span>
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleToggleTheme();
+                            setUserMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] transition cursor-pointer text-left"
+                        >
+                          {themeMode === "dark" ? (
+                            <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          ) : (
+                            <Moon className="w-3.5 h-3.5 text-[#FC4C02] shrink-0" />
+                          )}
+                          {themeMode === "dark" ? "切换明亮" : "切换暗黑"}
+                        </button>
+                        <Link
+                          href="/dashboard/manual"
+                          onClick={() => handleNavClick("/dashboard/manual")}
+                          className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] transition"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                          帮助手册
+                        </Link>
+                      </div>
+
+                      <div className="border-t border-[var(--rgm-border)] mt-1 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            supabase.auth.signOut();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition cursor-pointer text-left"
+                        >
+                          <LogOut className="w-3.5 h-3.5 shrink-0" />
+                          退出登录
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <button
@@ -1028,18 +1214,17 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Mobile / Narrow Window 5-Tab Bar (W10.4 aligned with MiniApp) */}
+        {/* Mobile / Narrow Window 5-Tab Bar */}
         <nav className="flex lg:hidden items-center justify-around gap-1 px-3 pb-2.5 overflow-x-auto no-scrollbar border-t border-[var(--rgm-divider)] pt-2">
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
-            const isActive = item.matchPaths.includes(pathname || "");
             return (
               <Link
-                key={item.href}
+                key={item.key}
                 href={item.href}
                 onClick={() => handleNavClick(item.href)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-all ${
-                  isActive
+                  item.isActive
                     ? "bg-[#FC4C02] text-white shadow-sm"
                     : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)]"
                 }`}
@@ -1065,6 +1250,15 @@ export default function Navbar() {
       {user?.id && isDashboardRoute && (
         <CoachChatBox uid={user.id} hideFloatingOnXl={pathname === "/dashboard/coach"} />
       )}
+      <AiOperationAssistant
+        user={user}
+        isCoachOrOwner={isCoachOrOwner}
+        isSuperAdmin={isSuperAdmin}
+        hasManagedOrg={hasManagedOrg}
+        themeMode={themeMode}
+        onToggleTheme={handleToggleTheme}
+        onOpenAuth={() => setAuthOpen(true)}
+      />
     </>
   );
 }

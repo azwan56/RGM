@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import apiClient from "@/lib/apiClient";
 import { useUiFeedback } from "@/components/ui/UiFeedbackProvider";
 import {
@@ -43,11 +44,14 @@ export default function ClubPulsePanel({
   onClubJoined,
 }: ClubPulsePanelProps) {
   const { showToast } = useUiFeedback();
+  const router = useRouter();
+  const pathname = usePathname();
   const [pulseData, setPulseData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
   const [broadcastCollapsed, setBroadcastCollapsed] = useState(false);
   const [pulseCollapsed, setPulseCollapsed] = useState(defaultCollapsed);
+  const [selectedClubId, setSelectedClubId] = useState<string>("");
 
   // Composer modal (Leader/Coach broadcast)
   const [showComposer, setShowComposer] = useState(false);
@@ -57,15 +61,49 @@ export default function ClubPulsePanel({
   const [bAudience, setBAudience] = useState("all");
   const [bSending, setBSending] = useState(false);
 
-  // Weekly PK modal
+  // Weekly PK modal & homepage visibility toggle (default OFF)
+  const HOME_BUDDY_PK_STORAGE_KEY = "rgm_home_show_buddy_pk";
+  const [showHomeBuddyPk, setShowHomeBuddyPk] = useState(false);
   const [pkData, setPkData] = useState<any>(null);
   const [pkLoading, setPkLoading] = useState(false);
+
+  useEffect(() => {
+    const syncPref = () => {
+      try {
+        const raw = localStorage.getItem(HOME_BUDDY_PK_STORAGE_KEY);
+        setShowHomeBuddyPk(raw === "1" || raw === "true");
+      } catch {
+        setShowHomeBuddyPk(false);
+      }
+    };
+    syncPref();
+    window.addEventListener("storage", syncPref);
+    window.addEventListener("rgm-home-pk-pref-changed", syncPref);
+    return () => {
+      window.removeEventListener("storage", syncPref);
+      window.removeEventListener("rgm-home-pk-pref-changed", syncPref);
+    };
+  }, []);
+
+  function toggleHomeBuddyPk(nextVal?: boolean) {
+    const flag = typeof nextVal === "boolean" ? nextVal : !showHomeBuddyPk;
+    setShowHomeBuddyPk(flag);
+    try {
+      localStorage.setItem(HOME_BUDDY_PK_STORAGE_KEY, flag ? "1" : "0");
+      window.dispatchEvent(new Event("rgm-home-pk-pref-changed"));
+    } catch {}
+    showToast(flag ? "已开启首页搭子周 PK" : "已关闭首页搭子周 PK（保留寻搭子与选团展厅）", "info");
+  }
 
   const loadPulse = useCallback(async () => {
     if (!uid) return;
     try {
       const q = new URLSearchParams({ viewer_uid: uid, tab: activeTab, limit: "15" });
-      if (clubId) q.set("club_id", clubId);
+      if (selectedClubId) {
+        q.set("club_id", selectedClubId);
+      } else if (clubId) {
+        q.set("preferred_club_id", clubId);
+      }
       const res = await apiClient.get(`/api/community/home-pulse?${q.toString()}`);
       setPulseData(res.data);
     } catch {
@@ -73,7 +111,27 @@ export default function ClubPulsePanel({
     } finally {
       setLoading(false);
     }
-  }, [uid, clubId, activeTab]);
+  }, [uid, clubId, selectedClubId, activeTab]);
+
+  function handleEnterClubFeed(cid?: string) {
+    const targetCid = String(cid || pulseData?.club_id || clubId || "").trim();
+    if (targetCid) {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("rgm_active_club_id", targetCid);
+      }
+      router.push(`/dashboard/team?club_id=${encodeURIComponent(targetCid)}&tab=leaderboard`);
+    } else {
+      router.push("/dashboard/team");
+    }
+  }
+
+  function handleSwitchClub(cid: string) {
+    if (!cid || cid === pulseData?.club_id) return;
+    setSelectedClubId(cid);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("rgm_active_club_id", cid);
+    }
+  }
 
   useEffect(() => {
     loadPulse();
@@ -177,15 +235,26 @@ export default function ClubPulsePanel({
     }
   }
 
-  async function handleAcceptInvite(token: string) {
+  async function handleAcceptInvite(token: string, invitedClubId?: string) {
     try {
       const res = await apiClient.post(`/api/community/invites/${token}/respond`, {
         user_id: uid,
         action: "accept",
       });
-      showToast(`🎉 已免码兼入【${res.data?.club_name || "新跑团"}】${res.data?.preassigned_group ? ` (${res.data.preassigned_group})` : ""}`);
+      const targetClubId = res.data?.club_id || invitedClubId || "";
+      if (typeof window !== "undefined" && targetClubId) {
+        localStorage.setItem("rgm_active_club_id", targetClubId);
+      }
+      showToast(
+        `🎉 已免码兼入【${res.data?.club_name || "新跑团"}】${
+          res.data?.preassigned_group ? ` (${res.data.preassigned_group})` : ""
+        }，正在进入跑团...`
+      );
       onClubJoined?.();
       loadPulse();
+      if (pathname !== "/dashboard/team") {
+        router.push("/dashboard/team");
+      }
     } catch (e: any) {
       showToast("接受邀请失败：" + (e?.message || ""), "error");
     }
@@ -196,41 +265,150 @@ export default function ClubPulsePanel({
   const buddyRings: any[] = pulseData?.buddy_live_rings || [];
   const pkSummary = pulseData?.weekly_pk_summary;
   const pulseItems: any[] = pulseData?.pulse_items || [];
+  const topActiveClubs: any[] = [...(pulseData?.clubs || [])]
+    .sort((a: any, b: any) => {
+      const sa = Number(a?.today_checkin_count || 0) * 10 + Number(a?.recent_7d_runs || 0);
+      const sb = Number(b?.today_checkin_count || 0) * 10 + Number(b?.recent_7d_runs || 0);
+      if (sb !== sa) return sb - sa;
+      const td = Number(b?.today_checkin_count || 0) - Number(a?.today_checkin_count || 0);
+      if (td !== 0) return td;
+      const r7 = Number(b?.recent_7d_runs || 0) - Number(a?.recent_7d_runs || 0);
+      if (r7 !== 0) return r7;
+      return Number(b?.member_count || 0) - Number(a?.member_count || 0);
+    })
+    .slice(0, 3);
+
+  function isDefaultClubLogo(url?: string): boolean {
+    const s = String(url || "").trim().toLowerCase();
+    return !s || s.includes("rgm-logo.png") || s.includes("logo-square.png");
+  }
 
   return (
     <div className="space-y-4">
-      {/* 1) Pending Golden Targeted Invite Banner (Non-Exclusive Multi-Club Join) */}
-      {pendingInvites.length > 0 && (
-        <div className="rounded-2xl border border-amber-500/40 bg-[var(--rgm-amber-tint)] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-2.5 min-w-0">
-            <Sparkles className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <div className="text-xs font-black text-[var(--rgm-text)]">
-                ✨ 收到来自【{pendingInvites[0].club_name}】{pendingInvites[0].inviter_name} 的定向兼团特邀
-                {pendingInvites[0].preassigned_group ? `（预编入 ${pendingInvites[0].preassigned_group}）` : ""}
+      {/* 1) Synthesized Clickable Club Invitation Card (One-Click Join & Enter Club) */}
+      {pendingInvites.length > 0 && (() => {
+        const inv = pendingInvites[0];
+        const summary = inv.showcase_summary || inv;
+        const stats = summary.verified_stats || {};
+        const photos: any[] = summary.photos || [];
+        const landmarks: string[] = summary.home_landmarks || [];
+        const coaches: any[] = summary.coaching_team || [];
+        const coverUrl = summary.hero_cover_url || photos[0]?.photo_url || inv.club_logo || "";
+
+        return (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => handleAcceptInvite(inv.invite_token, inv.club_id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleAcceptInvite(inv.invite_token, inv.club_id);
+              }
+            }}
+            className="group rounded-2xl border-2 border-amber-500/50 bg-[var(--rgm-amber-tint)] hover:border-[#FC4C02] transition-all overflow-hidden cursor-pointer shadow-lg"
+          >
+            <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              {/* Left: Club Cover/Logo + Main Info + Photos Strip */}
+              <div className="flex flex-col sm:flex-row items-start gap-3.5 min-w-0 flex-1">
+                {coverUrl ? (
+                  <div className="w-full sm:w-28 h-24 rounded-xl overflow-hidden bg-[var(--rgm-card)] border border-amber-500/30 shrink-0 relative">
+                    <img src={coverUrl} alt={inv.club_name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-[10px] font-bold">
+                      📍 {inv.club_city || "同城"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-xl bg-[#FC4C02]/15 border border-[#FC4C02]/40 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-6 h-6 text-[#FC4C02]" />
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-full bg-[#FC4C02] text-white text-[10px] font-black">
+                      ✨ 跑团特邀卡 · 点击卡片直接入团
+                    </span>
+                    {inv.preassigned_group && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-black">
+                        预编入 {inv.preassigned_group}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-sm sm:text-base font-black text-[var(--rgm-text)] group-hover:text-[#FC4C02] transition">
+                    【{inv.club_name}】{inv.inviter_name} 诚邀您加入
+                  </div>
+
+                  <div className="text-xs text-[var(--rgm-text-2)] line-clamp-1">
+                    {summary.slogan || inv.reason_tag || "跑团之间无排他性，支持多团并行共享手表跑量"}
+                  </div>
+
+                  {/* Synthesized Club Core Metrics & Landmarks */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5 text-[11px]">
+                    <span className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] font-bold text-[var(--rgm-text)]">
+                      👥 {stats.member_count ?? 1} 位队员
+                    </span>
+                    {(stats.month_total_km ?? 0) > 0 && (
+                      <span className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] font-bold text-[var(--rgm-text)]">
+                        🏃 本月 {stats.month_total_km} km
+                      </span>
+                    )}
+                    {(stats.sub330_count ?? 0) > 0 && (
+                      <span className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] font-bold text-emerald-500">
+                        ⌚ 破330 {stats.sub330_count} 人
+                      </span>
+                    )}
+                    {landmarks.slice(0, 2).map((lm: string) => (
+                      <span key={lm} className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)]">
+                        📍 {lm}
+                      </span>
+                    ))}
+                    {summary.schedule_summary && (
+                      <span className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] truncate max-w-[200px]">
+                        🗓️ {summary.schedule_summary}
+                      </span>
+                    )}
+                    {coaches.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-lg bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-amber-500 font-bold">
+                        🎖️ 教练 {coaches[0].display_name}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="text-[11px] text-[var(--rgm-text-2)] mt-0.5">
-                {pendingInvites[0].reason_tag || "跑团之间无排他性，支持多团并行共享手表跑量"}
+
+              {/* Right: Photo Thumbnails + Direct Join CTA */}
+              <div className="flex items-center justify-between lg:justify-end gap-3 shrink-0">
+                {photos.length > 1 && (
+                  <div className="hidden sm:flex items-center -space-x-2">
+                    {photos.slice(0, 3).map((p: any, idx: number) => (
+                      <img
+                        key={p.id || idx}
+                        src={p.photo_url}
+                        alt={p.caption || "跑团实拍"}
+                        className="w-11 h-11 rounded-xl object-cover border-2 border-[var(--rgm-card)] shadow"
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/join/${inv.invite_token}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-3 py-2 rounded-xl border border-amber-500/40 bg-[var(--rgm-card)] text-xs font-bold text-[var(--rgm-text)] hover:opacity-80"
+                  >
+                    详情展厅
+                  </Link>
+                  <span className="px-4 py-2 rounded-xl bg-[#FC4C02] text-white text-xs font-black group-hover:opacity-90 shadow-md">
+                    点击直接进跑团 ›
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Link
-              href={`/join/${pendingInvites[0].invite_token}`}
-              className="px-3 py-1.5 rounded-xl border border-amber-500/40 text-xs font-bold text-[var(--rgm-text)] hover:opacity-80"
-            >
-              先看展厅对比
-            </Link>
-            <button
-              type="button"
-              onClick={() => handleAcceptInvite(pendingInvites[0].invite_token)}
-              className="px-3.5 py-1.5 rounded-xl bg-[#FC4C02] text-white text-xs font-black hover:opacity-90 cursor-pointer"
-            >
-              免码一键兼入 ›
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 2) Club Pinned Broadcast Top Strip */}
       {(pinned || isLeader) && (
@@ -300,31 +478,80 @@ export default function ClubPulsePanel({
         </div>
       )}
 
-      {/* 3) Social Pulse & Buddy Live Rings Bento Card (Collapsible, default collapsed) */}
+      {/* 3) Minimalist Top-3 Active Clubs Avatar Strip & Collapsible Pulse (default collapsed) */}
       <div className={`rgm-bento-card transition-all ${pulseCollapsed ? "px-5 py-3.5" : "p-5 space-y-4"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <button
-            type="button"
-            onClick={() => setPulseCollapsed((prev) => !prev)}
-            className="flex items-center gap-2.5 text-left min-w-0 flex-1 cursor-pointer group"
-          >
-            <span className="text-base shrink-0">⚡</span>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-black text-[var(--rgm-text)] group-hover:text-[#FC4C02] transition">
-                  同频搭子与跑团社交脉搏
-                </h3>
-                {!loading && (buddyRings.length > 0 || pulseItems.length > 0) && (
-                  <span className="px-2 py-0.5 rounded-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[10px] font-bold text-[var(--rgm-text-2)] tabular-nums">
-                    {buddyRings.length} 位同频跑友 · {pulseItems.length} 条动态
-                  </span>
-                )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {pulseData?.has_club && topActiveClubs.length > 0 ? (
+            <div className="flex items-center gap-4 flex-wrap min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => setPulseCollapsed((prev) => !prev)}
+                className="text-xs font-extrabold text-[var(--rgm-text-2)] hover:text-[#FC4C02] transition cursor-pointer shrink-0"
+              >
+                活跃跑团
+              </button>
+              <div className="flex items-center gap-4 sm:gap-5 flex-wrap">
+                {topActiveClubs.map((c: any) => {
+                  const todayCnt = Number(c?.today_checkin_count || 0);
+                  const isDefault = isDefaultClubLogo(c?.logo_url);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleEnterClubFeed(c.id)}
+                      title={`${c.name} · 今日 ${todayCnt} 人打卡`}
+                      className="flex flex-col items-center gap-1 group cursor-pointer shrink-0"
+                    >
+                      <div
+                        className={`relative w-11 h-11 rounded-xl p-0.5 bg-[var(--rgm-card-2)] border-2 transition group-hover:border-[#FC4C02] ${
+                          todayCnt > 0 ? "border-[#FC4C02]" : "border-[var(--rgm-border)]"
+                        }`}
+                      >
+                        <img
+                          src={c.logo_url || "/icon.png"}
+                          alt={c.name}
+                          className="w-full h-full rounded-[10px] object-cover"
+                        />
+                        {todayCnt > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FC4C02] text-white text-[10px] font-black leading-[18px] text-center border-2 border-[var(--rgm-card)] tabular-nums">
+                            {todayCnt}
+                          </span>
+                        )}
+                        {isDefault && (
+                          <span className="absolute inset-x-0.5 bottom-0.5 px-1 py-[1px] rounded-b-[9px] bg-black/70 text-[8px] font-bold text-white truncate text-center">
+                            {c.name}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-[10px] tabular-nums whitespace-nowrap ${
+                          todayCnt > 0 ? "font-extrabold text-emerald-500" : "font-semibold text-[var(--rgm-text-3)]"
+                        }`}
+                      >
+                        今日 {todayCnt} 人打卡
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-[11px] text-[var(--rgm-text-2)] truncate">
-                {pkSummary?.summary_text || "关注同频跑友 · 互关解锁每周跑量 PK"}
-              </p>
             </div>
-          </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPulseCollapsed((prev) => !prev)}
+              className="flex items-center gap-2.5 text-left min-w-0 flex-1 cursor-pointer group"
+            >
+              <span className="text-base shrink-0">🏆</span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-[var(--rgm-text)] group-hover:text-[#FC4C02] transition truncate">
+                  活跃跑团与同频搭子
+                </h3>
+                <p className="text-[11px] text-[var(--rgm-text-2)] truncate">
+                  {(showHomeBuddyPk && pkSummary?.summary_text) || "加入跑团后展示最活跃跑团头像与今日打卡"}
+                </p>
+              </div>
+            </button>
+          )}
 
           <div className="flex items-center gap-2 flex-wrap shrink-0">
             <Link
@@ -332,14 +559,14 @@ export default function ClubPulsePanel({
               className="px-3 py-1.5 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/30 text-xs font-bold text-[#FC4C02] flex items-center gap-1 hover:opacity-90 whitespace-nowrap"
             >
               <Compass className="w-3.5 h-3.5" />
-              六维寻搭子
+              寻搭子
             </Link>
             <Link
               href="/dashboard/plaza"
               className="px-3 py-1.5 rounded-xl border border-[var(--rgm-border)] bg-[var(--rgm-card-2)] text-xs font-bold text-[var(--rgm-text)] flex items-center gap-1 hover:border-[#FC4C02]/40 whitespace-nowrap"
             >
               <Award className="w-3.5 h-3.5 text-amber-500" />
-              选团与名帅展厅
+              选团展厅
             </Link>
             <button
               type="button"
@@ -364,8 +591,37 @@ export default function ClubPulsePanel({
 
         {!pulseCollapsed && (
           <>
-            {/* Buddy Live Rings Row */}
-        {buddyRings.length > 0 && (
+            {/* Multi-Club Quick Switcher (sorted by most frequently followed) */}
+            {(pulseData?.clubs || []).length > 1 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <span className="text-[11px] font-bold text-[var(--rgm-text-muted)] shrink-0">常看跑团：</span>
+                {(pulseData.clubs || []).map((c: any) => {
+                  const isAct = c.id === pulseData?.club_id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleSwitchClub(c.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold shrink-0 transition cursor-pointer flex items-center gap-1.5 ${
+                        isAct
+                          ? "bg-[#FC4C02] text-white"
+                          : "bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
+                      }`}
+                    >
+                      <span>{c.name}</span>
+                      {c.today_checkin_count > 0 && (
+                        <span className={`text-[10px] px-1.5 rounded-full ${isAct ? "bg-white/20 text-white" : "bg-[var(--rgm-green-tint)] text-emerald-500"}`}>
+                          {c.today_checkin_count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Buddy Live Rings Row (Weekly PK — default OFF, toggleable) */}
+        {showHomeBuddyPk && buddyRings.length > 0 && (
           <div className="flex items-center gap-3 overflow-x-auto pb-1">
             {buddyRings.map((b: any) => {
               const ringCls = b.ran_today
@@ -403,8 +659,9 @@ export default function ClubPulsePanel({
           </div>
         )}
 
-        {/* 4-in-1 Pulse Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-[var(--rgm-divider)]">
+        {/* 4-in-1 Pulse Tabs + Buddy PK Toggle */}
+        <div className="flex items-center justify-between gap-2 pb-1 border-b border-[var(--rgm-divider)]">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
           {[
             { key: "all", label: "🔥 全部脉搏" },
             { key: "broadcasts", label: "📢 广播/活动" },
@@ -424,6 +681,20 @@ export default function ClubPulsePanel({
               {t.label}
             </button>
           ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => toggleHomeBuddyPk()}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 transition cursor-pointer border flex items-center gap-1 ${
+              showHomeBuddyPk
+                ? "bg-[var(--rgm-brand-tint)] border-[#FC4C02]/40 text-[#FC4C02]"
+                : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
+            }`}
+            title="开启或关闭首页搭子周 PK 展示（默认关闭）"
+          >
+            <Trophy className="w-3 h-3" />
+            <span>搭子PK：{showHomeBuddyPk ? "开" : "关"}</span>
+          </button>
         </div>
 
         {/* Pulse Feed Items */}
@@ -520,11 +791,24 @@ export default function ClubPulsePanel({
                 return (
                   <div
                     key={item.item_id}
-                    className="p-3.5 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] space-y-2"
+                    onClick={() => handleEnterClubFeed(a.club_id || pulseData?.club_id)}
+                    className="p-3.5 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/45 transition cursor-pointer space-y-2"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
+                        {a.avatar_url ? (
+                          <img src={a.avatar_url} alt={a.display_name} className="w-6 h-6 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-[var(--rgm-card)] border border-[var(--rgm-border)] flex items-center justify-center text-[10px] font-black text-[var(--rgm-text)] shrink-0">
+                            {String(a.display_name || "跑").slice(0, 1)}
+                          </div>
+                        )}
                         <span className="text-xs font-black text-[var(--rgm-text)] truncate">{a.display_name}</span>
+                        {a.has_coach_critique && (
+                          <span className="px-1.5 py-0.5 rounded bg-[var(--rgm-green-tint)] text-emerald-500 text-[10px] font-bold shrink-0">
+                            已点评
+                          </span>
+                        )}
                         <span className="text-[11px] text-[var(--rgm-text-2)] truncate">{a.name}</span>
                       </div>
                       <div className="text-xs font-black tabular-nums text-[#FC4C02] shrink-0">
@@ -534,25 +818,31 @@ export default function ClubPulsePanel({
                     {a.ai_journal && !a.is_critique_hidden && (
                       <p className="text-[11px] text-[var(--rgm-text-2)] line-clamp-2">{a.ai_journal}</p>
                     )}
-                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                      {CHEER_PILLS.map((cp) => {
-                        const cnt = cheers.counts_by_key?.[cp.key] || 0;
-                        const active = (cheers.viewer_cheered_keys || []).includes(cp.key);
-                        return (
-                          <button
-                            key={cp.key}
-                            type="button"
-                            onClick={() => handleMicroCheer("activity", a.id, a.user_id, cp.key)}
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
-                              active
-                                ? "bg-[#FC4C02] text-white"
-                                : "bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
-                            }`}
-                          >
-                            {cp.label} {cnt > 0 ? cnt : ""}
-                          </button>
-                        );
-                      })}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {CHEER_PILLS.map((cp) => {
+                          const cnt = cheers.counts_by_key?.[cp.key] || 0;
+                          const active = (cheers.viewer_cheered_keys || []).includes(cp.key);
+                          return (
+                            <button
+                              key={cp.key}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMicroCheer("activity", a.id, a.user_id, cp.key);
+                              }}
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                                active
+                                  ? "bg-[#FC4C02] text-white"
+                                  : "bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
+                              }`}
+                            >
+                              {cp.label} {cnt > 0 ? cnt : ""}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] font-bold text-[#FC4C02]">进团浏览详情 ›</span>
                     </div>
                   </div>
                 );

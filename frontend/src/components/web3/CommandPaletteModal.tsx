@@ -12,6 +12,7 @@ import {
   CornerDownLeft,
   Crown,
   Flame,
+  Mic,
   Moon,
   Search,
   Shield,
@@ -56,9 +57,14 @@ const GROUP_LABELS: Record<CommandPaletteItem["group"], string> = {
   actions: "全局快捷指令 · Quick Actions",
 };
 
-export function dispatchRgmNavIntent(href: string) {
+export function dispatchRgmNavIntent(
+  href: string,
+  perspective?: "runner" | "leader" | "admin"
+) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent("rgm-nav-intent", { detail: { href } }));
+  window.dispatchEvent(
+    new CustomEvent("rgm-nav-intent", { detail: { href, perspective } })
+  );
 }
 
 export default function CommandPaletteModal({
@@ -141,7 +147,7 @@ export default function CommandPaletteModal({
         id: "runner-discover",
         group: "runner",
         label: "六维同频寻搭子",
-        desc: "5岁年龄段 · VDOT同频±2 · 30日跑量 · 公园地标 · 互关周PK",
+        desc: "年龄组别 · VDOT同频±2 · 30日跑量 · 公园地标 · 互关周PK",
         href: "/dashboard/discover",
         keywords: "搭子 找跑友 同频 搜索 关注 pk 公园 地标",
         badge: "W11.3",
@@ -226,7 +232,7 @@ export default function CommandPaletteModal({
           group: "leader",
           label: "教练全队体能信号灯罗盘 & 选兔雷达",
           desc: "红黄绿灰风险筛查 · TSB过载置顶 · 选兔稳健度雷达 · 批量派课",
-          href: "/dashboard/team-coach?tab=coach",
+          href: "/dashboard/team?tab=coach",
           keywords: "教练 信号灯 罗盘 tsb 选兔 雷达 排课",
           badge: "W4.1",
           icon: ClipboardCheck,
@@ -236,7 +242,7 @@ export default function CommandPaletteModal({
           group: "leader",
           label: "教练 5 秒连续批阅三栏舱",
           desc: "异常置顶队列 · 心率配速与生理对照 · 快捷词条连发 ⏎ 自动切下一位",
-          href: "/dashboard/team-coach?mode=batch-critique",
+          href: "/dashboard/team?tab=coach&mode=batch-critique",
           keywords: "批阅 点评 连续 5秒 教练 三栏",
           badge: "W4.2",
           icon: Sparkles,
@@ -445,11 +451,60 @@ export default function CommandPaletteModal({
           </button>
         </div>
 
+        {/* AI Operation Assistant Bridge */}
+        <button
+          type="button"
+          onClick={() => {
+            const q = query.trim();
+            onClose();
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("rgm-open-ops-assistant", {
+                  detail: { query: q },
+                })
+              );
+            }
+          }}
+          className="mx-3 mt-2.5 px-3 py-2 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/35 hover:border-[#FC4C02] flex items-center justify-between gap-2 text-left transition cursor-pointer"
+        >
+          <span className="flex items-center gap-2 text-xs font-bold text-[#FC4C02]">
+            <Mic className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {query.trim()
+                ? `用 AI 操作助手按「${query.trim()}」直达流程入口`
+                : "不知道功能在哪？用语音或自然语言让 AI 操作助手直接带你去"}
+            </span>
+          </span>
+          <span className="text-[11px] font-black text-[#FC4C02] shrink-0">
+            ⌘/ 打开 ›
+          </span>
+        </button>
+
         {/* Grouped Command Results */}
         <div className="overflow-y-auto p-2.5 space-y-3">
           {filtered.length === 0 ? (
-            <div className="py-10 text-center text-xs text-[var(--rgm-text-muted)]">
-              未找到匹配的页面或指令，试试“课表”、“批阅”、“选兔”、“隐私”或“亮色”
+            <div className="py-10 text-center space-y-3">
+              <div className="text-xs text-[var(--rgm-text-muted)]">
+                未找到匹配的页面或指令，试试“课表”、“批阅”、“选兔”、“隐私”或“亮色”
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const q = query.trim();
+                  onClose();
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                      new CustomEvent("rgm-open-ops-assistant", {
+                        detail: { query: q },
+                      })
+                    );
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#FC4C02] hover:bg-orange-600 text-white text-xs font-bold transition cursor-pointer"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                问 AI 操作助手「{query.trim() || "帮我找入口"}」
+              </button>
             </div>
           ) : (
             grouped.map(([groupKey, groupItems]) => (

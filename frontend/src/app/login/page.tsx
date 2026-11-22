@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import ComplianceFooter from "@/components/ComplianceFooter";
 import AuthCockpitPanel from "@/components/web3/AuthCockpitPanel";
 import { supabase } from "@/lib/supabase";
 import { ShieldCheck, Sparkles, UserPlus, Watch } from "lucide-react";
@@ -118,6 +119,7 @@ export default function LoginPage() {
           </div>
         </div>
       </main>
+      <ComplianceFooter />
     </div>
   );
 }

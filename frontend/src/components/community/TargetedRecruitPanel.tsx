@@ -32,6 +32,7 @@ export default function TargetedRecruitPanel({
   const [landmark, setLandmark] = useState("");
 
   const [candidates, setCandidates] = useState<any[]>([]);
+  const [emptyReason, setEmptyReason] = useState("");
   const [selectedUids, setSelectedUids] = useState<string[]>([]);
   const [funnel, setFunnel] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -59,9 +60,12 @@ export default function TargetedRecruitPanel({
         apiClient.get(`/api/community/clubs/${encodeURIComponent(clubId)}/recruit-funnel?operator_uid=${encodeURIComponent(operatorUid)}`),
       ]);
       setCandidates(cRes.data?.candidates || []);
+      setEmptyReason(cRes.data?.empty_reason || "");
       setFunnel(fRes.data);
-    } catch {
-      // Quiet if non-leader
+    } catch (e: any) {
+      setCandidates([]);
+      const detail = e?.response?.data?.detail || e?.message || "";
+      setEmptyReason(detail ? `加载候选人失败：${detail}` : "加载候选人失败，请稍后重试");
     } finally {
       setLoading(false);
     }
@@ -212,7 +216,7 @@ export default function TargetedRecruitPanel({
         <div className="py-6 text-center text-xs text-[var(--rgm-text-muted)]">正在检索大群与同城可招募跑友...</div>
       ) : candidates.length === 0 ? (
         <div className="p-6 rounded-2xl bg-[var(--rgm-card-2)] text-center text-xs text-[var(--rgm-text-muted)]">
-          当前筛选条件下暂无可邀约候选人（30天内已发或90天内婉拒会自动进入冷静期保护）
+          {emptyReason || "当前筛选条件下暂无可邀约候选人（30天内已发或90天内婉拒会自动进入冷静期保护）"}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">

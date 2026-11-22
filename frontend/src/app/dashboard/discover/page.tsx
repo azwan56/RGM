@@ -26,10 +26,10 @@ export default function DiscoverBuddiesPage() {
   return (
     <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)] rgm-web3-page">
       <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="rgm-page-container py-6">
         {!ready ? (
           <div className="rgm-bento-card p-10 text-center text-xs text-[var(--rgm-text-muted)]">
-            正在加载六维同频寻搭子...
+            正在加载同频寻搭子...
           </div>
         ) : (
           <BuddyDiscoveryView uid={uid} />

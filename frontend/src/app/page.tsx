@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import Navbar from "@/components/Navbar";
+import ComplianceFooter from "@/components/ComplianceFooter";
 import AuthCockpitPanel from "@/components/web3/AuthCockpitPanel";
 import {
   Activity,
@@ -193,7 +194,7 @@ export default function Home() {
                   </Link>
 
                   <Link
-                    href="/dashboard/team-coach"
+                    href="/dashboard/team?tab=coach"
                     className="flex items-center justify-between p-4 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-sky-500/45 text-[var(--rgm-text)] transition"
                   >
                     <div className="flex items-center gap-3">
@@ -230,6 +231,7 @@ export default function Home() {
           </div>
         </div>
       </main>
+      <ComplianceFooter />
     </div>
   );
 }

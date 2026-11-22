@@ -265,15 +265,20 @@ html.theme-light :not(.fixed)[class*="bg-black/90"],
 html.theme-light [class*="from-purple-900/"],
 html.theme-light [class*="from-purple-950/"],
 html.theme-light [class*="from-purple-500/"],
+html.theme-light [class*="from-[#1c1c22]"],
 html.theme-light [class*="via-[#1e1b2e]"],
 html.theme-light [class*="bg-purple-950/"],
 html.theme-light [class*="from-emerald-950/"],
+html.theme-light [class*="to-teal-950/"],
+html.theme-light [class*="to-indigo-950/"],
 html.theme-light [class*="bg-emerald-950/"],
 html.theme-light [class*="bg-emerald-500/5"],
 html.theme-light [class*="bg-emerald-500/10"],
 html.theme-light [class*="bg-sky-500/[0.06]"],
 html.theme-light [class*="bg-amber-500/[0.06]"],
-html.theme-light [class*="bg-amber-500/10"] {
+html.theme-light [class*="bg-amber-500/10"],
+html.theme-light [class*="bg-zinc-400/10"],
+html.theme-light [class*="bg-slate-400/10"] {
   background-image: none !important;
   background-color: #f8fafc !important;
   border-color: #e2e8f0 !important;
@@ -443,10 +448,18 @@ html.theme-light [class~="bg-[#0A84FF]"].text-white,
 html.theme-light [class~="bg-[#0A84FF]"] .text-white,
 html.theme-light [class~="from-[#0A84FF]"].text-white,
 html.theme-light [class~="from-[#0A84FF]"] .text-white,
+html.theme-light [class~="bg-[#ff6426]"].text-white,
+html.theme-light [class~="bg-[#ff6426]"] .text-white,
+html.theme-light [class~="bg-[#ff5a14]"].text-white,
+html.theme-light [class~="bg-[#ff5a14]"] .text-white,
 html.theme-light .bg-orange-500.text-white,
+html.theme-light .bg-orange-500 .text-white,
 html.theme-light .bg-orange-600.text-white,
+html.theme-light .bg-orange-600 .text-white,
 html.theme-light .bg-amber-600.text-white,
+html.theme-light .bg-amber-600 .text-white,
 html.theme-light .bg-amber-700.text-white,
+html.theme-light .bg-amber-700 .text-white,
 html.theme-light .bg-emerald-600.text-white,
 html.theme-light .bg-emerald-600 .text-white,
 html.theme-light .bg-rose-500.text-white,
@@ -561,6 +574,16 @@ html.theme-light [class*="text-red-"],
 html.theme-light [class*="text-rose-500"],
 html.theme-light [class*="text-rose-600"] {
   color: #dc2626 !important;
+}
+
+html.theme-light select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+html.theme-light input::placeholder,
+html.theme-light textarea::placeholder {
+  color: #94a3b8 !important;
 }
 
 /* 7. Recharts 图表网格与悬浮框适配 */
@@ -848,6 +871,22 @@ html.theme-light .rgm-org-tile-tag.is-ok {
 @media (min-width: 1280px) {
   .rgm-web3-page {
     padding-left: 224px;
+  }
+}
+
+.rgm-page-container {
+  width: 100%;
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .rgm-page-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
   }
 }
 

@@ -48,6 +48,7 @@ import {
 export default function AdminPage() {
   const [adminToken, setAdminToken] = useState<string | null>(null);
   const [adminInfo, setAdminInfo] = useState<any>(null);
+  const [pendingAdminOpen, setPendingAdminOpen] = useState<string | null>(null);
 
   // Tab state: 'orgs' (大群体架构) | 'clubs' (分跑团) | 'unaffiliated' (未入团自由跑友) | 'support' (用户问题反馈工单) | 'analytics' (用户体验与行为分析)
   const [activeTab, setActiveTab] = useState<"orgs" | "clubs" | "unaffiliated" | "support" | "analytics">("orgs");
@@ -422,6 +423,7 @@ export default function AdminPage() {
         : window.location.search;
       const sp = new URLSearchParams(searchStr);
       const qTab = sp.get("tab");
+      const qOpen = sp.get("open");
       if (
         qTab === "orgs" ||
         qTab === "clubs" ||
@@ -430,6 +432,9 @@ export default function AdminPage() {
         qTab === "analytics"
       ) {
         setActiveTab(qTab);
+      }
+      if (qOpen === "create-org" || qOpen === "create-club") {
+        setPendingAdminOpen(qOpen);
       }
     };
     syncAdminTab();
@@ -448,6 +453,19 @@ export default function AdminPage() {
       window.removeEventListener("rgm-nav-intent", onNavIntent as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    if (!pendingAdminOpen || !adminToken) return;
+    const act = pendingAdminOpen;
+    setPendingAdminOpen(null);
+    if (act === "create-org") {
+      setActiveTab("orgs");
+      openCreateOrgModal();
+    } else if (act === "create-club") {
+      setActiveTab("clubs");
+      openCreateModal();
+    }
+  }, [pendingAdminOpen, adminToken]);
 
   // Club Modals Opener
   function openCreateModal() {
@@ -893,7 +911,7 @@ export default function AdminPage() {
     <div className="min-h-screen rgm-web3-page bg-[var(--rgm-bg)] text-[var(--rgm-text)] flex flex-col font-sans">
       <Navbar />
 
-      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 rgm-page-container py-6">
         {/* Header Banner */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-900 border border-red-500/20 p-6 rounded-3xl backdrop-blur-md shadow-2xl">
           <div className="flex items-center gap-4">
@@ -1734,7 +1752,7 @@ export default function AdminPage() {
                             <img
                               src={
                                 m.avatar_url ||
-                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                                "/defaults/default-avatar.svg"
                               }
                               alt={m.display_name || "跑友"}
                               className="w-11 h-11 rounded-full object-cover border border-white/20 shrink-0"
@@ -3675,7 +3693,7 @@ export default function AdminPage() {
                           <td className="p-3.5">
                             <div className="flex items-center gap-2.5">
                               <img
-                                src={m.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                                src={m.avatar_url || "/defaults/default-avatar.svg"}
                                 alt="Avatar"
                                 className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
                               />

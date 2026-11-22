@@ -10,7 +10,7 @@ interface BuddyDiscoveryViewProps {
   uid: string;
 }
 
-const AGE_BRACKETS = ["", "U30", "30-34", "35-39", "40-44", "45-49", "50+"];
+const AGE_BRACKETS = ["", "青年组", "中坚组", "壮年组", "大师组"];
 
 export default function BuddyDiscoveryView({ uid }: BuddyDiscoveryViewProps) {
   const { showToast } = useUiFeedback();
@@ -95,7 +95,7 @@ export default function BuddyDiscoveryView({ uid }: BuddyDiscoveryViewProps) {
               🤝 六维同频寻搭子 & 隐私脱敏互关
             </h1>
             <p className="text-xs text-[var(--rgm-text-2)] mt-1">
-              严格遵循 5 岁年龄段与公共常跑地标脱敏规范，跑者在「档案与隐私设定」中可随时自主开关检索权限
+              严格遵循年龄组别（青年组/中坚组/壮年组/大师组）与公共常跑地标脱敏规范，跑者在「档案与隐私设定」中可随时自主开关检索权限
             </p>
           </div>
           <Link
@@ -130,7 +130,7 @@ export default function BuddyDiscoveryView({ uid }: BuddyDiscoveryViewProps) {
         {/* 6D Filters */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
           <div>
-            <label className="text-[11px] font-bold text-[var(--rgm-text-2)] block mb-1">1. 年龄组</label>
+            <label className="text-[11px] font-bold text-[var(--rgm-text-2)] block mb-1">1. 年龄组别</label>
             <select
               value={ageGroup}
               onChange={(e) => setAgeGroup(e.target.value)}
@@ -138,7 +138,7 @@ export default function BuddyDiscoveryView({ uid }: BuddyDiscoveryViewProps) {
             >
               {AGE_BRACKETS.map((b) => (
                 <option key={b || "all"} value={b}>
-                  {b || "不限年龄组"}
+                  {b || "不限组别"}
                 </option>
               ))}
             </select>

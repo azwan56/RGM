@@ -25,6 +25,123 @@ const CATEGORY_MAP: Record<string, string> = {
   team_event: "补给团建",
 };
 
+function isOrgClub(club: any): boolean {
+  return Boolean(club?.org_id || club?.is_org_club || String(club?.org_name || "").trim());
+}
+
+function formatOrgBadge(club: any): string {
+  const orgName = String(club?.org_name || "").trim();
+  if (isOrgClub(club)) {
+    if (!orgName) return "🏛️ 大群分团";
+    return orgName.endsWith("大群") ? `🏛️ ${orgName}` : `🏛️ ${orgName}大群`;
+  }
+  return "自由团";
+}
+
+function getClubStatusMeta(club: any): { text: string; cls: string; disabled: boolean } {
+  const st = String(club?.status || "active").toLowerCase();
+  if (st === "locked") {
+    return { text: "🔒 已锁定", cls: "bg-rose-500/15 text-rose-400 border border-rose-500/30", disabled: true };
+  }
+  if (st === "paused") {
+    return { text: "⏸️ 已暂停", cls: "bg-zinc-500/15 text-zinc-400 border border-zinc-500/30", disabled: true };
+  }
+  if (String(club?.join_mode || "free").toLowerCase() === "invite") {
+    return { text: "🔑 需邀请码", cls: "bg-[var(--rgm-amber-tint)] text-amber-500 border border-amber-500/30", disabled: false };
+  }
+  return { text: "🟢 自由入团", cls: "bg-[var(--rgm-green-tint)] text-emerald-500 border border-emerald-500/30", disabled: false };
+}
+
+function ClubScopeStatusBadges({ club, isMember }: { club: any; isMember?: boolean }) {
+  const org = isOrgClub(club);
+  const st = getClubStatusMeta(club);
+  return (
+    <>
+      <span
+        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          org
+            ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+            : "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+        }`}
+      >
+        {formatOrgBadge(club)}
+      </span>
+      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${st.cls}`}>{st.text}</span>
+      {isMember && (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--rgm-green-tint)] text-emerald-500 border border-emerald-500/30">
+          ✓ 已加入
+        </span>
+      )}
+    </>
+  );
+}
+
+function InviteCodeJoinModal({
+  club,
+  code,
+  setCode,
+  submitting,
+  onClose,
+  onSubmit,
+}: {
+  club: any;
+  code: string;
+  setCode: (v: string) => void;
+  submitting: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  if (!club) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl bg-[var(--rgm-card)] border border-[var(--rgm-border)] p-5 space-y-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-black text-[var(--rgm-text)]">加入【{club.name}】</h3>
+          <button type="button" onClick={onClose} className="p-1 text-[var(--rgm-text-muted)] hover:text-[var(--rgm-text)] cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <ClubScopeStatusBadges club={club} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-[var(--rgm-text-2)] block">跑团专属邀请码</label>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="请输入团长分享的邀请码"
+            className="w-full px-3.5 py-2 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-xs text-[var(--rgm-text)] uppercase"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-2 rounded-xl border border-[var(--rgm-border)] text-xs font-bold text-[var(--rgm-text-2)] cursor-pointer"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={submitting || !code.trim()}
+            onClick={onSubmit}
+            className="px-4 py-2 rounded-xl bg-[#FC4C02] text-white text-xs font-black disabled:opacity-50 cursor-pointer"
+          >
+            {submitting ? "加入中..." : "确认加入"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ClubShowcaseDetail({
   clubId,
   viewerUid,
@@ -46,6 +163,9 @@ export function ClubShowcaseDetail({
   const [photoCat, setPhotoCat] = useState("all");
   const [lightboxUrl, setLightboxUrl] = useState("");
   const [studioOpen, setStudioOpen] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -66,23 +186,34 @@ export function ClubShowcaseDetail({
     loadDetail();
   }, [loadDetail]);
 
-  async function handleJoinClub() {
+  async function handleJoinClub(code?: string) {
     if (!viewerUid) {
-      showToast("请先登录后一键兼入跑团", "info");
+      showToast("请先登录后加入跑团", "info");
       return;
     }
+    if (data?.club?.join_mode === "invite" && !inviteToken && !code) {
+      setInviteCode("");
+      setInviteModalOpen(true);
+      return;
+    }
+    setJoining(true);
     try {
       await apiClient.post("/api/team/join-club", {
         user_id: viewerUid,
         club_id: clubId,
         privacy_consent: true,
         via_invite: Boolean(inviteToken),
+        invite_code: code ? code.trim().toUpperCase() : undefined,
       });
-      showToast(`🎉 已兼入【${data?.club?.name || "跑团"}】，手表里程多团共享！`);
+      setInviteModalOpen(false);
+      setInviteCode("");
+      showToast(`🎉 已加入【${data?.club?.name || "跑团"}】，手表里程多团共享！`);
       loadDetail();
       onJoinedClub?.();
     } catch (e: any) {
       showToast("加入提示：" + (e?.response?.data?.detail || e?.message || "需凭邀请码加入"), "error");
+    } finally {
+      setJoining(false);
     }
   }
 
@@ -119,11 +250,7 @@ export function ClubShowcaseDetail({
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl font-black text-[var(--rgm-text)]">{club.name}</h2>
-                {club.org_name && (
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[var(--rgm-amber-tint)] text-amber-500">
-                    🏛️ {club.org_name}
-                  </span>
-                )}
+                <ClubScopeStatusBadges club={club} isMember={viewer_membership?.status === "active"} />
               </div>
               <p className="text-sm font-bold text-[#FC4C02]">{showcase?.slogan || club.description}</p>
               <div className="flex items-center gap-2 flex-wrap pt-1 text-[11px] text-[var(--rgm-text-2)]">
@@ -155,16 +282,19 @@ export function ClubShowcaseDetail({
                 <span className="px-4 py-2 rounded-xl bg-[var(--rgm-green-tint)] text-emerald-500 text-xs font-black flex items-center gap-1">
                   <CheckCircle2 className="w-4 h-4" /> 已加入本团
                 </span>
+              ) : getClubStatusMeta(club).disabled ? (
+                <span className="px-3.5 py-2 rounded-xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-xs font-bold text-[var(--rgm-text-muted)]">
+                  {getClubStatusMeta(club).text} · 暂不开放加入
+                </span>
               ) : (
-                club.join_mode === "free" && (
-                  <button
-                    type="button"
-                    onClick={handleJoinClub}
-                    className="px-4 py-2 rounded-xl bg-[#FC4C02] text-white text-xs font-black cursor-pointer hover:opacity-90"
-                  >
-                    + 无排他一键兼团
-                  </button>
-                )
+                <button
+                  type="button"
+                  disabled={joining}
+                  onClick={() => handleJoinClub()}
+                  className="px-4 py-2 rounded-xl bg-[#FC4C02] text-white text-xs font-black cursor-pointer hover:opacity-90 disabled:opacity-50"
+                >
+                  {joining ? "加入中..." : club.join_mode === "invite" ? "🔑 凭邀请码加入跑团" : "+ 加入跑团（支持多团兼入）"}
+                </button>
               )}
             </div>
           </div>
@@ -311,6 +441,15 @@ export function ClubShowcaseDetail({
         operatorUid={viewerUid || ""}
         onSaved={loadDetail}
       />
+
+      <InviteCodeJoinModal
+        club={inviteModalOpen ? club : null}
+        code={inviteCode}
+        setCode={setInviteCode}
+        submitting={joining}
+        onClose={() => setInviteModalOpen(false)}
+        onSubmit={() => handleJoinClub(inviteCode)}
+      />
     </div>
   );
 }
@@ -330,6 +469,9 @@ export function CoachShowcaseDetail({
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [studioOpen, setStudioOpen] = useState(false);
+  const [joiningClubId, setJoiningClubId] = useState<string | null>(null);
+  const [inviteClub, setInviteClub] = useState<any>(null);
+  const [inviteCode, setInviteCode] = useState("");
 
   const loadCoach = useCallback(async () => {
     setLoading(true);
@@ -347,6 +489,39 @@ export function CoachShowcaseDetail({
   useEffect(() => {
     loadCoach();
   }, [loadCoach]);
+
+  async function handleJoinCoachedClub(cl: any, code?: string) {
+    if (!viewerUid) {
+      showToast("请先登录后加入跑团", "info");
+      return;
+    }
+    if (getClubStatusMeta(cl).disabled) {
+      showToast(`${getClubStatusMeta(cl).text}，暂不开放加入`, "info");
+      return;
+    }
+    if (cl.join_mode === "invite" && !code) {
+      setInviteClub(cl);
+      setInviteCode("");
+      return;
+    }
+    setJoiningClubId(cl.id);
+    try {
+      await apiClient.post("/api/team/join-club", {
+        user_id: viewerUid,
+        club_id: cl.id,
+        privacy_consent: true,
+        invite_code: code ? code.trim().toUpperCase() : undefined,
+      });
+      setInviteClub(null);
+      setInviteCode("");
+      showToast(`🎉 已加入【${cl.name}】！`);
+      loadCoach();
+    } catch (e: any) {
+      showToast("加入失败：" + (e?.response?.data?.detail || e?.message || ""), "error");
+    } finally {
+      setJoiningClubId(null);
+    }
+  }
 
   if (loading) {
     return <div className="rgm-bento-card p-10 text-center text-xs text-[var(--rgm-text-muted)]">加载团长/教练风采中...</div>;
@@ -457,19 +632,69 @@ export function CoachShowcaseDetail({
           </div>
         )}
 
-        {(ci?.coached_clubs || []).length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-[var(--rgm-text)]">🏛️ 执教跑团：</span>
-            {ci.coached_clubs.map((cl: any) => (
-              <button
-                key={cl.id}
-                type="button"
-                onClick={() => onSelectClub?.(cl.id)}
-                className="px-3 py-1.5 rounded-xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/30 text-xs font-bold text-[#FC4C02] cursor-pointer hover:opacity-90"
-              >
-                {cl.name} ({cl.member_cnt}人) ›
-              </button>
-            ))}
+      </div>
+
+      {/* Coached Clubs Roster (all currently coached clubs with 大群/自由团/状态 + quick join) */}
+      <div className="rgm-bento-card p-6 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-black text-[var(--rgm-text)]">
+            🏛️ 当前执教跑团 ({(ci?.coached_clubs || []).length})
+          </h3>
+          <span className="text-[11px] text-[var(--rgm-text-muted)]">点击卡片进入跑团展厅</span>
+        </div>
+        {(ci?.coached_clubs || []).length === 0 ? (
+          <div className="py-4 text-center text-xs text-[var(--rgm-text-muted)]">暂无当前可见执教跑团</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {ci.coached_clubs.map((cl: any) => {
+              const stMeta = getClubStatusMeta(cl);
+              return (
+                <div
+                  key={cl.id}
+                  onClick={() => onSelectClub?.(cl.id)}
+                  className="p-4 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/50 transition flex items-center justify-between gap-3 cursor-pointer"
+                >
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-black text-[var(--rgm-text)] truncate">{cl.name}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--rgm-brand-tint)] text-[#FC4C02]">
+                        {cl.role === "owner" ? "团长" : "教练"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <ClubScopeStatusBadges club={cl} isMember={Boolean(cl.is_member)} />
+                    </div>
+                    <div className="text-[11px] text-[var(--rgm-text-muted)]">
+                      📍 {cl.city || "同城"} · {cl.member_cnt ?? 0} 位队员
+                    </div>
+                  </div>
+                  <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {cl.is_member ? (
+                      <span className="px-3 py-1.5 rounded-xl bg-[var(--rgm-green-tint)] text-emerald-500 text-xs font-bold">
+                        ✓ 已加入
+                      </span>
+                    ) : stMeta.disabled ? (
+                      <span className="px-3 py-1.5 rounded-xl bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-xs font-bold text-[var(--rgm-text-muted)]">
+                        {stMeta.text}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={joiningClubId === cl.id}
+                        onClick={() => handleJoinCoachedClub(cl)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer disabled:opacity-50 ${
+                          cl.join_mode === "invite"
+                            ? "bg-[var(--rgm-amber-tint)] text-amber-500 border border-amber-500/30"
+                            : "bg-[#FC4C02] text-white"
+                        }`}
+                      >
+                        {joiningClubId === cl.id ? "加入中..." : cl.join_mode === "invite" ? "🔑 凭码加入" : "+ 加入跑团"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -501,6 +726,15 @@ export function CoachShowcaseDetail({
         operatorUid={viewerUid || ""}
         onSaved={loadCoach}
       />
+
+      <InviteCodeJoinModal
+        club={inviteClub}
+        code={inviteCode}
+        setCode={setInviteCode}
+        submitting={Boolean(joiningClubId)}
+        onClose={() => setInviteClub(null)}
+        onSubmit={() => inviteClub && handleJoinCoachedClub(inviteClub, inviteCode)}
+      />
     </div>
   );
 }
@@ -525,6 +759,9 @@ export function ShowcasePlazaView({
   const [clubs, setClubs] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [joiningClubId, setJoiningClubId] = useState<string | null>(null);
+  const [inviteClub, setInviteClub] = useState<any>(null);
+  const [inviteCode, setInviteCode] = useState("");
 
   const loadPlaza = useCallback(async () => {
     setLoading(true);
@@ -546,6 +783,40 @@ export function ShowcasePlazaView({
   useEffect(() => {
     loadPlaza();
   }, [loadPlaza]);
+
+  async function handleJoinPlazaClub(c: any, code?: string) {
+    if (!viewerUid) {
+      showToast("请先登录后加入跑团", "info");
+      return;
+    }
+    if (getClubStatusMeta(c).disabled) {
+      showToast(`${getClubStatusMeta(c).text}，暂不开放加入`, "info");
+      return;
+    }
+    if (c.join_mode === "invite" && !code) {
+      setInviteClub(c);
+      setInviteCode("");
+      return;
+    }
+    const cid = c.club_id || c.id;
+    setJoiningClubId(cid);
+    try {
+      await apiClient.post("/api/team/join-club", {
+        user_id: viewerUid,
+        club_id: cid,
+        privacy_consent: true,
+        invite_code: code ? code.trim().toUpperCase() : undefined,
+      });
+      setInviteClub(null);
+      setInviteCode("");
+      showToast(`🎉 已加入【${c.name}】！`);
+      loadPlaza();
+    } catch (e: any) {
+      showToast("加入失败：" + (e?.response?.data?.detail || e?.message || ""), "error");
+    } finally {
+      setJoiningClubId(null);
+    }
+  }
 
   if (selectedClubId) {
     return (
@@ -646,6 +917,18 @@ export function ShowcasePlazaView({
                     <Sparkles className="w-5 h-5 mr-1 text-[#FC4C02]" /> 跑团品牌展厅
                   </div>
                 )}
+                <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                  {c.org_name && (
+                    <span className="px-2 py-0.5 rounded-full bg-blue-600/90 text-white text-[10px] font-bold">
+                      🏛️ {c.org_name}
+                    </span>
+                  )}
+                  {c.is_decorated && (
+                    <span className="px-2 py-0.5 rounded-full bg-[#FC4C02]/90 text-white text-[10px] font-bold">
+                      ✨ 已装修
+                    </span>
+                  )}
+                </div>
                 {c.photo_count > 0 && (
                   <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full bg-black/70 text-white text-[10px] font-bold">
                     📸 {c.photo_count} 张实拍
@@ -653,23 +936,44 @@ export function ShowcasePlazaView({
                 )}
               </div>
               <div className="p-5 flex-1 flex flex-col justify-between gap-3">
-                <div>
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-black text-[var(--rgm-text)] truncate">{c.name}</h3>
-                    {c.is_member && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--rgm-green-tint)] text-emerald-500 font-bold shrink-0">
-                        已加入
-                      </span>
+                    {c.city && (
+                      <span className="text-[10px] text-[var(--rgm-text-muted)] shrink-0">📍 {c.city}</span>
                     )}
                   </div>
-                  <p className="text-xs text-[var(--rgm-text-2)] mt-1 line-clamp-2">{c.slogan}</p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <ClubScopeStatusBadges club={c} isMember={Boolean(c.is_member)} />
+                  </div>
+                  <p className="text-xs text-[var(--rgm-text-2)] line-clamp-2">{c.slogan}</p>
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-[var(--rgm-text-muted)] pt-2 border-t border-[var(--rgm-divider)]">
-                  <span>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--rgm-text-muted)] pt-2 border-t border-[var(--rgm-divider)]">
+                  <span className="truncate">
                     <Users className="w-3.5 h-3.5 inline mr-1" />
-                    {c.verified_stats?.member_count ?? 0}人 · 破330 {c.verified_stats?.sub330_count ?? 0}人
+                    {c.verified_stats?.member_count ?? 0}人 · 近30天 {c.verified_stats?.recent_30d_checkins ?? 0}次打卡
+                    {(c.verified_stats?.recent_30d_events ?? 0) > 0 ? ` · ${c.verified_stats.recent_30d_events}场活动` : ""}
                   </span>
-                  <span className="text-[#FC4C02] font-bold">看相册与教练 ›</span>
+                  <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {c.is_member ? (
+                      <span className="text-emerald-500 font-bold">已加入 ›</span>
+                    ) : getClubStatusMeta(c).disabled ? (
+                      <span className="text-[var(--rgm-text-muted)] font-bold">{getClubStatusMeta(c).text}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={joiningClubId === c.club_id}
+                        onClick={() => handleJoinPlazaClub(c)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer disabled:opacity-50 ${
+                          c.join_mode === "invite"
+                            ? "bg-[var(--rgm-amber-tint)] text-amber-500 border border-amber-500/30"
+                            : "bg-[#FC4C02] text-white"
+                        }`}
+                      >
+                        {joiningClubId === c.club_id ? "加入中..." : c.join_mode === "invite" ? "凭码加入" : "+ 加入跑团"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -694,6 +998,11 @@ export function ShowcasePlazaView({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-sm font-black text-[var(--rgm-text)]">{ch.display_name}</span>
+                    {ch.is_decorated && (
+                      <span className="px-1.5 py-0.5 rounded bg-[#FC4C02]/15 text-[#FC4C02] text-[10px] font-bold">
+                        ✨ 已装修
+                      </span>
+                    )}
                     {ch.watch_verified && (
                       <span className="px-1.5 py-0.5 rounded bg-[var(--rgm-green-tint)] text-emerald-500 text-[10px] font-bold">
                         ⌚ 手表核验
@@ -709,7 +1018,9 @@ export function ShowcasePlazaView({
                 </div>
               </div>
               <div className="text-xs text-[var(--rgm-text-2)] flex items-center justify-between pt-2 border-t border-[var(--rgm-divider)]">
-                <span>全马PB：{ch.verified_marathon_pb || "教练认证"}</span>
+                <span>
+                  全马PB：{ch.verified_marathon_pb || "教练认证"} · 执教 {ch.coached_clubs_count || 1} 团
+                </span>
                 <span className="text-[#FC4C02] font-bold flex items-center gap-1">
                   <Award className="w-3.5 h-3.5" /> 资历与相册 ({ch.photo_count}) ›
                 </span>
@@ -718,6 +1029,15 @@ export function ShowcasePlazaView({
           ))}
         </div>
       )}
+
+      <InviteCodeJoinModal
+        club={inviteClub}
+        code={inviteCode}
+        setCode={setInviteCode}
+        submitting={Boolean(joiningClubId)}
+        onClose={() => setInviteClub(null)}
+        onSubmit={() => inviteClub && handleJoinPlazaClub(inviteClub, inviteCode)}
+      />
     </div>
   );
 }

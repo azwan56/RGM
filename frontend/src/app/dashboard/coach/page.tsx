@@ -248,7 +248,7 @@ export default function CoachPage() {
       <Navbar />
 
       <div className="rgm-web3-page">
-      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="rgm-page-container py-6 space-y-6">
         {/* Title Header — 与小程序「训练」页一致：标题 + 三段切换 */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
@@ -257,10 +257,10 @@ export default function CoachPage() {
           </div>
           {isCoachOrOwner && (
             <button
-              onClick={() => router.push("/dashboard/team-coach")}
+              onClick={() => router.push("/dashboard/team?tab=coach")}
               className="self-start md:self-auto flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-300 text-xs font-bold transition"
             >
-              🧢 跑团教练工作台 ›
+              跑团教练工作台 ›
             </button>
           )}
         </div>

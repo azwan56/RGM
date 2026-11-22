@@ -22,6 +22,28 @@ function notifyListeners(event: string, session: any) {
   });
 }
 
+function isJwtExpired(token?: string | null): boolean {
+  if (!token || typeof token !== "string") return true;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const jsonStr = decodeURIComponent(
+      atob(b64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    const payload = JSON.parse(jsonStr);
+    if (typeof payload?.exp === "number" && Date.now() >= payload.exp * 1000) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 // Robust auth provider
 const customAuth = {
   ...baseSupabase.auth,
@@ -150,6 +172,10 @@ const customAuth = {
       if (raw) {
         try {
           const session = JSON.parse(raw);
+          if (session?.access_token && isJwtExpired(session.access_token)) {
+            localStorage.removeItem(AUTH_KEY);
+            return { data: { session: null }, error: null };
+          }
           return { data: { session }, error: null };
         } catch (e) {
           localStorage.removeItem(AUTH_KEY);

@@ -31,7 +31,7 @@ export default function ShowcasePlazaPage() {
   return (
     <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)] rgm-web3-page">
       <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="rgm-page-container py-6">
         {mounted ? (
           <ShowcasePlazaView
             viewerUid={viewerUid || undefined}

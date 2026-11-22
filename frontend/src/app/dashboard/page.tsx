@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import ComplianceFooter from "@/components/ComplianceFooter";
 import { supabase } from "@/lib/supabase";
 import apiClient from "@/lib/apiClient";
 import { showToast } from "@/components/ui/UiFeedbackProvider";
@@ -13,6 +14,7 @@ import OrgRequirementModal, { OrgReminderInfo } from "@/components/OrgRequiremen
 import PersonalShareCardModal from "@/components/PersonalShareCardModal";
 import PersonalReportModal from "@/components/PersonalReportModal";
 import ClubPulsePanel from "@/components/community/ClubPulsePanel";
+import { openAiOperationAssistant } from "@/components/web3/AiOperationAssistant";
 import {
   Zap,
   Activity,
@@ -34,6 +36,7 @@ import {
   ArrowRight,
   Users,
   Sparkles,
+  Mic,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -123,12 +126,63 @@ export default function DashboardPage() {
   // Web 3.0 Onboarding Checklist & Hero Quick RPE states
   const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(false);
   const [quickRpeKey, setQuickRpeKey] = useState<string>("");
+  const [pendingDashOpen, setPendingDashOpen] = useState<string | null>(null);
+  const [showGoalDetails, setShowGoalDetails] = useState<boolean>(false);
+  const [showPmcChart, setShowPmcChart] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOnboardingDismissed(localStorage.getItem("rgm_onboarding_dismissed") === "1");
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncDashIntent = (hrefOverride?: string) => {
+      const targetUrl = hrefOverride
+        ? new URL(hrefOverride, window.location.origin)
+        : new URL(window.location.href);
+      if (targetUrl.pathname !== "/dashboard") return;
+      const openParam = targetUrl.searchParams.get("open");
+      if (openParam) {
+        setPendingDashOpen(openParam);
+      }
+    };
+    syncDashIntent();
+    const onPop = () => syncDashIntent();
+    const onNavIntent = (e: Event) => {
+      const href = (e as CustomEvent)?.detail?.href;
+      if (typeof href === "string") syncDashIntent(href);
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("rgm-nav-intent", onNavIntent);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("rgm-nav-intent", onNavIntent);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingDashOpen || loading || !user?.id) return;
+    const act = pendingDashOpen;
+    setPendingDashOpen(null);
+    if (act === "personal-report") {
+      setPersonalReportModalOpen(true);
+    } else if (act === "share-card") {
+      setShareCardModalOpen(true);
+    } else if (act === "bind-garmin") {
+      setModalBrand("garmin");
+      setGarminModalOpen(true);
+    } else if (act === "bind-coros") {
+      setModalBrand("coros");
+      setGarminModalOpen(true);
+    } else if (act === "sync-watch") {
+      void handleSync();
+    }
+    if (typeof window !== "undefined" && window.location.search.includes("open=")) {
+      window.history.replaceState(null, "", "/dashboard");
+    }
+  }, [pendingDashOpen, loading, user?.id]);
 
   function parseOrgReminder(orgs: any[]): OrgReminderInfo {
     if (!orgs || !orgs.length) return { hasReminder: false, type: "none" };
@@ -626,7 +680,7 @@ export default function DashboardPage() {
   const currentYearNow = dashboardData?.current_month_info?.year || new Date().getFullYear();
   const currentMonthNow = dashboardData?.current_month_info?.month || (new Date().getMonth() + 1);
   const isViewingCurrentMonth = selectedYear === currentYearNow && selectedMonth === currentMonthNow;
-  const displayedMonthActivities = showAllMonthActs ? monthActivities : monthActivities.slice(0, 6);
+  const displayedMonthActivities = showAllMonthActs ? monthActivities : monthActivities.slice(0, 4);
 
   const totalMonthKm = Math.round(monthActivities.reduce((acc, a) => acc + (Number(a.distance_km) || 0), 0) * 10) / 10;
   const totalMonthTrimp = Math.round(monthActivities.reduce((acc, a) => acc + (Number(a.trimp) || 0), 0));
@@ -677,11 +731,11 @@ export default function DashboardPage() {
       <Navbar />
 
       <div className="rgm-web3-page">
-      <main className="max-w-[1440px] mx-auto px-4 sm:px-7 py-6 space-y-6">
-        {/* ── 顶部精简全息指挥栏（v2.1 双层防挤压结构：第1层独立展示问候语与长名字，第2层展示状态徽章，彻底杜绝末字符裁切与长名碰撞） ── */}
-        <section className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#121215] border border-white/[0.08] rounded-[28px] px-6 py-5">
+      <main className="rgm-page-container py-6 space-y-6">
+        {/* ── 顶部精简全息指挥栏（双层防挤压结构） ── */}
+        <section className="rgm-bento-card rounded-[24px] px-5 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-2.5">
-            <h1 className="text-xl sm:text-[26px] font-black leading-[1.35] tracking-normal break-words pr-3 max-w-full text-white">
+            <h1 className="text-xl sm:text-[26px] font-black leading-[1.35] tracking-normal break-words pr-3 max-w-full text-[var(--rgm-text)]">
               {dashboardData?.user?.display_name ? `你好，${dashboardData.user.display_name}` : "跑步控制台"}
             </h1>
             <div className="flex items-center gap-2.5 flex-wrap">
@@ -736,7 +790,7 @@ export default function DashboardPage() {
             )}
             <button
               onClick={() => setPersonalReportModalOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs sm:text-[13px] font-bold bg-[#18181c] border border-white/10 text-white hover:bg-white/10 transition cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs sm:text-[13px] font-bold bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text)] hover:border-[#FC4C02]/40 transition cursor-pointer shadow-sm"
             >
               <span>📊 个人周报/月报</span>
             </button>
@@ -859,7 +913,15 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => openAiOperationAssistant()}
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-[var(--rgm-card)] border border-[#FC4C02]/35 text-xs font-bold text-[#FC4C02] hover:bg-[#FC4C02] hover:text-white transition cursor-pointer"
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>语音问 AI 向导</span>
+                  </button>
                   {"href" in nextStep && nextStep.href ? (
                     <Link
                       href={nextStep.href}
@@ -1349,184 +1411,19 @@ export default function DashboardPage() {
             ) : null}
           </div>
 
-          {/* ── RIGHT COLUMN (5 cols): 卡片 C (跑力罗盘与生理恢复) + 卡片 D (周期跑量目标进度卡) ── */}
+          {/* ── RIGHT COLUMN (5 cols): 卡片 D (周期跑量目标) + 卡片 C (跑力罗盘与生理恢复) ── */}
           <div className="lg:col-span-5 space-y-6">
-            {/* 卡片 C：⚡ 跑力罗盘与生理恢复 Bento 卡 */}
-            <div className="bg-[#121215] border border-white/[0.08] rounded-[28px] p-6 sm:p-7 space-y-4">
+            {/* 卡片 D：周期跑量与备赛目标（周/月/年三维圆环 + A赛倒计时 + 默认折叠明细） */}
+            <div className="rgm-bento-card rounded-[24px] p-5 sm:p-6 space-y-4">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base sm:text-lg font-black text-white">⚡ 跑力罗盘与生理恢复</h2>
-                  {scienceData?.canova_matrix?.runner_type_label && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/25 text-sky-300 text-xs font-bold">
-                      {scienceData.canova_matrix.runner_type_label}
-                    </span>
-                  )}
-                </div>
-                <Link href="/dashboard/analysis" className="text-xs font-bold text-sky-400 hover:text-sky-300 shrink-0">
-                  五维分析 ›
+                <h2 className="text-base sm:text-lg font-black text-[var(--rgm-text)]">🎯 周期跑量与备赛目标</h2>
+                <Link href="/dashboard/profile?tab=training" className="text-xs font-bold text-[#FC4C02] hover:opacity-85 shrink-0">
+                  目标设置 ›
                 </Link>
               </div>
 
-              {/* VDOT 主视觉 + 四项预测一体卡 */}
-              <div className="bg-[#18181c] border border-[#FC4C02]/25 rounded-[20px] p-4 space-y-3.5">
-                <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-white/[0.06]">
-                  <div>
-                    <div className="text-[11px] font-extrabold text-[#FC4C02] tracking-wider">
-                      EFFECTIVE VDOT · 有效跑力
-                    </div>
-                    <div className="text-xs text-zinc-400 mt-0.5">
-                      {scienceData?.canova_matrix?.endurance_retention_ratio
-                        ? `耐力保持系数 ${scienceData.canova_matrix.endurance_retention_ratio} · `
-                        : ""}
-                      含全马衰减修正
-                    </div>
-                  </div>
-                  <div className="text-3xl sm:text-4xl font-black tabular-nums text-white leading-none">
-                    {effectiveVdot}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
-                  <div>
-                    <div className="text-[10px] font-bold text-zinc-500">5K 预测</div>
-                    <div className="text-xs sm:text-sm font-black text-white mt-1">
-                      {scienceData?.race_predictions?.five_k || "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-zinc-500">10K 预测</div>
-                    <div className="text-xs sm:text-sm font-black text-white mt-1">
-                      {scienceData?.race_predictions?.ten_k || "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-zinc-500">半马预测</div>
-                    <div className="text-xs sm:text-sm font-black text-[#FC4C02] mt-1">
-                      {scienceData?.race_predictions?.half_marathon || "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold text-zinc-500">全马预测</div>
-                    <div className="text-xs sm:text-sm font-black text-rose-400 mt-1">
-                      {scienceData?.race_predictions?.marathon || "—"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3 列晨起生理指标 */}
-              <div className="grid grid-cols-3 gap-2.5 tabular-nums">
-                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
-                  <div className="text-[11px] font-bold text-zinc-400">🔋 身体电量</div>
-                  <div className="text-lg sm:text-xl font-black text-amber-400 mt-1">
-                    {todayHealth?.body_battery_max != null ? `${todayHealth.body_battery_max}%` : "—"}
-                  </div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5">
-                    {todayHealth?.sleep_score != null ? `睡眠 ${todayHealth.sleep_score} 分` : "晨起电量"}
-                  </div>
-                </div>
-                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
-                  <div className="text-[11px] font-bold text-zinc-400">💓 夜间 HRV</div>
-                  <div className="text-lg sm:text-xl font-black text-sky-400 mt-1">
-                    {todayHealth?.hrv_ms != null ? todayHealth.hrv_ms : "—"}
-                    {todayHealth?.hrv_ms != null && <span className="text-[11px] font-semibold ml-0.5">ms</span>}
-                  </div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5">
-                    {todayHealth?.hrv_weekly_avg ? `周均 ${todayHealth.hrv_weekly_avg} ms` : "心率变异性"}
-                  </div>
-                </div>
-                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
-                  <div className="text-[11px] font-bold text-zinc-400">❤️ 静息心率</div>
-                  <div className="text-lg sm:text-xl font-black text-rose-400 mt-1">
-                    {todayHealth?.resting_heart_rate != null ? todayHealth.resting_heart_rate : "—"}
-                    {todayHealth?.resting_heart_rate != null && (
-                      <span className="text-[11px] font-semibold ml-0.5">bpm</span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5">自主神经平稳</div>
-                </div>
-              </div>
-
-              {/* 30天 Banister PMC 负荷曲线 */}
-              <div className="pt-1 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-3 font-bold">
-                    <span className="text-zinc-400">
-                      体能 CTL <strong className="text-sky-400">{scienceData?.current_ctl ?? 0}</strong>
-                    </span>
-                    <span className="text-zinc-400">
-                      疲劳 ATL <strong className="text-pink-400">{scienceData?.current_atl ?? 0}</strong>
-                    </span>
-                    <span className="text-zinc-400">
-                      状态 TSB{" "}
-                      <strong className="text-emerald-400">
-                        {(scienceData?.current_tsb ?? 0) > 0
-                          ? `+${scienceData?.current_tsb ?? 0}`
-                          : scienceData?.current_tsb ?? 0}
-                      </strong>
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-zinc-500">30天 Banister 曲线</span>
-                </div>
-
-                <div className="h-[150px] w-full">
-                  {ctlHistory.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={ctlHistory.slice(-30)} margin={{ top: 5, right: 5, left: -28, bottom: 0 }}>
-                        <CartesianGrid stroke="#222" strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="short_date" stroke="#555" fontSize={10} tickLine={false} />
-                        <YAxis stroke="#555" fontSize={10} tickLine={false} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#16161a",
-                            borderColor: "rgba(255,255,255,0.15)",
-                            borderRadius: "12px",
-                            fontSize: "12px",
-                            color: "#fff",
-                          }}
-                          formatter={(val: any, name: any) => {
-                            if (name === "ctl") return [`${val}`, "体能 (CTL)"];
-                            if (name === "atl") return [`${val}`, "疲劳 (ATL)"];
-                            if (name === "tsb") return [`${val}`, "状态 (TSB)"];
-                            return [val, name];
-                          }}
-                        />
-                        <Bar dataKey="tsb" barSize={6} radius={[3, 3, 3, 3]}>
-                          {ctlHistory.slice(-30).map((entry: any, index: number) => {
-                            const tsbVal = Number(entry.tsb || 0);
-                            let color = "#ef4444";
-                            if (tsbVal > 5) color = "#10b981";
-                            else if (tsbVal >= -30) color = "#0ea5e9";
-                            else if (tsbVal >= -50) color = "#f59e0b";
-                            return <Cell key={`cell-${index}`} fill={color} opacity={0.75} />;
-                          })}
-                        </Bar>
-                        <Line type="monotone" dataKey="ctl" name="ctl" stroke="#0284c7" strokeWidth={2.5} dot={false} />
-                        <Line
-                          type="monotone"
-                          dataKey="atl"
-                          name="atl"
-                          stroke="#ec4899"
-                          strokeWidth={2}
-                          strokeDasharray="4 3"
-                          dot={false}
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center bg-[#18181c] rounded-2xl">
-                      <Activity className="w-5 h-5 text-zinc-600 mb-1" />
-                      <p className="text-xs text-zinc-500">同步跑步记录后自动生成负荷趋势</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 卡片 D：周期跑量目标进度卡（Web 3.0 W1.2 周/月/年三维圆环 + A赛倒计时） */}
-            <div className="bg-[#121215] border border-white/[0.08] rounded-[28px] p-6 sm:p-7 space-y-4">
-              {/* 3-Dimension SVG Donut Rings + Upcoming Race Strip */}
-              <div className="grid grid-cols-3 gap-2 pb-2">
+              {/* 3-Dimension SVG Donut Rings */}
+              <div className="grid grid-cols-3 gap-2">
                 {[
                   {
                     label: "本周目标",
@@ -1625,151 +1522,364 @@ export default function DashboardPage() {
                 </Link>
               )}
 
-              <div className="flex items-center justify-between gap-2">
-                <div className="inline-flex p-1 rounded-xl bg-[#18181c] border border-white/[0.06]">
-                  {(
-                    [
-                      { key: "week", label: "本周" },
-                      { key: "month", label: `${currentMonthNow}月目标` },
-                      { key: "year", label: "全年" },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.key}
-                      onClick={() => setActiveGoalTab(tab.key)}
-                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
-                        activeGoalTab === tab.key
-                          ? "bg-[#121215] text-white shadow-sm"
-                          : "text-zinc-500 hover:text-zinc-300"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="text-right tabular-nums">
-                  <span className="text-2xl font-black text-[#FC4C02]">
-                    {activeGoalTab === "week"
-                      ? weeklyProgress.progress_pct ?? 0
-                      : activeGoalTab === "month"
-                      ? dashboardData?.progress?.progress_pct ?? 0
-                      : yearlyStats.progress_pct ?? 0}
-                    %
-                  </span>
-                </div>
-              </div>
-
-              <div className="w-full h-2.5 bg-zinc-800/80 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-[#FC4C02] to-[#EA580C]"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      activeGoalTab === "week"
-                        ? weeklyProgress.progress_pct ?? 0
-                        : activeGoalTab === "month"
-                        ? dashboardData?.progress?.progress_pct ?? 0
-                        : yearlyStats.progress_pct ?? 0
-                    )}%`,
-                  }}
-                />
-              </div>
-
-              <div className="grid grid-cols-4 divide-x divide-white/[0.06] text-center tabular-nums">
-                {(activeGoalTab === "week"
-                  ? [
-                      { label: "本周已跑", value: `${weeklyProgress.current_week_km ?? 0} km`, cls: "text-emerald-400" },
-                      { label: "周度目标", value: `${weeklyProgress.target_week_km ?? 50} km`, cls: "text-white" },
-                      { label: "剩余里程", value: `${weeklyProgress.remaining_km ?? 0} km`, cls: "text-zinc-300" },
-                      { label: "日均需跑", value: `${weeklyProgress.daily_required_km ?? 0} km`, cls: "text-amber-400" },
-                    ]
-                  : activeGoalTab === "month"
-                  ? [
-                      {
-                        label: "本月已跑",
-                        value: `${dashboardData?.progress?.current_month_km ?? 0} km`,
-                        cls: "text-white",
-                      },
-                      {
-                        label: "月度目标",
-                        value: `${dashboardData?.progress?.target_month_km ?? 200} km`,
-                        cls: "text-white",
-                      },
-                      {
-                        label: "剩余里程",
-                        value: `${dashboardData?.progress?.remaining_km ?? 0} km`,
-                        cls: "text-amber-400",
-                      },
-                      {
-                        label: "日均需跑",
-                        value: `${dashboardData?.progress?.daily_required_km ?? 0} km`,
-                        cls: "text-[#FC4C02]",
-                      },
-                    ]
-                  : [
-                      { label: "累计跑量", value: `${yearlyStats.total_km ?? 0} km`, cls: "text-rose-400" },
-                      { label: "年度目标", value: `${yearlyStats.target_year_km ?? 2400} km`, cls: "text-white" },
-                      { label: "总跑次", value: `${yearlyStats.total_runs ?? 0} 次`, cls: "text-zinc-300" },
-                      { label: "年终预测", value: `${yearlyStats.projected_year_km ?? 0} km`, cls: "text-emerald-400" },
-                    ]
-                ).map((s) => (
-                  <div key={s.label} className="px-1">
-                    <div className="text-[11px] font-semibold text-zinc-500">{s.label}</div>
-                    <div className={`text-sm sm:text-base font-black mt-1 ${s.cls}`}>{s.value}</div>
+              <div className="grid grid-cols-3 gap-2 text-center tabular-nums bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl py-2.5 px-2">
+                <div>
+                  <div className="text-[10px] font-semibold text-[var(--rgm-text-muted)]">本周已跑</div>
+                  <div className="text-sm font-black text-emerald-500 mt-0.5">
+                    {weeklyProgress.current_week_km ?? 0} km
                   </div>
-                ))}
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold text-[var(--rgm-text-muted)]">本周剩余</div>
+                  <div className="text-sm font-black text-[var(--rgm-text)] mt-0.5">
+                    {weeklyProgress.remaining_km ?? 0} km
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold text-[var(--rgm-text-muted)]">日均需跑</div>
+                  <div className="text-sm font-black text-[#FC4C02] mt-0.5">
+                    {weeklyProgress.daily_required_km ?? 0} km
+                  </div>
+                </div>
               </div>
 
-              {activeGoalTab === "week" && (weeklyProgress.daily_breakdown || []).length > 0 && (
-                <div className="grid grid-cols-7 gap-1.5 pt-1">
-                  {(weeklyProgress.daily_breakdown || []).map((day: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`py-2 rounded-xl border flex flex-col items-center text-center ${
-                        day.is_today ? "bg-emerald-500/10 border-emerald-500/40" : "bg-[#18181c] border-white/[0.06]"
-                      }`}
-                    >
-                      <span className={`text-[11px] ${day.is_today ? "text-emerald-400 font-black" : "text-zinc-400"}`}>
-                        {day.day_name}
-                      </span>
-                      <span className="text-[9px] text-zinc-600">{day.date}</span>
-                      <span
-                        className={`mt-1 text-[11px] font-black tabular-nums ${
-                          day.distance_km > 0 ? "text-emerald-300" : "text-zinc-600"
-                        }`}
-                      >
-                        {day.distance_km > 0 ? day.distance_km : day.is_past ? "—" : "0"}
+              <button
+                type="button"
+                onClick={() => setShowGoalDetails((v) => !v)}
+                className="w-full py-2 rounded-xl bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-[11px] font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition cursor-pointer"
+              >
+                {showGoalDetails ? "收起跑量明细 ▴" : "展开跑量趋势与每日明细 ▾"}
+              </button>
+
+              {showGoalDetails && (
+                <div className="space-y-4 pt-2 border-t border-[var(--rgm-divider)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="inline-flex p-1 rounded-xl bg-[#18181c] border border-white/[0.06]">
+                      {(
+                        [
+                          { key: "week", label: "本周" },
+                          { key: "month", label: `${currentMonthNow}月目标` },
+                          { key: "year", label: "全年" },
+                        ] as const
+                      ).map((tab) => (
+                        <button
+                          key={tab.key}
+                          onClick={() => setActiveGoalTab(tab.key)}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
+                            activeGoalTab === tab.key
+                              ? "bg-[#121215] text-white shadow-sm"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-right tabular-nums">
+                      <span className="text-2xl font-black text-[#FC4C02]">
+                        {activeGoalTab === "week"
+                          ? weeklyProgress.progress_pct ?? 0
+                          : activeGoalTab === "month"
+                          ? dashboardData?.progress?.progress_pct ?? 0
+                          : yearlyStats.progress_pct ?? 0}
+                        %
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
 
-              {activeGoalTab !== "week" && monthlyTrend.length > 0 && (
-                <div className="h-[105px] w-full pt-1">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyTrend} margin={{ top: 5, right: 5, left: -28, bottom: 0 }}>
-                      <CartesianGrid stroke="#1f1f24" strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="month_label" stroke="#555" fontSize={10} tickLine={false} />
-                      <YAxis stroke="#555" fontSize={10} tickLine={false} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#16161a",
-                          borderColor: "rgba(255,255,255,0.15)",
-                          borderRadius: "12px",
-                          fontSize: "12px",
-                        }}
-                        formatter={(val: any) => [`${val} km`, "月跑量"]}
-                      />
-                      <Bar dataKey="distance_km" radius={[4, 4, 0, 0]}>
-                        {monthlyTrend.map((entry: any, index: number) => (
-                          <Cell key={`month-cell-${index}`} fill={entry.is_current ? "#fc4c02" : "#334155"} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <div className="w-full h-2.5 bg-zinc-800/80 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-[#FC4C02] to-[#EA580C]"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          activeGoalTab === "week"
+                            ? weeklyProgress.progress_pct ?? 0
+                            : activeGoalTab === "month"
+                            ? dashboardData?.progress?.progress_pct ?? 0
+                            : yearlyStats.progress_pct ?? 0
+                        )}%`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-4 divide-x divide-white/[0.06] text-center tabular-nums">
+                    {(activeGoalTab === "week"
+                      ? [
+                          { label: "本周已跑", value: `${weeklyProgress.current_week_km ?? 0} km`, cls: "text-emerald-400" },
+                          { label: "周度目标", value: `${weeklyProgress.target_week_km ?? 50} km`, cls: "text-white" },
+                          { label: "剩余里程", value: `${weeklyProgress.remaining_km ?? 0} km`, cls: "text-zinc-300" },
+                          { label: "日均需跑", value: `${weeklyProgress.daily_required_km ?? 0} km`, cls: "text-amber-400" },
+                        ]
+                      : activeGoalTab === "month"
+                      ? [
+                          {
+                            label: "本月已跑",
+                            value: `${dashboardData?.progress?.current_month_km ?? 0} km`,
+                            cls: "text-white",
+                          },
+                          {
+                            label: "月度目标",
+                            value: `${dashboardData?.progress?.target_month_km ?? 200} km`,
+                            cls: "text-white",
+                          },
+                          {
+                            label: "剩余里程",
+                            value: `${dashboardData?.progress?.remaining_km ?? 0} km`,
+                            cls: "text-amber-400",
+                          },
+                          {
+                            label: "日均需跑",
+                            value: `${dashboardData?.progress?.daily_required_km ?? 0} km`,
+                            cls: "text-[#FC4C02]",
+                          },
+                        ]
+                      : [
+                          { label: "累计跑量", value: `${yearlyStats.total_km ?? 0} km`, cls: "text-rose-400" },
+                          { label: "年度目标", value: `${yearlyStats.target_year_km ?? 2400} km`, cls: "text-white" },
+                          { label: "总跑次", value: `${yearlyStats.total_runs ?? 0} 次`, cls: "text-zinc-300" },
+                          { label: "年终预测", value: `${yearlyStats.projected_year_km ?? 0} km`, cls: "text-emerald-400" },
+                        ]
+                    ).map((s) => (
+                      <div key={s.label} className="px-1">
+                        <div className="text-[11px] font-semibold text-zinc-500">{s.label}</div>
+                        <div className={`text-sm sm:text-base font-black mt-1 ${s.cls}`}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {activeGoalTab === "week" && (weeklyProgress.daily_breakdown || []).length > 0 && (
+                    <div className="grid grid-cols-7 gap-1.5 pt-1">
+                      {(weeklyProgress.daily_breakdown || []).map((day: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className={`py-2 rounded-xl border flex flex-col items-center text-center ${
+                            day.is_today ? "bg-emerald-500/10 border-emerald-500/40" : "bg-[#18181c] border-white/[0.06]"
+                          }`}
+                        >
+                          <span className={`text-[11px] ${day.is_today ? "text-emerald-400 font-black" : "text-zinc-400"}`}>
+                            {day.day_name}
+                          </span>
+                          <span className="text-[9px] text-zinc-600">{day.date}</span>
+                          <span
+                            className={`mt-1 text-[11px] font-black tabular-nums ${
+                              day.distance_km > 0 ? "text-emerald-300" : "text-zinc-600"
+                            }`}
+                          >
+                            {day.distance_km > 0 ? day.distance_km : day.is_past ? "—" : "0"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeGoalTab !== "week" && monthlyTrend.length > 0 && (
+                    <div className="h-[105px] w-full pt-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={monthlyTrend} margin={{ top: 5, right: 5, left: -28, bottom: 0 }}>
+                          <CartesianGrid stroke="#1f1f24" strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="month_label" stroke="#555" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#555" fontSize={10} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#16161a",
+                              borderColor: "rgba(255,255,255,0.15)",
+                              borderRadius: "12px",
+                              fontSize: "12px",
+                            }}
+                            formatter={(val: any) => [`${val} km`, "月跑量"]}
+                          />
+                          <Bar dataKey="distance_km" radius={[4, 4, 0, 0]}>
+                            {monthlyTrend.map((entry: any, index: number) => (
+                              <Cell key={`month-cell-${index}`} fill={entry.is_current ? "#fc4c02" : "#334155"} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                 </div>
               )}
+            </div>
+
+            {/* 卡片 C：⚡ 跑力罗盘与生理恢复 Bento 卡（曲线默认折叠） */}
+            <div className="rgm-bento-card rounded-[24px] p-5 sm:p-6 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-[var(--rgm-text)]">⚡ 跑力罗盘与生理恢复</h2>
+                  {scienceData?.canova_matrix?.runner_type_label && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/25 text-sky-300 text-xs font-bold">
+                      {scienceData.canova_matrix.runner_type_label}
+                    </span>
+                  )}
+                </div>
+                <Link href="/dashboard/analysis" className="text-xs font-bold text-sky-400 hover:text-sky-300 shrink-0">
+                  五维分析 ›
+                </Link>
+              </div>
+
+              {/* VDOT 主视觉 + 四项预测一体卡 */}
+              <div className="bg-[#18181c] border border-[#FC4C02]/25 rounded-[20px] p-4 space-y-3.5">
+                <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-white/[0.06]">
+                  <div>
+                    <div className="text-[11px] font-extrabold text-[#FC4C02] tracking-wider">
+                      EFFECTIVE VDOT · 有效跑力
+                    </div>
+                    <div className="text-xs text-zinc-400 mt-0.5">
+                      {scienceData?.canova_matrix?.endurance_retention_ratio
+                        ? `耐力保持系数 ${scienceData.canova_matrix.endurance_retention_ratio} · `
+                        : ""}
+                      含全马衰减修正
+                    </div>
+                  </div>
+                  <div className="text-3xl sm:text-4xl font-black tabular-nums text-white leading-none">
+                    {effectiveVdot}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
+                  <div>
+                    <div className="text-[10px] font-bold text-zinc-500">5K 预测</div>
+                    <div className="text-xs sm:text-sm font-black text-white mt-1">
+                      {scienceData?.race_predictions?.five_k || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-zinc-500">10K 预测</div>
+                    <div className="text-xs sm:text-sm font-black text-white mt-1">
+                      {scienceData?.race_predictions?.ten_k || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-zinc-500">半马预测</div>
+                    <div className="text-xs sm:text-sm font-black text-[#FC4C02] mt-1">
+                      {scienceData?.race_predictions?.half_marathon || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-zinc-500">全马预测</div>
+                    <div className="text-xs sm:text-sm font-black text-rose-400 mt-1">
+                      {scienceData?.race_predictions?.marathon || "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 列晨起生理指标 */}
+              <div className="grid grid-cols-3 gap-2.5 tabular-nums">
+                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
+                  <div className="text-[11px] font-bold text-zinc-400">🔋 身体电量</div>
+                  <div className="text-lg sm:text-xl font-black text-amber-400 mt-1">
+                    {todayHealth?.body_battery_max != null ? `${todayHealth.body_battery_max}%` : "—"}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">
+                    {todayHealth?.sleep_score != null ? `睡眠 ${todayHealth.sleep_score} 分` : "晨起电量"}
+                  </div>
+                </div>
+                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
+                  <div className="text-[11px] font-bold text-zinc-400">💓 夜间 HRV</div>
+                  <div className="text-lg sm:text-xl font-black text-sky-400 mt-1">
+                    {todayHealth?.hrv_ms != null ? todayHealth.hrv_ms : "—"}
+                    {todayHealth?.hrv_ms != null && <span className="text-[11px] font-semibold ml-0.5">ms</span>}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">
+                    {todayHealth?.hrv_weekly_avg ? `周均 ${todayHealth.hrv_weekly_avg} ms` : "心率变异性"}
+                  </div>
+                </div>
+                <div className="bg-[#18181c] border border-white/[0.06] rounded-[20px] p-3">
+                  <div className="text-[11px] font-bold text-zinc-400">❤️ 静息心率</div>
+                  <div className="text-lg sm:text-xl font-black text-rose-400 mt-1">
+                    {todayHealth?.resting_heart_rate != null ? todayHealth.resting_heart_rate : "—"}
+                    {todayHealth?.resting_heart_rate != null && (
+                      <span className="text-[11px] font-semibold ml-0.5">bpm</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">自主神经平稳</div>
+                </div>
+              </div>
+
+              {/* 30天 Banister PMC 负荷摘要与折叠曲线 */}
+              <div className="pt-1 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-3 font-bold flex-wrap">
+                    <span className="text-zinc-400">
+                      体能 CTL <strong className="text-sky-400">{scienceData?.current_ctl ?? 0}</strong>
+                    </span>
+                    <span className="text-zinc-400">
+                      疲劳 ATL <strong className="text-pink-400">{scienceData?.current_atl ?? 0}</strong>
+                    </span>
+                    <span className="text-zinc-400">
+                      状态 TSB{" "}
+                      <strong className="text-emerald-400">
+                        {(scienceData?.current_tsb ?? 0) > 0
+                          ? `+${scienceData?.current_tsb ?? 0}`
+                          : scienceData?.current_tsb ?? 0}
+                      </strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPmcChart((v) => !v)}
+                    className="text-[11px] font-bold text-[#FC4C02] hover:opacity-80 transition cursor-pointer shrink-0"
+                  >
+                    {showPmcChart ? "收起负荷曲线 ▴" : "展开 30 天曲线 ▾"}
+                  </button>
+                </div>
+
+                {showPmcChart && (
+                  <div className="h-[150px] w-full">
+                    {ctlHistory.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={ctlHistory.slice(-30)} margin={{ top: 5, right: 5, left: -28, bottom: 0 }}>
+                          <CartesianGrid stroke="#222" strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="short_date" stroke="#555" fontSize={10} tickLine={false} />
+                          <YAxis stroke="#555" fontSize={10} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#16161a",
+                              borderColor: "rgba(255,255,255,0.15)",
+                              borderRadius: "12px",
+                              fontSize: "12px",
+                              color: "#fff",
+                            }}
+                            formatter={(val: any, name: any) => {
+                              if (name === "ctl") return [`${val}`, "体能 (CTL)"];
+                              if (name === "atl") return [`${val}`, "疲劳 (ATL)"];
+                              if (name === "tsb") return [`${val}`, "状态 (TSB)"];
+                              return [val, name];
+                            }}
+                          />
+                          <Bar dataKey="tsb" barSize={6} radius={[3, 3, 3, 3]}>
+                            {ctlHistory.slice(-30).map((entry: any, index: number) => {
+                              const tsbVal = Number(entry.tsb || 0);
+                              let color = "#ef4444";
+                              if (tsbVal > 5) color = "#10b981";
+                              else if (tsbVal >= -30) color = "#0ea5e9";
+                              else if (tsbVal >= -50) color = "#f59e0b";
+                              return <Cell key={`cell-${index}`} fill={color} opacity={0.75} />;
+                            })}
+                          </Bar>
+                          <Line type="monotone" dataKey="ctl" name="ctl" stroke="#0284c7" strokeWidth={2.5} dot={false} />
+                          <Line
+                            type="monotone"
+                            dataKey="atl"
+                            name="atl"
+                            stroke="#ec4899"
+                            strokeWidth={2}
+                            strokeDasharray="4 3"
+                            dot={false}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-center bg-[#18181c] rounded-2xl">
+                        <Activity className="w-5 h-5 text-zinc-600 mb-1" />
+                        <p className="text-xs text-zinc-500">同步跑步记录后自动生成负荷趋势</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1792,7 +1902,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* ── LEFT COLUMN (5 cols): 跑团荣誉领奖台与师徒 ── */}
           <div className="lg:col-span-5 space-y-6">
-            <div className="bg-[#121215] border border-white/[0.08] rounded-[28px] p-6 sm:p-7 space-y-4">
+            <div className="rgm-bento-card rounded-[24px] p-5 sm:p-6 space-y-4">
               {/* Header with Club Selector */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -1817,7 +1927,7 @@ export default function DashboardPage() {
                         ))}
                       </select>
                     ) : (
-                      <h2 className="text-base sm:text-lg font-black text-white break-words pr-1.5">
+                      <h2 className="text-base sm:text-lg font-black text-[var(--rgm-text)] break-words pr-1.5">
                         {activeClub?.name || "跑团看板"}
                       </h2>
                     )}
@@ -1916,10 +2026,10 @@ export default function DashboardPage() {
                         </div>
                       )}
 
-                      {/* 4–7 名简洁列表 */}
+                      {/* 4–5 名简洁列表 */}
                       {clubLeaderboard.length > 3 && (
                         <div className="space-y-2">
-                          {clubLeaderboard.slice(3, 7).map((runner: any) => {
+                          {clubLeaderboard.slice(3, 5).map((runner: any) => {
                             const isMe = runner.user_id === user?.id;
                             return (
                               <div
@@ -1956,14 +2066,14 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <div className="space-y-2.5">
-                      {clubFeed.slice(0, 5).map((item: any) => (
+                      {clubFeed.slice(0, 4).map((item: any) => (
                         <div key={item.id} className="bg-[#18181c] border border-white/[0.06] rounded-2xl p-3 space-y-1.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                               <img
                                 src={
                                   item.avatar_url ||
-                                  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                                  "/defaults/default-avatar.svg"
                                 }
                                 alt={item.runner_name}
                                 className="w-6 h-6 rounded-full object-cover shrink-0"
@@ -1996,7 +2106,7 @@ export default function DashboardPage() {
                                     key={lk.user_id}
                                     src={
                                       lk.avatar_url ||
-                                      `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(lk.user_id || "liker")}`
+                                      "/defaults/default-avatar.svg"
                                     }
                                     alt={lk.display_name || "跑友"}
                                     className="w-4 h-4 rounded-full object-cover border border-[#18181c]"
@@ -2076,10 +2186,10 @@ export default function DashboardPage() {
 
           {/* ── RIGHT COLUMN (7 cols): 🏃 个人近期与当月跑步记录明细 ── */}
           <div className="lg:col-span-7">
-            <div className="bg-[#121215] border border-white/[0.08] rounded-[28px] p-6 sm:p-7 space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3.5 border-b border-white/[0.06]">
+            <div className="rgm-bento-card rounded-[24px] p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3.5 border-b border-[var(--rgm-divider)]">
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h2 className="text-base sm:text-lg font-black text-white">🏃 近期跑步记录</h2>
+                  <h2 className="text-base sm:text-lg font-black text-[var(--rgm-text)]">🏃 近期跑步记录</h2>
                   <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300">
                     {selectedMonth}月累计 {totalMonthKm} km
                   </span>
@@ -2268,14 +2378,20 @@ export default function DashboardPage() {
                         </div>
 
                         {reviewText && (
-                          <div className="bg-[#18181c] border-l-[3px] border-l-purple-500 rounded-r-xl px-3.5 py-2.5 text-xs text-zinc-300 leading-relaxed">
+                          <div
+                            onClick={() => setExpandedTrackId(expandedTrackId === act.id ? null : act.id)}
+                            title="点击展开完整复盘与轨迹"
+                            className={`bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] border-l-[3px] border-l-purple-500 rounded-r-xl px-3.5 py-2.5 text-xs text-[var(--rgm-text-2)] leading-relaxed cursor-pointer transition ${
+                              expandedTrackId === act.id ? "" : "line-clamp-2"
+                            }`}
+                          >
                             <strong className="font-bold text-purple-300">Canova 复盘：</strong>
                             {reviewText}
                           </div>
                         )}
 
                         {mode !== "excluded" && act.captain_cheer && (
-                          <div className="bg-[#18181c] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 leading-relaxed">
+                          <div className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] leading-relaxed">
                             <strong className="font-bold text-[#FC4C02]">
                               📣 {act.captain_cheer_meta?.captain_title || "团长加油"}：
                             </strong>
@@ -2305,10 +2421,10 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {!loadingMonthActs && monthActivities.length > 6 && (
+              {!loadingMonthActs && monthActivities.length > 4 && (
                 <button
                   onClick={() => setShowAllMonthActs(!showAllMonthActs)}
-                  className="w-full py-2.5 rounded-2xl text-xs font-bold text-zinc-400 hover:text-white bg-[#18181c] hover:bg-white/10 transition"
+                  className="w-full py-2.5 rounded-2xl text-xs font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] transition cursor-pointer"
                 >
                   {showAllMonthActs ? "收起记录 ▴" : `查看当月全部 ${monthActivities.length} 条跑步记录 ▾`}
                 </button>
@@ -2511,6 +2627,7 @@ export default function DashboardPage() {
         />
       )}
       </div>
+      <ComplianceFooter />
     </div>
   );
 }

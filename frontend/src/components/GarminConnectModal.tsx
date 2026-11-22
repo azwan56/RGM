@@ -64,6 +64,7 @@ export default function GarminConnectModal({
         const res = await apiClient.post("/api/auth/garmin/bind", payload);
 
         if (res.data?.needs_mfa) {
+          if (res.data?.domain) setDomain(res.data.domain);
           setNeedsMfa(true);
           setLoading(false);
           return;

@@ -81,6 +81,18 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     const cfg = error?.config || {};
+    const status = error?.response?.status;
+    if (status === 401 && typeof window !== "undefined") {
+      try {
+        if (localStorage.getItem("rgm_auth_session")) {
+          localStorage.removeItem("rgm_auth_session");
+          const p = window.location.pathname || "";
+          if (!p.startsWith("/login") && !p.startsWith("/join")) {
+            window.location.href = "/login";
+          }
+        }
+      } catch {}
+    }
     const startedAt = Number(cfg.__rgmStartedAt || 0);
     const elapsedMs = startedAt > 0 ? Date.now() - startedAt : 0;
     if (error.response?.data?.detail) {

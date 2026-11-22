@@ -13,6 +13,7 @@ import CaptainExecutiveCockpit from "@/components/web3/CaptainExecutiveCockpit";
 import BatchCritiqueCockpit from "@/components/web3/BatchCritiqueCockpit";
 import TargetedRecruitPanel from "@/components/community/TargetedRecruitPanel";
 import ShowcaseStudioModal from "@/components/community/ShowcaseStudioModal";
+import { dispatchRgmNavIntent } from "@/components/web3/CommandPaletteModal";
 import { supabase } from "@/lib/supabase";
 import apiClient, { formatBeijingTime } from "@/lib/apiClient";
 import { showToast, askConfirm } from "@/components/ui/UiFeedbackProvider";
@@ -378,11 +379,15 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         ? new URL(hrefOverride, window.location.origin).search
         : window.location.search;
       const sp = new URLSearchParams(searchStr);
+      const qClubId = sp.get("club_id");
       const qTab = sp.get("tab");
       const qMode = sp.get("mode");
       const qOpen = sp.get("open");
       const qOrgAction = sp.get("org_action");
 
+      if (qClubId) {
+        localStorage.setItem("rgm_active_club_id", qClubId);
+      }
       if (qTab === "leaderboard" || qTab === "president" || qTab === "coach" || qTab === "events") {
         setActiveTab(qTab);
       }
@@ -414,23 +419,102 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     };
   }, []);
 
+  const switchTeamTab = (nextTab: "leaderboard" | "president" | "coach" | "events") => {
+    setActiveTab(nextTab);
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      if (nextTab === "leaderboard") {
+        sp.delete("tab");
+      } else {
+        sp.set("tab", nextTab);
+      }
+      if (nextTab !== "coach") {
+        sp.delete("mode");
+      }
+      const q = sp.toString();
+      const targetHref = q ? `/dashboard/team?${q}` : "/dashboard/team";
+      window.history.replaceState(null, "", targetHref);
+      dispatchRgmNavIntent(targetHref);
+    }
+  };
+
   useEffect(() => {
     if (!pendingWeb3Intent) return;
-    if (pendingWeb3Intent.open === "club-report" && currentClub?.id) {
-      openClubReportModal();
-      setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+    if (pendingWeb3Intent.open && !loading) {
+      const openAct = pendingWeb3Intent.open;
+      const globalHandled = new Set([
+        "join-club",
+        "browse-clubs",
+        "create-club",
+        "join-org",
+        "coach-showcase",
+      ]);
+
+      if (openAct === "join-club") {
+        setShowJoinModal(true);
+        setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+      } else if (openAct === "browse-clubs") {
+        if (currentClub) setShowAllClubsModal(true);
+        setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+      } else if (openAct === "create-club") {
+        setShowCreateClubModal(true);
+        setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+      } else if (openAct === "join-org") {
+        setShowOrgJoinModal(true);
+        setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+      } else if (openAct === "coach-showcase") {
+        setShowcaseStudioMode("coach");
+        setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+      } else if (!globalHandled.has(openAct)) {
+        if (currentClub?.id) {
+          if (openAct === "club-report") {
+            openClubReportModal();
+          } else if (openAct === "club-invite") {
+            void openClubInviteModal(currentClub);
+          } else if (openAct === "create-event") {
+            setActiveTab("events");
+            setShowCreateEventModal(true);
+          } else if (openAct === "mentorship") {
+            setActiveTab("leaderboard");
+            setShowMentorshipBindModal(true);
+          } else if (openAct === "broadcast") {
+            setShowBroadcastModal(true);
+          } else if (openAct === "import-schedule") {
+            setActiveTab("coach");
+            setShowScheduleImportModal(true);
+          } else if (openAct === "assign-template") {
+            setActiveTab("coach");
+            void openTemplateAssignModal();
+          } else if (openAct === "club-showcase") {
+            setShowcaseStudioMode("club");
+          } else if (openAct === "targeted-recruit") {
+            setActiveTab("president");
+            window.setTimeout(() => {
+              document
+                .getElementById("section-targeted-recruit")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 180);
+          } else if (openAct === "leave-club") {
+            openLeaveClubModal();
+          }
+          setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+        } else {
+          setPendingWeb3Intent((prev) => (prev ? { ...prev, open: null } : null));
+        }
+      }
     }
+
     const targetOrg = activeManagedOrg || managedOrgs[0];
     if (pendingWeb3Intent.orgAction && targetOrg) {
       const act = pendingWeb3Intent.orgAction;
-      if (act === "roster") openOrgRosterModalFor(targetOrg);
+      if (act === "roster" || act === "audit") openOrgRosterModalFor(targetOrg);
       else if (act === "report") openOrgReportModalFor(targetOrg);
       else if (act === "fields") openOrgFieldRulesModalFor(targetOrg);
       else if (act === "settings") openOrgSettingsModalFor(targetOrg);
       else if (act === "events") openOrgEventsModalFor(targetOrg);
       setPendingWeb3Intent((prev) => (prev ? { ...prev, orgAction: null } : null));
     }
-  }, [pendingWeb3Intent, currentClub?.id, activeManagedOrg?.id, managedOrgs.length]);
+  }, [pendingWeb3Intent, loading, currentClub?.id, activeManagedOrg?.id, managedOrgs.length]);
 
   async function loadIncomingClubInvite(
     clubId: string,
@@ -446,11 +530,46 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       if (inviterUid) q.set("inviter_uid", inviterUid);
       if (uid) q.set("user_id", uid);
       const res = await apiClient.get(`/api/team/${clubId}/invite-info?${q.toString()}`);
-      setReceivedInviteData({
+      const inviteData: any = {
         ...(res.data || {}),
         raw_invite_code: inviteCode || "",
         raw_inviter_uid: inviterUid || "",
-      });
+      };
+
+      // If logged-in user clicked a valid club invite card/link, auto-join & enter the club directly
+      if (uid && inviteData?.club?.id) {
+        if (inviteData.is_club_member) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("rgm_pending_club_invite");
+            localStorage.setItem("rgm_active_club_id", inviteData.club.id);
+          }
+          await loadUserClubs(uid);
+        } else if (inviteData.one_click_join || inviteData.is_code_valid) {
+          try {
+            const payload: any = {
+              user_id: uid,
+              club_id: inviteData.club.id,
+              privacy_consent: true,
+              via_invite: true,
+            };
+            if (inviteCode) payload.invite_code = inviteCode;
+            if (inviterUid) payload.inviter_uid = inviterUid;
+            const joinRes = await apiClient.post("/api/team/join-club", payload);
+            inviteData.is_club_member = true;
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("rgm_pending_club_invite");
+              localStorage.setItem("rgm_active_club_id", inviteData.club.id);
+            }
+            showToast(joinRes.data?.message || `🎉 已直接加入【${inviteData.club.name || "跑团"}】！`);
+            await loadUserClubs(uid);
+            await loadAllClubs(uid);
+          } catch {
+            // Keep interactive modal open if auto-join needs manual confirmation
+          }
+        }
+      }
+
+      setReceivedInviteData(inviteData);
     } catch (e: any) {
       console.error("Load incoming club invite error:", e);
       setReceivedInviteData(null);
@@ -2240,7 +2359,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     setSubmittingComment((prev) => ({ ...prev, [activityId]: true }));
     try {
       const authorName = userProfile?.display_name || user?.user_metadata?.display_name || "跑友";
-      const authorAvatar = userProfile?.avatar_url || user?.user_metadata?.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80";
+      const authorAvatar = userProfile?.avatar_url || user?.user_metadata?.avatar_url || "/defaults/default-avatar.svg";
       const replyTarget = replyTargets[activityId];
       const payload: any = {
         user_id: user.id,
@@ -2553,11 +2672,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       <Navbar />
 
       {loading ? (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-24 text-center text-zinc-500">
+        <div className="rgm-page-container py-24 text-center text-[var(--rgm-text-muted)]">
           <p>跑团数据加载中...</p>
         </div>
       ) : !currentClub ? (
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-10">
+        <main className="rgm-page-container py-8 space-y-8">
           {activeManagedOrg && (
             <OrgManagementHub
               activeOrg={activeManagedOrg}
@@ -2571,27 +2690,34 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               onOpenFieldRules={openOrgFieldRulesModalFor}
             />
           )}
-          <div className="bg-gradient-to-b from-[#18181c] to-[#121215] border border-white/10 rounded-3xl p-8 sm:p-10 text-center shadow-2xl">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FC4C02]/10 border border-[#FC4C02]/30 text-3xl mb-4">
+          <div className="rgm-bento-card rounded-3xl p-8 sm:p-10 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[var(--rgm-brand-tint)] border border-[#FC4C02]/30 text-3xl mb-4">
               🏃‍♂️
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white mb-2">
+            <h1 className="text-2xl sm:text-3xl font-black text-[var(--rgm-text)] mb-2">
               欢迎来到跑团中心
             </h1>
-            <p className="text-sm text-zinc-400 max-w-xl mx-auto leading-relaxed mb-6">
+            <p className="text-sm text-[var(--rgm-text-2)] max-w-xl mx-auto leading-relaxed mb-6">
               请在下方浏览平台所有已创建跑团并选择加入，与队友共同参加月度跑量挑战、查看英雄榜与教练负荷监控！
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap">
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-xs font-semibold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] rounded-xl transition cursor-pointer"
               >
                 <UserPlus className="w-3.5 h-3.5 text-[#FC4C02]" />
                 已有跑团邀请码？点此加入
               </button>
               <button
+                onClick={() => setShowCreateClubModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-xs font-bold text-emerald-300 rounded-xl transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                自建专属跑团
+              </button>
+              <button
                 onClick={() => setShowOrgJoinModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 rounded-xl transition shadow-lg shadow-amber-500/10"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 rounded-xl transition shadow-lg shadow-amber-500/10 cursor-pointer"
               >
                 <Shield className="w-3.5 h-3.5 text-amber-400" />
                 加入大群体 · 戈友实名认证
@@ -2603,18 +2729,18 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           <div className="space-y-5">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2.5">
-                <span className="text-lg font-black text-white">🏆 平台所有跑团</span>
+                <span className="text-lg font-black text-[var(--rgm-text)]">🏆 平台所有跑团</span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#FC4C02]/20 text-[#FC4C02] border border-[#FC4C02]/30">
                   {allClubs.length} 个跑团
                 </span>
               </div>
-              <span className="text-xs text-zinc-400">选择您感兴趣的跑团，点击即可一键加入开启训练</span>
+              <span className="text-xs text-[var(--rgm-text-2)]">选择您感兴趣的跑团，点击即可一键加入开启训练</span>
             </div>
 
             {loadingAllClubs ? (
-              <div className="py-12 text-center text-xs text-zinc-500">正在加载跑团列表...</div>
+              <div className="py-12 text-center text-xs text-[var(--rgm-text-muted)]">正在加载跑团列表...</div>
             ) : allClubs.length === 0 ? (
-              <div className="bg-[#141416] border border-white/5 rounded-3xl p-12 text-center text-zinc-400">
+              <div className="rgm-bento-card rounded-3xl p-12 text-center text-[var(--rgm-text-2)]">
                 平台暂无已创建跑团，请联系平台超级管理员创建！
               </div>
             ) : (
@@ -2622,7 +2748,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 {allClubs.map((club) => (
                   <div
                     key={club.id}
-                    className="bg-[#141416] hover:bg-[#18181c] border border-white/10 hover:border-[#FC4C02]/40 rounded-3xl p-6 transition flex flex-col justify-between shadow-xl"
+                    className="rgm-bento-card hover:border-[#FC4C02]/45 rounded-3xl p-6 transition flex flex-col justify-between"
                   >
                     <div>
                       <div className="flex items-start gap-4 mb-4">
@@ -2633,25 +2759,25 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="text-lg font-black text-white truncate">{club.name}</h3>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
+                            <h3 className="text-lg font-black text-[var(--rgm-text)] truncate">{club.name}</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)]">
                               📍 {club.city || "上海"}
                             </span>
                           </div>
-                          <p className="text-xs text-zinc-400 mt-1.5 line-clamp-2 leading-relaxed">
+                          <p className="text-xs text-[var(--rgm-text-2)] mt-1.5 line-clamp-2 leading-relaxed">
                             {club.description || "科学耐力训练 · PB 突破与健康长久奔跑。"}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4 py-3 px-3.5 bg-black/30 rounded-2xl border border-white/5 text-xs text-zinc-400 mb-5">
+                      <div className="flex items-center gap-4 py-3 px-3.5 bg-[var(--rgm-card-2)] rounded-2xl border border-[var(--rgm-border)] text-xs text-[var(--rgm-text-2)] mb-5">
                         <div>
-                          <span className="text-zinc-500">团长: </span>
-                          <span className="text-white font-semibold">{club.owner_name || "平台指定"}</span>
+                          <span className="text-[var(--rgm-text-muted)]">团长: </span>
+                          <span className="text-[var(--rgm-text)] font-semibold">{club.owner_name || "平台指定"}</span>
                         </div>
-                        <div className="w-px h-3 bg-white/10" />
+                        <div className="w-px h-3 bg-[var(--rgm-border)]" />
                         <div>
-                          <span className="text-zinc-500">成员: </span>
+                          <span className="text-[var(--rgm-text-muted)]">成员: </span>
                           <span className="text-[#FC4C02] font-bold">{club.member_count || 1} 人</span>
                         </div>
                       </div>
@@ -2661,7 +2787,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       <button
                         onClick={() => handleJoinClubDirect(club.id)}
                         disabled={joiningClubId === club.id}
-                        className="w-full py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20 flex items-center justify-center gap-2"
+                        className="w-full py-3 bg-[#FC4C02] hover:bg-[#ff6426] text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-[#FC4C02]/20 flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <UserPlus className="w-4 h-4" />
                         {joiningClubId === club.id ? "正在加入..." : "选择参加此跑团"}
@@ -2674,16 +2800,16 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           </div>
 
           {/* Unaffiliated Peers Mutual Basic Status Section */}
-          <div className="bg-[#141416] border border-cyan-500/25 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl">
+          <div className="rgm-bento-card border-cyan-500/25 rounded-3xl p-6 sm:p-8 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-lg font-black text-white">🌍 自由跑友同伴 · 基本状态互看</span>
+                  <span className="text-lg font-black text-[var(--rgm-text)]">🌍 自由跑友同伴 · 基本状态互看</span>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                     {unaffiliatedPeersSummary?.total_members ?? unaffiliatedPeers.length} 人
                   </span>
                 </div>
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-[var(--rgm-text-2)] mt-1">
                   暂未加入跑团的跑友之间可互相查看手表绑定、目标设定与月跑量进度（出于隐私保护，不在同一跑团的用户之间不展示具体单次运动记录与GPS轨迹）
                 </p>
               </div>
@@ -2692,12 +2818,12 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 value={unaffiliatedPeerSearch}
                 onChange={(e) => setUnaffiliatedPeerSearch(e.target.value)}
                 placeholder="搜索自由跑友昵称..."
-                className="w-full sm:w-56 bg-[#18181c] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                className="w-full sm:w-56 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-xl px-3.5 py-2 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-cyan-500"
               />
             </div>
 
             {unaffiliatedPeers.length === 0 ? (
-              <div className="py-8 text-center text-xs text-zinc-500">正在加载自由跑友基本状态...</div>
+              <div className="py-8 text-center text-xs text-[var(--rgm-text-muted)]">正在加载自由跑友基本状态...</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[540px] overflow-y-auto pr-1">
                 {unaffiliatedPeers
@@ -2710,29 +2836,29 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   .map((p) => (
                     <div
                       key={p.user_id}
-                      className="bg-[#18181c] border border-white/5 hover:border-cyan-500/30 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
+                      className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-cyan-500/35 rounded-2xl p-4 flex flex-col justify-between gap-3 transition"
                     >
                       <div className="space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <img
-                              src={p.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                              src={p.avatar_url || "/defaults/default-avatar.svg"}
                               alt={p.display_name}
-                              className="w-10 h-10 rounded-full object-cover border border-white/10 shrink-0"
+                              className="w-10 h-10 rounded-full object-cover border border-[var(--rgm-border)] shrink-0"
                             />
                             <div className="min-w-0">
-                              <div className="font-bold text-white text-xs truncate">
+                              <div className="font-bold text-[var(--rgm-text)] text-xs truncate">
                                 {p.display_name}
                                 {p.user_id === user?.id && (
                                   <span className="ml-1.5 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px]">我</span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-zinc-500 mt-0.5">
+                              <div className="text-[10px] text-[var(--rgm-text-muted)] mt-0.5">
                                 ⏰ 注册：{p.joined_at_display || "近期"}
                               </div>
                             </div>
                           </div>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/5 text-zinc-300 shrink-0">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)] shrink-0">
                             本月 {p.month_km || 0}km
                           </span>
                         </div>
@@ -2740,28 +2866,28 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         <div className="grid grid-cols-2 gap-2 text-[11px]">
                           <div className={`p-2 rounded-xl border ${p.watch_bound ? "bg-emerald-500/10 border-emerald-500/30" : "bg-amber-500/10 border-amber-500/30"}`}>
                             <div className="flex items-center justify-between">
-                              <span className="text-zinc-400">⌚ 手表</span>
+                              <span className="text-[var(--rgm-text-2)]">⌚ 手表</span>
                               <span className={`font-bold text-[10px] ${p.watch_bound ? "text-emerald-300" : "text-amber-300"}`}>
                                 {p.watch_bound ? "已绑定" : "未绑定"}
                               </span>
                             </div>
-                            <div className="text-[10px] text-zinc-300 truncate mt-0.5">{p.watch_bound_label}</div>
+                            <div className="text-[10px] text-[var(--rgm-text-2)] truncate mt-0.5">{p.watch_bound_label}</div>
                           </div>
                           <div className={`p-2 rounded-xl border ${p.goal_configured ? "bg-emerald-500/10 border-emerald-500/30" : "bg-amber-500/10 border-amber-500/30"}`}>
                             <div className="flex items-center justify-between">
-                              <span className="text-zinc-400">🎯 目标</span>
+                              <span className="text-[var(--rgm-text-2)]">🎯 目标</span>
                               <span className={`font-bold text-[10px] ${p.goal_configured ? "text-emerald-300" : "text-amber-300"}`}>
                                 {p.goal_configured ? "已设定" : "默认"}
                               </span>
                             </div>
-                            <div className="text-[10px] text-zinc-300 truncate mt-0.5">月目标 {p.target_km || 100}km</div>
+                            <div className="text-[10px] text-[var(--rgm-text-2)] truncate mt-0.5">月目标 {p.target_km || 100}km</div>
                           </div>
                         </div>
                       </div>
 
                       <button
                         onClick={() => router.push(`/dashboard/analysis?student_user_id=${encodeURIComponent(p.user_id)}`)}
-                        className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-bold text-zinc-200 transition"
+                        className="w-full py-2 rounded-xl bg-[var(--rgm-card)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-[11px] font-bold text-[var(--rgm-text)] transition cursor-pointer"
                       >
                         📊 查看基本状态名片
                       </button>
@@ -2773,49 +2899,49 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
           {/* Feature Highlights Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+            <div className="rgm-bento-card rounded-2xl p-6 flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xl shrink-0">
                 🥇
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white mb-1">跑团月度英雄榜</h3>
-                <p className="text-xs text-zinc-400 leading-relaxed">
+                <h3 className="text-sm font-bold text-[var(--rgm-text)] mb-1">跑团月度英雄榜</h3>
+                <p className="text-xs text-[var(--rgm-text-2)] leading-relaxed">
                   自动汇聚全体团员月跑量与配速排名，良性竞逐突破个人 PB。
                 </p>
               </div>
             </div>
 
-            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+            <div className="rgm-bento-card rounded-2xl p-6 flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-xl shrink-0">
                 🏆
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white mb-1">专属跑量挑战赛</h3>
-                <p className="text-xs text-zinc-400 leading-relaxed">
+                <h3 className="text-sm font-bold text-[var(--rgm-text)] mb-1">专属跑量挑战赛</h3>
+                <p className="text-xs text-[var(--rgm-text-2)] leading-relaxed">
                   团长与教练可随时发起公里数打卡挑战，团员达标点亮荣誉勋章。
                 </p>
               </div>
             </div>
 
-            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+            <div className="rgm-bento-card rounded-2xl p-6 flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-xl shrink-0">
                 💬
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white mb-1">跑友圈动态与 AI 点评</h3>
-                <p className="text-xs text-zinc-400 leading-relaxed">
+                <h3 className="text-sm font-bold text-[var(--rgm-text)] mb-1">跑友圈动态与 AI 点评</h3>
+                <p className="text-xs text-[var(--rgm-text-2)] leading-relaxed">
                   同步手表跑步记录后自动生成 AI 战报，支持队友点赞与留言互动。
                 </p>
               </div>
             </div>
 
-            <div className="bg-[#141416] border border-white/5 rounded-2xl p-6 flex items-start gap-4">
+            <div className="rgm-bento-card rounded-2xl p-6 flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-xl shrink-0">
                 🧢
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white mb-1">教练学员体能罗盘</h3>
-                <p className="text-xs text-zinc-400 leading-relaxed">
+                <h3 className="text-sm font-bold text-[var(--rgm-text)] mb-1">教练学员体能罗盘</h3>
+                <p className="text-xs text-[var(--rgm-text-2)] leading-relaxed">
                   科学监控全员 CTL/ATL/TSB 负荷与心率变异性，预防过度训练与伤病。
                 </p>
               </div>
@@ -2823,7 +2949,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           </div>
         </main>
       ) : (
-        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+        <main className="rgm-page-container py-6 space-y-6">
           {activeManagedOrg && (
             <OrgManagementHub
               activeOrg={activeManagedOrg}
@@ -2838,7 +2964,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
             />
           )}
           {/* Header with Multi-Club Selector and Actions */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gradient-to-r from-[#18181c] via-[#121215] to-[#18181c] border border-white/10 rounded-3xl p-6 shadow-2xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 rgm-bento-card rounded-3xl p-6">
             <div className="flex items-center gap-4">
               <img
                 src={currentClub.logo_url || "/logo.png"}
@@ -2847,7 +2973,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               />
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-xl sm:text-2xl font-black text-white">
+                  <h1 className="text-xl sm:text-2xl font-black text-[var(--rgm-text)]">
                     {currentClub.name}
                   </h1>
                   {currentClub.org_name && (
@@ -2869,27 +2995,27 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-zinc-400 mt-1 line-clamp-1 max-w-xl">
+                <p className="text-xs text-[var(--rgm-text-2)] mt-1 line-clamp-1 max-w-xl">
                   {currentClub.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
                 </p>
                 <div className="flex items-center gap-3 mt-2">
-                  <span className="text-[11px] text-zinc-500">📍 {currentClub.city || "上海"}</span>
+                  <span className="text-[11px] text-[var(--rgm-text-muted)]">📍 {currentClub.city || "上海"}</span>
                 </div>
                 {clubs.length > 1 && (
                   <div className="flex items-center gap-2 mt-3 flex-wrap">
-                    <span className="text-[11px] text-zinc-400 font-medium">切换跑团:</span>
+                    <span className="text-[11px] text-[var(--rgm-text-2)] font-medium">切换跑团:</span>
                     {clubs.map((c: any) => (
                       <button
                         key={c.id}
                         onClick={() => handleSwitchClub(c)}
-                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
                           currentClub.id === c.id
                             ? c.is_access_suspended
                               ? "bg-rose-600 text-white shadow-md shadow-rose-600/20 font-bold"
                               : "bg-[#FC4C02] text-white shadow-md shadow-[#FC4C02]/20 font-bold"
                             : c.is_access_suspended
                             ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                            : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5"
+                            : "bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] border border-[var(--rgm-border)]"
                         }`}
                       >
                         <span>{c.name}</span>
@@ -2970,11 +3096,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         📸 识图导入周课表
                       </button>
                       <button
-                        onClick={() => router.push("/dashboard/team-coach")}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black transition shadow-lg shadow-purple-600/25 cursor-pointer"
+                        onClick={() => switchTeamTab("coach")}
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/45 text-[var(--rgm-text)] rounded-2xl text-xs font-black transition cursor-pointer"
                       >
                         <ClipboardCheck className="w-4 h-4" />
-                        🧢 教练集中工作台
+                        教练工作台
                       </button>
                     </>
                   )}
@@ -3010,29 +3136,29 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </button>
                   <button
                     onClick={() => router.push("/dashboard/plaza")}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-amber-300 rounded-2xl text-xs font-bold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:bg-[var(--rgm-card-3)] text-amber-300 rounded-2xl text-xs font-bold transition cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     选团与名帅展厅
                   </button>
                   <button
                     onClick={() => router.push("/dashboard/discover")}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-sky-300 rounded-2xl text-xs font-bold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:bg-[var(--rgm-card-3)] text-sky-300 rounded-2xl text-xs font-bold transition cursor-pointer"
                   >
                     <Target className="w-4 h-4 text-sky-400" />
-                    六维寻搭子
+                    同频寻搭子
                   </button>
                   {!currentClub?.is_virtual_unaffiliated && (
                     <button
                       onClick={() => router.push(`/dashboard/plaza?club_id=${encodeURIComponent(currentClub.id)}`)}
-                      className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] rounded-2xl text-xs font-bold transition cursor-pointer"
                     >
                       🖼️ 本团宣传页
                     </button>
                   )}
                   <button
                     onClick={() => setShowJoinModal(true)}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition shadow-sm"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] rounded-2xl text-xs font-bold transition shadow-sm"
                   >
                     <UserPlus className="w-4 h-4 text-[#FC4C02]" />
                     输入邀请码
@@ -3142,139 +3268,85 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           </div>
         ) : (
           <>
-            {/* 4-Tab Navigation */}
-            <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
-          {coachWorkbenchMode ? (
-            <>
-              <button
-                onClick={() => setActiveTab("coach")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-                  activeTab === "coach"
-                    ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Activity className="w-4 h-4" />
-                🧭 排课模版与全队体能罗盘
-              </button>
-              <button
-                onClick={() => setActiveTab("leaderboard")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-                  activeTab === "leaderboard"
-                    ? "bg-[#FC4C02] text-white shadow-lg shadow-[#FC4C02]/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Flame className="w-4 h-4" />
-                💬 队员打卡动态与教练点评台
-              </button>
-              <button
-                onClick={() => setActiveTab("events")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-                  activeTab === "events"
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Award className="w-4 h-4" />
-                🏃 合练约跑与挑战赛管理 ({events.length})
-              </button>
-              <button
-                onClick={() => setActiveTab("president")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-                  activeTab === "president"
-                    ? "bg-amber-600 text-white shadow-lg shadow-amber-600/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                📊 战报中心与成员/助教管理
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setActiveTab("leaderboard")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
-                  activeTab === "leaderboard"
-                    ? "bg-[#FC4C02] text-white shadow-lg shadow-[#FC4C02]/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Trophy className="w-4 h-4" />
-                跑团总览与排行榜
-              </button>
-
-              {(currentRole === "owner" || currentRole === "coach") && (
-                <button
-                  onClick={() => setActiveTab("coach")}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
-                    activeTab === "coach"
-                      ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
-                      : "bg-white/5 text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  <Activity className="w-4 h-4" />
-                  🧢 教练学员体能罗盘
-                </button>
-              )}
-
-              {(currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
-                <button
-                  onClick={() => setActiveTab("president")}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
-                    activeTab === "president"
-                      ? "bg-amber-600 text-white shadow-lg shadow-amber-600/25"
-                      : "bg-white/5 text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  👥 跑团成员与管理
-                </button>
-              )}
-
-              <button
-                onClick={() => setActiveTab("events")}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition ${
-                  activeTab === "events"
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                    : "bg-white/5 text-zinc-400 hover:text-white"
-                }`}
-              >
-                <Award className="w-4 h-4" />
-                🏆 跑团挑战赛与活动 ({events.length})
-              </button>
-            </>
-          )}
-        </div>
+            {/* Unified 4-Tab Navigation */}
+            <div className="flex items-center gap-2 border-b border-[var(--rgm-border)] pb-3 overflow-x-auto">
+              {(
+                [
+                  {
+                    key: "leaderboard" as const,
+                    label: "动态与排行",
+                    icon: Trophy,
+                    visible: true,
+                  },
+                  {
+                    key: "events" as const,
+                    label: `约跑活动 (${events.length})`,
+                    icon: Award,
+                    visible: true,
+                  },
+                  {
+                    key: "coach" as const,
+                    label: "教练工作台",
+                    icon: ClipboardCheck,
+                    visible: currentRole === "owner" || currentRole === "coach" || user?.is_admin,
+                  },
+                  {
+                    key: "president" as const,
+                    label: "成员与运营",
+                    icon: Users,
+                    visible: currentRole === "owner" || currentRole === "coach" || user?.is_admin,
+                  },
+                ]
+              )
+                .filter((t) => t.visible)
+                .map((tabItem) => {
+                  const TabIcon = tabItem.icon;
+                  const isActive = activeTab === tabItem.key;
+                  return (
+                    <button
+                      key={tabItem.key}
+                      type="button"
+                      onClick={() => switchTeamTab(tabItem.key)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap shrink-0 cursor-pointer border ${
+                        isActive
+                          ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-sm shadow-[#FC4C02]/25"
+                          : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:border-[#FC4C02]/40"
+                      }`}
+                    >
+                      <TabIcon className="w-4 h-4 shrink-0" />
+                      {tabItem.label}
+                    </button>
+                  );
+                })}
+            </div>
 
         {/* ── TAB 1: 跑团总览与排行榜 ── */}
         {activeTab === "leaderboard" && (
           <div className="space-y-8">
             {/* Top Stat Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-[#121215] border border-white/5 rounded-3xl p-5">
-                <span className="text-xs text-zinc-400 font-medium">🏃 本月跑团总里程</span>
-                <div className="text-2xl font-black text-white mt-1">
+              <div className="rgm-bento-card rounded-2xl p-5">
+                <span className="text-xs text-[var(--rgm-text-2)] font-medium">🏃 本月跑团总里程</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
                   {dashboardMetrics?.total_month_km || "16.0"} <span className="text-xs text-[#FC4C02]">km</span>
                 </div>
               </div>
-              <div className="bg-[#121215] border border-white/5 rounded-3xl p-5">
-                <span className="text-xs text-zinc-400 font-medium">👥 注册跑者人数</span>
-                <div className="text-2xl font-black text-white mt-1">
-                  {dashboardMetrics?.members_count || members.length || 1} <span className="text-xs text-zinc-500">人</span>
+              <div className="rgm-bento-card rounded-2xl p-5">
+                <span className="text-xs text-[var(--rgm-text-2)] font-medium">👥 注册跑者人数</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
+                  {dashboardMetrics?.members_count || members.length || 1} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                 </div>
               </div>
-              <div className="bg-[#121215] border border-white/5 rounded-3xl p-5">
-                <span className="text-xs text-zinc-400 font-medium">🧢 认证专业教练</span>
+              <div className="rgm-bento-card rounded-2xl p-5">
+                <span className="text-xs text-[var(--rgm-text-2)] font-medium">🧢 认证专业教练</span>
                 <div className="text-2xl font-black text-purple-400 mt-1">
-                  {dashboardMetrics?.coaches_count || 1} <span className="text-xs text-zinc-500">位</span>
+                  {dashboardMetrics?.coaches_count || 1} <span className="text-xs text-[var(--rgm-text-muted)]">位</span>
                 </div>
               </div>
-              <div className="bg-[#121215] border border-white/5 rounded-3xl p-5">
-                <span className="text-xs text-zinc-400 font-medium">🎯 进行中挑战赛</span>
+              <div className="rgm-bento-card rounded-2xl p-5">
+                <span className="text-xs text-[var(--rgm-text-2)] font-medium">🎯 进行中挑战赛</span>
                 <div className="text-2xl font-black text-emerald-400 mt-1">
-                  {dashboardMetrics?.active_events_count || events.length || 1} <span className="text-xs text-zinc-500">项</span>
+                  {dashboardMetrics?.active_events_count || events.length || 1} <span className="text-xs text-[var(--rgm-text-muted)]">项</span>
                 </div>
               </div>
             </div>
@@ -3294,17 +3366,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     <span className="px-2.5 py-1 rounded-xl bg-[#FC4C02]/15 border border-[#FC4C02]/30 text-[#FC4C02] text-xs font-black shrink-0">
                       {myRow ? `我的本月排名 #${myRow.rank || myIdx + 1}` : "本月暂未上榜"}
                     </span>
-                    <div className="text-xs text-zinc-300 truncate">
+                    <div className="text-xs text-[var(--rgm-text-2)] truncate">
                       {myRow ? (
                         aheadRow && gapKm ? (
                           <span>
-                            已跑 <strong className="text-white">{myRow.distance_km} km</strong>（目标完成 {myRow.progress_pct}%）· 距前一名「
-                            <strong className="text-white">{aheadRow.display_name}</strong>」仅差{" "}
+                            已跑 <strong className="text-[var(--rgm-text)]">{myRow.distance_km} km</strong>（目标完成 {myRow.progress_pct}%）· 距前一名「
+                            <strong className="text-[var(--rgm-text)]">{aheadRow.display_name}</strong>」仅差{" "}
                             <strong className="text-[#FC4C02]">{gapKm} km</strong>，再跑一课即可反超！
                           </span>
                         ) : (
                           <span>
-                            🎉 领跑全团榜首！本月累计 <strong className="text-white">{myRow.distance_km} km</strong>，保持节奏！
+                            🎉 领跑全团榜首！本月累计 <strong className="text-[var(--rgm-text)]">{myRow.distance_km} km</strong>，保持节奏！
                           </span>
                         )
                       ) : (
@@ -3312,7 +3384,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       )}
                     </div>
                   </div>
-                  <span className="text-[11px] font-bold text-zinc-400 shrink-0">
+                  <span className="text-[11px] font-bold text-[var(--rgm-text-muted)] shrink-0">
                     共 {leaderboard.length} 位团友参与本月角逐
                   </span>
                 </div>
@@ -3323,41 +3395,41 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-5 space-y-6">
             {/* 🥋 师徒传帮带（紧凑版，位于英雄榜上方） */}
-            <div className="bg-gradient-to-br from-emerald-950/25 via-[#121215] to-teal-950/20 border border-emerald-500/25 rounded-3xl p-5 space-y-3">
+            <div className="rgm-bento-card border-emerald-500/25 rounded-3xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h2
-                  className="text-base font-black text-white flex items-center gap-2 cursor-help"
+                  className="text-base font-black text-[var(--rgm-text)] flex items-center gap-2 cursor-help"
                   title={`每位队员可拜 1 位师傅，每位师傅最多同时带 ${mentorshipOverview?.max_mentees || 3} 位徒弟（同大群可跨跑团）。师傅可只读查看徒弟的训练课表、GPS 轨迹与静息心率 / HRV / 睡眠恢复数据。`}
                 >
                   🥋 师徒传帮带
-                  <span className="text-[11px] font-normal text-zinc-500">ⓘ</span>
+                  <span className="text-[11px] font-normal text-[var(--rgm-text-muted)]">ⓘ</span>
                 </h2>
                 <button
                   onClick={() => setShowMentorshipBindModal(true)}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-bold transition shrink-0"
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-bold transition shrink-0 cursor-pointer"
                 >
                   + 结对 {mentorshipOverview?.mentees_count || 0}/{mentorshipOverview?.max_mentees || 3}
                 </button>
               </div>
 
               {/* 我的师傅（单行） */}
-              <div className="flex items-center justify-between gap-2 bg-[#16181d] border border-white/10 rounded-2xl px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3 py-2.5">
                 {mentorshipOverview?.my_mentor ? (
                   <>
                     <div className="flex items-center gap-2.5 min-w-0">
                       <img
                         src={
                           mentorshipOverview.my_mentor.avatar_url ||
-                          "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                          "/defaults/default-avatar.svg"
                         }
                         alt={mentorshipOverview.my_mentor.display_name}
                         className="w-8 h-8 rounded-full object-cover border border-emerald-500/40 shrink-0"
                       />
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">
+                        <div className="text-xs font-bold text-[var(--rgm-text)] truncate">
                           🙏 师傅 · {mentorshipOverview.my_mentor.display_name}
                         </div>
-                        <div className="text-[10px] text-zinc-500 truncate">
+                        <div className="text-[10px] text-[var(--rgm-text-muted)] truncate">
                           {(mentorshipOverview.my_mentor.clubs || []).join(" · ") || "同大群师傅"} · 全马PB{" "}
                           {mentorshipOverview.my_mentor.marathon_pb_str || "—"}
                         </div>
@@ -3371,13 +3443,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           mentorshipOverview.my_mentor.display_name
                         )
                       }
-                      className="text-[11px] text-zinc-500 hover:text-rose-400 transition shrink-0"
+                      className="text-[11px] text-[var(--rgm-text-muted)] hover:text-rose-400 transition shrink-0"
                     >
                       解除
                     </button>
                   </>
                 ) : (
-                  <span className="text-xs text-zinc-500">🙏 暂未拜师 · 点「+ 结对」输入师傅 ID</span>
+                  <span className="text-xs text-[var(--rgm-text-muted)]">🙏 暂未拜师 · 点「+ 结对」输入师傅 ID</span>
                 )}
               </div>
 
@@ -3389,20 +3461,20 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       key={mt.mentee_id}
                       onClick={() => handleOpenMenteeDetail(mt.mentee_id)}
                       title="查看徒弟完整训练与睡眠恢复档案"
-                      className="flex items-center justify-between gap-2 bg-[#16181d] hover:bg-[#1c2026] border border-emerald-500/20 hover:border-emerald-400/50 rounded-2xl px-3 py-2 transition cursor-pointer"
+                      className="flex items-center justify-between gap-2 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-emerald-500/20 hover:border-emerald-400/50 rounded-2xl px-3 py-2 transition cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
                           src={
                             mt.avatar_url ||
-                            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                            "/defaults/default-avatar.svg"
                           }
                           alt={mt.display_name}
-                          className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
+                          className="w-8 h-8 rounded-full object-cover border border-[var(--rgm-border)] shrink-0"
                         />
                         <div className="min-w-0">
-                          <div className="text-xs font-bold text-white truncate">{mt.display_name}</div>
-                          <div className="text-[10px] text-zinc-500 truncate">
+                          <div className="text-xs font-bold text-[var(--rgm-text)] truncate">{mt.display_name}</div>
+                          <div className="text-[10px] text-[var(--rgm-text-muted)] truncate">
                             7天 {mt.training_summary?.week_km || 0}km · 本月 {mt.training_summary?.month_km || 0}km · 静息{" "}
                             {mt.rest_summary?.latest_resting_hr || "—"} · HRV {mt.rest_summary?.latest_hrv || "—"}
                           </div>
@@ -3423,14 +3495,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-between text-xs text-zinc-500 px-1">
+                <div className="flex items-center justify-between text-xs text-[var(--rgm-text-muted)] px-1">
                   <span>还没有徒弟（最多 {mentorshipOverview?.max_mentees || 3} 位）</span>
                   <button
                     onClick={() => {
                       setMentorshipBindRole("as_mentor");
                       setShowMentorshipBindModal(true);
                     }}
-                    className="text-emerald-300 font-bold hover:text-emerald-200"
+                    className="text-emerald-300 font-bold hover:text-emerald-200 cursor-pointer"
                   >
                     立即收徒 ›
                   </button>
@@ -3438,16 +3510,16 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               )}
             </div>
             {/* Leaderboard Table */}
-            <div className="bg-[#121215] border border-white/5 rounded-3xl p-5 shadow-xl">
+            <div className="rgm-bento-card rounded-3xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                     <Trophy className="w-5 h-5 text-amber-400" />
                     本月英雄榜
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">按当月累计跑量实时竞逐排名</p>
+                  <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">按当月累计跑量实时竞逐排名</p>
                 </div>
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-white/5 text-zinc-300">
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)]">
                   实时更新
                 </span>
               </div>
@@ -3463,7 +3535,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         ? "bg-zinc-400/10 border-zinc-400/20"
                         : runner.rank === 3
                         ? "bg-orange-500/10 border-orange-500/20"
-                        : "bg-[#18181c] border-white/5"
+                        : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)]"
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
@@ -3471,13 +3543,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         {runner.rank === 1 ? "🥇" : runner.rank === 2 ? "🥈" : runner.rank === 3 ? "🥉" : `#${runner.rank}`}
                       </div>
                       <img
-                        src={runner.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                        src={runner.avatar_url || "/defaults/default-avatar.svg"}
                         alt={runner.display_name}
-                        className="w-9 h-9 rounded-full object-cover border border-white/10 flex-shrink-0"
+                        className="w-9 h-9 rounded-full object-cover border border-[var(--rgm-border)] flex-shrink-0"
                       />
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-white">{runner.display_name}</span>
+                          <span className="text-sm font-bold text-[var(--rgm-text)]">{runner.display_name}</span>
                           {runner.role === "owner" && (
                             <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">团长</span>
                           )}
@@ -3485,17 +3557,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                             <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-bold">教练</span>
                           )}
                         </div>
-                        <span className="text-xs text-zinc-400">
+                        <span className="text-xs text-[var(--rgm-text-2)]">
                           目标: {runner.target_km} km · 完成度 {runner.progress_pct}%
                         </span>
                       </div>
                     </div>
 
                     <div className="text-right">
-                      <div className="text-base font-black text-white whitespace-nowrap">
+                      <div className="text-base font-black text-[var(--rgm-text)] whitespace-nowrap">
                         {runner.distance_km} <span className="text-xs text-[#FC4C02]">km</span>
                       </div>
-                      <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden mt-1 ml-auto">
+                      <div className="w-16 h-1.5 bg-[var(--rgm-card-3)] rounded-full overflow-hidden mt-1 ml-auto">
                         <div
                           className="h-full bg-gradient-to-r from-[#FC4C02] to-amber-400 rounded-full"
                           style={{ width: `${Math.min(100, runner.progress_pct)}%` }}
@@ -3510,13 +3582,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               </div>
               <div className="lg:col-span-7">
             {/* Recent Group Activities Feed with AI Coach Comments & Social Interaction */}
-            <div className="bg-[#121215] border border-white/5 rounded-3xl p-5 sm:p-6 space-y-5">
+            <div className="rgm-bento-card rounded-3xl p-5 sm:p-6 space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                   <Flame className="w-5 h-5 text-[#FC4C02]" />
                   打卡动态
                 </h2>
-                <span className="text-xs text-zinc-500 hidden sm:inline">❤️ 点赞 · 💬 评论</span>
+                <span className="text-xs text-[var(--rgm-text-muted)] hidden sm:inline">❤️ 点赞 · 💬 评论</span>
               </div>
 
               {feed.length > 0 ? (
@@ -3524,13 +3596,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   {visibleFeed.map((act) => (
                     <div
                       key={act.id}
-                      className="p-6 bg-[#18181c] border border-white/10 rounded-3xl space-y-4 hover:border-white/20 transition shadow-xl"
+                      className="p-6 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-3xl space-y-4 hover:border-[#FC4C02]/35 transition"
                     >
                       {/* Top: Runner & Activity Info */}
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <img
-                            src={act.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                            src={act.avatar_url || "/defaults/default-avatar.svg"}
                             alt={act.display_name}
                             className="w-12 h-12 rounded-full object-cover border border-white/10"
                           />
@@ -3594,7 +3666,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                       {/* AI Coach Critique Bubble */}
                       {!act.is_critique_hidden && (act.ai_journal || act.user_id === user?.id) && (
-                        <div className="bg-gradient-to-r from-purple-950/30 via-[#1e1b2e] to-indigo-950/30 border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-zinc-200">
+                        <div className="bg-[var(--rgm-purple-tint)] border border-purple-500/25 rounded-2xl p-4 text-xs leading-relaxed text-[var(--rgm-text-2)]">
                           <div className="flex items-center gap-2 font-bold text-purple-300 mb-1.5">
                             <Bot className="w-4 h-4 text-purple-400" />
                             <span>Canova教练专属点评</span>
@@ -3602,7 +3674,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               智能生成
                             </span>
                           </div>
-                          <p className="text-xs text-zinc-300 leading-relaxed font-sans">
+                          <p className="text-xs text-[var(--rgm-text)] leading-relaxed font-sans">
                             {act.ai_journal || "正在基于 Canova 耐力生理模型生成点评..."}
                           </p>
                         </div>
@@ -3610,35 +3682,35 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                       {/* Public Club Captain Cheer Bubble */}
                       {act.captain_cheer && (
-                        <div className="bg-[#121214] border border-white/5 rounded-2xl p-4">
+                        <div className="bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-2xl p-4">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-[#FC4C02] text-[11px]">
                               📣 {act.captain_cheer_meta?.captain_title || "团长加油"}
                             </span>
                           </div>
-                          <p className="text-zinc-200 mt-1 text-xs leading-relaxed">
+                          <p className="text-[var(--rgm-text)] mt-1 text-xs leading-relaxed">
                             {act.captain_cheer}
                           </p>
                         </div>
                       )}
 
                       {/* Social Actions: Like & Comment Counter */}
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                      <div className="flex items-center justify-between pt-2 border-t border-[var(--rgm-border)]">
                         <div className="flex items-center gap-3">
                           <button
                             onClick={() => handleToggleLike(act.id)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
                               act.has_liked
                                 ? "bg-rose-500/15 border-rose-500/40 text-rose-400 shadow-sm"
-                                : "bg-white/5 border-white/10 text-zinc-400 hover:text-white hover:bg-white/10"
+                                : "bg-[var(--rgm-card)] border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-3)]"
                             }`}
                           >
                             <Heart className={`w-3.5 h-3.5 ${act.has_liked ? "fill-rose-500 text-rose-500" : ""}`} />
                             <span>{act.has_liked ? "已点赞" : "点赞"} ({act.likes_count || 0})</span>
                           </button>
 
-                          <div className="flex items-center gap-1 text-xs text-zinc-400 font-medium">
-                            <MessageCircle className="w-3.5 h-3.5 text-zinc-500" />
+                          <div className="flex items-center gap-1 text-xs text-[var(--rgm-text-2)] font-medium">
+                            <MessageCircle className="w-3.5 h-3.5 text-[var(--rgm-text-muted)]" />
                             <span>{act.comments?.length || 0} 条跑友留言</span>
                           </div>
                         </div>
@@ -3646,23 +3718,23 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                       {/* Likers Strip (显示点赞者及头像) */}
                       {act.likers && act.likers.length > 0 && (
-                        <div className="flex items-start gap-2.5 bg-[#121214] border border-white/5 rounded-2xl px-3.5 py-2.5">
+                        <div className="flex items-start gap-2.5 bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5">
                           <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 mt-1 shrink-0" />
                           <div className="flex flex-wrap items-center gap-1.5">
                             {act.likers.map((lk: any, lkIdx: number) => (
                               <span
                                 key={lk.user_id || lkIdx}
-                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-semibold text-zinc-200"
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[11px] font-semibold text-[var(--rgm-text)]"
                               >
                                 <img
-                                  src={lk.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                                  src={lk.avatar_url || "/defaults/default-avatar.svg"}
                                   alt={lk.display_name || "跑友"}
                                   className="w-4 h-4 rounded-full object-cover"
                                 />
                                 <span>{lk.display_name || "跑友"}</span>
                               </span>
                             ))}
-                            <span className="text-[11px] text-zinc-500 ml-1">
+                            <span className="text-[11px] text-[var(--rgm-text-muted)] ml-1">
                               等 {act.likers.length} 人点赞
                             </span>
                           </div>
@@ -3671,14 +3743,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                       {/* Comments Thread (跑友留言产生 Thread) */}
                       {act.comments && act.comments.length > 0 && (
-                        <div className="space-y-3 bg-[#121214] border border-white/5 rounded-2xl p-4">
+                        <div className="space-y-3 bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-2xl p-4">
                           {getCommentThreads(act.comments).map((thread: any) => (
                             <div key={thread.id} className="space-y-2">
                               {/* Root Comment */}
                               <div className="flex items-start justify-between gap-3 text-xs">
                                 <div className="flex items-start gap-2.5">
                                   <img
-                                    src={thread.author_avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                                    src={thread.author_avatar || "/defaults/default-avatar.svg"}
                                     alt={thread.author_name}
                                     className="w-6 h-6 rounded-full object-cover mt-0.5 shrink-0"
                                   />
@@ -3720,7 +3792,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                     <div key={rep.id} className="flex items-start justify-between gap-3 text-xs">
                                       <div className="flex items-start gap-2">
                                         <img
-                                          src={rep.author_avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                                          src={rep.author_avatar || "/defaults/default-avatar.svg"}
                                           alt={rep.author_name}
                                           className="w-5 h-5 rounded-full object-cover mt-0.5 shrink-0"
                                         />
@@ -3847,7 +3919,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               ? `回复 @${replyTargets[act.id].author_name}：聊聊配速、心率或加油互动...`
                               : "在 Canova教练评语后给队友鼓励或写句评语..."
                           }
-                          className="flex-1 bg-[#121214] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FC4C02]"
+                          className="flex-1 bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-xl px-3.5 py-2 text-xs text-[var(--rgm-text)] placeholder:text-[var(--rgm-text-muted)] focus:outline-none focus:border-[#FC4C02]"
                         />
                         <button
                           onClick={() => handlePostComment(act.id)}
@@ -3866,21 +3938,21 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     {!isFeedExpanded && feed.length > 20 ? (
                       <button
                         onClick={() => setIsFeedExpanded(true)}
-                        className="w-full py-3.5 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-bold text-zinc-300 hover:text-white transition flex items-center justify-center gap-2 shadow-lg shadow-black/20"
+                        className="w-full py-3.5 px-4 rounded-2xl bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 text-xs font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <Flame className="w-4 h-4 text-[#FC4C02]" />
                         <span>加载更多（展开当月全部打卡 · 还有 {feed.length - 20} 条）</span>
                       </button>
                     ) : isFeedExpanded && feed.length > 20 ? (
                       <div className="space-y-3">
-                        <div className="py-3 px-4 rounded-2xl bg-white/[0.02] border border-white/5 text-[11px] text-zinc-400 flex items-center justify-between">
+                        <div className="py-3 px-4 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[11px] text-[var(--rgm-text-2)] flex items-center justify-between">
                           <span className="flex items-center gap-1.5">
                             <Check className="w-3.5 h-3.5 text-emerald-500/80" />
                             已展示当月全部打卡记录（共 {feed.length} 条）
                           </span>
                           <button
                             onClick={() => setIsFeedExpanded(false)}
-                            className="text-[#FC4C02] hover:underline flex items-center gap-1 font-bold text-xs"
+                            className="text-[#FC4C02] hover:underline flex items-center gap-1 font-bold text-xs cursor-pointer"
                           >
                             <ChevronUp className="w-3.5 h-3.5" />
                             收起折叠
@@ -3890,7 +3962,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           <button
                             onClick={handleLoadMoreFeed}
                             disabled={loadingMoreFeed}
-                            className="w-full py-3 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-bold text-zinc-400 hover:text-white transition flex items-center justify-center gap-2"
+                            className="w-full py-3 px-4 rounded-2xl bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 text-xs font-bold text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition flex items-center justify-center gap-2 cursor-pointer"
                           >
                             {loadingMoreFeed ? (
                               <>
@@ -3899,7 +3971,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               </>
                             ) : (
                               <>
-                                <Clock className="w-4 h-4 text-zinc-400" />
+                                <Clock className="w-4 h-4 text-[var(--rgm-text-muted)]" />
                                 <span>加载更早历史月份打卡（跑团共 {feedTotal} 条记录）</span>
                               </>
                             )}
@@ -3908,7 +3980,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <div className="py-3 px-4 rounded-2xl bg-white/[0.02] border border-white/5 text-[11px] text-zinc-500 flex items-center justify-center gap-1.5">
+                        <div className="py-3 px-4 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[11px] text-[var(--rgm-text-muted)] flex items-center justify-center gap-1.5">
                           <Check className="w-3.5 h-3.5 text-emerald-500/80" />
                           <span>已展示当月全部打卡记录（共 {feed.length} 条）</span>
                         </div>
@@ -3916,7 +3988,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           <button
                             onClick={handleLoadMoreFeed}
                             disabled={loadingMoreFeed}
-                            className="w-full py-2.5 px-4 rounded-2xl bg-[#141416] hover:bg-[#1a1a1e] border border-white/10 hover:border-[#FC4C02]/40 text-xs font-medium text-zinc-400 hover:text-white transition flex items-center justify-center gap-2"
+                            className="w-full py-2.5 px-4 rounded-2xl bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/40 text-xs font-medium text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] transition flex items-center justify-center gap-2 cursor-pointer"
                           >
                             {loadingMoreFeed ? (
                               <>
@@ -3925,7 +3997,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               </>
                             ) : (
                               <>
-                                <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                                <Clock className="w-3.5 h-3.5 text-[var(--rgm-text-muted)]" />
                                 <span>加载更早历史月份打卡（跑团共 {feedTotal} 条记录）</span>
                               </>
                             )}
@@ -3936,7 +4008,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-zinc-500 text-center py-8">暂无队员近期打卡，快去完成今日跑步吧！</p>
+                <p className="text-xs text-[var(--rgm-text-muted)] text-center py-8">暂无队员近期打卡，快去完成今日跑步吧！</p>
               )}
             </div>
               </div>
@@ -3954,18 +4026,18 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               eventsCount={events.length}
               onOpenInviteModal={() => openClubInviteModal(currentClub)}
               onOpenClubReport={openClubReportModal}
-              onSwitchToEvents={() => setActiveTab("events")}
-              onSwitchToCoach={() => setActiveTab("coach")}
+              onSwitchToEvents={() => switchTeamTab("events")}
+              onSwitchToCoach={() => switchTeamTab("coach")}
             />
 
             {/* W13.4 跑团品牌宣传页装修台入口 */}
             {!currentClub?.is_virtual_unaffiliated && (
-              <div className="bg-gradient-to-r from-[#FC4C02]/15 via-[#121215] to-[#18181c] border border-[#FC4C02]/30 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+              <div className="rgm-bento-card border-[#FC4C02]/35 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <h2 className="text-base font-black text-[var(--rgm-text)] flex items-center gap-2">
                     🖼️ 跑团品牌宣传页与合练照片墙装修台
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">
+                  <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">
                     设置跑团 Slogan、合练公园与排期、上传合练/赛场/证书大片；开启后发的每一封定向特邀函都将自带宣传页背书
                   </p>
                 </div>
@@ -3973,7 +4045,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   <button
                     type="button"
                     onClick={() => router.push(`/dashboard/plaza?club_id=${encodeURIComponent(currentClub.id)}`)}
-                    className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-xs font-bold text-[var(--rgm-text)] cursor-pointer transition"
                   >
                     预览对外主页 ›
                   </button>
@@ -3992,22 +4064,24 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
             {/* W12.1–W12.4 团长/教练多维靶向纳新与漏斗 */}
             {!currentClub?.is_virtual_unaffiliated && user?.id && (
-              <TargetedRecruitPanel
-                clubId={currentClub.id}
-                clubName={currentClub.name}
-                operatorUid={user.id}
-              />
+              <div id="section-targeted-recruit" className="scroll-mt-24">
+                <TargetedRecruitPanel
+                  clubId={currentClub.id}
+                  clubName={currentClub.name}
+                  operatorUid={user.id}
+                />
+              </div>
             )}
             {/* Club Lifecycle & Status Management (Only Owner & Admin) */}
             {(currentRole === "owner" || user?.is_admin) && (
-              <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8 space-y-5 shadow-xl">
+              <div className="rgm-bento-card rounded-3xl p-6 sm:p-8 space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-lg font-black text-white flex items-center gap-2">
+                    <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                       <Shield className="w-5 h-5 text-amber-400" />
                       跑团运行状态与生命周期治理
                     </h2>
-                    <p className="text-xs text-zinc-400 mt-0.5">
+                    <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">
                       管理【{currentClub?.name}】的运行状态（正常/暂停/锁定）或解散跑团
                     </p>
                   </div>
@@ -4233,13 +4307,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
             {/* New Members Onboarding & Watch/Goal Setup Status Panel */}
             {(currentRole === "owner" || currentRole === "coach" || user?.is_admin) && (
-              <div className="bg-[#121215] border border-emerald-500/25 rounded-3xl p-6 sm:p-8 space-y-5 shadow-xl">
+              <div className="rgm-bento-card border-emerald-500/25 rounded-3xl p-6 sm:p-8 space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-lg font-black text-white flex items-center gap-2">
+                    <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                       🌱 新队员与入团设定状态（加入时间 / 手表绑定 / 目标设定）
                     </h2>
-                    <p className="text-xs text-zinc-400 mt-0.5">
+                    <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">
                       追踪新入团队员的加入时间、佳明/高驰/苹果/华为手表绑定状态与周/月跑量目标设定，支持一键提醒待完善队员
                     </p>
                   </div>
@@ -4253,10 +4327,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       <button
                         key={f.id}
                         onClick={() => setNewMembersFilter(f.id as any)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                           newMembersFilter === f.id
                             ? "bg-emerald-500 text-black"
-                            : "bg-white/5 text-zinc-300 hover:bg-white/10"
+                            : "bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:bg-[var(--rgm-card-3)]"
                         }`}
                       >
                         {f.label}
@@ -4267,30 +4341,30 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
                 {/* 4 KPI summary cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-[#18181c] border border-emerald-500/25 rounded-2xl p-3.5">
+                  <div className="bg-[var(--rgm-card-2)] border border-emerald-500/25 rounded-2xl p-3.5">
                     <span className="text-[11px] text-emerald-400 font-bold">🌱 近7天新入团</span>
-                    <div className="text-xl font-black text-white mt-0.5">
-                      {newMembersSummary?.new_7d_count ?? 0} <span className="text-xs text-zinc-500">人</span>
+                    <div className="text-xl font-black text-[var(--rgm-text)] mt-0.5">
+                      {newMembersSummary?.new_7d_count ?? 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                     </div>
                   </div>
-                  <div className="bg-[#18181c] border border-cyan-500/25 rounded-2xl p-3.5">
+                  <div className="bg-[var(--rgm-card-2)] border border-cyan-500/25 rounded-2xl p-3.5">
                     <span className="text-[11px] text-cyan-400 font-bold">⌚ 手表已绑定</span>
-                    <div className="text-xl font-black text-white mt-0.5">
+                    <div className="text-xl font-black text-[var(--rgm-text)] mt-0.5">
                       {newMembersSummary?.watch_bound_count ?? 0}{" "}
-                      <span className="text-xs text-zinc-500">/ {newMembersSummary?.total_members ?? newMembersStatus.length}</span>
+                      <span className="text-xs text-[var(--rgm-text-muted)]">/ {newMembersSummary?.total_members ?? newMembersStatus.length}</span>
                     </div>
                   </div>
-                  <div className="bg-[#18181c] border border-purple-500/25 rounded-2xl p-3.5">
+                  <div className="bg-[var(--rgm-card-2)] border border-purple-500/25 rounded-2xl p-3.5">
                     <span className="text-[11px] text-purple-400 font-bold">🎯 目标已设定</span>
-                    <div className="text-xl font-black text-white mt-0.5">
+                    <div className="text-xl font-black text-[var(--rgm-text)] mt-0.5">
                       {newMembersSummary?.goal_configured_count ?? 0}{" "}
-                      <span className="text-xs text-zinc-500">/ {newMembersSummary?.total_members ?? newMembersStatus.length}</span>
+                      <span className="text-xs text-[var(--rgm-text-muted)]">/ {newMembersSummary?.total_members ?? newMembersStatus.length}</span>
                     </div>
                   </div>
-                  <div className="bg-[#18181c] border border-amber-500/25 rounded-2xl p-3.5">
+                  <div className="bg-[var(--rgm-card-2)] border border-amber-500/25 rounded-2xl p-3.5">
                     <span className="text-[11px] text-amber-400 font-bold">⚠️ 待完善设置</span>
                     <div className="text-xl font-black text-amber-400 mt-0.5">
-                      {newMembersSummary?.needs_setup_count ?? 0} <span className="text-xs text-zinc-500">人</span>
+                      {newMembersSummary?.needs_setup_count ?? 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                     </div>
                   </div>
                 </div>
@@ -4306,25 +4380,25 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     .map((m) => (
                       <div
                         key={m.user_id}
-                        className="bg-[#18181c] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3"
+                        className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl p-4 flex flex-col justify-between gap-3"
                       >
                         <div className="space-y-3">
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-3 min-w-0">
                               <img
-                                src={m.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                                src={m.avatar_url || "/defaults/default-avatar.svg"}
                                 alt={m.display_name}
-                                className="w-10 h-10 rounded-full object-cover border border-white/10 shrink-0"
+                                className="w-10 h-10 rounded-full object-cover border border-[var(--rgm-border)] shrink-0"
                               />
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-bold text-white text-xs truncate">{m.display_name}</span>
-                                  <span className="px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 text-[10px]">
+                                  <span className="font-bold text-[var(--rgm-text)] text-xs truncate">{m.display_name}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)] text-[10px]">
                                     {m.role === "owner" ? "👑 团长" : m.role === "coach" ? "🧢 教练" : "🏃 队员"}
                                   </span>
                                 </div>
-                                <div className="text-[11px] text-zinc-400 mt-0.5">
-                                  ⏰ 加入时间：<span className="text-zinc-200 font-mono">{m.joined_at_display}</span>
+                                <div className="text-[11px] text-[var(--rgm-text-2)] mt-0.5">
+                                  ⏰ 加入时间：<span className="text-[var(--rgm-text)] font-mono">{m.joined_at_display}</span>
                                 </div>
                               </div>
                             </div>
@@ -4334,7 +4408,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                   ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                                   : m.is_new_30d
                                   ? "bg-cyan-500/15 text-cyan-300"
-                                  : "bg-white/5 text-zinc-400"
+                                  : "bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)]"
                               }`}
                             >
                               {m.join_recency_label}
@@ -4418,17 +4492,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               </div>
             )}
 
-            <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8">
+            <div className="rgm-bento-card rounded-3xl p-6 sm:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
-                  <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                     <Users className="w-5 h-5 text-amber-400" />
                     跑团成员与权限管理
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">管理跑团跑者成员、指定/撤销认证教练、移交团长或移除成员</p>
+                  <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">管理跑团跑者成员、指定/撤销认证教练、移交团长或移除成员</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-400">共 <strong className="text-white">{members.length}</strong> 位团员</span>
+                  <span className="text-xs text-[var(--rgm-text-2)]">共 <strong className="text-[var(--rgm-text)]">{members.length}</strong> 位团员</span>
                   {(currentRole === "owner" || user?.is_admin) && (
                     <button
                       onClick={() => {
@@ -4450,7 +4524,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-white/10 text-[11px] font-bold text-zinc-400 uppercase">
+                    <tr className="border-b border-[var(--rgm-border)] text-[11px] font-bold text-[var(--rgm-text-2)] uppercase">
                       <th className="py-3 px-4">跑者</th>
                       <th className="py-3 px-4">当前角色</th>
                       <th className="py-3 px-4">月跑量计划与完成度</th>
@@ -4459,37 +4533,37 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       <th className="py-3 px-4 text-right">管理操作</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 text-xs font-medium text-zinc-300">
+                  <tbody className="divide-y divide-[var(--rgm-divider)] text-xs font-medium text-[var(--rgm-text-2)]">
                     {members.map((m) => (
-                      <tr key={m.user_id} className="hover:bg-white/[0.02]">
+                      <tr key={m.user_id} className="hover:bg-[var(--rgm-card-2)]/60">
                         <td className="py-3.5 px-4 flex items-center gap-3">
                           <img
-                            src={m.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                            src={m.avatar_url || "/defaults/default-avatar.svg"}
                             alt={m.display_name}
                             className="w-8 h-8 rounded-full object-cover"
                           />
                           <div>
-                            <span className="font-bold text-white block">{m.display_name}</span>
-                            <span className="text-[10px] text-zinc-500">{m.user_id}</span>
+                            <span className="font-bold text-[var(--rgm-text)] block">{m.display_name}</span>
+                            <span className="text-[10px] text-[var(--rgm-text-muted)]">{m.user_id}</span>
                           </div>
                         </td>
                         <td className="py-3.5 px-4">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            m.role === "owner" ? "bg-amber-500/20 text-amber-300" : m.role === "coach" ? "bg-purple-500/20 text-purple-300" : "bg-zinc-800 text-zinc-400"
+                            m.role === "owner" ? "bg-amber-500/20 text-amber-300" : m.role === "coach" ? "bg-purple-500/20 text-purple-300" : "bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)]"
                           }`}>
                             {m.role === "owner" ? "👑 团长" : m.role === "coach" ? "🧢 教练" : "普通跑者"}
                           </span>
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-white text-xs">{m.month_km || 0} / {m.target_km || 200} km</span>
+                            <span className="font-mono text-[var(--rgm-text)] text-xs">{m.month_km || 0} / {m.target_km || 200} km</span>
                             <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
-                              (m.completion_rate || 0) >= 100 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-zinc-400"
+                              (m.completion_rate || 0) >= 100 ? "bg-emerald-500/20 text-emerald-400" : "bg-[var(--rgm-card-2)] text-[var(--rgm-text-2)]"
                             }`}>
                               {m.completion_rate || 0}%
                             </span>
                           </div>
-                          <div className="w-32 bg-white/10 h-1.5 rounded-full overflow-hidden mt-1.5">
+                          <div className="w-32 bg-[var(--rgm-card-3)] h-1.5 rounded-full overflow-hidden mt-1.5">
                             <div
                               className={`h-full rounded-full transition-all ${
                                 (m.completion_rate || 0) >= 100 ? "bg-emerald-400" : "bg-[#FC4C02]"
@@ -4498,8 +4572,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                             />
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 font-mono text-zinc-300">{formatPb(m.marathon_pb)}</td>
-                        <td className="py-3.5 px-4 text-zinc-400">{m.joined_at?.slice(0, 10)}</td>
+                        <td className="py-3.5 px-4 font-mono text-[var(--rgm-text)]">{formatPb(m.marathon_pb)}</td>
+                        <td className="py-3.5 px-4 text-[var(--rgm-text-2)]">{m.joined_at?.slice(0, 10)}</td>
                         <td className="py-3.5 px-4 text-right space-x-2">
                           {(currentRole === "owner" || user?.is_admin) ? (
                             <>
@@ -4516,7 +4590,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                   ) : (
                                     <button
                                       onClick={() => handleUpdateMemberRole(m.user_id, "member")}
-                                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[11px] font-bold transition"
+                                      className="px-2.5 py-1 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)] rounded-lg text-[11px] font-bold transition"
                                       title="取消教练权限"
                                     >
                                       取消教练
@@ -4577,7 +4651,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 🏃 前往我的个人训练课表
               </button>
               <button
-                onClick={() => setActiveTab("leaderboard")}
+                onClick={() => switchTeamTab("leaderboard")}
                 className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition cursor-pointer"
               >
                 🏆 查看跑团英雄榜与打卡动态
@@ -4592,30 +4666,50 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => setCoachViewMode("compass")}
-                  className={`px-4 py-2 rounded-xl text-xs font-black transition border ${
+                  onClick={() => {
+                    setCoachViewMode("compass");
+                    if (typeof window !== "undefined") {
+                      const sp = new URLSearchParams(window.location.search);
+                      sp.set("tab", "coach");
+                      sp.delete("mode");
+                      const href = `/dashboard/team?${sp.toString()}`;
+                      window.history.replaceState(null, "", href);
+                      dispatchRgmNavIntent(href);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition border cursor-pointer ${
                     coachViewMode === "compass"
                       ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-md shadow-[#FC4C02]/20"
-                      : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                      : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
                   }`}
                 >
                   🧭 全景学员罗盘与周课表
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCoachViewMode("critique")}
-                  className={`px-4 py-2 rounded-xl text-xs font-black transition border flex items-center gap-2 ${
+                  onClick={() => {
+                    setCoachViewMode("critique");
+                    if (typeof window !== "undefined") {
+                      const sp = new URLSearchParams(window.location.search);
+                      sp.set("tab", "coach");
+                      sp.set("mode", "batch-critique");
+                      const href = `/dashboard/team?${sp.toString()}`;
+                      window.history.replaceState(null, "", href);
+                      dispatchRgmNavIntent(href);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition border flex items-center gap-2 cursor-pointer ${
                     coachViewMode === "critique"
                       ? "bg-[#FC4C02] text-white border-[#FC4C02] shadow-md shadow-[#FC4C02]/20"
-                      : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                      : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
                   }`}
                 >
                   <span>⚡ 5秒连续批阅打卡工作台</span>
                   <span
                     className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                       coachViewMode === "critique"
-                        ? "bg-black/25 text-white"
-                        : "bg-amber-500/20 text-amber-300"
+                        ? "bg-orange-950/35 text-white border border-white/25"
+                        : "bg-[var(--rgm-amber-tint)] text-amber-500 border border-amber-500/30"
                     }`}
                   >
                     {
@@ -4633,7 +4727,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 </button>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] text-zinc-400">
+                <span className="text-[11px] text-[var(--rgm-text-2)]">
                   当前主控跑团：{currentClub?.name || "跑团"} · {sortedCoachStudents.length} 位学员
                 </span>
                 {(currentRole === "owner" || currentRole === "coach") && (
@@ -4679,17 +4773,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 className={`border rounded-3xl p-5 cursor-pointer transition ${
                   coachStatusFilter === "peak"
                     ? "bg-emerald-500/15 border-emerald-400 shadow-lg shadow-emerald-500/10"
-                    : "bg-[#121215] border-emerald-500/30 hover:border-emerald-500/60"
+                    : "rgm-bento-card border-emerald-500/30 hover:border-emerald-500/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-emerald-400 font-bold">🟢 巅峰状态 (TSB &gt; 5)</span>
                   {coachStatusFilter === "peak" && <span className="text-[10px] text-emerald-300 font-bold">✓ 筛选中</span>}
                 </div>
-                <div className="text-2xl font-black text-white mt-1">
-                  {coachCockpit?.summary?.peak_count || 0} <span className="text-xs text-zinc-500">人</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
+                  {coachCockpit?.summary?.peak_count || 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                 </div>
-                <p className="text-[10px] text-zinc-400 mt-1">适宜安排比赛测速或高强度课</p>
+                <p className="text-[10px] text-[var(--rgm-text-2)] mt-1">适宜安排比赛测速或高强度课</p>
               </div>
 
               <div
@@ -4697,17 +4791,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 className={`border rounded-3xl p-5 cursor-pointer transition ${
                   coachStatusFilter === "optimal"
                     ? "bg-blue-500/15 border-blue-400 shadow-lg shadow-blue-500/10"
-                    : "bg-[#121215] border-blue-500/30 hover:border-blue-500/60"
+                    : "rgm-bento-card border-blue-500/30 hover:border-blue-500/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-blue-400 font-bold">🔵 专项适应 (TSB -30~5)</span>
                   {coachStatusFilter === "optimal" && <span className="text-[10px] text-blue-300 font-bold">✓ 筛选中</span>}
                 </div>
-                <div className="text-2xl font-black text-white mt-1">
-                  {coachCockpit?.summary?.optimal_count || 0} <span className="text-xs text-zinc-500">人</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
+                  {coachCockpit?.summary?.optimal_count || 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                 </div>
-                <p className="text-[10px] text-zinc-400 mt-1">身体良好吸收负荷，按计划推进</p>
+                <p className="text-[10px] text-[var(--rgm-text-2)] mt-1">身体良好吸收负荷，按计划推进</p>
               </div>
 
               <div
@@ -4715,17 +4809,17 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 className={`border rounded-3xl p-5 cursor-pointer transition ${
                   coachStatusFilter === "tired"
                     ? "bg-amber-500/15 border-amber-400 shadow-lg shadow-amber-500/10"
-                    : "bg-[#121215] border-amber-500/30 hover:border-amber-500/60"
+                    : "rgm-bento-card border-amber-500/30 hover:border-amber-500/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-amber-400 font-bold">🟡 疲劳积累 (TSB -50~-30)</span>
                   {coachStatusFilter === "tired" && <span className="text-[10px] text-amber-300 font-bold">✓ 筛选中</span>}
                 </div>
-                <div className="text-2xl font-black text-white mt-1">
-                  {coachCockpit?.summary?.tired_count || 0} <span className="text-xs text-zinc-500">人</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
+                  {coachCockpit?.summary?.tired_count || 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                 </div>
-                <p className="text-[10px] text-zinc-400 mt-1">建议穿插低心率排酸轻松跑</p>
+                <p className="text-[10px] text-[var(--rgm-text-2)] mt-1">建议穿插低心率排酸轻松跑</p>
               </div>
 
               <div
@@ -4733,32 +4827,32 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 className={`border rounded-3xl p-5 cursor-pointer transition ${
                   coachStatusFilter === "danger"
                     ? "bg-rose-500/15 border-rose-400 shadow-lg shadow-rose-500/10"
-                    : "bg-[#121215] border-rose-500/30 hover:border-rose-500/60"
+                    : "rgm-bento-card border-rose-500/30 hover:border-rose-500/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-rose-400 font-bold">🔴 伤病预警 (TSB &lt; -50)</span>
                   {coachStatusFilter === "danger" && <span className="text-[10px] text-rose-300 font-bold">✓ 筛选中</span>}
                 </div>
-                <div className="text-2xl font-black text-white mt-1">
-                  {coachCockpit?.summary?.danger_count || 0} <span className="text-xs text-zinc-500">人</span>
+                <div className="text-2xl font-black text-[var(--rgm-text)] mt-1">
+                  {coachCockpit?.summary?.danger_count || 0} <span className="text-xs text-[var(--rgm-text-muted)]">人</span>
                 </div>
-                <p className="text-[10px] text-zinc-400 mt-1">过度训练风险，需强制休整</p>
+                <p className="text-[10px] text-[var(--rgm-text-2)] mt-1">过度训练风险，需强制休整</p>
               </div>
             </div>
 
             {/* ── Coach Workbench Hub: 模版货架 + 核心动作 + 精简筛选 ── */}
-            <div className="bg-[#131318] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl space-y-5">
+            <div className="rgm-bento-card rounded-3xl p-5 sm:p-6 space-y-5">
               {/* Row 1: Title + Primary Actions */}
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                     🧢 排课工作台
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--rgm-card-2)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                       本周执行率 {coachCockpit?.summary?.avg_week_compliance || 0}%
                     </span>
                   </h3>
-                  <p className="text-xs text-zinc-500 mt-1">① 选模版 → ② 选队员 → ③ 派发（草案可逐人微调后发布）</p>
+                  <p className="text-xs text-[var(--rgm-text-muted)] mt-1">① 选模版 → ② 选队员 → ③ 派发（草案可逐人微调后发布）</p>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
@@ -4771,14 +4865,14 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </button>
                   <button
                     onClick={() => openTemplateAssignModal()}
-                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] transition flex items-center gap-1.5 cursor-pointer"
                   >
                     模版派发
                   </button>
                   {sortedCoachStudents.length > 0 && (
                     <button
                       onClick={() => setSelectedStudentForPlan(sortedCoachStudents[0])}
-                      className="px-3.5 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 transition flex items-center gap-1.5 cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] transition flex items-center gap-1.5 cursor-pointer"
                       title="按当前筛选顺序逐个审核、微调并发布队员课表"
                     >
                       逐人批阅 ({sortedCoachStudents.length})
@@ -4786,7 +4880,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   )}
                   <button
                     onClick={() => setShowBroadcastModal(true)}
-                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] transition flex items-center gap-1.5 cursor-pointer"
                     title="把跑团公共合练课（如周二间歇课、周末长距离）同步写入全体队员当周课表"
                   >
                     合练课派发
@@ -4800,7 +4894,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     className={`px-3.5 py-2 rounded-xl text-xs font-medium border transition flex items-center gap-1.5 cursor-pointer ${
                       showBatchHistoryPanel
                         ? "bg-[#FC4C02] text-white border-[#FC4C02] font-bold"
-                        : "bg-white/5 hover:bg-white/10 text-zinc-200 border-white/10"
+                        : "bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border-[var(--rgm-border)]"
                     }`}
                     title="查看近期识图导入或模版批量派发记录，支持整批一键撤回并恢复队员原课表"
                   >
@@ -4810,7 +4904,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     <button
                       onClick={() => handleBatchGenerateClubDrafts(true)}
                       disabled={batchGeneratingDrafts}
-                      className="px-3.5 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      className="px-3.5 py-2 rounded-xl text-xs font-medium bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       title="根据每位未排课队员的目标赛事、周跑量与体能状态，自动生成个性化草案"
                     >
                       {batchGeneratingDrafts ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
@@ -4824,7 +4918,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                               handleBatchGenerateClubDrafts(false);
                             }
                           }}
-                          className="whitespace-nowrap px-3 py-2 rounded-xl text-[11px] font-medium bg-[#18181c] hover:bg-white/10 text-zinc-300 border border-white/10 shadow-xl cursor-pointer"
+                          className="whitespace-nowrap px-3 py-2 rounded-xl text-[11px] font-medium bg-[var(--rgm-card)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text)] border border-[var(--rgm-border)] shadow-xl cursor-pointer"
                         >
                           ↻ 全团重制新周期草案
                         </button>
@@ -4906,20 +5000,20 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               {/* Row 2: Template Shelf (all templates visible at a glance, one click to distribute) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-zinc-300">训练模版</span>
+                  <span className="text-xs font-bold text-[var(--rgm-text-2)]">训练模版</span>
                   <div className="flex items-center gap-3 text-[11px]">
-                    <span className="text-zinc-500 hidden sm:inline">每周按 Canova 周期自动递进 · 点击卡片即可派发</span>
+                    <span className="text-[var(--rgm-text-muted)] hidden sm:inline">每周按 Canova 周期自动递进 · 点击卡片即可派发</span>
                     <button
                       onClick={() => openTemplateAssignModal(undefined, undefined, "custom")}
-                      className="font-medium text-zinc-300 hover:text-white cursor-pointer"
+                      className="font-medium text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] cursor-pointer"
                     >
                       我的模版 ({coachTemplates.filter((t: any) => t.is_custom).length}) →
                     </button>
                   </div>
                 </div>
                 {loadingTemplates && coachTemplates.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-zinc-500 flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-zinc-400" /> 正在加载模版...
+                  <div className="py-6 text-center text-xs text-[var(--rgm-text-muted)] flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--rgm-text-muted)]" /> 正在加载模版...
                   </div>
                 ) : (
                   <div className="flex gap-2.5 overflow-x-auto pb-1.5 snap-x">
@@ -4932,18 +5026,18 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         <button
                           key={tpl.id}
                           onClick={() => openTemplateAssignModal(tpl.id)}
-                          className="snap-start shrink-0 w-48 text-left p-3 rounded-2xl bg-[#18181c] border border-white/10 hover:border-white/25 transition cursor-pointer group/tpl"
+                          className="snap-start shrink-0 w-48 text-left p-3 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/45 transition cursor-pointer group/tpl"
                         >
                           <div className="flex items-center justify-between gap-1">
-                            <span className="text-xs font-bold text-white truncate">{tpl.short_name}</span>
-                            {tpl.is_custom && <span className="text-[9px] text-zinc-400 shrink-0">自建</span>}
+                            <span className="text-xs font-bold text-[var(--rgm-text)] truncate">{tpl.short_name}</span>
+                            {tpl.is_custom && <span className="text-[9px] text-[var(--rgm-text-muted)] shrink-0">自建</span>}
                           </div>
-                          <div className="text-[10px] text-zinc-400 mt-1 truncate">{tpl.target_pb_label}</div>
-                          <div className="mt-2 flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                          <div className="text-[10px] text-[var(--rgm-text-2)] mt-1 truncate">{tpl.target_pb_label}</div>
+                          <div className="mt-2 flex items-center justify-between text-[10px] font-mono text-[var(--rgm-text-2)]">
                             <span>{tpl.weekly_km}km · {tpl.days_per_week}练</span>
                             <span className="flex items-center gap-1">
-                              {rec > 0 && <span className="px-1.5 rounded bg-white/5 text-zinc-300 font-medium">荐{rec}</span>}
-                              {inUse > 0 && <span className="px-1.5 rounded bg-white/5 text-zinc-300">用{inUse}</span>}
+                              {rec > 0 && <span className="px-1.5 rounded bg-[var(--rgm-card-3)] text-[var(--rgm-text)] font-medium">荐{rec}</span>}
+                              {inUse > 0 && <span className="px-1.5 rounded bg-[var(--rgm-card-3)] text-[var(--rgm-text)]">用{inUse}</span>}
                             </span>
                           </div>
                           <div className="mt-2 text-[10px] font-bold text-[#FC4C02] opacity-0 group-hover/tpl:opacity-100 transition">
@@ -4957,7 +5051,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               </div>
 
               {/* Row 3: Compact Filters */}
-              <div className="pt-4 border-t border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="pt-4 border-t border-[var(--rgm-border)] flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {[
                     { key: "all", label: `全部 ${coachCockpit?.summary?.total_students || 0}` },
@@ -4969,10 +5063,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     <button
                       key={f.key}
                       onClick={() => setCoachPlanFilter(f.key === "all" || coachPlanFilter === f.key ? "all" : (f.key as any))}
-                      className={`px-3 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-lg text-xs transition cursor-pointer border ${
                         coachPlanFilter === f.key
-                          ? "bg-[#FC4C02] text-white font-bold"
-                          : "bg-white/5 text-zinc-400 border border-white/10 hover:text-white font-medium"
+                          ? "bg-[#FC4C02] text-white border-[#FC4C02] font-bold"
+                          : "bg-[var(--rgm-card-2)] text-[var(--rgm-text-2)] border-[var(--rgm-border)] hover:text-[var(--rgm-text)] font-medium"
                       }`}
                     >
                       {f.label}
@@ -4984,7 +5078,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   <select
                     value={coachGroupFilter}
                     onChange={(e) => setCoachGroupFilter(e.target.value)}
-                    className="bg-[#18181c] border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-white/25"
+                    className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-xl px-2.5 py-1.5 text-xs text-[var(--rgm-text)] outline-none focus:border-[#FC4C02]/50"
                     title="按组别筛选队员"
                   >
                     <option value="all">全部组别</option>
@@ -5004,21 +5098,21 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     value={coachSearchQuery}
                     onChange={(e) => setCoachSearchQuery(e.target.value)}
                     placeholder="搜索队员"
-                    className="bg-[#18181c] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-white/25 outline-none w-32 sm:w-40"
+                    className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-xl px-3 py-1.5 text-xs text-[var(--rgm-text)] focus:border-[#FC4C02]/50 outline-none w-32 sm:w-40"
                   />
                 </div>
               </div>
             </div>
 
             {/* Students Matrix Table */}
-            <div className="bg-[#121215] border border-white/5 rounded-3xl p-6 sm:p-8">
+            <div className="rgm-bento-card rounded-3xl p-6 sm:p-8">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-zinc-400" />
+                  <h2 className="text-lg font-bold text-[var(--rgm-text)] flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-[var(--rgm-text-muted)]" />
                     全队学员训练计划审核、周执行打卡与生理负荷监控
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">
+                  <p className="text-xs text-[var(--rgm-text-2)] mt-0.5">
                     点击【审核/管理训练计划】可查看或微调课表，支持整周加减量、单日配速/距离微调与一键发布给队员
                   </p>
                 </div>
@@ -5027,30 +5121,30 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 <div className="flex items-center gap-3 flex-wrap">
                   <button
                     onClick={openClubReportModal}
-                    className="px-3.5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 font-medium text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] border border-[var(--rgm-border)] text-[var(--rgm-text)] font-medium text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                   >
                     <FileText className="w-3.5 h-3.5" />
                     制作跑团周报/月报
                   </button>
 
-                  <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl border border-white/10 text-xs">
-                    <span className="text-[11px] text-zinc-400 pl-2">TSB排序:</span>
+                  <div className="flex items-center gap-1 p-1 bg-[var(--rgm-card-2)] rounded-xl border border-[var(--rgm-border)] text-xs">
+                    <span className="text-[11px] text-[var(--rgm-text-2)] pl-2">TSB排序:</span>
                     <button
                       onClick={() => setCoachSortOrder("danger_first")}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
                         coachSortOrder === "danger_first"
                           ? "bg-[#FC4C02] text-white font-bold"
-                          : "text-zinc-400 hover:text-white"
+                          : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
                       }`}
                     >
                       预警优先
                     </button>
                     <button
                       onClick={() => setCoachSortOrder("peak_first")}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
                         coachSortOrder === "peak_first"
                           ? "bg-[#FC4C02] text-white font-bold"
-                          : "text-zinc-400 hover:text-white"
+                          : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
                       }`}
                     >
                       巅峰优先
@@ -5063,7 +5157,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         setCoachStatusFilter("all");
                         setCoachPlanFilter("all");
                       }}
-                      className="text-xs text-zinc-400 hover:text-white px-2 py-1 bg-white/5 rounded-lg border border-white/10"
+                      className="text-xs text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] px-2 py-1 bg-[var(--rgm-card-2)] rounded-lg border border-[var(--rgm-border)] cursor-pointer"
                     >
                       ✕ 清除筛选
                     </button>
@@ -5080,28 +5174,28 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   return (
                     <div
                       key={student.user_id}
-                      className="p-6 bg-[#18181c] border border-white/10 hover:border-white/20 rounded-2xl flex flex-col gap-4 transition shadow-lg"
+                      className="p-6 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] hover:border-[#FC4C02]/35 rounded-2xl flex flex-col gap-4 transition"
                     >
                       {/* Top Row: Info + Badges */}
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex items-center gap-4">
                           <img
-                            src={student.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                            src={student.avatar_url || "/defaults/default-avatar.svg"}
                             alt={student.display_name}
-                            className="w-12 h-12 rounded-full object-cover border border-white/10"
+                            className="w-12 h-12 rounded-full object-cover border border-[var(--rgm-border)]"
                           />
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-base font-bold text-white">{student.display_name}</span>
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                              <span className="text-base font-bold text-[var(--rgm-text)]">{student.display_name}</span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                 {student.status_text}
                               </span>
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                 {student.canova_phase || "基础准备期"}
                               </span>
                               {/* Goal Race Pill */}
                               {student.goal_race && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                   备战: {student.goal_race.name}
                                   {(student.goal_race.days_until ?? student.goal_race.days_left) != null ? ` (${student.goal_race.days_until ?? student.goal_race.days_left}天后)` : ""}
                                 </span>
@@ -5113,23 +5207,23 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                 </span>
                               )}
                               {pState === "published" && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                   已发布 ({pInfo.reviewed_by_name || "认证教练"})
                                 </span>
                               )}
                               {pState === "self_active" && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                   个人计划执行中
                                 </span>
                               )}
                               {pState === "none" && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-400 border border-white/10">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-muted)] border border-[var(--rgm-border)]">
                                   尚未排课
                                 </span>
                               )}
                               {/* Demographic Age & Gender Badge */}
                               {(student.gender_label || student.age) && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-300 border border-white/10">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[var(--rgm-card)] text-[var(--rgm-text-2)] border border-[var(--rgm-border)]">
                                   {student.gender_label === "女" ? "女" : student.gender_label === "男" ? "男" : ""}
                                   {student.age ? `${student.gender_label ? " · " : ""}${student.age}岁` : ""}
                                   {student.age && student.age >= 45 && student.age_group_label ? ` (${student.age_group_label})` : ""}
@@ -5369,15 +5463,15 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                   onClick={() => setSelectedStudentForPlan(student)}
                                   className={`p-2 rounded-lg border text-center cursor-pointer transition hover:border-white/30 ${
                                     d.status === "completed"
-                                      ? "bg-emerald-950/25 border-emerald-500/35"
+                                      ? "bg-emerald-500/10 border-emerald-500/35"
                                       : d.status === "missed"
-                                      ? "bg-rose-950/25 border-rose-500/35"
+                                      ? "bg-rose-500/10 border-rose-500/35"
                                       : d.status === "rest"
-                                      ? "bg-zinc-900/50 border-white/5 opacity-60"
-                                      : "bg-white/[0.02] border-white/10"
+                                      ? "bg-[var(--rgm-card-2)] border-[var(--rgm-border)] opacity-60"
+                                      : "bg-[var(--rgm-card-2)] border-[var(--rgm-border)]"
                                   }`}
                                 >
-                                  <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                                  <div className="flex items-center justify-between text-[10px] text-[var(--rgm-text-muted)]">
                                     <span className="font-bold">{d.day_of_week}</span>
                                     <span>
                                       {d.status === "completed"
@@ -5389,7 +5483,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                         : "⏳"}
                                     </span>
                                   </div>
-                                  <div className="text-[11px] font-bold text-white truncate mt-0.5">
+                                  <div className="text-[11px] font-bold text-[var(--rgm-text)] truncate mt-0.5">
                                     {d.title}
                                   </div>
                                   <div className="text-[10px] font-mono text-zinc-400 mt-0.5">
@@ -5432,8 +5526,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           )}
                         </div>
                       ) : (
-                        <div className="bg-[#121216] border border-dashed border-white/10 rounded-xl px-4 py-3 flex items-center justify-between text-xs">
-                          <span className="text-zinc-400">
+                        <div className="bg-[var(--rgm-card-2)] border border-dashed border-[var(--rgm-border)] rounded-xl px-4 py-3 flex items-center justify-between text-xs">
+                          <span className="text-[var(--rgm-text-muted)]">
                             ⚪ 该队员当前尚未配置专属周训练课表，可根据其目标赛事与当前生理状态一键生成 AI 定制草案。
                           </span>
                           <button
@@ -5446,22 +5540,22 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       )}
 
                       {/* Middle Row: Monthly Running Plan Progress Bar */}
-                      <div className="bg-[#121215] border border-white/5 rounded-xl p-4">
+                      <div className="bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-xl p-4">
                         <div className="flex items-center justify-between text-xs mb-2">
                           <div className="flex items-center gap-2">
                             <Target className="w-4 h-4 text-[#FC4C02]" />
-                            <span className="text-zinc-300 font-bold">月跑量目标计划:</span>
-                            <span className="text-white font-mono font-bold text-sm">
-                              {student.month_km} <span className="text-zinc-500 font-normal">/ {student.target_km || 200} km</span>
+                            <span className="text-[var(--rgm-text-2)] font-bold">月跑量目标计划:</span>
+                            <span className="text-[var(--rgm-text)] font-mono font-bold text-sm">
+                              {student.month_km} <span className="text-[var(--rgm-text-muted)] font-normal">/ {student.target_km || 200} km</span>
                             </span>
                             <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                               student.completion_rate >= 100
-                                ? "bg-emerald-500/20 text-emerald-400"
+                                ? "bg-emerald-500/20 text-emerald-500"
                                 : student.pacing_status === "ahead"
-                                ? "bg-blue-500/20 text-blue-400"
+                                ? "bg-blue-500/20 text-blue-500"
                                 : student.pacing_status === "lagging"
-                                ? "bg-amber-500/20 text-amber-400"
-                                : "bg-white/5 text-zinc-300"
+                                ? "bg-amber-500/20 text-amber-500"
+                                : "bg-[var(--rgm-card)] border border-[var(--rgm-border)] text-[var(--rgm-text-2)]"
                             }`}>
                               {student.completion_rate || 0}% ({student.pacing_text || "按计划推进"})
                             </span>
@@ -6871,7 +6965,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div className="flex items-center gap-4">
                   <img
-                    src={selectedStudentForReport.avatar_url || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"}
+                    src={selectedStudentForReport.avatar_url || "/defaults/default-avatar.svg"}
                     alt={selectedStudentForReport.display_name}
                     className="w-14 h-14 rounded-full object-cover border-2 border-purple-500/50"
                   />
@@ -7061,11 +7155,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-black text-white flex items-center gap-2">
-                  <Award className="w-5 h-5 text-blue-400" />
+                <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
+                  <Award className="w-5 h-5 text-blue-500" />
                   跑团活动与月度挑战赛
                 </h2>
-                <p className="text-xs text-zinc-400 mt-0.5">全团共同参与，用公里数兑换专属荣誉与完赛勋章</p>
+                <p className="text-xs text-[var(--rgm-text-muted)] mt-0.5">全团共同参与，用公里数兑换专属荣誉与完赛勋章</p>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -7099,8 +7193,8 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               {events.map((evt) => (
                 <div
                   key={evt.id}
-                  className={`bg-[#121215] border rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col justify-between ${
-                    evt.is_org_event ? "border-amber-500/40 bg-gradient-to-br from-amber-500/[0.06] to-[#121215]" : "border-white/10"
+                  className={`rgm-bento-card rounded-3xl p-6 sm:p-7 flex flex-col justify-between ${
+                    evt.is_org_event ? "border-amber-500/40" : ""
                   }`}
                 >
                   <div>
@@ -7122,13 +7216,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleOpenEditEvent(evt)}
-                            className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                            className="px-2.5 py-1 bg-[var(--rgm-card-2)] hover:bg-[var(--rgm-card-3)] text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)] border border-[var(--rgm-border)] rounded-lg text-[11px] font-bold transition flex items-center gap-1"
                           >
                             <Edit2 className="w-3 h-3" /> 编辑
                           </button>
                           <button
                             onClick={() => handleDeleteEvent(evt.id)}
-                            className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                            className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
                           >
                             <Trash2 className="w-3 h-3" /> 删除
                           </button>
@@ -7136,23 +7230,23 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                       )}
                     </div>
 
-                    <h3 className="text-xl font-black text-white mb-2">{evt.title}</h3>
+                    <h3 className="text-xl font-black text-[var(--rgm-text)] mb-2">{evt.title}</h3>
                     {evt.event_type === "group_run" && (evt.meet_time || evt.location) && (
-                      <div className="flex flex-wrap gap-3 text-xs text-amber-300/90 mb-2 font-medium">
+                      <div className="flex flex-wrap gap-3 text-xs text-amber-500 mb-2 font-medium">
                         {evt.meet_time && <span>⏰ 集合时间：{evt.meet_time}</span>}
                         {evt.location && <span>📍 集合地点：{evt.location}</span>}
                         {evt.pace_requirement && <span>⚡ 配速分组：{evt.pace_requirement}</span>}
                       </div>
                     )}
-                    <p className="text-xs text-zinc-300 leading-relaxed mb-4">{evt.rules}</p>
+                    <p className="text-xs text-[var(--rgm-text-2)] leading-relaxed mb-4">{evt.rules}</p>
                   </div>
 
-                  <div className="pt-4 border-t border-white/5 flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs text-zinc-400">
-                      目标里程: <strong className="text-white text-sm">{evt.target_km} km</strong>
+                  <div className="pt-4 border-t border-[var(--rgm-border)] flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs text-[var(--rgm-text-muted)]">
+                      目标里程: <strong className="text-[var(--rgm-text)] text-sm">{evt.target_km} km</strong>
                       {(evt.participant_count ?? evt.participants_count) != null && (
-                        <span className="ml-3 text-zinc-400">
-                          已报名: <strong className="text-amber-300">{evt.participant_count ?? evt.participants_count} 人</strong>
+                        <span className="ml-3 text-[var(--rgm-text-muted)]">
+                          已报名: <strong className="text-amber-500">{evt.participant_count ?? evt.participants_count} 人</strong>
                         </span>
                       )}
                     </span>
@@ -7164,7 +7258,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                           onClick={() => handleToggleEventJoin(evt)}
                           className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-50 ${
                             evt.is_joined
-                              ? "bg-white/10 hover:bg-rose-500/20 text-emerald-300 hover:text-rose-300 border border-white/15"
+                              ? "bg-[var(--rgm-card-2)] hover:bg-rose-500/15 text-emerald-500 hover:text-rose-500 border border-[var(--rgm-border)]"
                               : "bg-[#FC4C02] hover:bg-orange-500 text-white shadow-md shadow-[#FC4C02]/20"
                           }`}
                         >
@@ -9086,11 +9180,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-stretch">
-              {/* Left: Live Visual Invite Poster Card */}
+              {/* Left: Live Visual Invite Poster Card (Synthesizes Club Main Info, Stats & Photos) */}
               <div className="md:col-span-6 bg-gradient-to-b from-[#18181c] via-[#121215] to-[#18181c] border border-white/15 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-xl relative overflow-hidden">
                 <div className="space-y-3">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FC4C02]/15 border border-[#FC4C02]/40 text-[#ff7a45] text-[11px] font-bold">
-                    💌 万跑跑团助手 · 官方入团邀请函
+                    💌 万跑跑团助手 · 官方入团邀请卡
                   </div>
                   <div>
                     <p className="text-sm font-black text-white">
@@ -9099,62 +9193,137 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                         : "👋 诚邀您加入我们的跑团"}
                     </p>
                     <p className="text-[11px] text-zinc-400 mt-0.5">
-                      科学耐力训练 · 佳明/高驰数据直连 · 队友同频共进
+                      科学耐力训练 · 佳明/高驰数据直连 · 点击或扫码直接进跑团
                     </p>
                   </div>
 
-                  <div className="bg-[#18181c] border border-white/10 rounded-2xl p-4 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={clubInviteShareData.logo_url || "/logo.png"}
-                        alt={clubInviteShareData.name}
-                        className="w-12 h-12 rounded-xl object-cover border border-[#FC4C02]/40 shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <h4 className="text-base font-black text-white truncate">
-                          {clubInviteShareData.name}
-                        </h4>
-                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                          {clubInviteShareData.org_name && (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
-                              🏛️ {clubInviteShareData.org_name}
+                  <div className="bg-[#18181c] border border-white/10 rounded-2xl overflow-hidden">
+                    {/* Synthesized Hero Cover / Photo Collage Banner */}
+                    {(clubInviteShareData.hero_cover_url || (clubInviteShareData.photos || []).length > 0) && (
+                      <div className="relative h-32 w-full bg-zinc-900 overflow-hidden">
+                        <img
+                          src={clubInviteShareData.hero_cover_url || clubInviteShareData.photos?.[0]?.photo_url}
+                          alt={clubInviteShareData.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#18181c] via-black/30 to-transparent" />
+                        {(clubInviteShareData.photos || []).length > 1 && (
+                          <div className="absolute bottom-2 right-2 flex items-center gap-1">
+                            {clubInviteShareData.photos.slice(0, 3).map((p: any, idx: number) => (
+                              <img
+                                key={p.id || idx}
+                                src={p.photo_url}
+                                alt={p.caption || "跑团实拍"}
+                                className="w-8 h-8 rounded-lg object-cover border border-white/40 shadow"
+                              />
+                            ))}
+                            {(clubInviteShareData.photo_count || clubInviteShareData.photos.length) > 3 && (
+                              <span className="px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold">
+                                📸 {clubInviteShareData.photo_count || clubInviteShareData.photos.length}张
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={clubInviteShareData.logo_url || clubInviteShareData.hero_cover_url || "/logo.png"}
+                          alt={clubInviteShareData.name}
+                          className="w-12 h-12 rounded-xl object-cover border border-[#FC4C02]/40 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <h4 className="text-base font-black text-white truncate">
+                            {clubInviteShareData.name}
+                          </h4>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            {clubInviteShareData.org_name && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
+                                🏛️ {clubInviteShareData.org_name}
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              📍 {clubInviteShareData.city || "上海"} · {clubInviteShareData.member_count || 1} 人
                             </span>
-                          )}
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            📍 {clubInviteShareData.city || "上海"} · {clubInviteShareData.member_count || 1} 人
-                          </span>
+                            {(clubInviteShareData.home_landmarks || []).slice(0, 2).map((lm: string) => (
+                              <span key={lm} className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/5 text-zinc-300 border border-white/10">
+                                {lm}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
-                      {clubInviteShareData.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
-                    </p>
+                      <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
+                        {clubInviteShareData.slogan || clubInviteShareData.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。"}
+                      </p>
 
-                    <div className="bg-[#FC4C02]/10 border border-[#FC4C02]/35 rounded-xl p-3 flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] font-bold text-orange-300">
-                          {clubInviteShareData.invite_code
-                            ? "🔑 专属入团邀请码（小程序/网页通用）"
-                            : "🟢 入团方式"}
+                      {clubInviteShareData.schedule_summary && (
+                        <div className="text-[11px] text-orange-300 font-bold bg-white/[0.03] border border-white/10 rounded-xl px-2.5 py-1.5">
+                          🗓️ 合练排期：{clubInviteShareData.schedule_summary}
                         </div>
-                        <div className="text-lg font-mono font-black text-white tracking-widest mt-0.5">
-                          {clubInviteShareData.invite_code || "免码自由入团"}
-                        </div>
-                      </div>
-                      {clubInviteShareData.invite_code && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(clubInviteShareData.invite_code);
-                            setCopiedInviteFlag("code");
-                            setTimeout(() => setCopiedInviteFlag(""), 2500);
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-orange-200 text-[11px] font-bold transition"
-                        >
-                          {copiedInviteFlag === "code" ? "✅ 已复制" : "复制邀请码"}
-                        </button>
                       )}
+
+                      {/* Synthesized Verified Stats Strip */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 rounded-xl bg-white/[0.03] border border-white/10 text-center">
+                          <div className="text-[10px] text-zinc-400">活跃队员</div>
+                          <div className="text-xs font-black text-white mt-0.5 tabular-nums">
+                            {clubInviteShareData.verified_stats?.member_count ?? clubInviteShareData.member_count ?? 1}人
+                          </div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-white/[0.03] border border-white/10 text-center">
+                          <div className="text-[10px] text-zinc-400">本月实跑</div>
+                          <div className="text-xs font-black text-[#FC4C02] mt-0.5 tabular-nums">
+                            {clubInviteShareData.verified_stats?.month_total_km ?? 0}km
+                          </div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-white/[0.03] border border-white/10 text-center">
+                          <div className="text-[10px] text-zinc-400">⌚ 核验破330</div>
+                          <div className="text-xs font-black text-emerald-400 mt-0.5 tabular-nums">
+                            {clubInviteShareData.verified_stats?.sub330_count ?? 0}人
+                          </div>
+                        </div>
+                      </div>
+
+                      {(clubInviteShareData.coaching_team || []).length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-zinc-300">
+                          <span className="font-bold text-amber-300">🎖️ 教练：</span>
+                          {clubInviteShareData.coaching_team.slice(0, 2).map((ch: any) => (
+                            <span key={ch.user_id} className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10">
+                              {ch.display_name}{ch.verified_marathon_pb ? ` (PB ${ch.verified_marathon_pb})` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="bg-[#FC4C02]/10 border border-[#FC4C02]/35 rounded-xl p-3 flex items-center justify-between">
+                        <div>
+                          <div className="text-[10px] font-bold text-orange-300">
+                            {clubInviteShareData.invite_code
+                              ? "🔑 专属入团邀请码（扫码/点卡免输码直入）"
+                              : "🟢 入团方式"}
+                          </div>
+                          <div className="text-lg font-mono font-black text-white tracking-widest mt-0.5">
+                            {clubInviteShareData.invite_code || "免码自由入团"}
+                          </div>
+                        </div>
+                        {clubInviteShareData.invite_code && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(clubInviteShareData.invite_code);
+                              setCopiedInviteFlag("code");
+                              setTimeout(() => setCopiedInviteFlag(""), 2500);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-orange-200 text-[11px] font-bold transition"
+                          >
+                            {copiedInviteFlag === "code" ? "✅ 已复制" : "复制邀请码"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -9298,14 +9467,16 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       {/* Incoming Web Club Invitation Landing Modal (微信好友点击邀请链接打开网页时的入团卡片) */}
       {showReceivedInviteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="bg-[#151518] border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
+          <div className="bg-[#151518] border border-emerald-500/40 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-4">
             {loadingReceivedInvite ? (
-              <div className="py-12 text-center text-sm text-zinc-400">正在加载跑团邀请函...</div>
+              <div className="py-12 text-center text-sm text-zinc-400">正在加载跑团邀请卡并为您直连跑团...</div>
             ) : receivedInviteData?.club ? (
               <>
                 <div className="flex items-center justify-between">
                   <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/35">
-                    🎉 收到跑团入团邀请函
+                    {receivedInviteData.is_club_member
+                      ? "🎉 已为您直通跑团 · 点击卡片立即进入"
+                      : "🎉 收到跑团入团邀请卡 · 点击卡片直接进团"}
                   </span>
                   <button
                     type="button"
@@ -9316,52 +9487,143 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   </button>
                 </div>
 
-                <div>
-                  <p className="text-xs text-zinc-400">
-                    {receivedInviteData.inviter_name
-                      ? `👋 您的跑友【${receivedInviteData.inviter_name}】诚邀您加入：`
-                      : "👋 您的跑友诚邀您加入："}
-                  </p>
-                  <div className="mt-3 bg-[#1c1c22] border border-white/10 rounded-2xl p-4 flex items-center gap-3.5">
-                    <img
-                      src={receivedInviteData.club.logo_url || "/logo.png"}
-                      alt={receivedInviteData.club.name}
-                      className="w-14 h-14 rounded-2xl object-cover border border-[#FC4C02]/40 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <h3 className="text-lg font-black text-white truncate">
-                        {receivedInviteData.club.name}
-                      </h3>
-                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                        {receivedInviteData.club.org_name && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
-                            🏛️ {receivedInviteData.club.org_name}
+                {/* Clickable Synthesized Club Invitation Card */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (receivedInviteData.is_club_member) {
+                      setShowReceivedInviteModal(false);
+                    } else if (!acceptingReceivedInvite) {
+                      handleAcceptReceivedClubInvite();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      if (receivedInviteData.is_club_member) {
+                        setShowReceivedInviteModal(false);
+                      } else if (!acceptingReceivedInvite) {
+                        handleAcceptReceivedClubInvite();
+                      }
+                    }
+                  }}
+                  className="group bg-[#1c1c22] border-2 border-white/15 hover:border-[#FC4C02] rounded-2xl overflow-hidden cursor-pointer transition-all shadow-xl"
+                >
+                  {/* Hero Cover + Photo Thumbnails */}
+                  {(receivedInviteData.club.hero_cover_url || (receivedInviteData.club.photos || []).length > 0) && (
+                    <div className="relative h-36 w-full bg-zinc-900 overflow-hidden">
+                      <img
+                        src={receivedInviteData.club.hero_cover_url || receivedInviteData.club.photos?.[0]?.photo_url}
+                        alt={receivedInviteData.club.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#1c1c22] via-black/30 to-transparent" />
+                      <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-black/70 text-orange-300 text-[11px] font-bold">
+                        {receivedInviteData.inviter_name
+                          ? `👋 跑友【${receivedInviteData.inviter_name}】诚邀加入`
+                          : "👋 诚邀您加入跑团"}
+                      </div>
+                      {(receivedInviteData.club.photos || []).length > 1 && (
+                        <div className="absolute bottom-2 right-2.5 flex items-center gap-1">
+                          {receivedInviteData.club.photos.slice(0, 3).map((p: any, idx: number) => (
+                            <img
+                              key={p.id || idx}
+                              src={p.photo_url}
+                              alt={p.caption || "跑团风采"}
+                              className="w-9 h-9 rounded-lg object-cover border border-white/50 shadow"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center gap-3.5">
+                      <img
+                        src={receivedInviteData.club.logo_url || receivedInviteData.club.hero_cover_url || "/logo.png"}
+                        alt={receivedInviteData.club.name}
+                        className="w-14 h-14 rounded-2xl object-cover border border-[#FC4C02]/40 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-black text-white truncate group-hover:text-[#FC4C02] transition">
+                          {receivedInviteData.club.name}
+                        </h3>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                          {receivedInviteData.club.org_name && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35">
+                              🏛️ {receivedInviteData.club.org_name}
+                            </span>
+                          )}
+                          <span className="text-xs text-zinc-300 font-bold">
+                            📍 {receivedInviteData.club.city || "上海"} · {receivedInviteData.club.member_count || 1} 位跑友
                           </span>
-                        )}
-                        <span className="text-xs text-zinc-400">
-                          📍 {receivedInviteData.club.city || "上海"} · {receivedInviteData.club.member_count || 1} 位跑友
-                        </span>
+                          {(receivedInviteData.club.home_landmarks || []).slice(0, 2).map((lm: string) => (
+                            <span key={lm} className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/5 text-zinc-300 border border-white/10">
+                              {lm}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  {receivedInviteData.club.description && (
-                    <p className="text-xs text-zinc-400 mt-3 leading-relaxed">
-                      {receivedInviteData.club.description}
+
+                    <p className="text-xs text-zinc-300 leading-relaxed line-clamp-2">
+                      {receivedInviteData.club.slogan || receivedInviteData.club.description || "科学耐力训练 · 队友同频共进"}
                     </p>
-                  )}
+
+                    {receivedInviteData.club.schedule_summary && (
+                      <div className="text-[11px] text-orange-300 font-bold bg-white/[0.03] border border-white/10 rounded-xl px-3 py-1.5">
+                        🗓️ 合练排期：{receivedInviteData.club.schedule_summary}
+                      </div>
+                    )}
+
+                    {/* Verified Stats Row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="p-2 rounded-xl bg-white/[0.04] border border-white/10 text-center">
+                        <div className="text-[10px] text-zinc-400">活跃队员</div>
+                        <div className="text-xs font-black text-white mt-0.5 tabular-nums">
+                          {receivedInviteData.club.verified_stats?.member_count ?? receivedInviteData.club.member_count ?? 1}人
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white/[0.04] border border-white/10 text-center">
+                        <div className="text-[10px] text-zinc-400">本月实跑</div>
+                        <div className="text-xs font-black text-[#FC4C02] mt-0.5 tabular-nums">
+                          {receivedInviteData.club.verified_stats?.month_total_km ?? 0}km
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white/[0.04] border border-white/10 text-center">
+                        <div className="text-[10px] text-zinc-400">⌚ 核验破330</div>
+                        <div className="text-xs font-black text-emerald-400 mt-0.5 tabular-nums">
+                          {receivedInviteData.club.verified_stats?.sub330_count ?? 0}人
+                        </div>
+                      </div>
+                    </div>
+
+                    {(receivedInviteData.club.coaching_team || []).length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-zinc-300">
+                        <span className="font-bold text-amber-300">🎖️ 核心教练：</span>
+                        {receivedInviteData.club.coaching_team.slice(0, 2).map((ch: any) => (
+                          <span key={ch.user_id} className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10">
+                            {ch.display_name}{ch.verified_marathon_pb ? ` · PB ${ch.verified_marathon_pb}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {(receivedInviteData.qrcode_base64 || receivedInviteData.qrcode_url) && (
-                  <div className="bg-[#18181c] border border-white/10 rounded-2xl p-4 flex items-center justify-between gap-3">
+                  <div className="bg-[#18181c] border border-white/10 rounded-2xl p-3.5 flex items-center justify-between gap-3">
                     <div className="space-y-1">
                       <div className="text-xs font-black text-emerald-400">
-                        📱 微信内推荐：长按或扫码入团
+                        📱 微信内推荐：长按或扫码直接进跑团
                       </div>
                       <div className="text-[11px] text-zinc-300">
-                        直接打开「万跑跑团助手」微信小程序一键加入
+                        打开「万跑跑团助手」小程序自动入团并进入跑团主页
                       </div>
                     </div>
-                    <div className="w-20 h-20 rounded-xl bg-white p-1.5 shrink-0">
+                    <div className="w-16 h-16 rounded-xl bg-white p-1.5 shrink-0">
                       <img
                         src={
                           receivedInviteData.qrcode_base64
@@ -9382,22 +9644,22 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     <button
                       type="button"
                       onClick={() => setShowReceivedInviteModal(false)}
-                      className="w-full py-3 rounded-2xl bg-emerald-500 text-black text-xs font-black transition"
+                      className="w-full py-3 rounded-2xl bg-emerald-500 text-black text-xs font-black transition cursor-pointer"
                     >
-                      ✅ 您已是本跑团成员 · 进入跑团主页
+                      ✅ 已加入本跑团 · 点击直接进入【{receivedInviteData.club.name}】
                     </button>
                   ) : (
                     <button
                       type="button"
                       disabled={acceptingReceivedInvite}
                       onClick={handleAcceptReceivedClubInvite}
-                      className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#FC4C02] to-[#ff6426] hover:from-[#ff6426] hover:to-[#ff7a45] text-white text-sm font-black transition shadow-lg shadow-[#FC4C02]/25 disabled:opacity-50"
+                      className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#FC4C02] to-[#ff6426] hover:from-[#ff6426] hover:to-[#ff7a45] text-white text-sm font-black transition shadow-lg shadow-[#FC4C02]/25 disabled:opacity-50 cursor-pointer"
                     >
                       {acceptingReceivedInvite
-                        ? "正在加入跑团..."
+                        ? "正在进入跑团..."
                         : user?.id
-                        ? `🚀 立即一键加入【${receivedInviteData.club.name}】`
-                        : `💻 登录网页版并加入【${receivedInviteData.club.name}】`}
+                        ? `🚀 点击直接加入并进入【${receivedInviteData.club.name}】`
+                        : `💻 登录并一键进入【${receivedInviteData.club.name}】`}
                     </button>
                   )}
                 </div>
@@ -9989,7 +10251,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                                   <img
                                     src={
                                       p.avatar_url ||
-                                      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
+                                      "/defaults/default-avatar.svg"
                                     }
                                     alt=""
                                     className="w-7 h-7 rounded-full object-cover"
@@ -10376,7 +10638,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 <img
                   src={
                     selectedMenteeDetail.mentee.avatar_url ||
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                    "/defaults/default-avatar.svg"
                   }
                   alt={selectedMenteeDetail.mentee.display_name}
                   className="w-14 h-14 rounded-full object-cover border-2 border-emerald-500/40"
@@ -10550,7 +10812,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <img
                 src={
                   removeMemberTarget.avatar_url ||
-                  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                  "/defaults/default-avatar.svg"
                 }
                 alt={removeMemberTarget.display_name}
                 className="w-12 h-12 rounded-full object-cover border border-rose-500/40 shrink-0"

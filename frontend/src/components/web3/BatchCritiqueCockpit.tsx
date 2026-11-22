@@ -252,7 +252,7 @@ export default function BatchCritiqueCockpit({
                       <img
                         src={
                           act.avatar_url ||
-                          "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                          "/defaults/default-avatar.svg"
                         }
                         alt={act.display_name || "跑者"}
                         className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
@@ -289,7 +289,7 @@ export default function BatchCritiqueCockpit({
                 <img
                   src={
                     selectedAct.avatar_url ||
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                    "/defaults/default-avatar.svg"
                   }
                   alt={selectedAct.display_name || "跑者"}
                   className="w-11 h-11 rounded-full object-cover border border-white/15 shrink-0"

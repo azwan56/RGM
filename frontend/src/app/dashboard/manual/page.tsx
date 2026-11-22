@@ -2,7 +2,8 @@
 
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { openAiOperationAssistant } from "@/components/web3/AiOperationAssistant";
 import {
   BookOpen,
   User,
@@ -19,7 +20,8 @@ import {
   Shield,
   ChevronRight,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Mic,
 } from "lucide-react";
 
 export default function ManualPage() {
@@ -43,12 +45,41 @@ export default function ManualPage() {
     }
   }
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncSection = (hrefOverride?: string) => {
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const sec = new URLSearchParams(searchStr).get("section");
+      if (sec) {
+        setActiveSection(sec);
+        window.setTimeout(() => scrollToSection(sec), 120);
+      }
+    };
+    syncSection();
+    const onPop = () => syncSection();
+    const onNav = (e: Event) => {
+      const href = String((e as CustomEvent)?.detail?.href || "");
+      if (href.startsWith("/dashboard/manual")) {
+        syncSection(href);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("rgm-nav-intent", onNav);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("rgm-nav-intent", onNav);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[var(--rgm-bg)] text-[var(--rgm-text)]">
       <Navbar />
 
       <div className="rgm-web3-page">
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+      <main className="rgm-page-container py-6">
+        <div className="max-w-5xl space-y-10">
         {/* Hero Header */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#18181c] via-[#121215] to-[#0d0d10] border border-white/10 p-6 sm:p-10 shadow-2xl">
           <div className="absolute -right-12 -top-12 w-64 h-64 bg-[#FC4C02]/10 rounded-full blur-3xl pointer-events-none" />
@@ -66,13 +97,23 @@ export default function ManualPage() {
               </p>
             </div>
 
-            <Link
-              href="/dashboard/profile"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold bg-[#FC4C02] hover:bg-[#ff5d1a] text-white shadow-lg shadow-[#FC4C02]/25 transition active:scale-95 shrink-0"
-            >
-              <span>前往完善个人档案</span>
-              <ChevronRight className="w-4 h-4" />
-            </Link>
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => openAiOperationAssistant({ autoVoice: false })}
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold bg-white/10 hover:bg-white/15 border border-[#FC4C02]/45 text-amber-300 transition active:scale-95 cursor-pointer"
+              >
+                <Mic className="w-4 h-4 text-[#FC4C02]" />
+                <span>语音问 AI 操作助手，直接带你去入口</span>
+              </button>
+              <Link
+                href="/dashboard/profile"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold bg-[#FC4C02] hover:bg-[#ff5d1a] text-white shadow-lg shadow-[#FC4C02]/25 transition active:scale-95 shrink-0"
+              >
+                <span>前往完善个人档案</span>
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
           </div>
 
           {/* Quick Anchor Pills */}
@@ -424,6 +465,7 @@ export default function ManualPage() {
             <span>立即前往完善个人档案与设置</span>
             <ArrowRight className="w-5 h-5" />
           </Link>
+        </div>
         </div>
       </main>
       </div>

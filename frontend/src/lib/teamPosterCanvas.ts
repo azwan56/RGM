@@ -3,6 +3,11 @@
  * Extracted from TeamView.tsx to keep presentation components concise and testable.
  */
 
+function appendCorsParam(src: string): string {
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return src;
+  return `${src}${src.includes("?") ? "&" : "?"}cors=1`;
+}
+
 export function drawRoundedRectWeb(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -89,7 +94,7 @@ export async function renderClubInvitePosterCanvas(d: any): Promise<HTMLCanvasEl
   if (!d) return null;
   const canvas = document.createElement("canvas");
   const W = 750;
-  const H = 980;
+  const H = 1120;
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
@@ -109,95 +114,153 @@ export async function renderClubInvitePosterCanvas(d: any): Promise<HTMLCanvasEl
   ctx.fillStyle = topBarGrad;
   ctx.fillRect(0, 0, W, 10);
 
-  drawRoundedRectWeb(ctx, 44, 42, 340, 44, 22, "rgba(252, 76, 2, 0.16)", "rgba(252, 76, 2, 0.45)");
+  drawRoundedRectWeb(ctx, 44, 36, 360, 42, 21, "rgba(252, 76, 2, 0.16)", "rgba(252, 76, 2, 0.45)");
   ctx.font = "bold 18px sans-serif";
   ctx.fillStyle = "#ff7a45";
-  ctx.fillText("💌 万跑跑团助手 · 官方入团邀请函", 64, 70);
+  ctx.fillText("💌 万跑跑团助手 · 官方入团邀请卡", 64, 63);
 
   ctx.font = "900 30px sans-serif";
   ctx.fillStyle = "#ffffff";
   const inviterLabel = d.inviter_name ? `👋 跑友【${d.inviter_name}】诚邀您入团` : "👋 诚邀您加入我们的跑团";
-  ctx.fillText(inviterLabel, 44, 138);
+  ctx.fillText(inviterLabel, 44, 122);
 
-  ctx.font = "18px sans-serif";
+  ctx.font = "17px sans-serif";
   ctx.fillStyle = "#9ca3af";
-  ctx.fillText("科学耐力训练 · 佳明/高驰数据直连 · 队友同频共进", 44, 172);
+  ctx.fillText("科学耐力训练 · 佳明/高驰数据直连 · 扫码或点卡直接进跑团", 44, 152);
 
-  drawRoundedRectWeb(ctx, 40, 204, W - 80, 500, 28, "#171923", "rgba(255, 255, 255, 0.12)");
+  // Main Card Body
+  drawRoundedRectWeb(ctx, 40, 178, W - 80, 678, 28, "#171923", "rgba(255, 255, 255, 0.12)");
 
-  ctx.font = "900 40px sans-serif";
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText((d.name || "万跑跑团助手").slice(0, 15), 76, 278);
-
-  let badgeX = 76;
-  const badgeY = 302;
-  if (d.org_name) {
-    const orgTxt = `🏛️ ${d.org_name}`;
-    ctx.font = "bold 17px sans-serif";
-    const orgW = Math.min(ctx.measureText(orgTxt).width + 32, 320);
-    drawRoundedRectWeb(ctx, badgeX, badgeY, orgW, 38, 12, "rgba(245, 158, 11, 0.18)", "rgba(245, 158, 11, 0.45)");
-    ctx.fillStyle = "#fcd34d";
-    ctx.fillText(orgTxt, badgeX + 16, badgeY + 25);
-    badgeX += orgW + 14;
+  // Optional Hero Cover / Showcase Photo at top of card
+  const coverSrc = d.hero_cover_url || d.photos?.[0]?.photo_url || "";
+  let contentStartY = 236;
+  if (coverSrc) {
+    await new Promise<void>((resolve) => {
+      const cImg = new Image();
+      cImg.crossOrigin = "anonymous";
+      cImg.onload = () => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(40 + 28, 178);
+        ctx.lineTo(W - 40 - 28, 178);
+        ctx.arcTo(W - 40, 178, W - 40, 178 + 28, 28);
+        ctx.lineTo(W - 40, 178 + 180);
+        ctx.lineTo(40, 178 + 180);
+        ctx.lineTo(40, 178 + 28);
+        ctx.arcTo(40, 178, 40 + 28, 178, 28);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(cImg, 40, 178, W - 80, 180);
+        const ov = ctx.createLinearGradient(0, 178, 0, 358);
+        ov.addColorStop(0, "rgba(0,0,0,0.15)");
+        ov.addColorStop(1, "rgba(23,25,35,0.95)");
+        ctx.fillStyle = ov;
+        ctx.fillRect(40, 178, W - 80, 180);
+        ctx.restore();
+        contentStartY = 382;
+        resolve();
+      };
+      cImg.onerror = () => resolve();
+      cImg.src = appendCorsParam(coverSrc);
+    });
   }
 
-  const metaTxt = `📍 ${d.city || "上海"} · ${d.member_count || 1} 位跑友同行`;
-  ctx.font = "bold 17px sans-serif";
-  const metaW = ctx.measureText(metaTxt).width + 32;
-  drawRoundedRectWeb(ctx, badgeX, badgeY, metaW, 38, 12, "rgba(16, 185, 129, 0.16)", "rgba(16, 185, 129, 0.4)");
-  ctx.fillStyle = "#6ee7b7";
-  ctx.fillText(metaTxt, badgeX + 16, badgeY + 25);
+  ctx.font = "900 38px sans-serif";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText((d.name || "万跑跑团助手").slice(0, 15), 76, contentStartY);
 
-  ctx.font = "20px sans-serif";
+  let badgeX = 76;
+  const badgeY = contentStartY + 18;
+  if (d.org_name) {
+    const orgTxt = `🏛️ ${d.org_name}`;
+    ctx.font = "bold 16px sans-serif";
+    const orgW = Math.min(ctx.measureText(orgTxt).width + 28, 280);
+    drawRoundedRectWeb(ctx, badgeX, badgeY, orgW, 34, 10, "rgba(245, 158, 11, 0.18)", "rgba(245, 158, 11, 0.45)");
+    ctx.fillStyle = "#fcd34d";
+    ctx.fillText(orgTxt, badgeX + 14, badgeY + 23);
+    badgeX += orgW + 10;
+  }
+
+  const landmarks = (d.home_landmarks || []).slice(0, 2).join(" / ");
+  const metaTxt = `📍 ${d.city || "上海"}${landmarks ? ` · ${landmarks}` : ""} · ${d.member_count || 1} 人`;
+  ctx.font = "bold 16px sans-serif";
+  const metaW = Math.min(ctx.measureText(metaTxt).width + 28, W - 76 - badgeX);
+  drawRoundedRectWeb(ctx, badgeX, badgeY, metaW, 34, 10, "rgba(16, 185, 129, 0.16)", "rgba(16, 185, 129, 0.4)");
+  ctx.fillStyle = "#6ee7b7";
+  ctx.fillText(metaTxt, badgeX + 14, badgeY + 23);
+
+  ctx.font = "19px sans-serif";
   ctx.fillStyle = "#d1d5db";
-  drawWrappedTextWeb(
+  const nextY = drawWrappedTextWeb(
     ctx,
-    d.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。欢迎每一位热爱奔跑的伙伴加入！",
+    d.slogan || d.description || "精英跑者联盟，追求 PB 突破与健康长久奔跑。欢迎每一位热爱奔跑的伙伴加入！",
     76,
-    384,
+    badgeY + 66,
     W - 152,
-    30,
-    3
+    27,
+    2
   );
 
+  // Schedule & Verified Stats Strip
+  const statY = Math.max(nextY + 8, contentStartY + 140);
+  const st = d.verified_stats || {};
+  const tileW = (W - 152 - 24) / 3;
+  const tiles = [
+    { label: "活跃队员", val: `${st.member_count ?? d.member_count ?? 1} 人`, color: "#ffffff" },
+    { label: "本月全团实跑", val: `${st.month_total_km ?? 0} km`, color: "#FC4C02" },
+    { label: "⌚ 手表核验破330", val: `${st.sub330_count ?? 0} 人`, color: "#34d399" },
+  ];
+  tiles.forEach((t, i) => {
+    const tx = 76 + i * (tileW + 12);
+    drawRoundedRectWeb(ctx, tx, statY, tileW, 74, 14, "rgba(255,255,255,0.04)", "rgba(255,255,255,0.10)");
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText(t.label, tx + 16, statY + 26);
+    ctx.font = "900 22px sans-serif";
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.val, tx + 16, statY + 56);
+  });
+
+  // Invite Code / Direct Join Box
+  const codeBoxY = 678;
   drawRoundedRectWeb(
     ctx,
     72,
-    490,
+    codeBoxY,
     W - 144,
-    176,
+    152,
     22,
     "rgba(252, 76, 2, 0.10)",
     "rgba(252, 76, 2, 0.40)"
   );
-  ctx.font = "bold 18px sans-serif";
+  ctx.font = "bold 17px sans-serif";
   ctx.fillStyle = "#fdba74";
   ctx.fillText(
-    d.invite_code ? "🔑 跑团专属入团邀请码（小程序/网页通用）" : "🟢 本跑团已开启免码自由入团",
+    d.invite_code ? "🔑 跑团专属入团邀请码（扫码直接免输码进跑团）" : "🟢 本跑团已开启免码自由入团",
     102,
-    534
+    codeBoxY + 38
   );
 
-  ctx.font = "900 48px monospace";
+  ctx.font = "900 44px monospace";
   ctx.fillStyle = "#ffffff";
-  ctx.fillText(d.invite_code || "免码直入", 102, 598);
+  ctx.fillText(d.invite_code || "免码直入", 102, codeBoxY + 94);
 
-  ctx.font = "17px sans-serif";
+  ctx.font = "16px sans-serif";
   ctx.fillStyle = "#9ca3af";
   ctx.fillText(
-    d.invite_code
-      ? "微信扫码直接免输码入团，或在小程序「跑团 → 输入邀请码」填入"
-      : "微信长按或扫描下方小程序码，即可一键加入跑团",
+    d.schedule_summary
+      ? `🗓️ 合练排期：${d.schedule_summary.slice(0, 32)}`
+      : "微信扫码直接免输码入团，并同步手表里程与团队排行榜",
     102,
-    638
+    codeBoxY + 130
   );
 
-  const fY = 740;
+  const fY = 882;
   drawRoundedRectWeb(ctx, 40, fY, W - 80, 190, 26, "#121520", "rgba(255, 255, 255, 0.12)");
 
   ctx.font = "bold 20px sans-serif";
   ctx.fillStyle = "#FC4C02";
-  ctx.fillText("📱 微信扫码或长按识别 · 一键入团", 72, fY + 54);
+  ctx.fillText("📱 微信扫码或长按识别 · 直接进跑团", 72, fY + 54);
 
   ctx.font = "900 28px sans-serif";
   ctx.fillStyle = "#ffffff";
@@ -205,7 +268,7 @@ export async function renderClubInvitePosterCanvas(d: any): Promise<HTMLCanvasEl
 
   ctx.font = "17px sans-serif";
   ctx.fillStyle = "#9ca3af";
-  ctx.fillText("直达跑团受邀页面 · 同步跑表解锁 AI 教练与团队排行榜", 72, fY + 140);
+  ctx.fillText("直达跑团主页并自动入团 · 同步跑表解锁 AI 教练与排行榜", 72, fY + 140);
 
   const qrSrc = d.qrcode_base64
     ? d.qrcode_base64.startsWith("data:")
@@ -225,7 +288,7 @@ export async function renderClubInvitePosterCanvas(d: any): Promise<HTMLCanvasEl
         resolve();
       };
       qrImg.onerror = () => resolve();
-      qrImg.src = qrSrc;
+      qrImg.src = appendCorsParam(qrSrc);
     });
   }
 
@@ -517,7 +580,7 @@ export async function renderClubReportPosterCanvas(rep: any, isLight: boolean): 
         resolve();
       };
       qrImg.onerror = () => resolve();
-      qrImg.src = qrSrc;
+      qrImg.src = appendCorsParam(qrSrc);
     });
   } else {
     drawRoundedRectWeb(

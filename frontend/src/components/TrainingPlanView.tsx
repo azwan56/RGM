@@ -151,12 +151,56 @@ export default function TrainingPlanView({
   const [weekTravelNote, setWeekTravelNote] = useState("");
   const [weekStrengthCount, setWeekStrengthCount] = useState<number>(0);
   const [savingWeekSummary, setSavingWeekSummary] = useState(false);
+  const [pendingPlanOpen, setPendingPlanOpen] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.id) {
       loadUserPlan(user.id);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncPlanIntent = (hrefOverride?: string) => {
+      const searchStr = hrefOverride
+        ? new URL(hrefOverride, window.location.origin).search
+        : window.location.search;
+      const openParam = new URLSearchParams(searchStr).get("open");
+      if (openParam === "plan-config" || openParam === "plan-versions") {
+        setPendingPlanOpen(openParam);
+      }
+    };
+    syncPlanIntent();
+    const onPop = () => syncPlanIntent();
+    const onNav = (e: Event) => {
+      const href = String((e as CustomEvent)?.detail?.href || "");
+      if (href.startsWith("/dashboard/coach")) {
+        syncPlanIntent(href);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("rgm-nav-intent", onNav);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("rgm-nav-intent", onNav);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingPlanOpen || loading) return;
+    const act = pendingPlanOpen;
+    setPendingPlanOpen(null);
+    if (act === "plan-config") {
+      setShowConfig(true);
+      window.setTimeout(() => {
+        document
+          .getElementById("section-plan-config")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 120);
+    } else if (act === "plan-versions") {
+      setShowVersionSwitcher(true);
+    }
+  }, [pendingPlanOpen, loading]);
 
   function getRecommendedTargetRace(races: any[]): any | null {
     if (!races || races.length === 0) return null;
@@ -843,7 +887,10 @@ function computeCurrentWeekIndex(planData: any): number {
 
       {/* ── Collapsible Plan Generation / Configuration Panel ── */}
       {(showConfig || !plan) && (
-        <div className="bg-[#121215] border border-purple-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
+        <div
+          id="section-plan-config"
+          className="bg-[#121215] border border-purple-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden scroll-mt-24"
+        >
           <div className="absolute -top-16 -right-16 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="flex items-center justify-between border-b border-white/5 pb-4">

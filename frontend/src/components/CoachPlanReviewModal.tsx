@@ -741,7 +741,7 @@ export default function CoachPlanReviewModal({
             <img
               src={
                 student?.avatar_url ||
-                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                "/defaults/default-avatar.svg"
               }
               alt={student?.display_name}
               className="w-14 h-14 rounded-full object-cover border border-white/15 shrink-0"

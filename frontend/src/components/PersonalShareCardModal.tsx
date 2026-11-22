@@ -214,7 +214,8 @@ export default function PersonalShareCardModal({
         img.crossOrigin = "anonymous";
         img.onload = () => resolve(img);
         img.onerror = () => resolve(null);
-        img.src = src;
+        const isBase64 = src.startsWith("data:") || src.startsWith("blob:");
+        img.src = isBase64 ? src : `${src}${src.includes("?") ? "&" : "?"}cors=1`;
       });
     };
 
