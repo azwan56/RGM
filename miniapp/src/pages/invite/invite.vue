@@ -5,8 +5,26 @@
       <text class="err-txt">{{ errMsg }}</text>
     </view>
     <template v-else-if="preview?.invite">
-      <!-- Unified Synthesized Club Invitation Card (Click Card to Join & Enter Club Directly) -->
-      <view class="rgm-card unified-invite-card" @click="respond('accept')">
+      <form @submit="onAcceptFormSubmit">
+        <!-- 新用户首次入团置顶昵称卡（原生 form submit 确保点选微信昵称后一次提交生效，避免出现“跑者_xxxx”） -->
+        <view v-if="needsWechatNickname && !preview.viewer_already_member" class="rgm-card nick-card" :class="{ 'nick-card-err': !!nickError }">
+          <text class="nick-badge">👤 首次入团 · 请先选用您的微信昵称 *</text>
+          <input
+            type="nickname"
+            name="nickname"
+            class="nick-input"
+            v-model="runnerNickname"
+            :focus="nickFocus"
+            placeholder="点这里 → 键盘上方一键选微信昵称"
+            @input="onNickSync"
+            @change="onNickSync"
+            @blur="onNickSync"
+          />
+          <text v-if="nickError" class="nick-err-txt">⚠️ {{ nickError }}</text>
+        </view>
+
+        <!-- Unified Synthesized Club Invitation Card (Click Card to Join & Enter Club Directly) -->
+        <view class="rgm-card unified-invite-card" @click="onCardClick">
         <image
           v-if="heroCoverUrl"
           :src="resolveAssetUrl(heroCoverUrl)"
@@ -92,13 +110,15 @@
               :src="resolveAssetUrl(p.photo_url)"
               class="strip-img"
               mode="aspectFill"
-              @click.stop="respond('accept')"
+              @click.stop="onCardClick"
             />
           </scroll-view>
 
           <view class="non-excl-box">
             <text class="non-excl-txt">🛡️ {{ preview.non_exclusive_notice }}</text>
-            <text class="click-hint-txt">👆 点击本邀请卡任意区域即可免码直接进跑团 ›</text>
+            <text class="click-hint-txt">
+              {{ needsWechatNickname && !preview.viewer_already_member ? '👆 在上方选用微信昵称后，点下方按钮即可免码进团 ›' : '👆 点击本邀请卡任意区域即可免码直接进跑团 ›' }}
+            </text>
           </view>
         </view>
       </view>
@@ -106,10 +126,11 @@
       <!-- Action Footer -->
       <view class="action-bar">
         <button class="decline-btn" :disabled="submitting" @click="respond('decline')">暂不加入</button>
-        <button class="accept-btn" :disabled="submitting" @click="respond('accept')">
+        <button class="accept-btn" form-type="submit" :disabled="submitting">
           {{ preview.viewer_already_member ? '已在该团 · 直接进入跑团 ›' : `一键免码进跑团${preview.invite.preassigned_group ? ` (${preview.invite.preassigned_group})` : ''}` }}
         </button>
       </view>
+      </form>
     </template>
   </view>
 </template>
@@ -132,6 +153,59 @@ const preview = ref<any>(null);
 const loading = ref(true);
 const errMsg = ref("");
 const submitting = ref(false);
+const currentUser = ref<any>(getStoredUser());
+const runnerNickname = ref("");
+const nickError = ref("");
+const nickFocus = ref(false);
+
+function isGenericRunnerName(raw?: string): boolean {
+  const n = (raw || "").trim();
+  if (!n) return true;
+  return (
+    n === "微信跑者" ||
+    n === "微信用户" ||
+    n === "跑者" ||
+    n.startsWith("跑者_") ||
+    n.startsWith("微信跑者_") ||
+    n.startsWith("微信用户_")
+  );
+}
+
+const needsWechatNickname = computed(() => isGenericRunnerName(currentUser.value?.display_name));
+
+function onNickSync(e: any) {
+  const val = String(e?.detail?.value ?? "").trim();
+  if (val) {
+    runnerNickname.value = val;
+    if (!isGenericRunnerName(val)) nickError.value = "";
+  }
+}
+
+function triggerNickFocus(msg?: string) {
+  if (msg) nickError.value = msg;
+  nickFocus.value = false;
+  setTimeout(() => {
+    nickFocus.value = true;
+  }, 60);
+}
+
+function onCardClick() {
+  if (needsWechatNickname.value && !preview.value?.viewer_already_member && isGenericRunnerName(runnerNickname.value)) {
+    triggerNickFocus("请先点击上方昵称框选用微信昵称");
+    uni.showToast({ title: "请先选用微信昵称", icon: "none" });
+    return;
+  }
+  respond("accept");
+}
+
+function onAcceptFormSubmit(e: any) {
+  const fromForm = String(e?.detail?.value?.nickname ?? "").trim();
+  if (fromForm) {
+    runnerNickname.value = fromForm;
+    nickError.value = "";
+  }
+  respond("accept", fromForm || runnerNickname.value.trim());
+}
 
 const showcaseData = computed(() => preview.value?.showcase_summary || preview.value?.showcase_preview?.showcase || preview.value?.invite || {});
 const verifiedStats = computed(() => preview.value?.showcase_summary?.verified_stats || preview.value?.showcase_preview?.verified_stats || preview.value?.invite?.verified_stats || {});
@@ -152,13 +226,17 @@ onLoad(async (opts?: any) => {
   }
   try {
     const existing = getStoredUser() || (await silentCheckExistingWechatUser());
+    if (existing) currentUser.value = existing;
     const q = existing?.id ? `?viewer_uid=${encodeURIComponent(existing.id)}` : "";
     preview.value = await request(`/api/community/invites/${encodeURIComponent(token.value)}${q}`);
 
-    // 若从微信特邀卡点击进入 (auto_join=1) 且已识别用户身份，直接自动入团并进入跑团主页
-    if (String(opts?.auto_join || "") === "1" && existing?.id && preview.value?.invite) {
+    // 若从微信特邀卡点击进入 (auto_join=1) 且老用户已拥有真实昵称，直接自动入团并进入跑团主页
+    if (String(opts?.auto_join || "") === "1" && existing?.id && !isGenericRunnerName(existing.display_name) && preview.value?.invite) {
       await respond("accept");
       return;
+    }
+    if (needsWechatNickname.value && !preview.value?.viewer_already_member) {
+      triggerNickFocus();
     }
   } catch (e: any) {
     errMsg.value = e?.message || "特邀函已失效";
@@ -167,17 +245,31 @@ onLoad(async (opts?: any) => {
   }
 });
 
-async function respond(action: "accept" | "decline") {
+async function respond(action: "accept" | "decline", submittedNick?: string) {
   if (action === "accept" && preview.value?.viewer_already_member) {
     setActiveClubId(preview.value.invite.club_id);
     uni.switchTab({ url: "/pages/team/team" });
+    return;
+  }
+  const finalNick = String(submittedNick ?? runnerNickname.value ?? "").trim();
+  if (action === "accept" && needsWechatNickname.value && isGenericRunnerName(finalNick)) {
+    triggerNickFocus("请先点击上方昵称框，一键选用您的微信昵称（不能为默认代号）");
+    uni.showToast({ title: "请先选用微信昵称", icon: "none" });
     return;
   }
   submitting.value = true;
   try {
     let u = getStoredUser() || (await silentCheckExistingWechatUser());
     if (!u?.id) {
-      u = await authenticateWechatUser({ agreeTerms: true });
+      u = await authenticateWechatUser({ agreeTerms: true, nickName: finalNick || undefined });
+    }
+    if (u) currentUser.value = u;
+    if (action === "accept" && finalNick && !isGenericRunnerName(finalNick) && isGenericRunnerName(u.display_name)) {
+      try {
+        await request(`/api/profile/${encodeURIComponent(u.id)}`, "PUT", { display_name: finalNick });
+        u.display_name = finalNick;
+        uni.setStorageSync("rgm_user", JSON.stringify(u));
+      } catch (_) {}
     }
     const res: any = await request(`/api/community/invites/${encodeURIComponent(token.value)}/respond`, "POST", {
       user_id: u.id,
@@ -213,6 +305,11 @@ async function respond(action: "accept" | "decline") {
 .box { margin-top: 20rpx; padding: 24rpx; }
 .center-txt { text-align: center; font-size: 24rpx; color: var(--rgm-text-2); padding: 60rpx 24rpx; }
 .err-txt { color: var(--rgm-red); font-weight: 800; }
+.nick-card { padding: 22rpx 24rpx; margin-bottom: 18rpx; border: 2rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.45)); }
+.nick-card-err { border-color: #ef4444; background: rgba(239, 68, 68, 0.08); }
+.nick-badge { display: block; font-size: 23rpx; font-weight: 900; color: var(--rgm-brand); margin-bottom: 12rpx; }
+.nick-input { height: 74rpx; padding: 0 22rpx; border-radius: 16rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line-strong, rgba(255,255,255,0.2)); color: var(--rgm-text); font-size: 27rpx; font-weight: 700; }
+.nick-err-txt { display: block; font-size: 21rpx; font-weight: 700; color: #f87171; margin-top: 8rpx; }
 .unified-invite-card { overflow: hidden; padding: 0; background: var(--rgm-amber-tint); border: 2rpx solid var(--rgm-amber-line); }
 .hero-cover-img { width: 100%; height: 280rpx; background: var(--rgm-card-2); }
 .invite-hero-body { padding: 26rpx; }

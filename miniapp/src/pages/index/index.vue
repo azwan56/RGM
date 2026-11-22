@@ -420,8 +420,8 @@
           </view>
         </view>
 
-        <!-- 6.2 搭子周 PK：3 对大小比例头像跑者人偶 -->
-        <view class="rgm-card h3-pk-card" :class="'tone-' + pkHeaderSummary.tone">
+        <!-- 6.2 搭子周 PK：3 对大小比例头像跑者人偶（默认关闭，可在首页展示设置或「我的」开启） -->
+        <view v-if="showHomeBuddyPk" class="rgm-card h3-pk-card" :class="'tone-' + pkHeaderSummary.tone">
           <view class="h3-pk-head">
             <view class="h3-pk-head-left">
               <RgmIcon name="users" :size="28" :color="pkHeaderSummary.iconColor" />
@@ -430,9 +430,12 @@
                 {{ pkHeaderSummary.badgeText }}
               </text>
             </view>
-            <text class="h3-pk-more" @click="goSubpage('/pages/discover/discover')">
-              {{ pkHeaderSummary.rightText }}
-            </text>
+            <view class="h3-pk-head-right">
+              <text class="h3-pk-more" @click="goSubpage('/pages/discover/discover')">
+                {{ pkHeaderSummary.rightText }}
+              </text>
+              <text class="h3-pk-hide-btn" @click.stop="setHomeBuddyPkVisible(false)">关闭</text>
+            </view>
           </view>
 
           <view class="h3-pk-grid">
@@ -751,7 +754,7 @@
       <view class="modal-content e5-sheet-modal" @click.stop="noop">
         <view class="modal-header">
           <view class="title-with-pill">
-            <text class="modal-title">消息中心与首页排序</text>
+            <text class="modal-title">消息中心与首页设置</text>
             <text v-if="e5ModalTab === 'notif' && unreadNotifCount > 0" class="notif-count-pill">{{ unreadNotifCount }} 未读</text>
           </view>
           <view class="header-actions-row">
@@ -766,7 +769,7 @@
               <text>教练与约跑消息{{ unreadNotifCount > 0 ? ` (${unreadNotifCount})` : '' }}</text>
             </view>
             <view class="rgm-seg-item" :class="{ active: e5ModalTab === 'order' }" @click="switchE5ModalTab('order')">
-              <text>首页板块排序</text>
+              <text>首页展示设置</text>
             </view>
           </view>
         </view>
@@ -804,50 +807,66 @@
           </view>
         </scroll-view>
 
-        <!-- Cut 2: 首页板块排序 -->
-        <view v-else class="layout-order-body">
-          <text class="layout-order-desc">
-            自由调整首页核心板块的上下次序，保存后立即生效。
-          </text>
-
-          <view class="layout-order-list">
-            <view
-              v-for="(modKey, idx) in homeOrderVisibleKeys"
-              :key="modKey"
-              class="layout-order-item"
-            >
-              <view class="loi-left">
-                <view class="loi-rank-badge">{{ idx + 1 }}</view>
-                <view class="loi-text-col">
-                  <text class="loi-title">{{ getModuleMeta(modKey).title }}</text>
-                  <text class="loi-sub">{{ getModuleMeta(modKey).desc }}</text>
-                </view>
+        <!-- Cut 2: 首页展示开关与板块排序 -->
+        <scroll-view v-else scroll-y class="layout-order-scroll">
+          <view class="layout-order-body">
+            <view class="layout-toggle-card">
+              <view class="layout-toggle-info">
+                <text class="layout-toggle-title">首页显示「搭子周 PK」</text>
+                <text class="layout-toggle-sub">
+                  默认关闭；关闭后首页隐藏搭子 PK 卡片，保留「寻搭子」与「选团展厅」入口
+                </text>
               </view>
+              <switch
+                :checked="showHomeBuddyPk"
+                color="#fc4c02"
+                @change="onToggleHomeBuddyPkSwitch"
+              />
+            </view>
 
-              <view class="loi-actions">
-                <view
-                  class="loi-btn arrow-btn"
-                  :class="{ disabled: idx === 0 }"
-                  @click="moveVisibleModuleOrder(modKey, -1)"
-                >
-                  <text class="loi-btn-txt">↑</text>
+            <text class="layout-order-desc">
+              自由调整首页核心板块的上下次序，保存后立即生效。
+            </text>
+
+            <view class="layout-order-list">
+              <view
+                v-for="(modKey, idx) in homeOrderVisibleKeys"
+                :key="modKey"
+                class="layout-order-item"
+              >
+                <view class="loi-left">
+                  <view class="loi-rank-badge">{{ idx + 1 }}</view>
+                  <view class="loi-text-col">
+                    <text class="loi-title">{{ getModuleMeta(modKey).title }}</text>
+                    <text class="loi-sub">{{ getModuleMeta(modKey).desc }}</text>
+                  </view>
                 </view>
-                <view
-                  class="loi-btn arrow-btn"
-                  :class="{ disabled: idx === homeOrderVisibleKeys.length - 1 }"
-                  @click="moveVisibleModuleOrder(modKey, 1)"
-                >
-                  <text class="loi-btn-txt">↓</text>
+
+                <view class="loi-actions">
+                  <view
+                    class="loi-btn arrow-btn"
+                    :class="{ disabled: idx === 0 }"
+                    @click="moveVisibleModuleOrder(modKey, -1)"
+                  >
+                    <text class="loi-btn-txt">↑</text>
+                  </view>
+                  <view
+                    class="loi-btn arrow-btn"
+                    :class="{ disabled: idx === homeOrderVisibleKeys.length - 1 }"
+                    @click="moveVisibleModuleOrder(modKey, 1)"
+                  >
+                    <text class="loi-btn-txt">↓</text>
+                  </view>
                 </view>
               </view>
             </view>
-          </view>
 
-          <view class="layout-order-footer">
-            <button class="loi-footer-btn reset" @click="resetHomeModuleOrder">恢复默认</button>
-            <button class="loi-footer-btn save" @click="saveHomeModuleOrder">保存并应用到首页</button>
+            <view class="layout-order-footer">
+              <button class="loi-footer-btn reset" @click="resetHomeModuleOrder">恢复默认</button>
+              <button class="loi-footer-btn save" @click="saveHomeModuleOrder">保存并应用到首页</button>
+            </view>
           </view>
-        </view>
+        </scroll-view>
       </view>
     </view>
 
@@ -2020,10 +2039,41 @@ function toggleFitnessChart() {
 const activeGoalTab = ref<'week' | 'month'>('week');
 const goalSheetDefaultTab = ref<'week' | 'month'>('week');
 
-// ── ↕️ 首页板块自定义显示次序 + 周/月完成度饼图样式 ──
+// ── ↕️ 首页板块自定义显示次序 + 首页搭子 PK 显示开关（默认关闭）──
 type HomeModuleKey = 'nextrun' | 'feed' | 'today' | 'goal' | 'status' | 'recent' | 'yearly';
 const HOME_MODULE_LEGACY_STORAGE_KEY = 'rgm_home_module_order_v1';
 const HOME_MODULE_STORAGE_KEY = 'rgm_home_module_order_v2';
+const HOME_BUDDY_PK_STORAGE_KEY = 'rgm_home_show_buddy_pk';
+
+function readHomeBuddyPkPref(): boolean {
+  try {
+    const raw = uni.getStorageSync(HOME_BUDDY_PK_STORAGE_KEY);
+    return raw === true || raw === '1' || raw === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
+const showHomeBuddyPk = ref<boolean>(readHomeBuddyPkPref());
+
+function setHomeBuddyPkVisible(nextVal: boolean, opts?: { silent?: boolean }) {
+  const flag = Boolean(nextVal);
+  showHomeBuddyPk.value = flag;
+  try {
+    uni.setStorageSync(HOME_BUDDY_PK_STORAGE_KEY, flag ? '1' : '0');
+  } catch (_) {}
+  trackClick('home_toggle_buddy_pk', flag ? '开启首页搭子周PK' : '关闭首页搭子周PK', { enabled: flag });
+  if (!opts?.silent) {
+    uni.showToast({
+      title: flag ? '已在首页显示搭子周 PK' : '已关闭首页搭子 PK，可在首页设置重新开启',
+      icon: 'none',
+    });
+  }
+}
+
+function onToggleHomeBuddyPkSwitch(e: any) {
+  setHomeBuddyPkVisible(Boolean(e?.detail?.value));
+}
 const DEFAULT_HOME_MODULE_ORDER: HomeModuleKey[] = [
   'nextrun',
   'today',
@@ -2207,6 +2257,9 @@ function pinModuleToTop(idx: number) {
 
 function resetHomeModuleOrder() {
   homeModuleOrderDraft.value = [...DEFAULT_HOME_MODULE_ORDER];
+  if (showHomeBuddyPk.value) {
+    setHomeBuddyPkVisible(false, { silent: true });
+  }
 }
 
 function saveHomeModuleOrder() {
@@ -3474,6 +3527,7 @@ onUnmounted(() => {
 
 onShow(() => {
   homeSyncUnmounted = false;
+  showHomeBuddyPk.value = readHomeBuddyPkPref();
   applySystemTheme(currentTheme.value);
   syncTabBarIndex(0);
   if (!firstLoadPending.value) {
@@ -3690,6 +3744,7 @@ const myAvatarForPk = computed(() => {
 });
 
 const homeBuddyPkPairs = computed<HomeBuddyPkPair[]>(() => {
+  if (!showHomeBuddyPk.value) return [];
   const meKm = myWeekKmForPk.value;
   const buddiesRaw = Array.isArray(homeSocialPulse.value?.buddy_live_rings)
     ? [...homeSocialPulse.value.buddy_live_rings]
@@ -8137,8 +8192,44 @@ async function acceptAndEnterInvitedClub(inv: any) {
   margin-bottom: 0;
 }
 
+.layout-order-scroll {
+  max-height: 62vh;
+}
+
 .layout-order-body {
-  padding: 24rpx 28rpx 32rpx;
+  padding: 16rpx 28rpx 32rpx;
+}
+
+.layout-toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 20rpx 22rpx;
+  margin-bottom: 22rpx;
+  border-radius: 20rpx;
+  background: var(--rgm-card-2, #1c1c21);
+  border: 1rpx solid var(--rgm-line, rgba(255, 255, 255, 0.08));
+}
+
+.layout-toggle-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.layout-toggle-title {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: var(--rgm-text, #f4f4f5);
+}
+
+.layout-toggle-sub {
+  font-size: 20rpx;
+  color: var(--rgm-text-3, #8e8e93);
+  line-height: 1.45;
 }
 
 .layout-order-desc {
@@ -9249,7 +9340,9 @@ async function acceptAndEnterInvitedClub(inv: any) {
 .h3-pk-summary-pill { padding: 4rpx 12rpx; border-radius: 999rpx; font-size: 19rpx; font-weight: 800; background: var(--rgm-brand-tint); color: var(--rgm-brand); border: 1rpx solid var(--rgm-brand-line); white-space: nowrap; }
 .h3-pk-summary-pill.is-green { background: var(--rgm-green-tint); color: var(--rgm-green); border-color: var(--rgm-green-line); }
 .h3-pk-summary-pill.is-amber { background: var(--rgm-amber-tint); color: var(--rgm-amber); border-color: var(--rgm-amber-line); }
+.h3-pk-head-right { display: flex; align-items: center; gap: 14rpx; flex-shrink: 0; }
 .h3-pk-more { font-size: 21rpx; font-weight: 700; color: var(--rgm-text-3); flex-shrink: 0; }
+.h3-pk-hide-btn { font-size: 20rpx; font-weight: 700; color: var(--rgm-text-3); padding: 4rpx 12rpx; border-radius: 999rpx; background: var(--rgm-card-2); border: 1rpx solid var(--rgm-line); flex-shrink: 0; }
 
 .h3-pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12rpx; }
 .h3-pk-pod { position: relative; background: var(--rgm-card-2); border: 1.5rpx solid var(--rgm-line); border-radius: 20rpx; padding: 12rpx 8rpx 12rpx; display: flex; flex-direction: column; align-items: center; box-sizing: border-box; }

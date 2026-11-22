@@ -220,11 +220,21 @@ export async function request<T = any>(
           }
           resolve(res.data as T);
         } else if (res.statusCode === 401) {
+          const prevUid = storedUid;
           clearSession();
           if (!_retried401 && !url.includes("/api/auth/wechat/miniapp-login")) {
             wechatLogin()
               .then((u) => {
                 if (u && getToken()) {
+                  if (prevUid && u.id && u.id !== prevUid) {
+                    uni.showModal({
+                      title: "登录身份已更新",
+                      content: "当前微信未绑定之前的旧账号，已为您临时登录微信新账号。请前往「我的」重新绑定您的运动手表，即可一键找回并合并全部历史数据。",
+                      showCancel: false,
+                    });
+                    reject(new Error("原账号未绑定当前微信，请前往「我的」重新绑定手表找回历史数据"));
+                    return;
+                  }
                   return request<T>(url, method, data, true).then(resolve, reject);
                 }
                 reject(new Error("Unauthorized"));
@@ -316,12 +326,18 @@ export function clearPendingInviterUid() {
   uni.removeStorageSync("rgm_pending_inviter_uid");
 }
 
+let _inflightWechatLogin: Promise<UserProfile | null> | null = null;
+
 /**
  * Executes WeChat wx.login and syncs unique user with backend.
- * Features dual wx/uni compatibility and seamless local device fallback so UI never hangs.
+ * Features dual wx/uni compatibility, single-flight deduplication across concurrent cold-start callers,
+ * and seamless local device fallback so UI never hangs.
  */
 export async function wechatLogin(forceNew = false): Promise<UserProfile | null> {
-  return new Promise((resolve) => {
+  if (!forceNew && _inflightWechatLogin) {
+    return _inflightWechatLogin;
+  }
+  const loginPromise = new Promise<UserProfile | null>((resolve) => {
     let resolved = false;
     let clientUuid = uni.getStorageSync("rgm_client_uuid");
     if (!clientUuid || forceNew) {
@@ -434,6 +450,16 @@ export async function wechatLogin(forceNew = false): Promise<UserProfile | null>
       },
     });
   });
+
+  if (!forceNew) {
+    _inflightWechatLogin = loginPromise;
+    loginPromise.finally(() => {
+      if (_inflightWechatLogin === loginPromise) {
+        _inflightWechatLogin = null;
+      }
+    });
+  }
+  return loginPromise;
 }
 
 /**

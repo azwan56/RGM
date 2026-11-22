@@ -2,7 +2,7 @@
   <view class="sub-page" :class="themeClass">
     <view class="sub-header">
       <text class="sub-title">🤝 六维同频寻搭子</text>
-      <text class="sub-sub">5岁年龄段与公园地标脱敏匹配 · 互关解锁每周跑量 PK</text>
+      <text class="sub-sub">按年龄组别与公园地标脱敏匹配 · 互关解锁每周跑量 PK</text>
     </view>
 
     <!-- 3 Search Scopes -->
@@ -21,7 +21,7 @@
         <view class="f-chip" :class="{ active: gender === 'female' }" @click="toggleGender('female')">👩 女跑友</view>
         <view class="f-chip" :class="{ active: gender === 'male' }" @click="toggleGender('male')">👨 男跑友</view>
         <picker :range="ageLabels" @change="onPickAge">
-          <view class="f-chip" :class="{ active: !!ageGroup }">{{ ageGroup || '年龄段 ▾' }}</view>
+          <view class="f-chip" :class="{ active: !!ageGroup }">{{ ageGroup || '年龄组别 ▾' }}</view>
         </picker>
         <picker :range="kmLabels" @change="onPickKm">
           <view class="f-chip" :class="{ active: !!monthlyKmMin }">{{ monthlyKmMin ? `≥${monthlyKmMin}km ▾` : '30日跑量 ▾' }}</view>
@@ -118,7 +118,7 @@ const candidates = ref<any[]>([]);
 const loading = ref(true);
 const pkData = ref<any>(null);
 
-const ageLabels = ["全部年龄", "U30", "30-34", "35-39", "40-44", "45-49", "50+"];
+const ageLabels = ["全部组别", "青年组", "中坚组", "壮年组", "大师组"];
 const kmLabels = ["不限跑量", "≥ 50 km", "≥ 100 km", "≥ 180 km", "≥ 250 km"];
 const kmValues = ["", "50", "100", "180", "250"];
 

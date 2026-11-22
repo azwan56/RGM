@@ -210,6 +210,7 @@ export interface GroupRunVenuePreset {
   address: string;
   latitude: number;
   longitude: number;
+  is_city_fallback?: boolean;
 }
 
 const LOCAL_LANDMARK_INDEX: GroupRunVenuePreset[] = [
@@ -230,9 +231,20 @@ const LOCAL_LANDMARK_INDEX: GroupRunVenuePreset[] = [
   { name: "顾村公园", address: "上海市宝山区沪太路4788号顾村公园", latitude: 31.3444, longitude: 121.3732 },
   { name: "佘山国家森林公园", address: "上海市松江区外青松公路9258号东佘山园", latitude: 31.0956, longitude: 121.1965 },
   { name: "滴水湖", address: "上海市浦东新区南汇新城镇环湖西一路滴水湖", latitude: 30.9069, longitude: 121.9299 },
+  { name: "苏州米堆山", address: "江苏省苏州市吴中区光福镇米堆山（太湖畔坎上村）", latitude: 31.2707, longitude: 120.3903 },
+  { name: "米堆山", address: "江苏省苏州市吴中区光福镇米堆山（太湖畔坎上村）", latitude: 31.2707, longitude: 120.3903 },
+  { name: "苏州灵岩山", address: "江苏省苏州市吴中区木渎镇灵岩山风景区", latitude: 31.2624, longitude: 120.5008 },
+  { name: "灵白线", address: "江苏省苏州市吴中区灵岩山-白马涧越野起点", latitude: 31.2624, longitude: 120.5008 },
+  { name: "苏州天平山", address: "江苏省苏州市吴中区灵天路天平山风景名胜区", latitude: 31.2883, longitude: 120.5007 },
+  { name: "苏州穹窿山", address: "江苏省苏州市吴中区藏书镇穹窿山风景区", latitude: 31.2509, longitude: 120.4438 },
+  { name: "苏州树山", address: "江苏省苏州市虎丘区通安镇树山生态村", latitude: 31.3587, longitude: 120.4505 },
+  { name: "苏州大阳山", address: "江苏省苏州市虎丘区阳山南路大阳山国家森林公园", latitude: 31.3358, longitude: 120.4642 },
+  { name: "金鸡湖", address: "江苏省苏州市工业园区金鸡湖景区", latitude: 31.3116, longitude: 120.6947 },
   { name: "奥林匹克森林公园", address: "北京市朝阳区科荟路33号奥林匹克森林公园南门", latitude: 40.0156, longitude: 116.3924 },
   { name: "玄武湖公园", address: "江苏省南京市玄武区玄武巷1号玄武门", latitude: 32.0724, longitude: 118.7979 },
+  { name: "南京紫金山", address: "江苏省南京市玄武区钟山风景名胜区紫金山", latitude: 32.0715, longitude: 118.8551 },
   { name: "西湖", address: "浙江省杭州市西湖区龙井路1号杭州西湖", latitude: 30.2437, longitude: 120.1479 },
+  { name: "莫干山", address: "浙江省湖州市德清县莫干山风景名胜区", latitude: 30.6168, longitude: 119.8602 },
   { name: "深圳湾公园", address: "广东省深圳市南山区滨海大道深圳湾公园", latitude: 22.5216, longitude: 113.9930 },
 ];
 
@@ -388,15 +400,16 @@ export async function searchGroupRunGeocode(keyword: string): Promise<GroupRunVe
 }
 
 /**
- * 调用微信原生全屏地图选点（预先以当前或关键词解析出的坐标为中心）
+ * 调用微信原生全屏地图选点（内置腾讯地图全量中文 POI 检索与自由拖拽）
  */
 export async function pickGroupRunLocation(
   currentLat?: number | null,
   currentLng?: number | null,
-  keyword?: string
+  keyword?: string,
+  useInitialCenter = false
 ): Promise<GroupRunVenuePreset | null> {
-  let centerLat = currentLat ? Number(currentLat) : null;
-  let centerLng = currentLng ? Number(currentLng) : null;
+  let centerLat = useInitialCenter && currentLat ? Number(currentLat) : null;
+  let centerLng = useInitialCenter && currentLng ? Number(currentLng) : null;
 
   if (keyword && keyword.trim() && (!centerLat || !centerLng)) {
     const matches = await searchGroupRunGeocode(keyword.trim());
@@ -421,7 +434,26 @@ export async function pickGroupRunLocation(
             resolve(null);
           }
         },
-        fail: () => {
+        fail: (err: any) => {
+          const msg = String(err?.errMsg || "");
+          if (msg.includes("cancel")) {
+            resolve(null);
+            return;
+          }
+          if (msg.includes("auth deny") || msg.includes("authorize")) {
+            uni.showModal({
+              title: "需要位置权限",
+              content: "开启位置授权后可使用微信全屏腾讯地图检索任意地点。",
+              confirmText: "去设置",
+              success: (m) => {
+                if (m.confirm && typeof uni.openSetting === "function") {
+                  uni.openSetting({});
+                }
+              },
+            });
+          } else if (msg) {
+            uni.showToast({ title: "打开微信地图选点失败，请重试", icon: "none" });
+          }
           resolve(null);
         },
       };

@@ -962,42 +962,50 @@
 
       <!-- Tab 2: Join by Invite Code -->
       <view v-if="d1Mode === 'code'" class="rgm-card d1-code-card">
-        <view class="t3-sec-head">
-          <text class="t3-sec-title">凭邀请码加入跑团</text>
-          <text class="t3-link" @click="openCreateClubModal">+ 自建跑团 ›</text>
-        </view>
-        <view v-if="needsWechatNickname" class="join-wx-profile-card" style="margin-bottom: 20rpx;">
-          <view class="jwp-row">
-            <!-- #ifdef MP-WEIXIN -->
-            <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
-              <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
-              <RgmIcon v-else name="camera" :size="32" color="muted" />
-              <text class="jwp-avatar-sub">微信头像</text>
-            </button>
-            <!-- #endif -->
-            <view class="jwp-input-col">
-              <text class="jwp-label">昵称 *</text>
-              <input
-                type="nickname"
-                class="jwp-nickname-input"
-                v-model="joinRunnerNickname"
-                placeholder="点击一键填入微信昵称"
-                @blur="onJoinNicknameBlur"
-              />
+        <form @submit="handleJoinClub">
+          <view class="t3-sec-head">
+            <text class="t3-sec-title">凭邀请码加入跑团</text>
+            <text class="t3-link" @click="openCreateClubModal">+ 自建跑团 ›</text>
+          </view>
+          <view v-if="needsWechatNickname" class="join-wx-profile-card" :class="{ 'jwp-error': !!joinNickError }" style="margin-bottom: 20rpx;">
+            <view class="jwp-row">
+              <!-- #ifdef MP-WEIXIN -->
+              <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+                <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
+                <RgmIcon v-else name="camera" :size="32" color="muted" />
+                <text class="jwp-avatar-sub">微信头像</text>
+              </button>
+              <!-- #endif -->
+              <view class="jwp-input-col">
+                <text class="jwp-label">入团昵称 *（点下方框一键用微信昵称）</text>
+                <input
+                  type="nickname"
+                  name="nickname"
+                  class="jwp-nickname-input"
+                  v-model="joinRunnerNickname"
+                  :focus="joinNickFocus"
+                  placeholder="点击此处 · 一键选用微信昵称"
+                  @input="onJoinNicknameBlur"
+                  @change="onJoinNicknameBlur"
+                  @blur="onJoinNicknameBlur"
+                />
+                <text v-if="joinNickError" class="jwp-err-txt">⚠️ {{ joinNickError }}</text>
+              </view>
             </view>
           </view>
-        </view>
-        <text class="d1-field-label">跑团专属邀请码</text>
-        <input
-          class="d1-code-input"
-          type="text"
-          maxlength="12"
-          placeholder="输入 4~8 位跑团邀请码"
-          v-model="inviteCodeInput"
-        />
-        <button class="d1-primary-cta" :loading="joiningClub" @click="handleJoinClub">
-          验证并加入跑团
-        </button>
+          <text class="d1-field-label">跑团专属邀请码</text>
+          <input
+            class="d1-code-input"
+            type="text"
+            name="invite_code"
+            maxlength="12"
+            placeholder="输入 4~8 位跑团邀请码"
+            v-model="inviteCodeInput"
+          />
+          <button class="d1-primary-cta" form-type="submit" :loading="joiningClub">
+            验证并加入跑团
+          </button>
+        </form>
         <view v-if="!currentOrg" class="d1-org-code-link" @click="openOrgJoinModal()">
           <text class="t3-link">我是高校戈友，凭码实名加入大群 ›</text>
         </view>
@@ -1812,8 +1820,10 @@
                   style="width: 100%; height: 240rpx;"
                   :latitude="Number(eventLatitude)"
                   :longitude="Number(eventLongitude)"
-                  :scale="16"
+                  :scale="15"
                   :markers="eventModalMapMarkers"
+                  :enable-scroll="true"
+                  :enable-zoom="true"
                   @tap="onInlineEventMapTap"
                 />
                 <view style="display: flex; align-items: center; justify-content: space-between; padding: 8rpx 14rpx; background: #eff6ff;">
@@ -2048,171 +2058,186 @@
         </view>
 
         <view class="modal-body">
-          <!-- 新用户一键同步微信昵称与头像 -->
-          <view v-if="needsWechatNickname" class="join-wx-profile-card">
-            <view class="jwp-head">
-              <text class="jwp-badge">👤 入团名片</text>
-            </view>
-            <view class="jwp-row">
-              <!-- #ifdef MP-WEIXIN -->
-              <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
-                <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
-                <text v-else class="jwp-avatar-placeholder">📷</text>
-                <text class="jwp-avatar-sub">微信头像</text>
-              </button>
-              <!-- #endif -->
-              <view class="jwp-input-col">
-                <text class="jwp-label">昵称 *</text>
-                <input
-                  type="nickname"
-                  class="jwp-nickname-input"
-                  v-model="joinRunnerNickname"
-                  placeholder="点击此处 · 一键填入微信昵称"
-                  @blur="onJoinNicknameBlur"
-                />
+          <form @submit="handleJoinClub">
+            <!-- 新用户一键同步微信昵称与头像（使用原生 form submit 保证点选微信昵称后一次提交生效） -->
+            <view v-if="needsWechatNickname" class="join-wx-profile-card" :class="{ 'jwp-error': !!joinNickError }">
+              <view class="jwp-head">
+                <text class="jwp-badge">👤 首次入团 · 必填微信昵称</text>
+              </view>
+              <view class="jwp-row">
+                <!-- #ifdef MP-WEIXIN -->
+                <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+                  <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
+                  <text v-else class="jwp-avatar-placeholder">📷</text>
+                  <text class="jwp-avatar-sub">微信头像</text>
+                </button>
+                <!-- #endif -->
+                <view class="jwp-input-col">
+                  <text class="jwp-label">昵称 *</text>
+                  <input
+                    type="nickname"
+                    name="nickname"
+                    class="jwp-nickname-input"
+                    v-model="joinRunnerNickname"
+                    :focus="joinNickFocus"
+                    placeholder="点击此处 · 一键选用微信昵称"
+                    @input="onJoinNicknameBlur"
+                    @change="onJoinNicknameBlur"
+                    @blur="onJoinNicknameBlur"
+                  />
+                  <text v-if="joinNickError" class="jwp-err-txt">⚠️ {{ joinNickError }}</text>
+                </view>
               </view>
             </view>
-          </view>
 
-          <text class="input-label">跑团专属邀请码</text>
-          <input
-            class="text-input"
-            type="text"
-            maxlength="12"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="请输入跑团专属邀请码"
-            v-model="inviteCodeInput"
-          />
-          <button class="submit-btn" :loading="joiningClub" @click="handleJoinClub">
-            立即加入
-          </button>
+            <text class="input-label">跑团专属邀请码</text>
+            <input
+              class="text-input"
+              type="text"
+              name="invite_code"
+              maxlength="12"
+              :adjust-position="false"
+              :cursor-spacing="30"
+              placeholder="请输入跑团专属邀请码"
+              v-model="inviteCodeInput"
+            />
+            <button class="submit-btn" form-type="submit" :loading="joiningClub">
+              立即加入
+            </button>
+          </form>
         </view>
       </view>
     </view>
 
-    <!-- ── 跑团受邀专属直达弹窗 (综合跑团主要信息与实拍图片 · 点击邀请卡直接进跑团) ── -->
+    <!-- ── 跑团受邀专属直达弹窗 (新用户先置顶1秒选微信昵称，通过原生 form submit 确保一次点中即入团) ── -->
     <view v-if="showClubInviteModal" class="modal-mask" @click="closeClubInviteModal" @touchmove.stop.prevent>
       <view class="modal-content club-invite-modal-box" @click.stop>
         <view class="modal-header">
           <view class="title-with-pill">
             <text class="modal-title">🎉 跑团入团邀请卡</text>
-            <text class="invite-badge-pill">点击卡片直接进团</text>
+            <text class="invite-badge-pill">{{ needsWechatNickname ? '先选微信昵称即入团' : '点击卡片直接进团' }}</text>
           </view>
           <text class="close-btn" @click="closeClubInviteModal">✕</text>
         </view>
 
         <view class="modal-body invite-body">
-          <!-- 综合跑团封面/实拍、核心战绩、据点排期与教练的一体化邀请卡（支持点击卡片直接入团） -->
-          <view class="invite-club-card" @click="handleAcceptClubInvite">
-            <image
-              v-if="invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url"
-              class="invite-hero-cover"
-              :src="resolveAssetUrl(invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url)"
-              mode="aspectFill"
-            />
-            <view class="invite-club-head-row">
-              <image class="invite-club-logo" :src="resolveAssetUrl(invitedClubInfo?.logo_url) || '/static/logo-square.png'" mode="aspectFill" />
-              <view class="invite-club-info">
-                <text class="invite-club-name">{{ invitedClubInfo?.name }}</text>
-                <view class="invite-meta-row">
-                  <text v-if="invitedClubInfo?.city" class="invite-pill">📍 {{ invitedClubInfo.city }}</text>
-                  <text class="invite-pill">👥 {{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }} 位团员</text>
-                  <text v-if="invitedClubInfo?.org_name" class="invite-pill org-pill">🏛️ {{ invitedClubInfo.org_name }}</text>
-                  <text
-                    v-for="lm in (invitedClubInfo?.home_landmarks || []).slice(0, 2)"
-                    :key="lm"
-                    class="invite-pill"
-                  >
-                    {{ lm }}
+          <form @submit="handleAcceptClubInvite">
+            <!-- 新用户把入团名片置顶在首屏最上方，绝不被下方卡片挤出视野；配合 form submit 解决 iOS type=nickname 同步问题 -->
+            <view v-if="needsWechatNickname" class="join-wx-profile-card" :class="{ 'jwp-error': !!joinNickError }">
+              <view class="jwp-head">
+                <text class="jwp-badge">👤 第 1 步：请先选用您的微信昵称 *</text>
+              </view>
+              <view class="jwp-row">
+                <!-- #ifdef MP-WEIXIN -->
+                <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+                  <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
+                  <text v-else class="jwp-avatar-placeholder">📷</text>
+                  <text class="jwp-avatar-sub">微信头像</text>
+                </button>
+                <!-- #endif -->
+                <view class="jwp-input-col">
+                  <text class="jwp-label">跑友昵称 *（告别「跑者_xxxx」）</text>
+                  <input
+                    type="nickname"
+                    name="nickname"
+                    class="jwp-nickname-input"
+                    v-model="joinRunnerNickname"
+                    :focus="joinNickFocus"
+                    placeholder="点这里 → 键盘上方一键选微信昵称"
+                    @input="onJoinNicknameBlur"
+                    @change="onJoinNicknameBlur"
+                    @blur="onJoinNicknameBlur"
+                  />
+                  <text v-if="joinNickError" class="jwp-err-txt">⚠️ {{ joinNickError }}</text>
+                </view>
+              </view>
+            </view>
+
+            <!-- 综合跑团封面/实拍、核心战绩、据点排期与教练的一体化邀请卡 -->
+            <view class="invite-club-card" @click="needsWechatNickname && !joinRunnerNickname.trim() ? triggerJoinNickFocus('请先点击上方昵称框选用微信昵称') : handleAcceptClubInvite()">
+              <image
+                v-if="invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url"
+                class="invite-hero-cover"
+                :src="resolveAssetUrl(invitedClubInfo?.hero_cover_url || invitedClubInfo?.photos?.[0]?.photo_url)"
+                mode="aspectFill"
+              />
+              <view class="invite-club-head-row">
+                <image class="invite-club-logo" :src="resolveAssetUrl(invitedClubInfo?.logo_url) || '/static/logo-square.png'" mode="aspectFill" />
+                <view class="invite-club-info">
+                  <text class="invite-club-name">{{ invitedClubInfo?.name }}</text>
+                  <view class="invite-meta-row">
+                    <text v-if="invitedClubInfo?.city" class="invite-pill">📍 {{ invitedClubInfo.city }}</text>
+                    <text class="invite-pill">👥 {{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }} 位团员</text>
+                    <text v-if="invitedClubInfo?.org_name" class="invite-pill org-pill">🏛️ {{ invitedClubInfo.org_name }}</text>
+                    <text
+                      v-for="lm in (invitedClubInfo?.home_landmarks || []).slice(0, 2)"
+                      :key="lm"
+                      class="invite-pill"
+                    >
+                      {{ lm }}
+                    </text>
+                  </view>
+                  <text v-if="invitedClubInfo?.slogan || invitedClubInfo?.description" class="invite-club-desc">
+                    {{ invitedClubInfo?.slogan || invitedClubInfo?.description }}
                   </text>
                 </view>
-                <text v-if="invitedClubInfo?.slogan || invitedClubInfo?.description" class="invite-club-desc">
-                  {{ invitedClubInfo?.slogan || invitedClubInfo?.description }}
-                </text>
               </view>
-            </view>
 
-            <view v-if="invitedClubInfo?.schedule_summary" class="invite-sched-row">
-              <text class="invite-sched-txt">🗓️ 合练排期：{{ invitedClubInfo.schedule_summary }}</text>
-            </view>
-
-            <view class="invite-stat-grid">
-              <view class="invite-stat-cell">
-                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }}人</text>
-                <text class="invite-stat-lbl">活跃队员</text>
+              <view v-if="invitedClubInfo?.schedule_summary" class="invite-sched-row">
+                <text class="invite-sched-txt">🗓️ 合练排期：{{ invitedClubInfo.schedule_summary }}</text>
               </view>
-              <view class="invite-stat-cell">
-                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.month_total_km ?? 0 }}km</text>
-                <text class="invite-stat-lbl">本月全团实跑</text>
-              </view>
-              <view class="invite-stat-cell">
-                <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.sub330_count ?? 0 }}人</text>
-                <text class="invite-stat-lbl">⌚ 核验破330</text>
-              </view>
-            </view>
 
-            <scroll-view v-if="(invitedClubInfo?.photos || []).length > 0" scroll-x class="invite-photo-strip" @click.stop>
-              <image
-                v-for="(p, idx) in (invitedClubInfo?.photos || []).slice(0, 5)"
-                :key="p.id || idx"
-                :src="resolveAssetUrl(p.photo_url)"
-                class="invite-strip-img"
-                mode="aspectFill"
-                @click.stop="handleAcceptClubInvite"
-              />
-            </scroll-view>
-          </view>
+              <view class="invite-stat-grid">
+                <view class="invite-stat-cell">
+                  <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.member_count ?? invitedClubInfo?.member_count ?? 1 }}人</text>
+                  <text class="invite-stat-lbl">活跃队员</text>
+                </view>
+                <view class="invite-stat-cell">
+                  <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.month_total_km ?? 0 }}km</text>
+                  <text class="invite-stat-lbl">本月全团实跑</text>
+                </view>
+                <view class="invite-stat-cell">
+                  <text class="invite-stat-val">{{ invitedClubInfo?.verified_stats?.sub330_count ?? 0 }}人</text>
+                  <text class="invite-stat-lbl">⌚ 核验破330</text>
+                </view>
+              </view>
 
-          <!-- 新用户一键同步微信昵称与头像（告别“跑者_xxxx”代号） -->
-          <view v-if="needsWechatNickname" class="join-wx-profile-card">
-            <view class="jwp-head">
-              <text class="jwp-badge">👤 入团名片</text>
-            </view>
-            <view class="jwp-row">
-              <!-- #ifdef MP-WEIXIN -->
-              <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
-                <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
-                <text v-else class="jwp-avatar-placeholder">📷</text>
-                <text class="jwp-avatar-sub">微信头像</text>
-              </button>
-              <!-- #endif -->
-              <view class="jwp-input-col">
-                <text class="jwp-label">昵称 *</text>
-                <input
-                  type="nickname"
-                  class="jwp-nickname-input"
-                  v-model="joinRunnerNickname"
-                  placeholder="点击此处 · 一键填入微信昵称"
-                  @blur="onJoinNicknameBlur"
+              <scroll-view v-if="(invitedClubInfo?.photos || []).length > 0" scroll-x class="invite-photo-strip" @click.stop>
+                <image
+                  v-for="(p, idx) in (invitedClubInfo?.photos || []).slice(0, 5)"
+                  :key="p.id || idx"
+                  :src="resolveAssetUrl(p.photo_url)"
+                  class="invite-strip-img"
+                  mode="aspectFill"
+                  @click.stop="needsWechatNickname && !joinRunnerNickname.trim() ? triggerJoinNickFocus('请先点击上方昵称框选用微信昵称') : handleAcceptClubInvite()"
                 />
+              </scroll-view>
+            </view>
+
+            <!-- 邀请码绑定核验状态 -->
+            <view class="invite-status-strip">
+              <text class="iss-icon">✓</text>
+              <view class="iss-text-col">
+                <text class="iss-title">{{ invitedClubOneClick ? '受邀直达 · 免码免审批' : (invitedClubInfo?.join_mode === 'invite' ? '邀请码已核验' : '自由入团') }}</text>
               </view>
             </view>
-          </view>
 
-          <!-- 邀请码绑定核验状态 -->
-          <view class="invite-status-strip">
-            <text class="iss-icon">✓</text>
-            <view class="iss-text-col">
-              <text class="iss-title">{{ invitedClubOneClick ? '受邀直达 · 免码免审批' : (invitedClubInfo?.join_mode === 'invite' ? '邀请码已核验' : '自由入团') }}</text>
+            <!-- 隶属大群：说明会同时以临时成员加入大群，资料可稍后补填 -->
+            <view v-if="invitedClubInfo?.org_id && !invitedClubIsOrgMember" class="invite-status-strip org-notice-strip">
+              <text class="iss-icon org-iss-icon">🏛️</text>
+              <view class="iss-text-col">
+                <text class="iss-title org-iss-title">将同时加入【{{ invitedClubInfo.org_name || '大群' }}】· 资料可稍后补填</text>
+                <text class="iss-sub org-iss-sub">需在 {{ invitedClubDeadlineDays }} 天内补齐资料并通过审核，逾期将移出大群跑团</text>
+              </view>
             </view>
-          </view>
 
-          <!-- 隶属大群：说明会同时以临时成员加入大群，资料可稍后补填 -->
-          <view v-if="invitedClubInfo?.org_id && !invitedClubIsOrgMember" class="invite-status-strip org-notice-strip">
-            <text class="iss-icon org-iss-icon">🏛️</text>
-            <view class="iss-text-col">
-              <text class="iss-title org-iss-title">将同时加入【{{ invitedClubInfo.org_name || '大群' }}】· 资料可稍后补填</text>
-              <text class="iss-sub org-iss-sub">需在 {{ invitedClubDeadlineDays }} 天内补齐资料并通过审核，逾期将移出大群跑团</text>
+            <view class="modal-btn-row">
+              <button class="btn-cancel" @click="closeClubInviteModal">暂不加入</button>
+              <button class="btn-submit" form-type="submit" :loading="acceptingClubInvite">
+                ✓ 确认加入跑团
+              </button>
             </view>
-          </view>
-
-          <view class="modal-btn-row">
-            <button class="btn-cancel" @click="closeClubInviteModal">暂不加入</button>
-            <button class="btn-submit" :loading="acceptingClubInvite" @click="handleAcceptClubInvite">
-              ✓ 接受邀请
-            </button>
-          </view>
+          </form>
         </view>
       </view>
     </view>
@@ -3397,46 +3422,54 @@
             <text class="ptb-name">{{ targetClubForCodeJoin?.name }}</text>
           </view>
 
-          <!-- 新用户一键同步微信昵称与头像 -->
-          <view v-if="needsWechatNickname" class="join-wx-profile-card" style="margin-bottom: 20rpx;">
-            <view class="jwp-head">
-              <text class="jwp-badge">👤 入团名片</text>
-            </view>
-            <view class="jwp-row">
-              <!-- #ifdef MP-WEIXIN -->
-              <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
-                <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
-                <text v-else class="jwp-avatar-placeholder">📷</text>
-                <text class="jwp-avatar-sub">微信头像</text>
-              </button>
-              <!-- #endif -->
-              <view class="jwp-input-col">
-                <text class="jwp-label">昵称 *</text>
-                <input
-                  type="nickname"
-                  class="jwp-nickname-input"
-                  v-model="joinRunnerNickname"
-                  placeholder="点击此处 · 一键填入微信昵称"
-                  @blur="onJoinNicknameBlur"
-                />
+          <form @submit="submitClubCodeJoin">
+            <!-- 新用户一键同步微信昵称与头像 -->
+            <view v-if="needsWechatNickname" class="join-wx-profile-card" :class="{ 'jwp-error': !!joinNickError }" style="margin-bottom: 20rpx;">
+              <view class="jwp-head">
+                <text class="jwp-badge">👤 首次入团 · 必填微信昵称</text>
+              </view>
+              <view class="jwp-row">
+                <!-- #ifdef MP-WEIXIN -->
+                <button class="jwp-avatar-btn" open-type="chooseAvatar" @chooseavatar="onJoinChooseAvatar">
+                  <image v-if="joinRunnerAvatar || user?.avatar_url" class="jwp-avatar-img" :src="joinRunnerAvatar || user?.avatar_url" mode="aspectFill" />
+                  <text v-else class="jwp-avatar-placeholder">📷</text>
+                  <text class="jwp-avatar-sub">微信头像</text>
+                </button>
+                <!-- #endif -->
+                <view class="jwp-input-col">
+                  <text class="jwp-label">昵称 *</text>
+                  <input
+                    type="nickname"
+                    name="nickname"
+                    class="jwp-nickname-input"
+                    v-model="joinRunnerNickname"
+                    :focus="joinNickFocus"
+                    placeholder="点击此处 · 一键选用微信昵称"
+                    @input="onJoinNicknameBlur"
+                    @change="onJoinNicknameBlur"
+                    @blur="onJoinNicknameBlur"
+                  />
+                  <text v-if="joinNickError" class="jwp-err-txt">⚠️ {{ joinNickError }}</text>
+                </view>
               </view>
             </view>
-          </view>
 
-          <input
-            class="club-code-input"
-            type="text"
-            maxlength="12"
-            :adjust-position="false"
-            :cursor-spacing="30"
-            placeholder="请输入跑团邀请码"
-            v-model="clubJoinCodeInput"
-          />
+            <input
+              class="club-code-input"
+              type="text"
+              name="invite_code"
+              maxlength="12"
+              :adjust-position="false"
+              :cursor-spacing="30"
+              placeholder="请输入跑团邀请码"
+              v-model="clubJoinCodeInput"
+            />
 
-          <view class="modal-btn-row">
-            <button class="btn-cancel" @click="showClubCodeModal = false">取消</button>
-            <button class="btn-submit" :loading="joiningClubId === targetClubForCodeJoin?.id" @click="submitClubCodeJoin">立即加入</button>
-          </view>
+            <view class="modal-btn-row">
+              <button class="btn-cancel" @click="showClubCodeModal = false">取消</button>
+              <button class="btn-submit" form-type="submit" :loading="joiningClubId === targetClubForCodeJoin?.id">立即加入</button>
+            </view>
+          </form>
         </view>
       </view>
     </view>
@@ -4712,6 +4745,26 @@ function promptOrgProfileLater(orgMembership: any, clubName?: string) {
 // ── 👤 新用户入团一键同步微信昵称与头像（避免“跑者_xxxx”代号） ──
 const joinRunnerNickname = ref("");
 const joinRunnerAvatar = ref("");
+const joinNickError = ref("");
+const joinNickFocus = ref(false);
+
+function triggerJoinNickFocus(errMsg?: string) {
+  if (errMsg) joinNickError.value = errMsg;
+  joinNickFocus.value = false;
+  setTimeout(() => {
+    joinNickFocus.value = true;
+  }, 60);
+}
+
+function extractSubmittedNickname(e?: any): string {
+  const fromForm = String(e?.detail?.value?.nickname ?? "").trim();
+  if (fromForm) {
+    joinRunnerNickname.value = fromForm;
+    joinNickError.value = "";
+    return fromForm;
+  }
+  return joinRunnerNickname.value.trim();
+}
 
 function isGenericRunnerName(raw?: string): boolean {
   const n = (raw || "").trim();
@@ -4792,6 +4845,9 @@ function onJoinNicknameBlur(e: any) {
   const val = e?.detail?.value;
   if (val && String(val).trim()) {
     joinRunnerNickname.value = String(val).trim();
+    if (!isGenericRunnerName(joinRunnerNickname.value)) {
+      joinNickError.value = "";
+    }
   }
 }
 
@@ -7031,22 +7087,33 @@ function handleJoinClubWithCheck(club: any) {
   if (club.join_mode === "invite") {
     targetClubForCodeJoin.value = club;
     clubJoinCodeInput.value = "";
+    joinNickError.value = "";
     showClubCodeModal.value = true;
-  } else if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
-    // 新跑友昵称仍为“跑者_xxxx”时，弹出跑团名片确认弹窗，引导一键点选微信真实昵称后再入团
+    if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
+      triggerJoinNickFocus();
+    }
+  } else if (needsWechatNickname.value && isGenericRunnerName(joinRunnerNickname.value)) {
+    // 保留新用户强制昵称规范：弹出带置顶微信昵称框的入团卡片，配合原生 form submit 一次选定即入团
     invitedClubInfo.value = club;
     invitedClubCode.value = "";
+    invitedClubOneClick.value = true;
+    joinNickError.value = "";
     showClubInviteModal.value = true;
+    triggerJoinNickFocus();
   } else {
     handleJoinClubDirect(club.id);
   }
 }
 
-async function submitClubCodeJoin() {
-  if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
-    uni.showToast({ title: "请先点击昵称框，一键填入您的微信昵称", icon: "none" });
+async function submitClubCodeJoin(e?: any) {
+  const finalNick = extractSubmittedNickname(e);
+  if (needsWechatNickname.value && isGenericRunnerName(finalNick)) {
+    triggerJoinNickFocus("请先点击上方昵称框，一键选用您的微信昵称（不能为默认代号）");
+    uni.showToast({ title: "请先点击昵称框选用微信昵称", icon: "none" });
     return;
   }
+  const fromFormCode = String(e?.detail?.value?.invite_code ?? "").trim();
+  if (fromFormCode) clubJoinCodeInput.value = fromFormCode;
   const code = clubJoinCodeInput.value.trim().toUpperCase();
   if (!code) {
     uni.showToast({ title: "请输入跑团专属邀请码", icon: "none" });
@@ -7059,9 +7126,16 @@ async function submitClubCodeJoin() {
 }
 
 async function handleJoinClubDirect(clubId: string, inviteCode?: string) {
-  const uid = user.value?.id;
+  let u = user.value || getStoredUser();
+  if (!u?.id) {
+    u = await wechatLogin();
+  }
+  if (u?.id) {
+    user.value = u;
+  }
+  const uid = u?.id;
   if (!uid) {
-    uni.showToast({ title: "请先登录", icon: "none" });
+    uni.showToast({ title: "登录中，请稍后重试", icon: "none" });
     return;
   }
   joiningClubId.value = clubId;
@@ -8562,25 +8636,33 @@ function closeClubInviteModal() {
   showClubInviteModal.value = false;
   invitedClubInfo.value = null;
   invitedClubCode.value = "";
+  joinNickError.value = "";
+  joinNickFocus.value = false;
 }
 
-async function handleAcceptClubInvite() {
+async function handleAcceptClubInvite(e?: any) {
   if (!invitedClubInfo.value) return;
-  if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
-    uni.showToast({ title: "请先点击昵称框，一键选用您的微信昵称", icon: "none" });
+  let u = user.value || getStoredUser() || checkAndAutoLogin();
+  if (!u?.id) {
+    u = await wechatLogin();
+  }
+  if (u?.id) {
+    user.value = u;
+  }
+  const uid = u?.id;
+  if (!uid) {
+    uni.showToast({ title: "登录中，请稍后重试", icon: "none" });
+    return;
+  }
+  // 原生 <form @submit> 直接读取微信 type="nickname" 的值，彻底解决 iOS 未 blur 时 v-model 为空的问题
+  const finalNick = extractSubmittedNickname(e);
+  if (needsWechatNickname.value && isGenericRunnerName(finalNick)) {
+    triggerJoinNickFocus("请点击上方昵称框，一键选用您的微信昵称（或输入常用称呼）");
+    uni.showToast({ title: "请先点击昵称框选用微信昵称", icon: "none" });
     return;
   }
   const targetClub = invitedClubInfo.value;
   const targetCode = invitedClubCode.value;
-  let uid = user.value?.id;
-  if (!uid) {
-    const autologin = await checkAndAutoLogin();
-    uid = autologin?.id;
-  }
-  if (!uid) {
-    uni.showToast({ title: "请先登录", icon: "none" });
-    return;
-  }
 
   acceptingClubInvite.value = true;
   try {
@@ -8589,7 +8671,7 @@ async function handleAcceptClubInvite() {
       club_id: targetClub.id,
       invite_code: targetCode,
       privacy_consent: true,
-      display_name: joinRunnerNickname.value.trim() || undefined,
+      display_name: finalNick || undefined,
       avatar_url: joinRunnerAvatar.value || undefined,
       inviter_uid: invitedByUid.value || undefined,
       via_invite: true,
@@ -8633,18 +8715,29 @@ async function handleAcceptClubInvite() {
   }
 }
 
-async function handleJoinClub() {
-  if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
-    uni.showToast({ title: "请先点击昵称框，一键填入您的微信昵称", icon: "none" });
+async function handleJoinClub(e?: any) {
+  let u = user.value || getStoredUser();
+  if (!u?.id) {
+    u = await wechatLogin();
+  }
+  if (u?.id) {
+    user.value = u;
+  }
+  const uid = u?.id;
+  if (!uid) {
+    uni.showToast({ title: "登录中，请稍后重试", icon: "none" });
     return;
   }
+  const finalNick = extractSubmittedNickname(e);
+  if (needsWechatNickname.value && isGenericRunnerName(finalNick)) {
+    triggerJoinNickFocus("请点击上方昵称框，一键选用您的微信昵称（不能为默认代号）");
+    uni.showToast({ title: "请先点击昵称框选用微信昵称", icon: "none" });
+    return;
+  }
+  const fromFormCode = String(e?.detail?.value?.invite_code ?? "").trim();
+  if (fromFormCode) inviteCodeInput.value = fromFormCode;
   if (!inviteCodeInput.value.trim()) {
     uni.showToast({ title: "请输入邀请码", icon: "none" });
-    return;
-  }
-  const uid = user.value?.id;
-  if (!uid) {
-    uni.showToast({ title: "请先登录", icon: "none" });
     return;
   }
   joiningClub.value = true;
@@ -8652,7 +8745,7 @@ async function handleJoinClub() {
     const res = await request("/api/team/join", "POST", {
       user_id: uid,
       invite_code: inviteCodeInput.value.trim().toUpperCase(),
-      display_name: joinRunnerNickname.value.trim() || undefined,
+      display_name: finalNick || undefined,
       avatar_url: joinRunnerAvatar.value || undefined,
     });
     trackFunnelStep("club_join_success", "通过邀请码加入跑团", {
@@ -9657,6 +9750,9 @@ async function handleInviteFromWeChat(options: any) {
     uni.showLoading({ title: "正在为您直连跑团...", mask: true });
     try {
       const u = user.value || getStoredUser() || (await wechatLogin());
+      if (u?.id) {
+        user.value = u;
+      }
       const uid = u?.id || "";
       const res = await request(
         `/api/team/${encodeURIComponent(clubId)}/invite-info?invite_code=${encodeURIComponent(code)}&user_id=${encodeURIComponent(uid)}${invParam}`
@@ -9674,7 +9770,8 @@ async function handleInviteFromWeChat(options: any) {
         invitedClubIsOrgMember.value = Boolean(res.is_org_member && res.org_status !== "expired");
         invitedClubDeadlineDays.value = res.profile_deadline_days || 14;
 
-        // 用户点击微信邀请卡后，若已拥有有效昵称且邀请有效，直接自动入团并进入跑团主页
+        // 已设置过真实昵称的跑友点击有效邀请卡直接秒进跑团；
+        // 新跑友（默认代号“跑者_xxxx”）弹出置顶微信昵称卡，选完昵称点「确认加入」一次生效，避免团内出现“跑者_xxxx”
         if (canDirectJoin && uid && !needsWechatNickname.value) {
           try {
             const joinRes = await request("/api/team/join-club", "POST", {
@@ -9700,7 +9797,11 @@ async function handleInviteFromWeChat(options: any) {
             console.warn("auto join club on invite card click fallback to modal:", autoErr);
           }
         }
+        joinNickError.value = "";
         showClubInviteModal.value = true;
+        if (needsWechatNickname.value && !joinRunnerNickname.value.trim()) {
+          triggerJoinNickFocus();
+        }
       }
     } catch (err: any) {
       uni.hideLoading();
@@ -16297,10 +16398,23 @@ function goToSubpage(url: string) {
 /* ── 新用户入团微信昵称与头像一键填写卡 ── */
 .join-wx-profile-card {
   background: var(--rgm-card-2, rgba(255, 255, 255, 0.05));
-  border: 1rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.35));
+  border: 2rpx solid var(--rgm-brand-line, rgba(252, 76, 2, 0.45));
   border-radius: 20rpx;
   padding: 20rpx;
   margin-bottom: 22rpx;
+}
+
+.join-wx-profile-card.jwp-error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.jwp-err-txt {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #f87171;
+  line-height: 1.4;
+  margin-top: 4rpx;
 }
 
 .jwp-head {

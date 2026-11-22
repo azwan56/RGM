@@ -597,6 +597,23 @@
           </view>
         </view>
 
+        <!-- 首页搭子周 PK 展示开关（默认关闭；保留寻搭子与选团展厅） -->
+        <view style="display: flex; align-items: center; justify-content: space-between; padding: 20rpx; background: var(--rgm-card-2); border: 1px solid var(--rgm-line); border-radius: 16rpx; margin-top: 16rpx;">
+          <view style="flex: 1; padding-right: 20rpx;">
+            <text style="font-size: 27rpx; font-weight: 700; color: var(--rgm-ink); display: block; margin-bottom: 6rpx;">
+              首页显示「搭子周 PK」
+            </text>
+            <text style="font-size: 21rpx; color: var(--rgm-ink-2); line-height: 1.4;">
+              默认关闭；关闭后首页隐藏搭子 PK 卡片，保留「寻搭子」与「选团展厅」
+            </text>
+          </view>
+          <switch
+            :checked="showHomeBuddyPk"
+            color="#fc4c02"
+            @change="(e: any) => handleToggleHomeBuddyPk(!!e.detail.value)"
+          />
+        </view>
+
         <!-- M11.4 同频寻搭子与跑团招募检索授权 + 地标标签 -->
         <view class="privacy-critique-box" style="margin-top: 16rpx;">
           <text class="pc-label" style="display: block; margin-bottom: 10rpx;">🤝 可被搭档搜索范围（无排他隐私授权）</text>
@@ -6264,9 +6281,33 @@ async function handleImportGarminPb() {
   }
 }
 
+const HOME_BUDDY_PK_STORAGE_KEY = "rgm_home_show_buddy_pk";
+function readHomeBuddyPkPref(): boolean {
+  try {
+    const raw = uni.getStorageSync(HOME_BUDDY_PK_STORAGE_KEY);
+    return raw === true || raw === "1" || raw === "true";
+  } catch (_) {
+    return false;
+  }
+}
+const showHomeBuddyPk = ref<boolean>(readHomeBuddyPkPref());
+
+function handleToggleHomeBuddyPk(nextVal: boolean) {
+  const flag = Boolean(nextVal);
+  showHomeBuddyPk.value = flag;
+  try {
+    uni.setStorageSync(HOME_BUDDY_PK_STORAGE_KEY, flag ? "1" : "0");
+  } catch (_) {}
+  uni.showToast({
+    title: flag ? "已在首页显示搭子周 PK" : "已关闭首页搭子周 PK",
+    icon: "none",
+  });
+}
+
 let lastProfileLoadedAt = 0;
 
 onShow(() => {
+  showHomeBuddyPk.value = readHomeBuddyPkPref();
   applySystemTheme(currentTheme.value);
   syncTabBarIndex(4);
   const autoBrand = uni.getStorageSync("auto_open_device_brand");
