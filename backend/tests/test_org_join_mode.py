@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from main import app
@@ -367,7 +368,7 @@ def test_org_periodic_report_and_cross_club_events_workflow():
         "operator_uid": org_owner_uid,
         "title": "全群跨分跑团25km周末大拉练",
         "event_type": "group_run",
-        "meet_time": "2026-11-15 06:30",
+        "meet_time": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d 06:30"),
         "location": "世纪公园7号门",
         "target_km": 25.0,
         "pace_requirement": "A组430 / B组530",

@@ -53,7 +53,10 @@ def test_coros_adapter_elevation_normalization():
 def test_local_store_upsert_activity_elevation_aliases():
     init_db()
     test_act_id = "test_trail_elev_001"
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM activities WHERE id = ?", (test_act_id,))
+        conn.commit()
+
     # Simulate an adapter that only provided total_elevation_gain
     act_data = {
         "id": test_act_id,
@@ -71,14 +74,19 @@ def test_local_store_upsert_activity_elevation_aliases():
         "trimp": 656.1,
     }
 
-    LocalStore.upsert_activity(act_data)
+    try:
+        LocalStore.upsert_activity(act_data)
 
-    # Check database column
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT elevation_gain_meters, ai_journal FROM activities WHERE id = ?", (test_act_id,))
-        row = cursor.fetchone()
-        assert row is not None
-        elev_gain, critique = row
-        assert elev_gain == 4159.2
-        assert "+4159m" in critique, f"Critique should reflect +4159m, got: {critique}"
+        # Check database column
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT elevation_gain_meters, ai_journal FROM activities WHERE id = ?", (test_act_id,))
+            row = cursor.fetchone()
+            assert row is not None
+            elev_gain, critique = row
+            assert elev_gain == 4159.2
+            assert "+4159m" in critique, f"Critique should reflect +4159m, got: {critique}"
+    finally:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM activities WHERE id = ?", (test_act_id,))
+            conn.commit()

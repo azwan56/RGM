@@ -105,7 +105,7 @@ def test_temporary_status_and_sub_club_gating_workflow():
         "club_id": club_id
     })
     assert stranger_join.status_code == 400
-    assert "尚未加入该大群" in stranger_join.json()["detail"]
+    assert "该跑团隶属于" in stranger_join.json()["detail"] and "先加入" in stranger_join.json()["detail"]
 
     # 5. Member joins org with missing required fields (phone and clothing_size omitted)
     join_res = client.post("/api/org/join", json={
@@ -124,14 +124,13 @@ def test_temporary_status_and_sub_club_gating_workflow():
     assert "phone" in missing_names
     assert "clothing_size" in missing_names
 
-    # 6. Temporary member tries to join sub-club -> 400 / Blocked
+    # 6. Temporary member (within 14-day grace period) can join free sub-club directly
     temp_join = client.post("/api/team/join-club", json={
         "user_id": member_uid,
         "club_id": club_id
     })
-    assert temp_join.status_code == 400
-    assert "临时人员" in temp_join.json()["detail"]
-    assert "尚未填写全部必填资料" in temp_join.json()["detail"]
+    assert temp_join.status_code == 200
+    assert "成功加入" in temp_join.json()["message"]
 
     # 7. Member updates profile to complete required fields
     update_profile_res = client.post(f"/api/org/{org_id}/members/update-profile", json={
@@ -144,13 +143,13 @@ def test_temporary_status_and_sub_club_gating_workflow():
     assert up_data["status"] == "pending"
     assert len(up_data["missing_fields"]) == 0
 
-    # 8. Member tries to join sub-club in pending state -> 400 / Blocked
+    # 8. Pending member can also access/join sub-club without waiting for approval
     pending_join = client.post("/api/team/join-club", json={
         "user_id": member_uid,
         "club_id": club_id
     })
-    assert pending_join.status_code == 400
-    assert "等待大群管理员审核批准" in pending_join.json()["detail"]
+    assert pending_join.status_code == 200
+    assert "成功加入" in pending_join.json()["message"]
 
     # 9. Admin confirms member
     confirm_res = client.post(f"/api/org/{org_id}/members/{member_uid}/confirm", json={
@@ -242,7 +241,7 @@ def test_14_days_expiration_and_access_block():
         "club_id": sub_club["id"]
     })
     assert fail_join.status_code == 400
-    assert "临时身份已过期" in fail_join.json()["detail"]
+    assert "资料补填期限（14 天）已过" in fail_join.json()["detail"]
 
     # 8. Rejoining with invite code grants a fresh start
     rejoin_res = client.post("/api/org/join", json={

@@ -2316,6 +2316,9 @@ class LocalStore:
                 safe_data["id"] = eff_uid
                 if "created_at" not in safe_data:
                     safe_data["created_at"] = datetime.utcnow().isoformat() + "Z"
+                for pb_col in ("marathon_pb", "half_pb", "ten_k_pb", "five_k_pb"):
+                    if pb_col in existing_cols and pb_col not in safe_data:
+                        safe_data[pb_col] = None
                 valid_data = {k: v for k, v in safe_data.items() if k in existing_cols or k == "id"}
                 cols = list(valid_data.keys())
                 placeholders = ["?"] * len(cols)

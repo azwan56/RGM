@@ -1,9 +1,11 @@
 import pytest
 import os
 import json
+import sqlite3
+from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 from main import app
-from utils.local_store import LocalStore, init_db
+from utils.local_store import DB_PATH, LocalStore, init_db
 
 client = TestClient(app)
 
@@ -13,46 +15,54 @@ def setup_db():
 
 def test_race_completion_and_finish_time():
     test_uid = "test_user_race_complete_001"
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM race_plans WHERE id = 'race_test_001'")
+        conn.commit()
+
     # 1. Create a race plan with target time
     race_data = {
         "id": "race_test_001",
         "name": "2026 无锡马拉松",
         "race_type": "全马 (42.195K)",
-        "race_date": "2026-03-22",
+        "race_date": (datetime.utcnow() + timedelta(days=60)).strftime("%Y-%m-%d"),
         "target_time": "03:30:00",
         "priority": 1
     }
-    LocalStore.upsert_race_plan(test_uid, race_data)
-    
-    races = LocalStore.get_race_plans(test_uid)
-    assert len(races) >= 1
-    race = next(r for r in races if r["id"] == "race_test_001")
-    assert race["status"] == "upcoming"
-    assert not race["is_completed"]
-    
-    # 2. Complete race with actual finish time: 03:24:15 (faster than 03:30:00)
-    res = client.post(
-        f"/api/profile/{test_uid}/races/race_test_001/complete",
-        json={
-            "status": "completed",
-            "finish_time": "03:24:15",
-            "finish_notes": "后半程稳住配速，超额PB！",
-        }
-    )
-    assert res.status_code == 200
-    data = res.json()
-    assert "races" in data
-    
-    updated_races = LocalStore.get_race_plans(test_uid)
-    updated = next(r for r in updated_races if r["id"] == "race_test_001")
-    assert updated["status"] == "completed"
-    assert updated["is_completed"] is True
-    assert updated["finish_time"] == "03:24:15"
-    assert updated["finish_notes"] == "后半程稳住配速，超额PB！"
-    assert updated["diff_seconds"] == -345  # 5 min 45 sec ahead
-    assert "超额达标" in updated["performance_badge"]
-    assert "-05:45" in updated["diff_str"]
+    try:
+        LocalStore.upsert_race_plan(test_uid, race_data)
+
+        races = LocalStore.get_race_plans(test_uid)
+        assert len(races) >= 1
+        race = next(r for r in races if r["id"] == "race_test_001")
+        assert race["status"] == "upcoming"
+        assert not race["is_completed"]
+
+        # 2. Complete race with actual finish time: 03:24:15 (faster than 03:30:00)
+        res = client.post(
+            f"/api/profile/{test_uid}/races/race_test_001/complete",
+            json={
+                "status": "completed",
+                "finish_time": "03:24:15",
+                "finish_notes": "后半程稳住配速，超额PB！",
+            }
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert "races" in data
+
+        updated_races = LocalStore.get_race_plans(test_uid)
+        updated = next(r for r in updated_races if r["id"] == "race_test_001")
+        assert updated["status"] == "completed"
+        assert updated["is_completed"] is True
+        assert updated["finish_time"] == "03:24:15"
+        assert updated["finish_notes"] == "后半程稳住配速，超额PB！"
+        assert updated["diff_seconds"] == -345  # 5 min 45 sec ahead
+        assert "超额达标" in updated["performance_badge"]
+        assert "-05:45" in updated["diff_str"]
+    finally:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM race_plans WHERE id = 'race_test_001'")
+            conn.commit()
 
 def test_race_photo_base64_and_delete():
     test_uid = "test_user_race_photo_002"

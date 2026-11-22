@@ -294,7 +294,15 @@ def test_zero_ghost_profile_on_miniapp_dashboard_and_yearly_stats_default_year()
 
 
 def test_sync_incremental_window_nondestructive_coros_and_cross_brand_dedup():
+    init_db()
     uid = "u_phase2_dual_watch"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM activities WHERE user_id = ? OR id IN ('garmin_seed_old','coros_seed_old','garmin_dual_morning','coros_dual_morning_dup','coros_evening_jog')",
+            (uid,),
+        )
+        conn.execute("DELETE FROM profiles WHERE id = ?", (uid,))
+        conn.commit()
     today = LocalStore.get_beijing_today()
     yesterday_iso = (today - timedelta(days=1)).isoformat()
 
@@ -312,7 +320,7 @@ def test_sync_incremental_window_nondestructive_coros_and_cross_brand_dedup():
             "garmin_encrypted_password": encrypt_string("garmin_secret"),
             "garmin_last_sync_at": f"{yesterday_iso}T08:00:00Z",
             "coros_connected": 1,
-            "coros_account": "13800138000",
+            "coros_account": "13800138992",
             "coros_encrypted_password": encrypt_string("coros_secret"),
             "coros_last_sync_at": f"{yesterday_iso}T08:00:00Z",
         },
@@ -395,7 +403,7 @@ def test_sync_incremental_window_nondestructive_coros_and_cross_brand_dedup():
         _login_failed = False
 
         def __init__(self, *args, **kwargs):
-            pass
+            self.domain = kwargs.get("domain") or "teamcnapi.coros.com"
 
         def login(self, trigger_2fa_sms=False):
             return True
@@ -463,6 +471,13 @@ def test_sync_incremental_window_nondestructive_coros_and_cross_brand_dedup():
     assert "garmin_dual_morning" in ids_after
     assert "coros_evening_jog" in ids_after
     assert "coros_dual_morning_dup" not in ids_after
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM activities WHERE user_id = ? OR id IN ('garmin_seed_old','coros_seed_old','garmin_dual_morning','coros_dual_morning_dup','coros_evening_jog')",
+            (uid,),
+        )
+        conn.execute("DELETE FROM profiles WHERE id = ?", (uid,))
+        conn.commit()
 
 
 def test_unified_scheduler_and_nonblocking_screenshot_upload():

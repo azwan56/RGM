@@ -159,35 +159,37 @@ def test_coros_token_persistence(tmp_path):
 def test_local_store_coros_support():
     init_db()
     test_uid = "u_test_coros_runner_01"
-    
+    test_coros_acc = "13800138991"
+    LocalStore.delete_profile(test_uid)
+
     profile_data = {
         "id": test_uid,
         "email": "coros_runner@example.com",
         "display_name": "高驰跑者小强",
         "coros_connected": 1,
-        "coros_account": "13800138000",
+        "coros_account": test_coros_acc,
         "coros_encrypted_password": "encrypted_dummy_pwd",
         "coros_domain": "teamcnapi.coros.com"
     }
-    LocalStore.upsert_profile(test_uid, profile_data)
+    try:
+        LocalStore.upsert_profile(test_uid, profile_data)
 
-    retrieved = LocalStore.get_profile(test_uid)
-    assert retrieved is not None
-    assert retrieved.get("coros_connected") == 1
-    assert retrieved.get("coros_account") == "13800138000"
+        retrieved = LocalStore.get_profile(test_uid)
+        assert retrieved is not None
+        assert retrieved.get("coros_connected") == 1
+        assert retrieved.get("coros_account") == test_coros_acc
 
-    # Query by coros account
-    by_acc = LocalStore.get_profile_by_coros_account("13800138000")
-    assert by_acc is not None
-    assert by_acc["id"] == test_uid
+        # Query by coros account
+        by_acc = LocalStore.get_profile_by_coros_account(test_coros_acc)
+        assert by_acc is not None
+        assert by_acc["id"] == test_uid
 
-    # Verify get_all_syncable_users includes this runner
-    syncable = LocalStore.get_all_syncable_users()
-    uids = [u["id"] for u in syncable]
-    assert test_uid in uids
-
-    # Cleanup
-    LocalStore.delete_profile(test_uid)
+        # Verify get_all_syncable_users includes this runner
+        syncable = LocalStore.get_all_syncable_users()
+        uids = [u["id"] for u in syncable]
+        assert test_uid in uids
+    finally:
+        LocalStore.delete_profile(test_uid)
 
 def test_coros_auth_api_routes(monkeypatch):
     from fastapi.testclient import TestClient
