@@ -5129,14 +5129,14 @@ class LocalStore:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Finds the user's upcoming or ongoing joined club/org group runs across up to 8 active clubs,
+        Finds the user's upcoming or ongoing joined club/org group runs across all active clubs,
         strictly ordered nearest-first by Beijing meet time, in 1 DB connection.
         """
         if not uid or str(uid).strip() == "runner_001":
             return []
         eff_uid = LocalStore.resolve_user_id(uid)
         clubs = preloaded_clubs if preloaded_clubs is not None else LocalStore.get_user_clubs(eff_uid)
-        active_clubs = [c for c in clubs if not c.get("is_access_suspended") and c.get("id")][:8]
+        active_clubs = [c for c in clubs if not c.get("is_access_suspended") and c.get("id")]
         if not active_clubs:
             return []
 
@@ -5146,11 +5146,12 @@ class LocalStore:
             if c.get("org_id"):
                 org_to_clubs.setdefault(str(c["org_id"]), []).append(c)
 
+        p_uid_cond, p_uid_params = _uid_sql_clause("p.user_id", eff_uid, uid)
         club_ids = list(club_by_id.keys())
         org_ids = list(org_to_clubs.keys())
         c_ph = ",".join(["?"] * len(club_ids))
         scope_cond = f"e.club_id IN ({c_ph})"
-        params: List[Any] = [eff_uid] + club_ids
+        params: List[Any] = list(p_uid_params) + club_ids
         if org_ids:
             o_ph = ",".join(["?"] * len(org_ids))
             scope_cond = f"({scope_cond} OR (e.is_org_event = 1 AND e.org_id IN ({o_ph})))"
@@ -5173,7 +5174,7 @@ class LocalStore:
                 LEFT JOIN clubs cl ON cl.id = e.club_id
                 LEFT JOIN profiles cr ON cr.id = COALESCE(NULLIF(e.creator_id, ''), cl.owner_id)
                 LEFT JOIN club_memberships cm ON cm.club_id = e.club_id AND cm.user_id = cr.id
-                WHERE p.user_id = ?
+                WHERE {p_uid_cond}
                   AND p.status = 'joined'
                   AND {scope_cond}
                   AND COALESCE(LOWER(e.status), 'upcoming') NOT IN ('archived', 'completed', 'ended')

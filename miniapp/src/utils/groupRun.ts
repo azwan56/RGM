@@ -152,15 +152,20 @@ export function isGroupRunArchived(evt: any): boolean {
 export async function fetchMyUpcomingGroupRuns(uid: string): Promise<any[]> {
   if (!uid || uid === "runner_001") return [];
   const myRes: any = await request(`/api/team/my-clubs/${uid}`).catch(() => null);
-  const clubs: any[] = (myRes?.clubs || []).filter((c: any) => !c.is_access_suspended).slice(0, 8);
+  const clubs: any[] = (myRes?.clubs || []).filter((c: any) => !c.is_access_suspended);
   if (!clubs.length) return [];
-  const results = await Promise.all(
-    clubs.map((c: any) =>
-      request(`/api/team/${c.id}/events?user_id=${encodeURIComponent(uid)}`)
-        .then((r: any) => (r?.events || []).map((e: any) => ({ ...e, club_id: c.id, club_name: c.name })))
-        .catch(() => [])
-    )
-  );
+  const results: any[][] = [];
+  for (let i = 0; i < clubs.length; i += 6) {
+    const chunk = clubs.slice(i, i + 6);
+    const chunkRes = await Promise.all(
+      chunk.map((c: any) =>
+        request(`/api/team/${c.id}/events?user_id=${encodeURIComponent(uid)}`)
+          .then((r: any) => (r?.events || []).map((e: any) => ({ ...e, club_id: c.id, club_name: c.name })))
+          .catch(() => [])
+      )
+    );
+    results.push(...chunkRes);
+  }
   const cutoff = Date.now() - 4 * 3600 * 1000;
   const seenIds = new Set<string>();
   const upcoming: any[] = [];

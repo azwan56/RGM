@@ -168,7 +168,7 @@
         <swiper
           class="h3-ticket-swiper"
           :current="activeNextRunIdx"
-          :circular="false"
+          :circular="true"
           :duration="260"
           next-margin="28rpx"
           @change="onNextRunSwiperChange"
@@ -236,7 +236,9 @@
               @click.stop="activeNextRunIdx = dIdx"
             />
           </view>
-          <text class="h3-ticket-swipe-tip">已报 {{ myUpcomingRuns.length }} 场约跑 · 左右滑动查看</text>
+          <text class="h3-ticket-swipe-tip" @click.stop="stepNextRun">
+            已报 {{ myUpcomingRuns.length }} 场 · 左右滑动或点此切换 ›
+          </text>
         </view>
       </view>
 
@@ -1374,6 +1376,11 @@ function onNextRunSwiperChange(e: any) {
   if (!isNaN(idx) && idx >= 0 && idx < myUpcomingRuns.value.length) {
     activeNextRunIdx.value = idx;
   }
+}
+
+function stepNextRun() {
+  if (myUpcomingRuns.value.length <= 1) return;
+  activeNextRunIdx.value = (activeNextRunIdx.value + 1) % myUpcomingRuns.value.length;
 }
 
 async function loadMyNextRun(explicitUid?: string) {
@@ -8897,6 +8904,9 @@ async function acceptAndEnterInvitedClub(inv: any) {
 }
 
 .h3-nextrun-carousel {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 10rpx;

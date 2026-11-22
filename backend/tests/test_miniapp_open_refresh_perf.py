@@ -385,6 +385,23 @@ def test_miniapp_dashboard_multiple_upcoming_group_runs_sorted_nearest_first(iso
     far_day = (now_bj + timedelta(days=5)).strftime("%Y-%m-%d")
 
     with real_sqlite3.connect(isolated_db) as conn:
+        # Seed 10 extra clubs before club_perf_2 so club_perf_2 sits past index 8
+        for extra_i in range(10):
+            ex_cid = f"club_extra_{extra_i}"
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO clubs (id, name, owner_id, org_id, invite_code, status, created_at)
+                VALUES (?, ?, ?, NULL, ?, 'active', ?)
+                """,
+                (ex_cid, f"填充跑团_{extra_i}", uid, f"CLUBEX{extra_i}", now_iso),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at)
+                VALUES (?, ?, ?, 'member', 'active', ?)
+                """,
+                (f"cm_extra_{extra_i}", ex_cid, uid, now_iso),
+            )
         conn.execute(
             """
             INSERT OR REPLACE INTO clubs (id, name, owner_id, org_id, invite_code, status, created_at)
