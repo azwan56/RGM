@@ -1,23 +1,22 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   reactStrictMode: true,
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   eslint: {
     ignoreDuringBuilds: true,
   },
   images: {
     remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-      {
-        protocol: "http",
-        hostname: "**",
-      },
+      { protocol: "https", hostname: "rgm.vanpower.net" },
+      { protocol: "https", hostname: "*.vanpower.net" },
+      { protocol: "https", hostname: "thirdwx.qlogo.cn" },
+      { protocol: "https", hostname: "wx.qlogo.cn" },
+      { protocol: "http", hostname: "127.0.0.1" },
+      { protocol: "http", hostname: "localhost" },
     ],
   },
   async rewrites() {
@@ -29,6 +28,14 @@ const nextConfig: NextConfig = {
       {
         source: "/api/:path*",
         destination: `${backendUrl}/api/:path*`,
+      },
+      {
+        source: "/privacy",
+        destination: `${backendUrl}/privacy`,
+      },
+      {
+        source: "/citations",
+        destination: `${backendUrl}/citations`,
       },
     ];
   },

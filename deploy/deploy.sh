@@ -68,11 +68,24 @@ if [ ! -f "${DEPLOY_DIR}/.env.production" ]; then
     echo "⚠️ 请确保在 ${DEPLOY_DIR}/.env.production 中填写正确的 Supabase 与微信凭据。"
 fi
 
+# 3.5 执行 SQLite WAL 在线热备
+echo "💾 正在执行发版前 SQLite 在线热备份..."
+bash "${DEPLOY_DIR}/backup_sqlite.sh"
+
 # 4. 构建并启动容器
 echo "🐳 正在拉取镜像并构建启动容器..."
 cd "${DEPLOY_DIR}"
 docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
 docker compose -f docker-compose.prod.yml up -d --build
+
+echo "⏳ 等待后端健康检查就绪..."
+for i in $(seq 1 20); do
+    if curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+        echo "✅ 后端健康检查通过！"
+        break
+    fi
+    sleep 2
+done
 
 echo "=========================================================="
 echo "🎉 RGM 生产服务部署成功！"

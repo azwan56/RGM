@@ -1,53 +1,61 @@
-version: '3.8'
-
 services:
-  # 1. FastAPI Backend API
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
     container_name: rgm-backend
-    restart: always
+    restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
-      - TZ=Asia/Shanghai
       - ENVIRONMENT=production
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
-      - DASHSCOPE_WORKSPACE_ID=${DASHSCOPE_WORKSPACE_ID}
-      - DASHSCOPE_BASE_URL=${DASHSCOPE_BASE_URL}
-      - OPENAI_API_BASE=${OPENAI_API_BASE}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_MODEL=${LLM_MODEL:-qwen-max}
-      - WECHAT_APP_ID=${WECHAT_APP_ID}
-      - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
-      - SECRET_KEY=${SECRET_KEY}
-      - RGM_ADMIN_EMAIL=${RGM_ADMIN_EMAIL}
-      - RGM_ADMIN_PASSWORD=${RGM_ADMIN_PASSWORD}
+      - ENABLE_SUPABASE_DUAL_WRITE=${ENABLE_SUPABASE_DUAL_WRITE:-false}
     volumes:
       - ../backend/data:/app/data
-      - /etc/localtime:/etc/localtime:ro
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
 
-  # 2. Next.js Web Frontend
   frontend:
-    image: node:22-alpine
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
     container_name: rgm-frontend
-    restart: always
-    working_dir: /app
-    volumes:
-      - ../frontend:/app
-      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
-      - TZ=Asia/Shanghai
       - NODE_ENV=production
-      - NODE_OPTIONS=--max-old-space-size=2048
-      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
-      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-    command: sh -c "npm run start"
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: rgm-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
