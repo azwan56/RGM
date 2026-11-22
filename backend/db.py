@@ -10,6 +10,9 @@ logger = logging.getLogger("rgm_db")
 
 def get_supabase_admin():
     """Returns a Supabase client initialized with the Service Role Key for backend administration."""
+    if not getattr(settings, "ENABLE_SUPABASE_DUAL_WRITE", False):
+        logger.info("[supabase] ENABLE_SUPABASE_DUAL_WRITE is disabled; using SQLite WAL LocalStore primary mode.")
+        return None
     if not create_client:
         logger.warning("[supabase] supabase-py library not installed. Client in fallback mode.")
         return None
@@ -21,6 +24,7 @@ def get_supabase_admin():
         or url in (f"http://localhost:{settings.PORT}", f"http://127.0.0.1:{settings.PORT}", "http://localhost:8000", "http://127.0.0.1:8000")
         or "fake" in key.lower()
         or "your_production" in key.lower()
+        or "replace-with" in key.lower()
     ):
         logger.info("[supabase] External Supabase disabled or placeholder configured; using LocalStore primary mode.")
         return None

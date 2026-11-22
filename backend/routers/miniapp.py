@@ -23,7 +23,7 @@ from utils.local_store import LocalStore, DB_PATH, sqlite3
 from utils.running_metrics import compute_ctl_atl_tsb, compute_canova_athlete_matrix
 from utils.encryption import decrypt_string
 from utils.garmin_adapter import GarminAdapter
-from utils.security import is_safe_external_url
+from utils.security import is_safe_external_url, safe_fetch_external_bytes, is_strict_auth_mode
 from utils.coros_adapter import CorosAdapter
 from utils.captain_cheer import enrich_activities_with_captain_cheer, generate_activity_captain_cheer
 
@@ -60,7 +60,12 @@ def get_miniapp_dashboard_data(
             )
         )
         resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
-        is_cross_viewer = bool(resolved_viewer and resolved_viewer != eff_uid)
+        if resolved_viewer and not LocalStore.can_view_specific_workout_records(resolved_viewer, eff_uid):
+            raise HTTPException(
+                status_code=403,
+                detail="不在同一跑团的用户之间仅可查看基本状态，不能相互查看具体仪表盘与运动明细",
+            )
+        is_cross_viewer = bool(resolved_viewer != eff_uid) if is_strict_auth_mode() else bool(resolved_viewer and resolved_viewer != eff_uid)
         profile = LocalStore.get_profile(eff_uid) or {
             "id": eff_uid,
             "display_name": "微信跑者",
@@ -681,7 +686,7 @@ def get_miniapp_activities(
     eff_uid = uid
     canon_uid = LocalStore.resolve_user_id(uid)
     resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
-    is_cross_viewer = bool(resolved_viewer and resolved_viewer != canon_uid)
+    is_cross_viewer = bool(resolved_viewer != canon_uid) if is_strict_auth_mode() else bool(resolved_viewer and resolved_viewer != canon_uid)
     owner_prof_acts = (LocalStore.get_profile(canon_uid) or {}) if is_cross_viewer else {}
     act_privacy_cache: Dict[str, Dict[str, Any]] = {canon_uid: owner_prof_acts} if owner_prof_acts else {}
     hide_bio_viewer = (
@@ -761,7 +766,7 @@ def get_user_month_activities(
         )
     eff_uid = LocalStore.resolve_user_id(uid)
     resolved_viewer = LocalStore.resolve_user_id(str(eff_viewer).strip()) if eff_viewer else None
-    is_cross_viewer = bool(resolved_viewer and resolved_viewer != eff_uid)
+    is_cross_viewer = bool(resolved_viewer != eff_uid) if is_strict_auth_mode() else bool(resolved_viewer and resolved_viewer != eff_uid)
     owner_prof_m = (LocalStore.get_profile(eff_uid) or {}) if is_cross_viewer else {}
     month_privacy_cache: Dict[str, Dict[str, Any]] = {eff_uid: owner_prof_m} if owner_prof_m else {}
     hide_bio_viewer = (
@@ -1113,7 +1118,7 @@ class SupportTicketCreateRequest(BaseModel):
 
 
 @router.post("/support/tickets")
-def create_miniapp_support_ticket(req: SupportTicketCreateRequest):
+def create_miniapp_support_ticket(req: SupportTicketCreateRequest, request: Request = None):
     """
     Creates a user technical support / feedback ticket with automatic diagnostic context
     (UID, connected watch status, joined clubs, activity count).
@@ -1121,6 +1126,14 @@ def create_miniapp_support_ticket(req: SupportTicketCreateRequest):
     from utils.local_store import LocalStore
 
     target_uid = (req.uid or req.user_id or "").strip()
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="请先登录后提交反馈工单")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        if target_uid and LocalStore.resolve_user_id(token_uid) != LocalStore.resolve_user_id(target_uid):
+            raise HTTPException(status_code=403, detail="安全拦截：无权代他人提交工单")
+        target_uid = target_uid or token_uid
     if not target_uid:
         raise HTTPException(status_code=400, detail="缺少用户标识")
     if not req.content or len(req.content.strip()) < 2:
@@ -1145,6 +1158,7 @@ def create_miniapp_support_ticket(req: SupportTicketCreateRequest):
 def list_miniapp_support_tickets(
     uid: Optional[str] = Query(None, description="User ID"),
     user_id: Optional[str] = Query(None, description="User ID alias"),
+    request: Request = None,
 ):
     """
     Returns the user's submitted support tickets and any administrator replies.
@@ -1152,6 +1166,14 @@ def list_miniapp_support_tickets(
     from utils.local_store import LocalStore
 
     target_uid = (uid or user_id or "").strip()
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="请先登录后查看工单记录")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        if target_uid and LocalStore.resolve_user_id(token_uid) != LocalStore.resolve_user_id(target_uid):
+            raise HTTPException(status_code=403, detail="安全拦截：无权查看他人反馈工单")
+        target_uid = target_uid or token_uid
     if not target_uid:
         return {"tickets": []}
     tickets = LocalStore.get_user_support_tickets(target_uid)
@@ -1341,13 +1363,13 @@ def get_personal_share_card_data(
             cache_name = f"poster_cache_{hashlib.md5(u.encode('utf-8')).hexdigest()[:16]}.jpg"
             cache_p = os.path.join(avatar_dir, cache_name)
             if not os.path.exists(cache_p) or os.path.getsize(cache_p) < 200:
-                try:
-                    r = ext_req.get(u, timeout=5, allow_redirects=False)
-                    if r.status_code == 200 and 200 < len(r.content) <= 10 * 1024 * 1024:
+                img_data = safe_fetch_external_bytes(u, timeout=5.0)
+                if img_data and len(img_data) > 200:
+                    try:
                         with open(cache_p, "wb") as f:
-                            f.write(r.content)
-                except Exception:
-                    pass
+                            f.write(img_data)
+                    except Exception:
+                        pass
             if os.path.exists(cache_p) and os.path.getsize(cache_p) > 200:
                 with open(cache_p, "rb") as f:
                     return f.read()
@@ -1708,7 +1730,8 @@ def get_personal_share_card_data(
         }
 
         try:
-            track_resp = get_activity_track(act_id, request=None, uid=caller_uid or "", viewer_uid=caller_uid or "")
+            track_viewer = caller_uid if caller_uid else (None if is_strict_auth_mode() else eff_uid)
+            track_resp = get_activity_track(act_id, request=None, uid=eff_uid, viewer_uid=track_viewer)
             tr_obj = track_resp.get("track") if isinstance(track_resp, dict) else None
             if isinstance(tr_obj, dict):
                 raw_pts = tr_obj.get("points") or []

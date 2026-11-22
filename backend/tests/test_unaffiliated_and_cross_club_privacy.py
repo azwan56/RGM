@@ -11,9 +11,10 @@ def isolated_client():
     fd, tmp_db = tempfile.mkstemp(suffix="_rgm_privacy.db")
     os.close(fd)
     old_db = os.environ.get("RGM_DB_PATH")
-    os.environ["RGM_DB_PATH"] = tmp_db
     import utils.local_store as ls
 
+    old_ls_db = ls.DB_PATH
+    os.environ["RGM_DB_PATH"] = tmp_db
     ls.DB_PATH = tmp_db
     ls.init_db()
     from main import app
@@ -22,9 +23,9 @@ def isolated_client():
     yield client, ls.LocalStore, tmp_db
     if old_db is not None:
         os.environ["RGM_DB_PATH"] = old_db
-        ls.DB_PATH = old_db
     else:
         os.environ.pop("RGM_DB_PATH", None)
+    ls.DB_PATH = old_ls_db
     try:
         os.remove(tmp_db)
     except OSError:

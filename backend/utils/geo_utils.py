@@ -25,8 +25,61 @@ def _transform_lng(lng: float, lat: float) -> float:
 
 
 def out_of_china(lng: float, lat: float) -> bool:
-    """Checks if coordinates are outside mainland China bounds."""
-    return not (72.004 <= lng <= 137.8347 and 0.8293 <= lat <= 55.8271)
+    """Checks if coordinates are outside Mainland China GCJ-02 datum coverage."""
+    if not (72.004 <= lng <= 135.09 and 0.8293 <= lat <= 55.8271):
+        return True
+    # Hong Kong (keep Shenzhen >= 22.515N in Mainland)
+    if 113.82 <= lng <= 114.45 and 22.10 <= lat <= 22.51:
+        return True
+    # Macau
+    if 113.52 <= lng <= 113.60 and 22.10 <= lat <= 22.215:
+        return True
+    # Taiwan
+    if 119.9 <= lng <= 122.2 and 21.8 <= lat <= 25.4:
+        return True
+    # Korean Peninsula & Jeju (keep Liaoning/Jilin/Heilongjiang >= 38.7N in Mainland)
+    if 125.0 <= lng <= 131.5 and 33.0 <= lat <= 38.6:
+        return True
+    # Japan (Honshu/Kyushu/Shikoku/Hokkaido/Okinawa)
+    if (lng >= 129.3 and lat <= 41.6) or (lng >= 139.0 and lat <= 46.0) or (126.0 <= lng <= 132.0 and 24.0 <= lat <= 32.0):
+        return True
+    # Mainland Southeast Asia (preserve Hainan Island)
+    if lng <= 110.0 and lat <= 21.5 and not (108.5 <= lng <= 111.5 and 18.1 <= lat <= 20.2):
+        return True
+    return False
+
+
+def compute_smoothed_elevation_gain(
+    altitudes: List[float],
+    window: int = 5,
+    deadband_m: float = 1.5,
+) -> Optional[float]:
+    """
+    Computes cumulative ascent after moving-average smoothing and hysteresis deadband
+    filtering to suppress GPS/barometric elevation jitter.
+    """
+    if not altitudes or len(altitudes) < 2:
+        return None
+    w = max(1, int(window))
+    half = w // 2
+    n = len(altitudes)
+    smoothed: List[float] = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        seg = altitudes[lo:hi]
+        smoothed.append(sum(seg) / len(seg))
+
+    gain = 0.0
+    ref = smoothed[0]
+    for alt in smoothed[1:]:
+        diff = alt - ref
+        if diff >= deadband_m:
+            gain += diff
+            ref = alt
+        elif diff <= -deadband_m:
+            ref = alt
+    return round(gain, 1)
 
 
 def wgs84_to_gcj02(lat: float, lng: float) -> Tuple[float, float]:

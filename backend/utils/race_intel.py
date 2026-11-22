@@ -1129,14 +1129,18 @@ def fetch_race_intelligence(
     )
 
     try:
+        from config import settings
         raw = llm_client.chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            model=settings.LLM_MODEL_WORKHORSE,
             temperature=0.1,
             max_tokens=1000,
             enable_search=True,
+            search_strategy="standard",
+            raise_on_error=True,
         )
         clean = raw.strip()
         if "```json" in clean:

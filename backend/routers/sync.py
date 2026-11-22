@@ -15,6 +15,7 @@ from utils.coros_adapter import CorosAdapter
 from utils.running_metrics import calculate_trimp
 from utils.canova_holistic_critique import CANOVA_CRITIQUE_SCHEMA_VERSION
 from utils.local_store import LocalStore, DB_PATH, sqlite3, parse_iso_datetime
+from utils.security import is_strict_auth_mode, enforce_rate_limit, get_client_ip, MAX_IMAGE_UPLOAD_BYTES, validate_uploaded_image_bytes
 
 logger = logging.getLogger("router_sync")
 router = APIRouter()
@@ -78,6 +79,20 @@ def _resolve_incremental_sync_window(
     gap_days = max(0, (today - last_date).days)
     health_days = max(3, min(default_health_days, gap_days + 2))
     return inc_start, health_days
+
+
+def _to_epoch_seconds(dt_or_str: Any) -> Optional[float]:
+    if dt_or_str is None:
+        return None
+    if isinstance(dt_or_str, datetime):
+        dt = dt_or_str
+    else:
+        dt = parse_iso_datetime(str(dt_or_str))
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+    return dt.timestamp()
 
 
 def _filter_cross_brand_duplicates(uid: str, activities: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
@@ -147,10 +162,14 @@ def _filter_cross_brand_duplicates(uid: str, activities: List[Dict[str, Any]]) -
 
         is_dup = False
         if cur_dt is not None and cur_dist > 0:
+            cur_ts = _to_epoch_seconds(cur_dt)
             for ex_id, ex_prefix, ex_dt, ex_dist in existing_records:
                 if ex_prefix == cur_prefix or ex_dist <= 0:
                     continue
-                time_diff = abs((cur_dt - ex_dt).total_seconds())
+                ex_ts = _to_epoch_seconds(ex_dt)
+                if cur_ts is None or ex_ts is None:
+                    continue
+                time_diff = abs(cur_ts - ex_ts)
                 max_d = max(cur_dist, ex_dist)
                 dist_tol = max(250.0, max_d * 0.12)
                 if time_diff <= 900 and abs(cur_dist - ex_dist) <= dist_tol:
@@ -282,38 +301,45 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                     except Exception as pe:
                         logger.warning(f"[sync] Garmin profile fetch error: {pe}")
 
-                    garmin_start, garmin_health_days = _resolve_incremental_sync_window(
-                        uid=uid,
-                        brand_prefix="garmin",
-                        explicit_start_date=start_date,
-                        last_sync_iso=user.get("garmin_last_sync_at"),
-                        default_health_days=7,
-                    )
-                    g_acts = garmin_adapter.fetch_activities_by_date(start_date=garmin_start)
-                    if not g_acts and garmin_start == f"{LocalStore.get_beijing_today().year}-01-01":
-                        g_acts = garmin_adapter.fetch_recent_activities(limit=100)
-                    all_activities.extend(g_acts)
-                    if garmin_adapter.last_error:
-                        sync_errors.append(garmin_adapter.last_error)
+                    if getattr(garmin_adapter, "_login_failed", False) or getattr(garmin_adapter, "auth_blocked", False):
+                        if garmin_adapter.last_error:
+                            sync_errors.append(garmin_adapter.last_error)
+                        else:
+                            sync_errors.append("佳明登录授权受限，请前往【我的 → 手表连接】重新授权")
+                    else:
+                        garmin_start, garmin_health_days = _resolve_incremental_sync_window(
+                            uid=uid,
+                            brand_prefix="garmin",
+                            explicit_start_date=start_date,
+                            last_sync_iso=user.get("garmin_last_sync_at"),
+                            default_health_days=7,
+                        )
+                        g_acts = garmin_adapter.fetch_activities_by_date(start_date=garmin_start)
+                        if not g_acts and garmin_start == f"{LocalStore.get_beijing_today().year}-01-01":
+                            g_acts = garmin_adapter.fetch_recent_activities(limit=100)
+                        all_activities.extend(g_acts)
+                        if garmin_adapter.last_error:
+                            sync_errors.append(garmin_adapter.last_error)
 
-                    today_bj = LocalStore.get_beijing_today()
-                    for i in range(garmin_health_days):
-                        d = (today_bj - timedelta(days=i)).isoformat()
-                        try:
-                            h_metrics = garmin_adapter.fetch_daily_health_metrics(d)
-                            if h_metrics:
-                                if i == 0 and h_metrics.get("vo2_max") is None and profile_updates.get("vo2max"):
-                                    h_metrics["vo2_max"] = profile_updates["vo2max"]
-                                if any(h_metrics.get(k) is not None for k in [
-                                    "resting_heart_rate", "sleep_score", "hrv_last_night_avg", "body_battery_max",
-                                    "vo2_max", "steps", "active_calories", "nap_duration_seconds", "stress_avg", "hr_max"
-                                ]):
-                                    LocalStore.upsert_daily_health(uid, h_metrics)
-                                    synced_health = True
-                        except Exception as he:
-                            logger.warning(f"[sync] Garmin health fetch error on {d} for {uid}: {he}")
+                        today_bj = LocalStore.get_beijing_today()
+                        for i in range(garmin_health_days):
+                            d = (today_bj - timedelta(days=i)).isoformat()
+                            try:
+                                h_metrics = garmin_adapter.fetch_daily_health_metrics(d)
+                                if h_metrics:
+                                    if i == 0 and h_metrics.get("vo2_max") is None and profile_updates.get("vo2max"):
+                                        h_metrics["vo2_max"] = profile_updates["vo2max"]
+                                    if any(h_metrics.get(k) is not None for k in [
+                                        "resting_heart_rate", "sleep_score", "hrv_last_night_avg", "body_battery_max",
+                                        "vo2_max", "steps", "active_calories", "nap_duration_seconds", "stress_avg", "hr_max"
+                                    ]):
+                                        LocalStore.upsert_daily_health(uid, h_metrics)
+                                        synced_health = True
+                            except Exception as he:
+                                logger.warning(f"[sync] Garmin health fetch error on {d} for {uid}: {he}")
 
-                    profile_updates["garmin_last_sync_at"] = sync_time_iso
+                        if not getattr(garmin_adapter, "_login_failed", False) and not getattr(garmin_adapter, "auth_blocked", False):
+                            profile_updates["garmin_last_sync_at"] = sync_time_iso
             except Exception as ge:
                 logger.error(f"[sync] Garmin sync error for {uid}: {ge}")
                 err_msg = str(ge)
@@ -339,6 +365,13 @@ def sync_single_user(uid: str, start_date: Optional[str] = None) -> Dict[str, An
                         logger.warning(f"[sync] COROS login failed for {uid}: {err_msg}")
                         sync_errors.append(err_msg if err_msg.startswith("高驰登录失败") else f"高驰登录失败: {err_msg}")
                     else:
+                        if coros_adapter.domain and coros_adapter.domain != domain:
+                            logger.info(f"[sync] Persisting auto-corrected COROS domain for {uid}: {domain} -> {coros_adapter.domain}")
+                            profile_updates["coros_domain"] = coros_adapter.domain
+                            try:
+                                LocalStore.upsert_profile(uid, {"coros_domain": coros_adapter.domain})
+                            except Exception:
+                                pass
                         try:
                             c_info = coros_adapter.fetch_user_profile_info()
                             if c_info.get("avatar_url") and not profile_updates.get("avatar_url") and not user.get("avatar_url"):
@@ -617,13 +650,26 @@ def _run_background_user_sync(canonical_uid: str, raw_uid: str, start_date: Opti
             _USER_SYNC_JOBS[canonical_uid] = cur
 
 
+def _verify_sync_caller(request: Optional[Request], target_uid: str) -> None:
+    if not request:
+        return
+    token_uid = getattr(request.state, "user_id", None)
+    token_is_sa = bool(getattr(request.state, "is_super_admin", False))
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="安全拦截：请先登录后执行数据同步或导入")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        if LocalStore.resolve_user_id(token_uid) != LocalStore.resolve_user_id(target_uid):
+            raise HTTPException(status_code=403, detail="安全拦截：无权操作其他账号的同步或导入")
+
+
 @router.post("/trigger")
-def trigger_sync(req: SyncTriggerRequest):
+def trigger_sync(req: SyncTriggerRequest, request: Request = None):
     """
     Triggers watch/account sync for a single user.
     - Default (async_mode=False): synchronous execution returning full sync result (legacy contract).
     - async_mode=True: starts/deduplicates a background thread job and returns immediately; poll GET /api/sync/status/{uid}.
     """
+    _verify_sync_caller(request, req.uid)
     if not req.async_mode:
         return sync_single_user(req.uid, start_date=req.start_date)
 
@@ -660,8 +706,9 @@ def trigger_sync(req: SyncTriggerRequest):
 
 
 @router.get("/status/{uid}")
-def get_user_sync_status(uid: str):
+def get_user_sync_status(uid: str, request: Request = None):
     """Returns latest async sync job status for a user."""
+    _verify_sync_caller(request, uid)
     canonical_uid = LocalStore.resolve_user_id(uid)
     with _USER_SYNC_LOCK:
         job = dict(_USER_SYNC_JOBS.get(canonical_uid) or _USER_SYNC_JOBS.get(uid) or {})
@@ -918,8 +965,11 @@ def import_healthkit(req: HealthKitImportRequest, request: Request):
 
         # Skip if an activity within ±15 minutes already exists from another watch source
         try:
-            w_dt = datetime.fromisoformat(bj_start_str.replace("Z", "+00:00"))
-            if any(abs((w_dt - ex_dt).total_seconds()) <= 900 for ex_dt in existing_non_hk_times):
+            w_ts = _to_epoch_seconds(bj_start_str)
+            if w_ts is not None and any(
+                ex_ts is not None and abs(w_ts - ex_ts) <= 900
+                for ex_ts in (_to_epoch_seconds(d) for d in existing_non_hk_times)
+            ):
                 skipped_duplicates += 1
                 continue
         except Exception:
@@ -959,13 +1009,16 @@ def import_healthkit(req: HealthKitImportRequest, request: Request):
         trimp = None
         if w.average_heartrate:
             trimp = calculate_trimp(w.duration_seconds / 60.0, float(w.average_heartrate), rest_hr, max_hr, gender)
+        elif w.duration_seconds > 0:
+            trimp = round((w.duration_seconds / 60.0) * 0.85, 1)
         track = _build_hk_track(act_id, w.route or [])
         if track:
             with_gps += 1
         elev = w.elevation_gain_meters
         if elev is None and w.route:
+            from utils.geo_utils import compute_smoothed_elevation_gain
             alts = [p.alt for p in w.route if p.alt is not None]
-            elev = round(sum(max(0.0, b - a) for a, b in zip(alts, alts[1:])), 1) if len(alts) > 1 else None
+            elev = compute_smoothed_elevation_gain(alts)
 
         base_run_name = "室内跑步" if w.is_indoor else "户外跑步"
         if src == "apple_watch":
@@ -1262,10 +1315,9 @@ def _parse_fit_bytes(raw: bytes) -> Dict[str, Any]:
     if total_dur_s <= 0 and total_dist_m > 0:
         total_dur_s = int(total_dist_m * 0.36)
 
+    from utils.geo_utils import compute_smoothed_elevation_gain
     alts = [p.alt for p in route if p.alt is not None]
-    elev_gain = session_ascent if session_ascent is not None else (
-        round(sum(max(0.0, b - a) for a, b in zip(alts, alts[1:])), 1) if len(alts) > 1 else None
-    )
+    elev_gain = session_ascent if session_ascent is not None else compute_smoothed_elevation_gain(alts)
 
     return {
         "start_time": start_iso,
@@ -1482,11 +1534,9 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
     """
     import base64
 
-    token_uid = getattr(request.state, "user_id", None)
     if not req.uid or not req.uid.strip():
         raise HTTPException(status_code=401, detail="请先登录")
-    if token_uid and token_uid != req.uid:
-        raise HTTPException(status_code=403, detail="无权为其他账号导入数据")
+    _verify_sync_caller(request, req.uid)
 
     try:
         raw_bytes = base64.b64decode(req.content_base64)
@@ -1572,8 +1622,9 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
                 # 2. HealthKit record within ±5 minutes
                 if r_id.startswith("hk_"):
                     try:
-                        r_dt = datetime.fromisoformat(str(row["start_time"]).replace("Z", "+00:00"))
-                        if abs((r_dt - target_dt).total_seconds()) <= 300:
+                        r_ts = _to_epoch_seconds(str(row["start_time"]))
+                        t_ts = _to_epoch_seconds(target_dt)
+                        if r_ts is not None and t_ts is not None and abs(r_ts - t_ts) <= 300:
                             act_id = r_id
                             break
                     except Exception:
@@ -1629,7 +1680,12 @@ def import_track_file(req: TrackFileImportRequest, request: Request):
         except Exception:
             pass
 
-    trimp = calculate_trimp(dur_s / 60.0, float(avg_hr), rest_hr, max_hr, gender) if avg_hr and dur_s > 0 else None
+    if avg_hr and dur_s > 0:
+        trimp = calculate_trimp(dur_s / 60.0, float(avg_hr), rest_hr, max_hr, gender)
+    elif dur_s > 0:
+        trimp = round((dur_s / 60.0) * 0.85, 1)
+    else:
+        trimp = None
     track = _build_hk_track(act_id, parsed["route"])
 
     act = {
@@ -1843,56 +1899,20 @@ def _extract_runs_from_screenshot_bytes(raw_bytes: bytes, filename: str = "scree
         "- 请确保只提取具有明确【某月某日】的有效单日/单次记录（距离 > 0.1 km）。"
     )
 
-    api_key = settings.OPENAI_API_KEY
-    base_url = (settings.OPENAI_API_BASE or "").rstrip("/")
-    if not api_key or not base_url:
-        raise ValueError("服务端视觉识别配置缺失，请联系管理员")
+    from utils.llm import llm_client
 
-    models_to_try = ["qwen3.8-flash", "qwen3-vl-plus", "qwen3.5-ocr"]
-    raw_content = None
-    last_err = None
-
-    with httpx.Client(timeout=45.0) as client:
-        for model_name in models_to_try:
-            try:
-                payload = {
-                    "model": model_name,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_str}"}},
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 2000,
-                    "enable_thinking": False,
-                }
-                resp = client.post(
-                    f"{base_url}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    json=payload,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_content = (
-                        data.get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
-                    if raw_content and raw_content.strip():
-                        break
-                else:
-                    last_err = f"{model_name} HTTP {resp.status_code}: {resp.text[:160]}"
-                    logger.warning(f"[screenshot-import] {last_err}")
-            except Exception as e:
-                last_err = f"{model_name} error: {e}"
-                logger.warning(f"[screenshot-import] {last_err}")
+    try:
+        raw_content = llm_client.call_vision_ocr(
+            image_bytes=raw_bytes,
+            mime_type=mime,
+            prompt=prompt,
+            max_tokens=2000,
+        )
+    except Exception as e:
+        raise ValueError(f"未能从截图中识别出运动数据（{e}）")
 
     if not raw_content:
-        raise ValueError(f"未能从截图中识别出运动数据（{last_err or '响应为空'}）")
+        raise ValueError("未能从截图中识别出运动数据（响应为空）")
 
     cleaned = raw_content.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
@@ -2240,7 +2260,12 @@ def _process_screenshot_import(uid: str, raw_bytes: bytes, filename: str, source
 
         cleared_dates_in_batch.add(rec_date)
 
-        trimp = calculate_trimp(dur_s / 60.0, float(avg_hr), rest_hr, max_hr, gender) if avg_hr and dur_s > 0 else None
+        if avg_hr and dur_s > 0:
+            trimp = calculate_trimp(dur_s / 60.0, float(avg_hr), rest_hr, max_hr, gender)
+        elif dur_s > 0:
+            trimp = round((dur_s / 60.0) * 0.85, 1)
+        else:
+            trimp = None
         act = {
             "id": act_id,
             "user_id": uid,
@@ -2321,26 +2346,42 @@ def _process_screenshot_import(uid: str, raw_bytes: bytes, filename: str, source
 def import_screenshot_json(req: ScreenshotImportRequest, request: Request):
     """Import one or multiple running records from a base64-encoded screenshot."""
     import base64
+    from utils.security import (
+        enforce_rate_limit,
+        get_client_ip,
+        validate_uploaded_image_bytes,
+        MAX_IMAGE_UPLOAD_BYTES,
+    )
 
-    token_uid = getattr(request.state, "user_id", None)
     if not req.uid or not req.uid.strip():
         raise HTTPException(status_code=401, detail="请先登录")
-    if token_uid and token_uid != req.uid:
-        raise HTTPException(status_code=403, detail="无权为其他账号导入数据")
+    eff_uid = _verify_sync_caller(request, req.uid)
+    enforce_rate_limit(
+        "screenshot_import",
+        f"{eff_uid}:{get_client_ip(request)}",
+        max_calls=30,
+        window_seconds=3600,
+        detail="截图导入过于频繁，请稍后再试",
+    )
 
     b64_clean = (req.image_base64 or "").strip()
     if "," in b64_clean and b64_clean.startswith("data:"):
         b64_clean = b64_clean.split(",", 1)[1]
+    if len(b64_clean) > int(MAX_IMAGE_UPLOAD_BYTES * 1.4) + 1024:
+        raise HTTPException(status_code=413, detail="截图文件过大，最大支持 10MB")
 
     try:
-        raw_bytes = base64.b64decode(b64_clean)
+        raw_bytes = base64.b64decode(b64_clean, validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="截图图片编码无法解析")
 
+    fname = req.filename or "screenshot.jpg"
+    validate_uploaded_image_bytes(raw_bytes, filename=fname, max_bytes=MAX_IMAGE_UPLOAD_BYTES)
+
     return _process_screenshot_import(
-        uid=req.uid.strip(),
+        uid=eff_uid,
         raw_bytes=raw_bytes,
-        filename=req.filename or "screenshot.jpg",
+        filename=fname,
         source_brand=req.source_brand or "huawei",
     )
 
@@ -2353,18 +2394,35 @@ async def import_screenshot_upload(
     source_brand: str = Form("huawei"),
 ):
     """Import one or multiple running records from a multipart uploaded screenshot (via uni.uploadFile)."""
-    token_uid = getattr(request.state, "user_id", None)
+    from utils.security import (
+        enforce_rate_limit,
+        get_client_ip,
+        validate_uploaded_image_bytes,
+        MAX_IMAGE_UPLOAD_BYTES,
+    )
+
     if not uid or not uid.strip():
         raise HTTPException(status_code=401, detail="请先登录")
-    if token_uid and token_uid != uid:
-        raise HTTPException(status_code=403, detail="无权为其他账号导入数据")
+    eff_uid = _verify_sync_caller(request, uid)
+    enforce_rate_limit(
+        "screenshot_import",
+        f"{eff_uid}:{get_client_ip(request)}",
+        max_calls=30,
+        window_seconds=3600,
+        detail="截图导入过于频繁，请稍后再试",
+    )
 
-    raw_bytes = await file.read()
+    raw_bytes = await file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+    if len(raw_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="截图文件过大，最大支持 10MB")
+    fname = file.filename or "screenshot.jpg"
+    validate_uploaded_image_bytes(raw_bytes, filename=fname, max_bytes=MAX_IMAGE_UPLOAD_BYTES)
+
     return await run_in_threadpool(
         _process_screenshot_import,
-        uid=uid.strip(),
+        uid=eff_uid,
         raw_bytes=raw_bytes,
-        filename=file.filename or "screenshot.jpg",
+        filename=fname,
         source_brand=source_brand or "huawei",
     )
 

@@ -1,15 +1,28 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
 
 from utils.local_store import LocalStore
+from utils.security import is_strict_auth_mode
 from utils.wechat import dispatch_canova_critique_push, wechat_client
 from config import settings
 
 logger = logging.getLogger("router_notifications")
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+def _verify_notif_access(request: Optional[Request], target_uid: str) -> None:
+    if not request:
+        return
+    token_uid = getattr(request.state, "user_id", None)
+    token_is_sa = bool(getattr(request.state, "is_super_admin", False))
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="安全拦截：请先登录后再访问通知")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        if LocalStore.resolve_user_id(token_uid) != LocalStore.resolve_user_id(target_uid):
+            raise HTTPException(status_code=403, detail="安全拦截：无权查看或操作他人系统通知")
 
 
 class ReadAllRequest(BaseModel):
@@ -39,8 +52,9 @@ def get_subscribe_config():
 
 
 @router.get("")
-def get_notifications(user_id: str = Query(..., description="User ID"), limit: int = Query(30, ge=1, le=100)):
+def get_notifications(user_id: str = Query(..., description="User ID"), limit: int = Query(30, ge=1, le=100), request: Request = None):
     """Retrieves user system notifications and unread count."""
+    _verify_notif_access(request, user_id)
     canonical_uid = LocalStore.resolve_user_id(user_id)
     notifications = LocalStore.get_user_notifications(canonical_uid, limit=limit)
     unread_count = LocalStore.get_unread_notifications_count(canonical_uid)
@@ -52,8 +66,9 @@ def get_notifications(user_id: str = Query(..., description="User ID"), limit: i
 
 
 @router.post("/{notification_id}/read")
-def mark_notification_read(notification_id: str, user_id: str = Query(..., description="User ID")):
+def mark_notification_read(notification_id: str, user_id: str = Query(..., description="User ID"), request: Request = None):
     """Marks a single notification as read."""
+    _verify_notif_access(request, user_id)
     canonical_uid = LocalStore.resolve_user_id(user_id)
     ok = LocalStore.mark_notification_as_read(notification_id, canonical_uid)
     unread_count = LocalStore.get_unread_notifications_count(canonical_uid)
@@ -64,8 +79,9 @@ def mark_notification_read(notification_id: str, user_id: str = Query(..., descr
 
 
 @router.post("/read-all")
-def mark_all_read(req: ReadAllRequest):
+def mark_all_read(req: ReadAllRequest, request: Request = None):
     """Marks all user notifications as read."""
+    _verify_notif_access(request, req.user_id)
     canonical_uid = LocalStore.resolve_user_id(req.user_id)
     updated_count = LocalStore.mark_all_notifications_read(canonical_uid)
     return {
@@ -76,11 +92,12 @@ def mark_all_read(req: ReadAllRequest):
 
 
 @router.post("/test-push")
-def test_push_notification(req: TestPushRequest):
+def test_push_notification(req: TestPushRequest, request: Request = None):
     """
     Sends a test Canova Coach critique push to both in-app notification center and WeChat Subscribe Message.
     Useful for developers and admins to verify push delivery to real phone.
     """
+    _verify_notif_access(request, req.user_id)
     canonical_uid = LocalStore.resolve_user_id(req.user_id)
     profile = LocalStore.get_profile(canonical_uid) or {}
     openid = profile.get("wechat_openid")

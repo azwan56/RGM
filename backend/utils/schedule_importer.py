@@ -199,50 +199,42 @@ def format_shorthand_pace(raw_pace: str) -> str:
 
 def extract_text_from_schedule_image(image_base64: str) -> str:
     """
-    Uses DashScope multimodal model (qwen3.8-omni-flash / qwen-vl-max) to extract text verbatim from a schedule screenshot.
+    Uses dedicated OCR vision model (qwen3.5-ocr) via LLMClient to extract text verbatim from a schedule screenshot.
     """
     if not image_base64:
         return ""
-    b64_clean = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
+    mime_type = "image/jpeg"
+    b64_clean = image_base64.strip()
+    if "," in b64_clean:
+        header, b64_clean = b64_clean.split(",", 1)
+        if "image/png" in header.lower():
+            mime_type = "image/png"
+        elif "image/webp" in header.lower():
+            mime_type = "image/webp"
 
-    client = llm_client._get_client()
-    if not client:
+    if llm_client._get_client() is None:
         raise ValueError("AI 视觉服务未配置 API Key，请使用文本粘贴或示例课表导入")
 
-    vision_models = ["qwen3.8-omni-flash", "cmaas-qwen3.8-flash", "qwen3.8-max-0902", "qwen-vl-max"]
-    last_err = None
-    for model_name in vision_models:
-        try:
-            res = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_clean}"}},
-                            {
-                                "type": "text",
-                                "text": (
-                                    "请把这张跑步训练计划表图片中的所有文字完整、原样提取出来，"
-                                    "包含标题、每日日期、星期、训练内容、各组配速（A/B/C/D/E或男/女）、"
-                                    "底部的体能练习(a/b/c)及注意事项，不要遗漏任何一行。"
-                                ),
-                            },
-                        ],
-                    }
-                ],
-                temperature=0.1,
-                max_tokens=1800,
-            )
-            content = (res.choices[0].message.content or "").strip()
-            if content and len(content) > 20:
-                logger.info(f"[schedule_importer] Vision OCR succeeded with model {model_name}")
-                return content
-        except Exception as e:
-            last_err = e
-            logger.warning(f"[schedule_importer] Vision model {model_name} failed: {e}")
+    try:
+        raw_bytes = base64.b64decode(b64_clean, validate=True)
+    except Exception:
+        raise ValueError("课表图片编码无法解析")
 
-    raise ValueError(f"图片文字识别失败: {last_err}")
+    prompt = (
+        "请把这张跑步训练计划表图片中的所有文字完整、原样提取出来，"
+        "包含标题、每日日期、星期、训练内容、各组配速（A/B/C/D/E或男/女）、"
+        "底部的体能练习(a/b/c)及注意事项，不要遗漏任何一行。"
+    )
+    content = llm_client.call_vision_ocr(
+        image_bytes=raw_bytes,
+        mime_type=mime_type,
+        prompt=prompt,
+        max_tokens=1800,
+    ).strip()
+    if content and len(content) > 20:
+        logger.info("[schedule_importer] Vision OCR succeeded via LLMClient")
+        return content
+    raise ValueError("未能从课表图片中提取出有效训练内容，请确保图片清晰完整")
 
 
 def parse_weekly_schedule_text(

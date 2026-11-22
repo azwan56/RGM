@@ -496,7 +496,7 @@ def test_unified_scheduler_and_nonblocking_screenshot_upload():
             "/api/sync/import-screenshot-upload",
             headers={"Authorization": f"Bearer {token}"},
             data={"uid": uid, "source_brand": "huawei"},
-            files={"file": ("run.jpg", b"fake-jpeg-bytes", "image/jpeg")},
+            files={"file": ("run.jpg", b"\xff\xd8\xff\xe0fake-jpeg-bytes", "image/jpeg")},
         )
     assert resp.status_code == 200
     assert called_in_threadpool["flag"] is True

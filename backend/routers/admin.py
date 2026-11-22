@@ -4,12 +4,12 @@ import time
 import jwt
 import logging
 import hashlib
-from fastapi import APIRouter, HTTPException, Header, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Header, Depends, UploadFile, File, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from config import settings
 from utils.local_store import LocalStore
-from utils.security import validate_uploaded_image_bytes
+from utils.security import validate_uploaded_image_bytes, enforce_rate_limit, get_client_ip
 
 logger = logging.getLogger("router_admin")
 router = APIRouter()
@@ -65,12 +65,17 @@ def verify_super_admin(authorization: Optional[str] = Header(None)) -> Dict[str,
 
 
 @router.post("/login")
-def admin_login(req: AdminLoginRequest):
+def admin_login(req: AdminLoginRequest, request: Request = None):
     """
     Super Admin login endpoint.
     Strictly for platform super administrators to manage clubs and designate owners.
     """
-    if settings.ENVIRONMENT.lower() == "production" and ADMIN_PASSWORD in ("", "rgm_admin_2026"):
+    enforce_rate_limit("admin_login", get_client_ip(request), max_calls=8, window_seconds=300, detail="管理员登录尝试过于频繁，请 5 分钟后再试")
+    if settings.ENVIRONMENT.lower() == "production" and ADMIN_PASSWORD in (
+        "",
+        "rgm_admin_2026",
+        "replace-with-strong-super-admin-password",
+    ):
         raise HTTPException(status_code=503, detail="生产环境尚未配置安全的 RGM_ADMIN_PASSWORD，已拒绝默认密码登录")
 
     clean_email = req.email.strip().lower()

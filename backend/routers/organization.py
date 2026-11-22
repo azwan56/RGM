@@ -4,9 +4,27 @@ from typing import Optional, List, Dict, Any
 import logging
 from utils.local_store import LocalStore
 from utils.encryption import mask_name, mask_id_card, mask_phone, compute_age_group
+from utils.security import is_strict_auth_mode
 
 logger = logging.getLogger("router_org")
 router = APIRouter()
+
+
+def _resolve_org_caller(request: Optional[Request], explicit_op: Optional[str] = None) -> Optional[str]:
+    if not request:
+        return explicit_op
+    token_uid = getattr(request.state, "user_id", None)
+    token_is_sa = bool(getattr(request.state, "is_super_admin", False))
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="安全拦截：请先登录后操作")
+    if token_is_sa:
+        return explicit_op or token_uid or "rgm_super_admin"
+    if token_uid:
+        if explicit_op and not LocalStore.is_super_admin(token_uid):
+            if LocalStore.resolve_user_id(explicit_op) != LocalStore.resolve_user_id(token_uid):
+                raise HTTPException(status_code=403, detail="安全拦截：操作人身份与当前登录会话不一致")
+        return token_uid
+    return explicit_op
 
 class VerifyOrgCodeRequest(BaseModel):
     invite_code: str
@@ -445,12 +463,14 @@ def get_org_sub_clubs_endpoint(org_id: str, user_id: Optional[str] = None, reque
 
 
 @router.get("/{org_id}/members")
-def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None, operator_uid: Optional[str] = None):
+def get_org_members_endpoint(org_id: str, search: Optional[str] = None, class_filter: Optional[str] = None, operator_uid: Optional[str] = None, request: Request = None):
     """
     Returns verified member directory for the grand community (name, class, age_group, status, sub-clubs).
     Protects runner birth year, phone, and id_card privacy for non-admin viewers.
     Blocks expired members from viewing roster.
     """
+    eff_op = _resolve_org_caller(request, operator_uid)
+    operator_uid = eff_op
     org = LocalStore.get_organization(org_id)
     if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
@@ -590,25 +610,32 @@ def list_all_orgs_endpoint():
 
 
 @router.get("/admin/all-list")
-def list_all_orgs_admin_endpoint():
+def list_all_orgs_admin_endpoint(request: Request = None):
     """
     Returns all organizations in the platform with invite_code retained for admin console.
     """
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if is_strict_auth_mode() and not token_is_sa and not (token_uid and LocalStore.is_super_admin(token_uid)):
+        raise HTTPException(status_code=403, detail="权限不足：仅平台超级管理员可查看组织全量邀请码列表")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        raise HTTPException(status_code=403, detail="权限不足：仅平台超级管理员可查看组织全量邀请码列表")
     orgs = LocalStore.list_all_organizations()
     return {"organizations": orgs}
 
 
 @router.post("/{org_id}/join-mode")
-def update_org_join_mode_endpoint(org_id: str, req: UpdateOrgJoinModeRequest):
+def update_org_join_mode_endpoint(org_id: str, req: UpdateOrgJoinModeRequest, request: Request = None):
     """
     Allows organization organizer (owner / admin) to view/switch between 'free' and 'invite', and customize invite_code.
     """
+    eff_op = _resolve_org_caller(request, req.operator_uid)
     if req.join_mode and req.join_mode not in ("free", "invite"):
         raise HTTPException(status_code=400, detail="入会规则仅支持 'free' (自由入会) 或 'invite' (凭专属邀请码入会)")
     try:
         updated = LocalStore.update_organization_join_mode(
             org_id=org_id,
-            operator_uid=req.operator_uid,
+            operator_uid=eff_op,
             join_mode=req.join_mode,
             invite_code=req.invite_code
         )
@@ -628,21 +655,25 @@ def update_org_join_mode_endpoint(org_id: str, req: UpdateOrgJoinModeRequest):
 
 
 @router.put("/{org_id}")
-def update_org_endpoint(org_id: str, req: UpdateOrgRequest):
+def update_org_endpoint(org_id: str, req: UpdateOrgRequest, request: Request = None):
     """
     Updates organization info (name, invite_code, description, city, logo_url, owner_id, join_mode).
     Allows Org Owner, Org Admin, or Super Admin.
     """
     data = req.model_dump(exclude_unset=True) if hasattr(req, "model_dump") else req.dict(exclude_unset=True)
-    op_uid = data.pop("operator_uid", None)
-    if op_uid and not LocalStore.is_org_organizer(org_id, op_uid):
-        raise HTTPException(status_code=403, detail="只有大群主理人、大群管理员或超级管理员有权修改大群设定！")
+    raw_op_uid = data.pop("operator_uid", None)
+    eff_op = _resolve_org_caller(request, raw_op_uid)
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if (eff_op or token_uid or is_strict_auth_mode()) and not token_is_sa:
+        if not eff_op or not LocalStore.is_org_organizer(org_id, eff_op):
+            raise HTTPException(status_code=403, detail="只有大群主理人、大群管理员或超级管理员有权修改大群设定！")
 
-    if ("join_mode" in data or "invite_code" in data) and op_uid:
+    if ("join_mode" in data or "invite_code" in data) and eff_op:
         try:
             LocalStore.update_organization_join_mode(
                 org_id=org_id,
-                operator_uid=op_uid,
+                operator_uid=eff_op,
                 join_mode=data.get("join_mode"),
                 invite_code=data.get("invite_code")
             )
@@ -658,10 +689,15 @@ def update_org_endpoint(org_id: str, req: UpdateOrgRequest):
 
 
 @router.post("/{org_id}/bind-club")
-def bind_club_to_org_endpoint(org_id: str, req: BindClubRequest):
+def bind_club_to_org_endpoint(org_id: str, req: BindClubRequest, request: Request = None):
     """
     Binds or unbinds a running club to/from an organization.
     """
+    eff_op = _resolve_org_caller(request, None)
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if (eff_op or is_strict_auth_mode()) and not token_is_sa:
+        if not eff_op or not LocalStore.is_org_organizer(org_id, eff_op):
+            raise HTTPException(status_code=403, detail="只有大群主理人或超级管理员有权挂载/解绑下属跑团")
     club = LocalStore.get_club(req.club_id)
     if not club:
         raise HTTPException(status_code=404, detail="跑团不存在")
@@ -677,10 +713,15 @@ def bind_club_to_org_endpoint(org_id: str, req: BindClubRequest):
 
 
 @router.post("/create")
-def create_org_endpoint(req: CreateOrgRequest):
+def create_org_endpoint(req: CreateOrgRequest, request: Request = None):
     """
     Creates a new grand community (e.g. 复旦戈).
     """
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if (token_uid or is_strict_auth_mode()) and not token_is_sa:
+        if not token_uid or not LocalStore.is_super_admin(token_uid):
+            raise HTTPException(status_code=403, detail="权限不足：仅平台超级管理员可创建大组织")
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="组织名称不能为空")
     if not req.invite_code.strip():
@@ -735,15 +776,21 @@ def get_org_periodic_report_endpoint(
     period_index: Optional[int] = None,
     period_offset: Optional[int] = None,
     trail_mode: str = "include",
+    request: Request = None,
 ):
     """
     Returns cross-club periodic report (sub-club PK rankings, deduplicated member rankings, unaffiliated members radar)
     for Org Owners, Org Admins, or Super Admins.
     """
+    eff_op = _resolve_org_caller(request, operator_uid)
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    if (eff_op or is_strict_auth_mode()) and not token_is_sa:
+        if not eff_op or not LocalStore.is_org_organizer(org_id, eff_op):
+            raise HTTPException(status_code=403, detail="只有大群主理人、大群管理员或超级管理员有权查看全域报表")
     try:
         return LocalStore.get_org_periodic_report(
             org_id=org_id,
-            operator_uid=operator_uid,
+            operator_uid=eff_op,
             period_type=period_type,
             year=year,
             period_index=period_index,

@@ -144,8 +144,8 @@ def compute_ctl_atl_tsb(
     if not daily_trimp_series:
         return []
 
-    ctl_k = 2.0 / (ctl_decay_days + 1)
-    atl_k = 2.0 / (atl_decay_days + 1)
+    ctl_k = 1.0 - math.exp(-1.0 / max(1, ctl_decay_days))
+    atl_k = 1.0 - math.exp(-1.0 / max(1, atl_decay_days))
 
     ctl = 0.0
     atl = 0.0
@@ -635,8 +635,8 @@ def simulate_taper_7d(current_ctl: float, current_atl: float) -> Dict[str, Any]:
     """
     from datetime import date, timedelta
 
-    ctl_k = 2.0 / (42 + 1)
-    atl_k = 2.0 / (7 + 1)
+    ctl_k = 1.0 - math.exp(-1.0 / 42.0)
+    atl_k = 1.0 - math.exp(-1.0 / 7.0)
     base_ctl = float(current_ctl or 0.0)
     base_atl = float(current_atl or 0.0)
     today = date.today()

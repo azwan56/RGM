@@ -95,17 +95,106 @@ class SwitchAccountRequest(BaseModel):
     client_uuid: Optional[str] = None
     code: Optional[str] = None
 
+import threading
+import time as _auth_time
+from utils.security import (
+    is_strict_auth_mode,
+    get_client_ip,
+    enforce_rate_limit,
+    verify_apple_identity_token,
+)
+
 PENDING_MFA_ADAPTERS: Dict[str, Any] = {}
 PENDING_COROS_2FA_ADAPTERS: Dict[str, Any] = {}
+_PENDING_LOCK = threading.Lock()
+_PENDING_TTL_SECONDS = 300
+_PENDING_MAX_ENTRIES = 256
+
+
+def _set_pending_adapter(store: Dict[str, Any], key: str, adapter: Any) -> None:
+    now = _auth_time.time()
+    with _PENDING_LOCK:
+        expired = [
+            k
+            for k, v in list(store.items())
+            if isinstance(v, dict) and float(v.get("expires_at") or 0.0) <= now
+        ]
+        for k in expired:
+            store.pop(k, None)
+        while len(store) >= _PENDING_MAX_ENTRIES:
+            oldest_key = next(iter(store))
+            store.pop(oldest_key, None)
+        store[key] = {"adapter": adapter, "expires_at": now + _PENDING_TTL_SECONDS}
+
+
+def _get_pending_adapter(store: Dict[str, Any], key: str) -> Any:
+    now = _auth_time.time()
+    with _PENDING_LOCK:
+        entry = store.get(key)
+        if not entry:
+            return None
+        if isinstance(entry, dict) and "adapter" in entry:
+            if float(entry.get("expires_at") or 0.0) <= now:
+                store.pop(key, None)
+                return None
+            return entry.get("adapter")
+        return entry
+
+
+def _pop_pending_adapter(store: Dict[str, Any], key: str) -> Any:
+    now = _auth_time.time()
+    with _PENDING_LOCK:
+        entry = store.pop(key, None)
+        if not entry:
+            return None
+        if isinstance(entry, dict) and "adapter" in entry:
+            if float(entry.get("expires_at") or 0.0) <= now:
+                return None
+            return entry.get("adapter")
+        return entry
+
+
+def _verify_watch_bind_caller(http_req: Optional[Request], target_uid: Optional[str]) -> str:
+    from utils.local_store import LocalStore
+
+    clean_uid = (target_uid or "").strip()
+    if not clean_uid:
+        raise HTTPException(status_code=400, detail="缺少用户标识")
+
+    token_uid = getattr(getattr(http_req, "state", None), "user_id", None) if http_req is not None else None
+    if token_uid:
+        if LocalStore.is_super_admin(token_uid):
+            return clean_uid
+        if LocalStore.resolve_user_id(token_uid) == LocalStore.resolve_user_id(clean_uid):
+            return clean_uid
+        caller_p = LocalStore.get_profile(token_uid) or {}
+        target_p = LocalStore.get_profile(clean_uid) or {}
+        c_oid = (caller_p.get("wechat_openid") or "").strip()
+        t_oid = (target_p.get("wechat_openid") or "").strip()
+        if c_oid and t_oid and c_oid == t_oid:
+            return clean_uid
+        raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的手表绑定")
+
+    if is_strict_auth_mode():
+        raise HTTPException(status_code=401, detail="安全拦截：请先登录后再绑定或解绑手表")
+    return clean_uid
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/email/signup")
-def email_signup(request: EmailSignUpRequest):
+def email_signup(request: EmailSignUpRequest, http_req: Request = None):
     """
     Email registration endpoint for Web client.
     Hashes password with PBKDF2-SHA256, persists profile in LocalStore, and returns JWT session.
     """
+    enforce_rate_limit(
+        "auth_signup",
+        get_client_ip(http_req),
+        max_calls=10,
+        window_seconds=600,
+        detail="注册请求过于频繁，请稍后再试",
+    )
     import hashlib
     import time
     import jwt
@@ -175,7 +264,7 @@ def email_signup(request: EmailSignUpRequest):
     }
 
 @router.post("/email/login")
-def email_login(request: EmailLoginRequest):
+def email_login(request: EmailLoginRequest, http_req: Request = None):
     """
     Email / Account login endpoint for Web client.
     Supports email, bound Garmin email/phone, bound COROS account (phone/email), or registered phone number.
@@ -194,6 +283,14 @@ def email_login(request: EmailLoginRequest):
     if not account_input or not pwd:
         raise HTTPException(status_code=400, detail="请输入登录账号和密码")
 
+    enforce_rate_limit(
+        "auth_login",
+        f"{email}:{get_client_ip(http_req)}",
+        max_calls=15,
+        window_seconds=300,
+        detail="登录尝试过于频繁，请 5 分钟后再试",
+    )
+
     # Also support phone@coros.com or phone@rgm.run convenience format
     alt_account = email.split("@")[0] if email.endswith(("@coros.com", "@rgm.run", "@garmin.cn")) else email
 
@@ -203,7 +300,7 @@ def email_login(request: EmailLoginRequest):
     coros_connected = False
 
     from utils.local_store import LocalStore, sqlite3, DB_PATH
-    from utils.encryption import decrypt_pii
+    from utils.encryption import decrypt_pii, compute_phone_hmac
     local_p = LocalStore.get_profile(uid)
     if not local_p:
         try:
@@ -220,11 +317,27 @@ def email_login(request: EmailLoginRequest):
                 ).fetchall()
                 matched_row = rows[0] if rows else None
                 if not matched_row:
-                    phone_rows = conn.execute("SELECT * FROM profiles WHERE phone IS NOT NULL AND phone != ''").fetchall()
+                    hmac_a = compute_phone_hmac(account_input)
+                    hmac_b = compute_phone_hmac(alt_account)
+                    hmac_vals = [h for h in (hmac_a, hmac_b) if h]
+                    if hmac_vals:
+                        placeholders = ",".join("?" for _ in hmac_vals)
+                        matched_row = conn.execute(
+                            f"SELECT * FROM profiles WHERE phone_hmac IN ({placeholders}) LIMIT 1",
+                            tuple(hmac_vals),
+                        ).fetchone()
+                if not matched_row:
+                    phone_rows = conn.execute(
+                        "SELECT * FROM profiles WHERE phone IS NOT NULL AND phone != '' AND (phone_hmac IS NULL OR phone_hmac = '')"
+                    ).fetchall()
                     for r in phone_rows:
                         dec_phone = decrypt_pii(r["phone"] or "")
                         if dec_phone in (account_input, alt_account):
                             matched_row = r
+                            try:
+                                LocalStore.upsert_profile(r["id"], {"phone": dec_phone})
+                            except Exception:
+                                pass
                             break
                 if matched_row:
                     local_p = dict(matched_row)
@@ -575,7 +688,7 @@ def wechat_app_login(request: WeChatAppLoginRequest):
 
 
 @router.post("/apple/login")
-def apple_login(request: AppleLoginRequest):
+def apple_login(request: AppleLoginRequest, http_req: Request = None):
     """
     Sign in with Apple (Mandatory for iOS App Store).
     Identifies or creates user by apple_user_id or email, maintaining consistency with web/miniapp.
@@ -586,8 +699,22 @@ def apple_login(request: AppleLoginRequest):
     from datetime import datetime
     from utils.local_store import LocalStore
 
+    enforce_rate_limit(
+        "apple_login",
+        get_client_ip(http_req),
+        max_calls=20,
+        window_seconds=300,
+        detail="Apple 登录请求过于频繁，请稍后再试",
+    )
+
     if not request.apple_user_id:
         raise HTTPException(status_code=400, detail="缺少 Apple 用户凭证 (apple_user_id)")
+
+    if is_strict_auth_mode() or bool((request.identity_token or "").strip()):
+        verify_apple_identity_token(
+            request.identity_token or "",
+            expected_sub=request.apple_user_id,
+        )
 
     profile_data = LocalStore.get_profile_by_apple_id(request.apple_user_id)
 
@@ -709,7 +836,7 @@ def switch_account(request: SwitchAccountRequest):
 
 
 @router.post("/device-login")
-def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks):
+def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks, http_req: Request = None):
     """
     Direct Watch Device Authentication (Garmin / COROS).
     Authenticates directly with official Garmin or COROS servers using user's credentials.
@@ -736,6 +863,14 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
     if not account or not pwd:
         raise HTTPException(status_code=400, detail="请输入账号和密码")
 
+    enforce_rate_limit(
+        "device_login",
+        f"{account.lower()}:{get_client_ip(http_req)}",
+        max_calls=12,
+        window_seconds=300,
+        detail="手表直登尝试过于频繁，请 5 分钟后再试",
+    )
+
     openid = None
     if request.code:
         res = wechat_client.code_to_session(request.code)
@@ -754,16 +889,24 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
             domain = "garmin.cn"
 
         email_key = f"{account.lower()}::{domain}"
+        alt_garmin_dom = "garmin.com" if domain == "garmin.cn" else "garmin.cn"
+        alt_email_key = f"{account.lower()}::{alt_garmin_dom}"
         existing_p = LocalStore.get_profile_by_garmin_email(account)
         password_verified = False
-        if request.mfa_code and email_key in PENDING_MFA_ADAPTERS:
-            adapter = PENDING_MFA_ADAPTERS[email_key]
-            if not adapter.client:
-                adapter.login()
+        if request.mfa_code:
+            resolved_mfa_key = email_key
+            adapter = _get_pending_adapter(PENDING_MFA_ADAPTERS, email_key)
+            if not adapter:
+                adapter = _get_pending_adapter(PENDING_MFA_ADAPTERS, alt_email_key)
+                if adapter:
+                    domain = alt_garmin_dom
+                    resolved_mfa_key = alt_email_key
+            if not adapter or not getattr(adapter, "client", None):
+                raise HTTPException(status_code=400, detail="安全验证码会话已过期，请重新点击登录获取新验证码")
             ok = adapter.complete_mfa(request.mfa_code)
             if not ok:
                 raise HTTPException(status_code=400, detail=adapter.last_error or "验证码错误或已失效")
-            PENDING_MFA_ADAPTERS.pop(email_key, None)
+            _pop_pending_adapter(PENDING_MFA_ADAPTERS, resolved_mfa_key)
             password_verified = True
         elif existing_p:
             saved_pwd = decrypt_string(existing_p.get("garmin_encrypted_password", ""))
@@ -776,7 +919,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 ok = adapter.login(use_token=False)
                 if not ok:
                     if adapter.needs_mfa:
-                        PENDING_MFA_ADAPTERS[email_key] = adapter
+                        _set_pending_adapter(PENDING_MFA_ADAPTERS, email_key, adapter)
                         return {
                             "success": False,
                             "needs_mfa": True,
@@ -797,7 +940,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 old_wx_p = LocalStore.get_profile_by_openid(openid)
                 if old_wx_p and old_wx_p["id"] != user_id:
                     if str(old_wx_p["id"]).startswith("u_wx_") and not old_wx_p.get("garmin_connected") and not old_wx_p.get("coros_connected"):
-                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, drop_transient_watch_activities=True)
+                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, drop_transient_watch_activities=False)
                     else:
                         with sqlite3.connect(DB_PATH) as conn:
                             conn.execute("UPDATE profiles SET wechat_openid = NULL WHERE id = ?", (old_wx_p["id"],))
@@ -826,7 +969,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 old_wx_p = LocalStore.get_profile_by_openid(openid)
                 if old_wx_p and old_wx_p["id"] != user_id:
                     if str(old_wx_p["id"]).startswith("u_wx_") and not old_wx_p.get("garmin_connected") and not old_wx_p.get("coros_connected"):
-                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, profile_updates={"wechat_openid": openid}, drop_transient_watch_activities=True)
+                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, profile_updates={"wechat_openid": openid}, drop_transient_watch_activities=False)
                     else:
                         with sqlite3.connect(DB_PATH) as conn:
                             conn.execute("UPDATE profiles SET wechat_openid = NULL WHERE id = ?", (old_wx_p["id"],))
@@ -844,15 +987,25 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
             domain = "teamcnapi.coros.com"
 
         account_key = f"{account.lower()}::{domain}"
+        alt_coros_dom = "teamapi.coros.com" if "teamcnapi" in domain else "teamcnapi.coros.com"
+        alt_account_key = f"{account.lower()}::{alt_coros_dom}"
         code = (request.mfa_code or request.code or "").strip()
 
         existing_p = LocalStore.get_profile_by_coros_account(account)
-        if code and account_key in PENDING_COROS_2FA_ADAPTERS:
-            adapter = PENDING_COROS_2FA_ADAPTERS[account_key]
+        if code:
+            resolved_coros_key = account_key
+            adapter = _get_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key)
+            if not adapter:
+                adapter = _get_pending_adapter(PENDING_COROS_2FA_ADAPTERS, alt_account_key)
+                if adapter:
+                    domain = alt_coros_dom
+                    resolved_coros_key = alt_account_key
+            if not adapter or not getattr(adapter, "login_ticket", None):
+                raise HTTPException(status_code=400, detail="高驰验证码会话已过期，请重新点击登录获取短信验证码")
             ok = adapter.complete_2fa(code)
             if not ok:
                 raise HTTPException(status_code=400, detail=adapter.last_error or "高驰验证码错误或已失效")
-            PENDING_COROS_2FA_ADAPTERS.pop(account_key, None)
+            _pop_pending_adapter(PENDING_COROS_2FA_ADAPTERS, resolved_coros_key)
         else:
             password_verified = False
             if existing_p:
@@ -866,7 +1019,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 ok = adapter.login(force=True, trigger_2fa_sms=True)
                 if not ok:
                     if adapter.needs_2fa:
-                        PENDING_COROS_2FA_ADAPTERS[account_key] = adapter
+                        _set_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key, adapter)
                         return {
                             "success": False,
                             "needs_mfa": True,
@@ -888,7 +1041,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 old_wx_p = LocalStore.get_profile_by_openid(openid)
                 if old_wx_p and old_wx_p["id"] != user_id:
                     if str(old_wx_p["id"]).startswith("u_wx_") and not old_wx_p.get("garmin_connected") and not old_wx_p.get("coros_connected"):
-                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, drop_transient_watch_activities=True)
+                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, drop_transient_watch_activities=False)
                     else:
                         with sqlite3.connect(DB_PATH) as conn:
                             conn.execute("UPDATE profiles SET wechat_openid = NULL WHERE id = ?", (old_wx_p["id"],))
@@ -915,7 +1068,7 @@ def device_login(request: DeviceLoginRequest, background_tasks: BackgroundTasks)
                 old_wx_p = LocalStore.get_profile_by_openid(openid)
                 if old_wx_p and old_wx_p["id"] != user_id:
                     if str(old_wx_p["id"]).startswith("u_wx_") and not old_wx_p.get("garmin_connected") and not old_wx_p.get("coros_connected"):
-                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, profile_updates={"wechat_openid": openid}, drop_transient_watch_activities=True)
+                        LocalStore.merge_user_profiles(old_wx_p["id"], user_id, profile_updates={"wechat_openid": openid}, drop_transient_watch_activities=False)
                     else:
                         with sqlite3.connect(DB_PATH) as conn:
                             conn.execute("UPDATE profiles SET wechat_openid = NULL WHERE id = ?", (old_wx_p["id"],))
@@ -1049,7 +1202,7 @@ def wechat_confirm_login(request: WeChatConfirmLoginRequest):
 
 @router.post("/garmin/bind")
 @router.post("/garmin/connect")
-def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
+def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks, http_req: Request = None):
     """
     Binds Garmin Connect account (garmin.cn or garmin.com), encrypts password,
     and initiates an initial sync.
@@ -1058,9 +1211,22 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
     if domain not in ["garmin.cn", "garmin.com"]:
         raise HTTPException(status_code=400, detail="无效的佳明区域。请选择 garmin.cn (中国版) 或 garmin.com (国际版)")
 
+    if request.uid:
+        _verify_watch_bind_caller(http_req, request.uid)
+
     from utils.local_store import LocalStore, DB_PATH, sqlite3
 
     email_key = request.email.strip().lower()
+    enforce_rate_limit(
+        "garmin_bind",
+        f"{(request.uid or email_key)}:{get_client_ip(http_req)}",
+        max_calls=12,
+        window_seconds=300,
+        detail="佳明绑定尝试过于频繁，请 5 分钟后再试",
+    )
+    mfa_key = f"{email_key}::{domain}"
+    alt_domain_key = "garmin.com" if domain == "garmin.cn" else "garmin.cn"
+    alt_mfa_key = f"{email_key}::{alt_domain_key}"
     existing_p = LocalStore.get_profile_by_garmin_email(request.email)
     password_verified = False
     if existing_p and not request.mfa_code:
@@ -1070,14 +1236,19 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
 
     if request.mfa_code:
         # MFA submission path
-        adapter = PENDING_MFA_ADAPTERS.get(email_key)
-        if not adapter or not adapter.client:
-            adapter = GarminAdapter(email=request.email, password=request.password, domain=domain)
-            adapter.login()
+        resolved_mfa_key = mfa_key
+        adapter = _get_pending_adapter(PENDING_MFA_ADAPTERS, mfa_key)
+        if not adapter:
+            adapter = _get_pending_adapter(PENDING_MFA_ADAPTERS, alt_mfa_key)
+            if adapter:
+                domain = alt_domain_key
+                resolved_mfa_key = alt_mfa_key
+        if not adapter or not getattr(adapter, "client", None):
+            raise HTTPException(status_code=400, detail="验证码会话已过期，请重新点击绑定获取新验证码")
         ok = adapter.complete_mfa(request.mfa_code)
         if not ok:
             raise HTTPException(status_code=400, detail=adapter.last_error or "验证码错误或已失效，请重新输入邮件/短信中的 6 位验证码")
-        PENDING_MFA_ADAPTERS.pop(email_key, None)
+        _pop_pending_adapter(PENDING_MFA_ADAPTERS, resolved_mfa_key)
     elif not password_verified:
         # Initial login path
         adapter = GarminAdapter(email=request.email, password=request.password, domain=domain)
@@ -1091,7 +1262,7 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
             ok = adapter.login(use_token=False)
             if not ok:
                 if adapter.needs_mfa:
-                    PENDING_MFA_ADAPTERS[email_key] = adapter
+                    _set_pending_adapter(PENDING_MFA_ADAPTERS, mfa_key, adapter)
                     return {
                         "success": False,
                         "connected": False,
@@ -1115,7 +1286,7 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
                         adapter = alt_adapter
                         domain = alt_domain
                     elif alt_adapter.needs_mfa:
-                        PENDING_MFA_ADAPTERS[email_key] = alt_adapter
+                        _set_pending_adapter(PENDING_MFA_ADAPTERS, f"{email_key}::{alt_domain}", alt_adapter)
                         return {
                             "success": False,
                             "connected": False,
@@ -1158,12 +1329,9 @@ def bind_garmin(request: GarminBindRequest, background_tasks: BackgroundTasks):
             request.uid,
             effective_uid,
             profile_updates=update_data,
-            drop_transient_watch_activities=True,
+            drop_transient_watch_activities=False,
         )
     else:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("DELETE FROM activities WHERE user_id = ? AND (id LIKE 'hk_%' OR id LIKE 'aw_%' OR id LIKE 'hw_%')", (effective_uid,))
-            conn.commit()
         LocalStore.upsert_profile(effective_uid, {
             "garmin_connected": 1,
             "garmin_email": request.email,
@@ -1240,8 +1408,8 @@ def unbind_garmin(request: GarminUnbindRequest, authorization: Optional[str] = H
     if not target_p:
         raise HTTPException(status_code=404, detail="未找到对应的跑者档案")
 
-    # Require valid bearer token in production; verify caller ownership whenever token is supplied
-    if settings.ENVIRONMENT.lower() == "production" and (not authorization or not authorization.startswith("Bearer ")):
+    # Require valid bearer token in strict mode; verify caller ownership whenever token is supplied
+    if is_strict_auth_mode() and (not authorization or not authorization.startswith("Bearer ")):
         raise HTTPException(status_code=401, detail="安全拦截：解绑手表必须提供有效的登录令牌")
 
     if authorization and authorization.startswith("Bearer "):
@@ -1251,13 +1419,15 @@ def unbind_garmin(request: GarminUnbindRequest, authorization: Optional[str] = H
             payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
             caller_uid = payload.get("uid") or payload.get("sub")
             is_admin = payload.get("is_super_admin", False) or LocalStore.is_super_admin(caller_uid)
-            if not is_admin and caller_uid and caller_uid != request.uid:
+            if (
+                not is_admin
+                and caller_uid
+                and LocalStore.resolve_user_id(caller_uid) != LocalStore.resolve_user_id(request.uid)
+            ):
                 caller_p = LocalStore.get_profile(caller_uid)
                 c_oid = caller_p.get("wechat_openid") if caller_p else None
                 t_oid = target_p.get("wechat_openid") if target_p else None
-                c_email = caller_p.get("email") if caller_p else None
-                t_email = target_p.get("email") if target_p else None
-                if (not c_oid or c_oid != t_oid) and (not c_email or c_email != t_email):
+                if not c_oid or c_oid != t_oid:
                     raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的佳明账号绑定")
         except jwt.PyJWTError as e:
             logger.debug(f"[unbind_garmin] Token expired or invalid: {e}")
@@ -1294,13 +1464,16 @@ def unbind_garmin(request: GarminUnbindRequest, authorization: Optional[str] = H
 
 @router.post("/coros/bind")
 @router.post("/coros/connect")
-def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
+def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks, http_req: Request = None):
     """
     Binds COROS (高驰) account (China: teamcnapi.coros.com or Global: teamapi.coros.com),
     encrypts password, and initiates an initial sync.
     Supports 2FA (手机二次安全验证) and passwordless 1-click SMS re-authorization for already-bound owners.
     """
     from utils.local_store import LocalStore, DB_PATH, sqlite3
+
+    if request.uid:
+        _verify_watch_bind_caller(http_req, request.uid)
 
     domain = (request.domain or "teamcnapi.coros.com").lower().strip()
     if "teamapi" not in domain and "teamcnapi" not in domain and domain not in ["cn", "global"]:
@@ -1313,6 +1486,14 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
     clean_account = (request.account or "").strip()
     if clean_account.startswith("+86"):
         clean_account = clean_account[3:].lstrip("- ").strip()
+
+    enforce_rate_limit(
+        "coros_bind",
+        f"{(request.uid or clean_account.lower())}:{get_client_ip(http_req)}",
+        max_calls=12,
+        window_seconds=300,
+        detail="高驰绑定尝试过于频繁，请 5 分钟后再试",
+    )
 
     effective_pwd = (request.password or "").strip()
     if not effective_pwd and request.uid:
@@ -1333,26 +1514,30 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
         alt_domain_for_key = "teamapi.coros.com" if "teamcnapi" in domain else "teamcnapi.coros.com"
         alt_account_key = f"{clean_account.lower()}::{alt_domain_for_key}"
         resolved_key = account_key
-        adapter = PENDING_COROS_2FA_ADAPTERS.get(account_key)
-        if not adapter and PENDING_COROS_2FA_ADAPTERS.get(alt_account_key):
-            adapter = PENDING_COROS_2FA_ADAPTERS.get(alt_account_key)
-            domain = alt_domain_for_key
-            resolved_key = alt_account_key
-        if not adapter or not adapter.login_ticket:
-            adapter = CorosAdapter(account=clean_account, password=effective_pwd, domain=domain)
-            # Re-initiate login to acquire loginTicket if adapter state was lost
-            adapter.login(force=True, trigger_2fa_sms=False)
+        adapter = _get_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key)
+        if not adapter:
+            alt_adp = _get_pending_adapter(PENDING_COROS_2FA_ADAPTERS, alt_account_key)
+            if alt_adp:
+                adapter = alt_adp
+                domain = alt_domain_for_key
+                resolved_key = alt_account_key
+        if not adapter or not getattr(adapter, "login_ticket", None):
+            raise HTTPException(status_code=400, detail="验证码已过期，请重新点击获取短信验证码")
         ok = adapter.complete_2fa(code)
         if not ok:
             raise HTTPException(status_code=400, detail=adapter.last_error or "验证码错误或已失效，请重新输入手机短信中的 6 位验证码")
-        PENDING_COROS_2FA_ADAPTERS.pop(resolved_key, None)
+        if adapter.domain:
+            domain = adapter.domain
+        _pop_pending_adapter(PENDING_COROS_2FA_ADAPTERS, resolved_key)
     else:
         # Initial login attempt (force=True ignores cache while preserving needs_2fa circuit-breaker until verified)
         adapter = CorosAdapter(account=clean_account, password=effective_pwd, domain=domain)
         ok = adapter.login(force=True, trigger_2fa_sms=True)
+        if ok and adapter.domain:
+            domain = adapter.domain
         if not ok:
             if adapter.needs_2fa:
-                PENDING_COROS_2FA_ADAPTERS[account_key] = adapter
+                _set_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key, adapter)
                 return {
                     "success": False,
                     "connected": False,
@@ -1372,7 +1557,7 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
                     adapter = alt_adapter
                     domain = alt_domain
                 elif alt_adapter.needs_2fa:
-                    PENDING_COROS_2FA_ADAPTERS[alt_account_key] = alt_adapter
+                    _set_pending_adapter(PENDING_COROS_2FA_ADAPTERS, alt_account_key, alt_adapter)
                     return {
                         "success": False,
                         "connected": False,
@@ -1416,12 +1601,9 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
             request.uid,
             effective_uid,
             profile_updates=update_data,
-            drop_transient_watch_activities=True,
+            drop_transient_watch_activities=False,
         )
     else:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("DELETE FROM activities WHERE user_id = ? AND (id LIKE 'hk_%' OR id LIKE 'aw_%' OR id LIKE 'hw_%')", (effective_uid,))
-            conn.commit()
         LocalStore.upsert_profile(effective_uid, {
             "coros_connected": 1,
             "coros_account": clean_account,
@@ -1486,20 +1668,29 @@ def bind_coros(request: CorosBindRequest, background_tasks: BackgroundTasks):
 
 
 @router.post("/coros/resend-code")
-def resend_coros_code(request: CorosBindRequest):
+def resend_coros_code(request: CorosBindRequest, http_req: Request = None):
     """
     Resends 2FA SMS verification code for COROS account.
     """
+    if request.uid:
+        _verify_watch_bind_caller(http_req, request.uid)
+    enforce_rate_limit(
+        "coros_resend",
+        f"{request.account.strip().lower()}:{get_client_ip(http_req)}",
+        max_calls=5,
+        window_seconds=300,
+        detail="重发验证码过于频繁，请稍后再试",
+    )
     domain = request.domain.lower().strip()
     if "teamapi" not in domain and "teamcnapi" not in domain and domain not in ["cn", "global"]:
         domain = "teamcnapi.coros.com"
     account_key = f"{request.account.strip().lower()}::{domain}"
-    adapter = PENDING_COROS_2FA_ADAPTERS.get(account_key)
+    adapter = _get_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key)
     if not adapter or not adapter.two_fa_account:
         adapter = CorosAdapter(account=request.account, password=request.password, domain=domain)
         adapter.login(force=True, trigger_2fa_sms=True)
         if adapter.needs_2fa:
-            PENDING_COROS_2FA_ADAPTERS[account_key] = adapter
+            _set_pending_adapter(PENDING_COROS_2FA_ADAPTERS, account_key, adapter)
             return {"success": True, "message": "已重新发送高驰安全验证码"}
         raise HTTPException(status_code=400, detail=adapter.last_error or "重新发送验证码失败")
 
@@ -1511,7 +1702,7 @@ def resend_coros_code(request: CorosBindRequest):
 
 @router.post("/coros/unbind")
 @router.post("/coros/disconnect")
-def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Header(None)):
+def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Header(None), http_req: Request = None):
     """Unbinds COROS account with caller ownership verification."""
     from utils.local_store import LocalStore
 
@@ -1522,8 +1713,8 @@ def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Hea
     if not target_p:
         raise HTTPException(status_code=404, detail="未找到对应的跑者档案")
 
-    # Require valid bearer token in production; verify caller ownership whenever token is supplied
-    if settings.ENVIRONMENT.lower() == "production" and (not authorization or not authorization.startswith("Bearer ")):
+    # Require valid bearer token in strict mode; verify caller ownership whenever token is supplied
+    if is_strict_auth_mode() and (not authorization or not authorization.startswith("Bearer ")):
         raise HTTPException(status_code=401, detail="安全拦截：解绑手表必须提供有效的登录令牌")
 
     if authorization and authorization.startswith("Bearer "):
@@ -1533,13 +1724,15 @@ def unbind_coros(request: CorosUnbindRequest, authorization: Optional[str] = Hea
             payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
             caller_uid = payload.get("uid") or payload.get("sub")
             is_admin = payload.get("is_super_admin", False) or LocalStore.is_super_admin(caller_uid)
-            if not is_admin and caller_uid and caller_uid != request.uid:
+            if (
+                not is_admin
+                and caller_uid
+                and LocalStore.resolve_user_id(caller_uid) != LocalStore.resolve_user_id(request.uid)
+            ):
                 caller_p = LocalStore.get_profile(caller_uid)
                 c_oid = caller_p.get("wechat_openid") if caller_p else None
                 t_oid = target_p.get("wechat_openid") if target_p else None
-                c_email = caller_p.get("email") if caller_p else None
-                t_email = target_p.get("email") if target_p else None
-                if (not c_oid or c_oid != t_oid) and (not c_email or c_email != t_email):
+                if not c_oid or c_oid != t_oid:
                     raise HTTPException(status_code=403, detail="安全拦截：无权操作其他用户的高驰账号绑定")
         except jwt.PyJWTError as e:
             logger.debug(f"[unbind_coros] Token expired or invalid: {e}")
@@ -1597,13 +1790,12 @@ def _get_other_connected_watch_label(profile: Dict[str, Any], target_brand: str)
 
 
 @router.post("/apple-watch/bind")
-def bind_apple_watch(request: WatchStatusBindRequest):
+def bind_apple_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Marks Apple Watch (HealthKit / screenshot / track sync) as bound on the user's profile."""
     from datetime import datetime
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     curr_p = LocalStore.get_profile(request.uid) or {}
     if curr_p.get("garmin_connected"):
@@ -1649,12 +1841,11 @@ def bind_apple_watch(request: WatchStatusBindRequest):
 
 
 @router.post("/apple-watch/unbind")
-def unbind_apple_watch(request: WatchStatusBindRequest):
+def unbind_apple_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Unbinds Apple Watch from the user's profile."""
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     LocalStore.upsert_profile(request.uid, {
         "apple_watch_connected": 0,
@@ -1668,13 +1859,12 @@ def unbind_apple_watch(request: WatchStatusBindRequest):
 
 
 @router.post("/huawei/bind")
-def bind_huawei_watch(request: WatchStatusBindRequest):
+def bind_huawei_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Marks Huawei Watch (via screenshot / track file / Apple Health bridge) as bound."""
     from datetime import datetime
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     curr_p = LocalStore.get_profile(request.uid) or {}
     if curr_p.get("garmin_connected"):
@@ -1722,12 +1912,11 @@ def bind_huawei_watch(request: WatchStatusBindRequest):
 
 
 @router.post("/huawei/unbind")
-def unbind_huawei_watch(request: WatchStatusBindRequest):
+def unbind_huawei_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Unbinds Huawei Watch from the user's profile (preserving imported activities)."""
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     LocalStore.upsert_profile(request.uid, {
         "huawei_connected": 0,
@@ -1741,13 +1930,12 @@ def unbind_huawei_watch(request: WatchStatusBindRequest):
 
 
 @router.post("/suunto/bind")
-def bind_suunto_watch(request: WatchStatusBindRequest):
+def bind_suunto_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Marks Suunto Watch (via screenshot / FIT/GPX track file / Apple Health bridge) as bound."""
     from datetime import datetime
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     curr_p = LocalStore.get_profile(request.uid) or {}
     if curr_p.get("garmin_connected"):
@@ -1795,12 +1983,11 @@ def bind_suunto_watch(request: WatchStatusBindRequest):
 
 
 @router.post("/suunto/unbind")
-def unbind_suunto_watch(request: WatchStatusBindRequest):
+def unbind_suunto_watch(request: WatchStatusBindRequest, http_req: Request = None):
     """Unbinds Suunto Watch from the user's profile (preserving imported activities)."""
     from utils.local_store import LocalStore
 
-    if not request.uid or not request.uid.strip():
-        raise HTTPException(status_code=400, detail="缺少用户标识")
+    _verify_watch_bind_caller(http_req, request.uid)
 
     LocalStore.upsert_profile(request.uid, {
         "suunto_connected": 0,

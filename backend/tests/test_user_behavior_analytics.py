@@ -11,7 +11,8 @@ import pytest
 
 # Point RGM_DB_PATH to a disposable temp file BEFORE importing `main` so `main`'s import-time `init_db()` never touches real `data/rgm.db`
 _BOOT_TMP_DB = os.path.join(tempfile.gettempdir(), f"rgm_boot_test_{os.getpid()}.db")
-os.environ["RGM_DB_PATH"] = _BOOT_TMP_DB
+if not os.environ.get("RGM_DB_PATH"):
+    os.environ["RGM_DB_PATH"] = _BOOT_TMP_DB
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

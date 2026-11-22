@@ -1,9 +1,24 @@
 import os
 import base64
 import hashlib
+import hmac
 from typing import Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from config import settings
+
+
+def compute_phone_hmac(phone: Optional[str]) -> str:
+    """Computes a normalized HMAC-SHA256 blind index for O(1) indexed phone lookup."""
+    s = str(phone or "").strip()
+    if not s:
+        return ""
+    if s.startswith("+86"):
+        s = s[3:].lstrip("- ").strip()
+    return hmac.new(
+        (settings.SECRET_KEY or "").encode("utf-8"),
+        s.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 def _get_key() -> bytes:
     # Derives a consistent 32-byte key from settings.SECRET_KEY

@@ -10,8 +10,9 @@ import logging
 # Ensure backend path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.local_store import LocalStore, DB_PATH
+from utils.local_store import LocalStore, DB_PATH, db_connect
 from utils.garmin_adapter import GarminAdapter
+from utils.encryption import decrypt_string
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("backfill_elevation")
@@ -24,7 +25,7 @@ def backfill_user_garmin_elevation(user_id: str):
         return
 
     email = profile["garmin_email"]
-    pwd = profile["garmin_encrypted_password"]
+    pwd = decrypt_string(profile.get("garmin_encrypted_password") or "")
     domain = profile.get("garmin_domain") or "garmin.com"
     adapter = GarminAdapter(email=email, password=pwd, domain=domain)
     if not adapter.login():
@@ -37,7 +38,7 @@ def backfill_user_garmin_elevation(user_id: str):
     logger.info(f"Retrieved {len(garmin_acts)} activities from Garmin Connect.")
 
     updated_count = 0
-    with sqlite3.connect(DB_PATH) as conn:
+    with db_connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 

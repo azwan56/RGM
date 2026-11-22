@@ -577,8 +577,13 @@ def _extract_normalized_splits(
                 else:
                     p_sec = parse_pace_str_to_sec(activity.get("avg_pace_str"))
                     dur_s = (p_sec or 330) * (seg_dist_m / 1000.0)
-                eg = sum(max(0.0, b - a) for a, b in zip(elevs, elevs[1:])) if len(elevs) >= 2 else 0.0
-                el = sum(max(0.0, a - b) for a, b in zip(elevs, elevs[1:])) if len(elevs) >= 2 else 0.0
+                if len(elevs) >= 2:
+                    from utils.geo_utils import compute_smoothed_elevation_gain
+                    eg = compute_smoothed_elevation_gain(elevs) or 0.0
+                    el = compute_smoothed_elevation_gain([-x for x in elevs]) or 0.0
+                else:
+                    eg = 0.0
+                    el = 0.0
                 gap_s = compute_gap_sec(p_sec, seg_dist_m, eg, el)
                 synth.append({
                     "lap_index": bucket_idx,

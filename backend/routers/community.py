@@ -172,6 +172,9 @@ class TargetedInviteRespondRequest(BaseModel):
 @router.post("/clubs/{club_id}/broadcasts")
 def create_broadcast(club_id: str, req: CreateBroadcastRequest, request: Request):
     uid = _extract_uid(req.author_id or req.operator_uid, request)
+    from utils.wechat import wechat_client
+    prof = LocalStore.get_profile(uid) or {}
+    wechat_client.ensure_ugc_text_safe(f"{req.title or ''}\n{req.content or ''}", openid=prof.get("wechat_openid"), scene=2)
     try:
         item = LocalStore.create_club_broadcast(
             club_id=club_id,
@@ -228,11 +231,18 @@ def get_home_pulse(
     request: Request,
     viewer_uid: Optional[str] = Query(None),
     club_id: Optional[str] = Query(None),
+    preferred_club_id: Optional[str] = Query(None),
     tab: str = Query("all"),
     limit: int = Query(20, ge=1, le=50),
 ):
     uid = _extract_uid(viewer_uid, request)
-    return LocalStore.get_home_social_pulse(viewer_uid=uid, club_id=club_id, tab=tab, limit=limit)
+    return LocalStore.get_home_social_pulse(
+        viewer_uid=uid,
+        club_id=club_id,
+        tab=tab,
+        limit=limit,
+        preferred_club_id=preferred_club_id,
+    )
 
 
 @router.post("/micro-cheer")
@@ -371,6 +381,10 @@ def get_club_showcase(
 @router.put("/showcase/clubs/{club_id}")
 def upsert_club_showcase(club_id: str, req: ClubShowcaseUpsertRequest, request: Request):
     uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
+    from utils.wechat import wechat_client
+    prof = LocalStore.get_profile(uid) or {}
+    text_blob = "\n".join(str(v) for k, v in req.model_dump().items() if k != "operator_uid" and isinstance(v, str) and not v.startswith(("http", "/")))
+    wechat_client.ensure_ugc_text_safe(text_blob, openid=prof.get("wechat_openid"), scene=2)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         detail = LocalStore.upsert_club_showcase_profile(club_id, uid, payload)
@@ -393,6 +407,10 @@ def get_coach_showcase(coach_uid: str, request: Request, viewer_uid: Optional[st
 @router.put("/showcase/coaches/{coach_uid}")
 def upsert_coach_showcase(coach_uid: str, req: CoachResumeUpsertRequest, request: Request):
     uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
+    from utils.wechat import wechat_client
+    prof = LocalStore.get_profile(uid) or {}
+    text_blob = "\n".join(str(v) for k, v in req.model_dump().items() if k != "operator_uid" and isinstance(v, str) and not v.startswith(("http", "/")))
+    wechat_client.ensure_ugc_text_safe(text_blob, openid=prof.get("wechat_openid"), scene=2)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         detail = LocalStore.upsert_coach_public_resume(coach_uid, uid, payload)
@@ -415,6 +433,10 @@ async def upload_showcase_photo_multipart(
     is_cover: bool = Form(False),
 ):
     uid = _extract_uid(uploader_uid, request, strict_match_auth=True)
+    if caption and caption.strip():
+        from utils.wechat import wechat_client
+        prof = LocalStore.get_profile(uid) or {}
+        wechat_client.ensure_ugc_text_safe(caption, openid=prof.get("wechat_openid"), scene=2)
     contents = await file.read()
     filename = _save_showcase_image_bytes(owner_type, owner_id, contents, file.filename or "showcase.jpg")
     photo_url = _build_showcase_photo_url(request, filename)
@@ -440,6 +462,10 @@ async def upload_showcase_photo_multipart(
 @router.post("/showcase/photos/upload-base64")
 def upload_showcase_photo_base64(req: ShowcasePhotoBase64Request, request: Request):
     uid = _extract_uid(req.uploader_uid or req.operator_uid, request, strict_match_auth=True)
+    if req.caption and req.caption.strip():
+        from utils.wechat import wechat_client
+        prof = LocalStore.get_profile(uid) or {}
+        wechat_client.ensure_ugc_text_safe(req.caption, openid=prof.get("wechat_openid"), scene=2)
     raw_ext = (req.ext or ".jpg").lower()
     if not raw_ext.startswith("."):
         raw_ext = f".{raw_ext}"
@@ -475,6 +501,10 @@ def upload_showcase_photo_base64(req: ShowcasePhotoBase64Request, request: Reque
 @router.patch("/showcase/photos/{photo_id}")
 def update_showcase_photo_endpoint(photo_id: str, req: ShowcasePhotoUpdateRequest, request: Request):
     uid = _extract_uid(req.operator_uid, request, strict_match_auth=True)
+    if getattr(req, "caption", None):
+        from utils.wechat import wechat_client
+        prof = LocalStore.get_profile(uid) or {}
+        wechat_client.ensure_ugc_text_safe(req.caption, openid=prof.get("wechat_openid"), scene=2)
     try:
         payload = {k: v for k, v in req.model_dump().items() if k != "operator_uid" and v is not None}
         photo = LocalStore.update_showcase_photo(photo_id, uid, payload)
@@ -542,6 +572,10 @@ def get_recruit_candidates(
 @router.post("/clubs/{club_id}/targeted-invites")
 def create_targeted_invites_endpoint(club_id: str, req: TargetedInviteCreateRequest, request: Request):
     uid = _extract_uid(req.inviter_uid or req.operator_uid, request)
+    if req.custom_message and req.custom_message.strip():
+        from utils.wechat import wechat_client
+        prof = LocalStore.get_profile(uid) or {}
+        wechat_client.ensure_ugc_text_safe(req.custom_message, openid=prof.get("wechat_openid"), scene=2)
     try:
         res = LocalStore.create_targeted_invites(
             club_id=club_id,

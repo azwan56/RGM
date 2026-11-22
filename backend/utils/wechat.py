@@ -245,6 +245,104 @@ class WeChatAPI:
                 return None
         return None
 
+    def check_ugc_text_safety(
+        self,
+        content: str,
+        openid: Optional[str] = None,
+        scene: int = 2,
+    ) -> Dict[str, Any]:
+        """
+        Checks user-generated text against WeChat msg_sec_check (v2).
+        Fails open when WeChat credentials are not configured (local/test env);
+        returns {"pass": False, ...} if WeChat flags content as risky/review.
+        """
+        text = str(content or "").strip()
+        if not text:
+            return {"pass": True, "suggest": "pass"}
+        appid = (self.app_id or "").strip()
+        secret = (self.app_secret or "").strip()
+        if not appid or not secret or appid.startswith("your_") or secret.startswith("your_"):
+            return {"pass": True, "suggest": "pass", "skipped": "unconfigured"}
+
+        token = self.get_access_token()
+        if not token:
+            logger.warning("[wechat] msg_sec_check skipped: unable to obtain access_token")
+            return {"pass": True, "suggest": "pass", "skipped": "no_token"}
+
+        url = f"https://api.weixin.qq.com/wxa/msg_sec_check?access_token={token}"
+        payload: Dict[str, Any] = {
+            "content": text[:2500],
+            "version": 2,
+            "scene": int(scene),
+            "openid": (openid or "o000000000000000000000000000"),
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=5)
+            data = resp.json() if resp.status_code == 200 else {}
+            errcode = data.get("errcode", 0)
+            if errcode == 87014:
+                return {"pass": False, "suggest": "risky", "errcode": 87014}
+            if errcode in (40001, 42001):
+                token = self.get_access_token(force_refresh=True)
+                if token:
+                    resp = requests.post(
+                        f"https://api.weixin.qq.com/wxa/msg_sec_check?access_token={token}",
+                        json=payload,
+                        timeout=5,
+                    )
+                    data = resp.json() if resp.status_code == 200 else {}
+            suggest = str((data.get("result") or {}).get("suggest") or "pass").lower()
+            if data.get("errcode") == 87014 or suggest in ("risky", "review"):
+                return {"pass": False, "suggest": suggest, "errcode": data.get("errcode")}
+            return {"pass": True, "suggest": suggest}
+        except Exception as e:
+            logger.warning(f"[wechat] msg_sec_check request failed softly: {e}")
+            return {"pass": True, "suggest": "pass", "skipped": "network_error"}
+
+    def ensure_ugc_text_safe(
+        self,
+        content: str,
+        openid: Optional[str] = None,
+        scene: int = 2,
+    ) -> None:
+        from fastapi import HTTPException
+        res = self.check_ugc_text_safety(content=content, openid=openid, scene=scene)
+        if not res.get("pass", True):
+            raise HTTPException(
+                status_code=400,
+                detail="内容包含敏感或违规信息，请修改后重试",
+            )
+
+    def trigger_ugc_media_check_async(
+        self,
+        media_url: str,
+        openid: Optional[str] = None,
+        media_type: int = 2,
+        scene: int = 2,
+    ) -> None:
+        """Best-effort async WeChat media_check_async call for public image URLs."""
+        if not media_url or not str(media_url).startswith(("http://", "https://")):
+            return
+        appid = (self.app_id or "").strip()
+        secret = (self.app_secret or "").strip()
+        if not appid or not secret or appid.startswith("your_"):
+            return
+        token = self.get_access_token()
+        if not token:
+            return
+        url = f"https://api.weixin.qq.com/wxa/media_check_async?access_token={token}"
+        payload = {
+            "media_url": str(media_url),
+            "media_type": int(media_type),
+            "version": 2,
+            "scene": int(scene),
+            "openid": (openid or "o000000000000000000000000000"),
+        }
+        try:
+            requests.post(url, json=payload, timeout=4)
+        except Exception as e:
+            logger.debug(f"[wechat] media_check_async skipped softly: {e}")
+
     def get_stable_access_token(self, force_refresh: bool = False) -> Optional[str]:
         """
         Obtains WeChat Mini Program stable_token without invalidating tokens held by other processes.

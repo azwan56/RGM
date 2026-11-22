@@ -478,3 +478,60 @@ def test_web_qr_telemetry_bridge_for_legacy_miniapp_and_security():
     r_st3 = client.get(f"/api/auth/wechat/web-qr/status/{scene_id}")
     assert r_st3.json()["status"] == "consumed"
 
+
+def test_merge_replaces_legacy_fake_openid_and_lookup_uses_user_identities():
+    """Merging a real WeChat profile into a legacy `wx_...` profile replaces the fake openid,
+    and `get_profile_by_openid` / `get_profile_by_unionid` fall back to `user_identities`."""
+    ts = int(time.time() * 1000)
+    src_uid = f"u_wx_real_{ts}"
+    tgt_uid = f"u_legacy_{ts}"
+    real_openid = f"ogDgjxRealOpenid_{ts}"
+    alt_openid = f"ogDgjxAltOpenid_{ts}"
+    alt_unionid = f"oUnionAlt_{ts}"
+
+    LocalStore.upsert_profile(tgt_uid, {"id": tgt_uid, "display_name": "老账号", "wechat_openid": f"wx_legacy_{ts}"})
+    LocalStore.upsert_profile(src_uid, {"id": src_uid, "display_name": "跑者_temp", "wechat_openid": real_openid})
+    LocalStore.bind_user_identity(src_uid, "wechat_openid", real_openid)
+
+    merged = LocalStore.merge_user_profiles(src_uid, tgt_uid)
+    assert merged == tgt_uid
+    tgt_p = LocalStore.get_profile(tgt_uid)
+    assert tgt_p["wechat_openid"] == real_openid
+
+    # Also verify fallback lookup via user_identities when an additional openid/unionid is bound
+    LocalStore.bind_user_identity(tgt_uid, "wechat_openid", alt_openid)
+    LocalStore.bind_user_identity(tgt_uid, "wechat_unionid", alt_unionid)
+    found_by_oid = LocalStore.get_profile_by_openid(alt_openid)
+    found_by_uid = LocalStore.get_profile_by_unionid(alt_unionid)
+    assert found_by_oid is not None and found_by_oid["id"] == tgt_uid
+    assert found_by_uid is not None and found_by_uid["id"] == tgt_uid
+
+
+def test_concurrent_upsert_profile_for_new_user_is_idempotent():
+    """Concurrent first-launch miniapp-login calls creating the same profile must never raise IntegrityError."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ts = int(time.time() * 1000)
+    uid = f"u_wx_race_{ts}"
+    openid = f"ogDgjxRace_{ts}"
+
+    def _create(_idx: int):
+        LocalStore.upsert_profile(
+            uid,
+            {
+                "id": uid,
+                "wechat_openid": openid,
+                "display_name": f"跑者_{str(ts)[-4:]}",
+                "garmin_connected": 0,
+            },
+        )
+        return True
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(_create, range(6)))
+    assert all(results)
+    prof = LocalStore.get_profile(uid)
+    assert prof is not None and prof["wechat_openid"] == openid
+
+
+

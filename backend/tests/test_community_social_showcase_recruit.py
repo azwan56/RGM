@@ -183,7 +183,7 @@ def test_phase1_broadcast_pulse_and_micro_cheer_privacy(isolated_env):
     assert len(newcomer_cards) >= 1
     nc = newcomer_cards[0]
     assert nc["user_id"] == "u_newcomer"
-    assert nc["age_group"] in ("30-34", "35-39")
+    assert nc["age_group"] == "中坚组"
     assert "real_name" not in nc and "phone" not in nc and "date_of_birth" not in nc
 
     # Newcomer's activity respects hide_gps_route + hide_biometrics + critique='self'
@@ -214,6 +214,39 @@ def test_phase1_broadcast_pulse_and_micro_cheer_privacy(isolated_env):
     assert cheer.status_code == 200
     assert cheer.json()["active"] is True
     assert cheer.json()["counts_by_key"]["welcome_pat"] == 1
+
+    # Most-frequently-followed club affinity ranking:
+    # u_newcomer is in club_a and joins club_b; interacting more in club_b surfaces club_b automatically on home-pulse
+    with sqlite3.connect(isolated_env["db_file"]) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at, privacy_consent) VALUES ('cm_new_b', 'club_b', 'u_newcomer', 'member', 'active', '2026-11-01T00:00:00Z', 1)"
+        )
+        conn.commit()
+    for cheer_k in ("steady_aerobic", "high_intensity"):
+        c.post(
+            "/api/community/micro-cheer",
+            headers=_headers("u_newcomer"),
+            json={
+                "sender_id": "u_newcomer",
+                "target_type": "activity",
+                "target_id": "act_cap_1",
+                "recipient_id": "u_coach_b",
+                "cheer_key": cheer_k,
+                "club_id": "club_b",
+            },
+        )
+    auto_pulse = c.get("/api/community/home-pulse?viewer_uid=u_newcomer", headers=_headers("u_newcomer"))
+    assert auto_pulse.status_code == 200
+    ap = auto_pulse.json()
+    assert ap["club_id"] == "club_b"
+    assert ap["club_name"] == "张江破330特训营"
+    assert ap["club_selection_reason"] == "常关注"
+    assert ap["clubs"][0]["id"] == "club_b" and ap["clubs"][0]["is_most_frequent"] is True
+
+    switched_pulse = c.get("/api/community/home-pulse?viewer_uid=u_newcomer&club_id=club_a", headers=_headers("u_newcomer"))
+    assert switched_pulse.status_code == 200
+    assert switched_pulse.json()["club_id"] == "club_a"
+    assert switched_pulse.json()["club_selection_reason"] == "当前切换"
 
 
 def test_phase2_buddy_discovery_privacy_follow_pk_and_purge(isolated_env):
@@ -449,11 +482,27 @@ def test_phase4_non_exclusive_targeted_recruit_invite_and_funnel(isolated_env):
     # Targeted user sees pending invite & opens Golden Invite Landing Preview (embedded showcase)
     pend = c.get("/api/community/invites/my-pending?user_id=u_newcomer", headers=_headers("u_newcomer"))
     assert pend.status_code == 200 and len(pend.json()["invites"]) == 1
+    pend_inv = pend.json()["invites"][0]
+    assert "showcase_summary" in pend_inv
+    assert "verified_stats" in pend_inv
 
     prev = c.get(f"/api/community/invites/{token}?viewer_uid=u_newcomer", headers=_headers("u_newcomer"))
     assert prev.status_code == 200
     assert prev.json()["invite"]["preassigned_group"] == "A组"
     assert prev.json()["showcase_preview"]["club"]["id"] == "club_b"
+    assert "verified_stats" in prev.json()["invite"]
+    assert "showcase_summary" in prev.json()
+
+    # Club share-info and invite-info also synthesize club main info & images for the invite card
+    share_res = c.get("/api/team/club_b/share-info?user_id=u_coach_b", headers=_headers("u_coach_b"))
+    assert share_res.status_code == 200
+    assert "showcase_summary" in share_res.json()
+    assert "verified_stats" in share_res.json()
+
+    inv_info_res = c.get("/api/team/club_b/invite-info?inviter_uid=u_coach_b&user_id=u_newcomer", headers=_headers("u_newcomer"))
+    assert inv_info_res.status_code == 200
+    assert inv_info_res.json()["one_click_join"] is True
+    assert "verified_stats" in inv_info_res.json()["club"]
 
     # Zero-code accept: joins club_b with training_group='A组' AND preserves club_a membership!
     acc = c.post(
@@ -476,3 +525,358 @@ def test_phase4_non_exclusive_targeted_recruit_invite_and_funnel(isolated_env):
     assert f["sent_count"] == 1
     assert f["viewed_count"] == 1
     assert f["accepted_count"] == 1
+
+
+def test_showcase_plaza_prioritizes_decorated_and_active_clubs_and_coaches(isolated_env):
+    """Decorated clubs/coaches rank first, then clubs with highest recent check-in & event activity."""
+    c = isolated_env["client"]
+    db_file = isolated_env["db_file"]
+    today = get_beijing_today()
+    recent_ts = (today - timedelta(days=2)).isoformat() + "T07:00:00+08:00"
+    newest_ts = today.isoformat() + "T23:59:00+08:00"
+    older_ts = (today - timedelta(days=60)).isoformat() + "T07:00:00+08:00"
+
+    # Seed additional public clubs with deliberately inverted created_at timestamps:
+    # - club_newest_empty: created newest, undecorated, 0 activity -> must rank LAST
+    # - club_undec_hot: created oldest, undecorated, lots of check-ins + group event -> must lead undecorated clubs
+    # - club_dec_quiet: decorated with photo, 0 recent activity -> ahead of undecorated, behind active decorated
+    # - club_dec_hot: decorated with photo + slogan + active recent check-ins -> must rank #1
+    with sqlite3.connect(db_file) as conn:
+        cur = conn.cursor()
+        for uid, name in [
+            ("u_owner_hot", "热力团长"),
+            ("u_owner_quiet", "静默团长"),
+            ("u_owner_undec_hot", "活跃未装修团长"),
+            ("u_owner_empty", "新空团长"),
+            ("u_runner_extra", "打卡达人"),
+        ]:
+            cur.execute(
+                "INSERT OR REPLACE INTO profiles (id, display_name, city, garmin_connected, created_at) VALUES (?, ?, '上海', 1, ?)",
+                (uid, name, older_ts),
+            )
+
+        clubs_seed = [
+            ("club_dec_hot", "精装活跃团", "HOTDEC", "u_owner_hot", older_ts),
+            ("club_dec_quiet", "精装静默团", "QUTDEC", "u_owner_quiet", newest_ts),
+            ("club_undec_hot", "未装超活跃团", "HOTUND", "u_owner_undec_hot", older_ts),
+            ("club_newest_empty", "最新空跑团", "NEWEMP", "u_owner_empty", newest_ts),
+        ]
+        for cid, cname, code, owner, ts in clubs_seed:
+            cur.execute(
+                "INSERT OR REPLACE INTO clubs (id, org_id, name, city, invite_code, owner_id, join_mode, status, created_at) VALUES (?, NULL, ?, '上海', ?, ?, 'free', 'active', ?)",
+                (cid, cname, code, owner, ts),
+            )
+            cur.execute(
+                "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES (?, ?, ?, 'owner', 'active', ?)",
+                (f"cm_{cid}_own", cid, owner, ts),
+            )
+
+        # Also make u_owner_hot an owner of club_newest_empty (newer) to verify primary_club picks club_dec_hot!
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_multi_hot', 'club_newest_empty', 'u_owner_hot', 'coach', 'active', ?)",
+            (newest_ts,),
+        )
+        # Add extra runner to club_undec_hot & club_dec_hot
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_und_r', 'club_undec_hot', 'u_runner_extra', 'member', 'active', ?)",
+            (older_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_dec_r', 'club_dec_hot', 'u_runner_extra', 'member', 'active', ?)",
+            (older_ts,),
+        )
+
+        # Decorate club_dec_hot and club_dec_quiet (both with cover photo)
+        for cid, slogan in [("club_dec_hot", "精装活跃宣言"), ("club_dec_quiet", "精装静默宣言")]:
+            cur.execute(
+                "INSERT OR REPLACE INTO club_showcase_profiles (club_id, slogan, hero_cover_url, is_published, updated_at) VALUES (?, ?, ?, 1, ?)",
+                (cid, slogan, f"/api/showcase-photos/{cid}.jpg", recent_ts),
+            )
+            cur.execute(
+                "INSERT OR REPLACE INTO showcase_photos (id, owner_type, owner_id, uploader_id, photo_url, category, is_cover, created_at) VALUES (?, 'club', ?, ?, ?, 'group_run', 1, ?)",
+                (f"sp_{cid}", cid, "u_owner_hot", f"/api/showcase-photos/{cid}.jpg", recent_ts),
+            )
+
+        # Decorate u_owner_quiet as a coach with a personal photo & bio so decorated coach leads coach tab
+        cur.execute(
+            "INSERT OR REPLACE INTO coach_public_resumes (user_id, headline, bio_story, is_published, updated_at) VALUES ('u_owner_quiet', '资深科学训练教练', '执教十年', 1, ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO showcase_photos (id, owner_type, owner_id, uploader_id, photo_url, category, is_cover, created_at) VALUES ('sp_coach_quiet', 'coach', 'u_owner_quiet', 'u_owner_quiet', '/api/showcase-photos/coach_q.jpg', 'certificate', 1, ?)",
+            (recent_ts,),
+        )
+
+        # Seed recent 30d running check-ins:
+        # u_owner_hot: 6 runs; u_runner_extra: 10 runs; u_owner_undec_hot: 8 runs
+        for i in range(6):
+            cur.execute(
+                "INSERT OR REPLACE INTO activities (id, user_id, name, sport_type, distance_meters, moving_time_seconds, start_time) VALUES (?, 'u_owner_hot', '晨跑', 'running', 10000, 3000, ?)",
+                (f"act_oh_{i}", (today - timedelta(days=i + 1)).isoformat() + "T07:00:00+08:00"),
+            )
+        for i in range(10):
+            cur.execute(
+                "INSERT OR REPLACE INTO activities (id, user_id, name, sport_type, distance_meters, moving_time_seconds, start_time) VALUES (?, 'u_runner_extra', '打卡', 'running', 12000, 3600, ?)",
+                (f"act_re_{i}", (today - timedelta(days=i + 1)).isoformat() + "T07:00:00+08:00"),
+            )
+        for i in range(8):
+            cur.execute(
+                "INSERT OR REPLACE INTO activities (id, user_id, name, sport_type, distance_meters, moving_time_seconds, start_time) VALUES (?, 'u_owner_undec_hot', '拉练', 'running', 15000, 4500, ?)",
+                (f"act_uh_{i}", (today - timedelta(days=i + 1)).isoformat() + "T07:00:00+08:00"),
+            )
+
+        # Seed a recent group-run event with 2 participants for club_undec_hot
+        cur.execute(
+            "INSERT OR REPLACE INTO club_events (id, club_id, title, event_type, start_date, end_date, status, created_at) VALUES ('ev_und_1', 'club_undec_hot', '周日20km合练', 'group_run', ?, ?, 'archived', ?)",
+            ((today - timedelta(days=3)).isoformat(), (today - timedelta(days=3)).isoformat(), recent_ts),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_event_participants (id, event_id, club_id, user_id, joined_at, status) VALUES ('ep_und_1', 'ev_und_1', 'club_undec_hot', 'u_owner_undec_hot', ?, 'joined')",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_event_participants (id, event_id, club_id, user_id, joined_at, status) VALUES ('ep_und_2', 'ev_und_1', 'club_undec_hot', 'u_runner_extra', ?, 'joined')",
+            (recent_ts,),
+        )
+        conn.commit()
+
+    res = c.get("/api/community/showcase/plaza?viewer_uid=u_stranger&city=上海", headers=_headers("u_stranger"))
+    assert res.status_code == 200
+    body = res.json()
+    club_ids = [x["club_id"] for x in body["clubs"]]
+    # Decorated clubs come first (active decorated > quiet decorated), then active undecorated > newest empty
+    assert club_ids.index("club_dec_hot") < club_ids.index("club_dec_quiet")
+    assert club_ids.index("club_dec_quiet") < club_ids.index("club_undec_hot")
+    assert club_ids.index("club_undec_hot") < club_ids.index("club_newest_empty")
+
+    by_cid = {x["club_id"]: x for x in body["clubs"]}
+    assert by_cid["club_dec_hot"]["is_decorated"] is True
+    assert by_cid["club_undec_hot"]["is_decorated"] is False
+    assert by_cid["club_undec_hot"]["verified_stats"]["recent_30d_checkins"] == 18
+    assert by_cid["club_undec_hot"]["verified_stats"]["recent_30d_events"] == 1
+    assert by_cid["club_undec_hot"]["verified_stats"]["recent_30d_event_participants"] == 2
+
+    # Coach tab: decorated coach first; next coach leading decorated/active club; inactive empty club coach last
+    coaches = body["coaches"]
+    coach_uids = [x["user_id"] for x in coaches]
+    assert coach_uids[0] == "u_owner_quiet"
+    assert coach_uids.index("u_owner_hot") < coach_uids.index("u_owner_empty")
+    assert coach_uids.index("u_owner_undec_hot") < coach_uids.index("u_owner_empty")
+
+    # Multi-club coach u_owner_hot picks decorated active club_dec_hot as primary_club (NOT newer club_newest_empty)
+    by_uid = {x["user_id"]: x for x in coaches}
+    assert by_uid["u_owner_hot"]["primary_club_id"] == "club_dec_hot"
+    assert by_uid["u_owner_hot"]["primary_club_name"] == "精装活跃团"
+
+
+def test_showcase_org_club_priority_and_free_runner_isolation(isolated_env):
+    """Org clubs prioritize for org members; free runners never see org clubs anywhere (plaza, all-clubs, coach detail)."""
+    c = isolated_env["client"]
+    db_file = isolated_env["db_file"]
+    today = get_beijing_today()
+    recent_ts = (today - timedelta(days=1)).isoformat() + "T08:00:00+08:00"
+
+    # Decorate free club `club_pub` heavily + make `u_pub_owner` ALSO coach `club_a` (org_fudan)
+    # to test multi-scope coach isolation and primary_club scope priority.
+    with sqlite3.connect(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO club_showcase_profiles (club_id, slogan, hero_cover_url, is_published, updated_at) VALUES ('club_pub', '超豪华自由跑团', '/api/showcase-photos/pub.jpg', 1, ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO showcase_photos (id, owner_type, owner_id, uploader_id, photo_url, category, is_cover, created_at) VALUES ('sp_pub_cov', 'club', 'club_pub', 'u_pub_owner', '/api/showcase-photos/pub.jpg', 'group_run', 1, ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_pub_in_org', 'club_a', 'u_pub_owner', 'coach', 'active', ?)",
+            (recent_ts,),
+        )
+        # Decorate free-only coach u_outsider (make them owner of a free club `club_free_2`)
+        cur.execute(
+            "INSERT OR REPLACE INTO clubs (id, org_id, name, city, invite_code, owner_id, join_mode, status, created_at) VALUES ('club_free_2', NULL, '自由二团', '上海', 'FREE02', 'u_outsider', 'free', 'active', ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_free2_own', 'club_free_2', 'u_outsider', 'owner', 'active', ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO coach_public_resumes (user_id, headline, bio_story, is_published, updated_at) VALUES ('u_outsider', '自由团明星教练', '履历丰富', 1, ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO showcase_photos (id, owner_type, owner_id, uploader_id, photo_url, category, is_cover, created_at) VALUES ('sp_out_coach', 'coach', 'u_outsider', 'u_outsider', '/api/showcase-photos/out.jpg', 'certificate', 1, ?)",
+            (recent_ts,),
+        )
+        conn.commit()
+
+    # 1) Free runner (u_outsider, not in org_fudan): MUST NOT see any org_fudan clubs anywhere!
+    free_plaza = c.get("/api/community/showcase/plaza?viewer_uid=u_outsider&city=上海", headers=_headers("u_outsider"))
+    assert free_plaza.status_code == 200
+    fp = free_plaza.json()
+    free_club_ids = [x["club_id"] for x in fp["clubs"]]
+    assert "club_a" not in free_club_ids and "club_b" not in free_club_ids
+    assert all(not x.get("org_id") for x in fp["clubs"])
+    # Decorated free club `club_pub` comes before undecorated free club `club_free_2`
+    assert free_club_ids.index("club_pub") < free_club_ids.index("club_free_2")
+    # Org-only coaches (u_captain, u_coach_b) are invisible to free runner
+    free_coach_uids = [x["user_id"] for x in fp["coaches"]]
+    assert "u_captain" not in free_coach_uids and "u_coach_b" not in free_coach_uids
+    # Multi-scope coach u_pub_owner shows free club_pub (never org club_a) to free runner
+    pub_coach_card = next(x for x in fp["coaches"] if x["user_id"] == "u_pub_owner")
+    assert pub_coach_card["primary_club_id"] == "club_pub"
+
+    # Coach detail viewed by free runner MUST NOT leak org club `club_a`
+    coach_det_free = c.get("/api/community/showcase/coaches/u_pub_owner?viewer_uid=u_outsider", headers=_headers("u_outsider"))
+    assert coach_det_free.status_code == 200
+    leaked_cids = [x["id"] for x in coach_det_free.json()["coaching_impact"]["coached_clubs"]]
+    assert "club_a" not in leaked_cids
+    assert "club_pub" in leaked_cids
+
+    # /api/team/all-clubs for free runner also hides org clubs
+    all_free = c.get("/api/team/all-clubs?user_id=u_outsider&city=上海", headers=_headers("u_outsider"))
+    assert all_free.status_code == 200
+    assert all(not x.get("org_id") for x in all_free.json()["clubs"])
+
+    # Direct org club showcase detail blocked for free runner (403)
+    assert c.get("/api/community/showcase/clubs/club_a?viewer_uid=u_outsider", headers=_headers("u_outsider")).status_code == 403
+
+    # 2) Org member (u_newcomer, in org_fudan): MUST see org_fudan clubs FIRST, even ahead of decorated free club_pub!
+    org_plaza = c.get("/api/community/showcase/plaza?viewer_uid=u_newcomer&city=上海", headers=_headers("u_newcomer"))
+    assert org_plaza.status_code == 200
+    op = org_plaza.json()
+    org_club_ids = [x["club_id"] for x in op["clubs"]]
+    assert org_club_ids.index("club_a") < org_club_ids.index("club_pub")
+    assert org_club_ids.index("club_b") < org_club_ids.index("club_pub")
+    assert op["clubs"][0]["in_viewer_org"] is True
+
+    # Org coaches (u_captain, u_coach_b, u_pub_owner) MUST rank ahead of free-only decorated coach u_outsider!
+    org_coach_uids = [x["user_id"] for x in op["coaches"]]
+    assert org_coach_uids.index("u_captain") < org_coach_uids.index("u_outsider")
+    assert org_coach_uids.index("u_coach_b") < org_coach_uids.index("u_outsider")
+    assert org_coach_uids.index("u_pub_owner") < org_coach_uids.index("u_outsider")
+    # For org member, multi-scope coach u_pub_owner highlights their shared org club `club_a`
+    pub_coach_for_org = next(x for x in op["coaches"] if x["user_id"] == "u_pub_owner")
+    assert pub_coach_for_org["primary_club_id"] == "club_a"
+
+    # /api/team/all-clubs for org member also lists org clubs ahead of free clubs
+    all_org = c.get("/api/team/all-clubs?user_id=u_newcomer&city=上海", headers=_headers("u_newcomer"))
+    assert all_org.status_code == 200
+    all_org_cids = [x["id"] for x in all_org.json()["clubs"]]
+    assert all_org_cids.index("club_a") < all_org_cids.index("club_pub")
+    assert all_org_cids.index("club_b") < all_org_cids.index("club_pub")
+
+
+def test_buddy_discovery_uses_age_groups_without_numeric_brackets(isolated_env):
+    """Buddy discovery displays and filters by 青年组/中坚组/壮年组/大师组 (never numeric 5-year brackets),
+    while remaining backwards-compatible with legacy 50+/40-44 filter params."""
+    c = isolated_env["client"]
+    cur_year = get_beijing_today().year
+    LocalStore.upsert_profile("u_masters_runner", {
+        "display_name": "资深大师跑友", "gender": "male", "date_of_birth": f"{cur_year - 54}-03-10",
+        "city": "上海", "allow_buddy_search_scope": "public", "allow_club_search_scope": "public",
+    })
+    LocalStore.upsert_profile("u_prime_runner", {
+        "display_name": "壮年精英跑友", "gender": "female", "date_of_birth": f"{cur_year - 43}-06-15",
+        "city": "上海", "allow_buddy_search_scope": "public", "allow_club_search_scope": "public",
+    })
+    LocalStore.upsert_profile("u_youth_runner", {
+        "display_name": "青年新生代", "gender": "female", "date_of_birth": f"{cur_year - 25}-09-20",
+        "city": "上海", "allow_buddy_search_scope": "public", "allow_club_search_scope": "public",
+    })
+
+    # Public discover lists canonical group labels only
+    r_all = c.get("/api/community/discover?viewer_uid=u_captain&scope=public&match_my_vdot=0", headers=_headers("u_captain"))
+    assert r_all.status_code == 200
+    body = r_all.json()
+    assert body["age_bracket_options"] == ["青年组", "中坚组", "壮年组", "大师组"]
+    by_uid = {x["user_id"]: x for x in body["candidates"]}
+    assert by_uid["u_masters_runner"]["age_group"] == "大师组"
+    assert by_uid["u_prime_runner"]["age_group"] == "壮年组"
+    assert by_uid["u_youth_runner"]["age_group"] == "青年组"
+
+    # Filter by canonical group label '大师组'
+    r_masters = c.get("/api/community/discover?viewer_uid=u_captain&scope=public&match_my_vdot=0&age_group=大师组", headers=_headers("u_captain"))
+    assert r_masters.status_code == 200
+    m_uids = {x["user_id"] for x in r_masters.json()["candidates"]}
+    assert "u_masters_runner" in m_uids
+    assert "u_prime_runner" not in m_uids and "u_youth_runner" not in m_uids
+
+    # Backwards-compatible legacy filter param '50+' -> 大师组 and '40-44' -> 壮年组
+    r_legacy_50 = c.get("/api/community/discover?viewer_uid=u_captain&scope=public&match_my_vdot=0&age_group=50%2B", headers=_headers("u_captain"))
+    assert r_legacy_50.status_code == 200
+    assert "u_masters_runner" in {x["user_id"] for x in r_legacy_50.json()["candidates"]}
+
+    r_legacy_40 = c.get("/api/community/discover?viewer_uid=u_captain&scope=public&match_my_vdot=0&age_group=40-44", headers=_headers("u_captain"))
+    assert r_legacy_40.status_code == 200
+    assert "u_prime_runner" in {x["user_id"] for x in r_legacy_40.json()["candidates"]}
+
+
+def test_showcase_club_and_coach_metadata_org_free_status_and_coached_clubs(isolated_env):
+    """Club plaza/detail and coach detail must expose org vs free club type, join_mode, status, and is_member."""
+    c = isolated_env["client"]
+    db_file = isolated_env["db_file"]
+    today = get_beijing_today()
+    recent_ts = (today - timedelta(days=1)).isoformat() + "T08:00:00+08:00"
+
+    # Make u_coach_b coach BOTH an org invite club (club_b), a free open club (club_pub), and a locked free club (club_locked)
+    with sqlite3.connect(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO clubs (id, org_id, name, city, invite_code, owner_id, join_mode, status, created_at) VALUES ('club_locked', NULL, '历史锁定团', '上海', 'LOCK01', 'u_coach_b', 'free', 'locked', ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_cb_pub', 'club_pub', 'u_coach_b', 'coach', 'active', ?)",
+            (recent_ts,),
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO club_memberships (id, club_id, user_id, role, status, joined_at) VALUES ('cm_cb_lock', 'club_locked', 'u_coach_b', 'owner', 'active', ?)",
+            (recent_ts,),
+        )
+        conn.commit()
+
+    # 1) Plaza returns is_org_club, org_name, join_mode, status, is_member for clubs and coached_clubs for coaches
+    plaza = c.get("/api/community/showcase/plaza?viewer_uid=u_newcomer&city=上海", headers=_headers("u_newcomer"))
+    assert plaza.status_code == 200
+    p_clubs = {x["club_id"]: x for x in plaza.json()["clubs"]}
+    assert p_clubs["club_b"]["is_org_club"] is True
+    assert p_clubs["club_b"]["org_name"] == "复旦戈壁大群"
+    assert p_clubs["club_b"]["join_mode"] == "invite"
+    assert p_clubs["club_b"]["status"] == "active"
+    assert p_clubs["club_b"]["is_member"] is False
+
+    assert p_clubs["club_pub"]["is_org_club"] is False
+    assert p_clubs["club_pub"]["org_name"] == ""
+    assert p_clubs["club_pub"]["join_mode"] == "free"
+    assert p_clubs["club_pub"]["status"] == "active"
+
+    # 2) Club showcase detail exposes is_org_club, org_name, join_mode, status
+    det = c.get("/api/community/showcase/clubs/club_b?viewer_uid=u_newcomer", headers=_headers("u_newcomer"))
+    assert det.status_code == 200
+    dc = det.json()["club"]
+    assert dc["is_org_club"] is True
+    assert dc["org_name"] == "复旦戈壁大群"
+    assert dc["join_mode"] == "invite"
+    assert dc["status"] == "active"
+
+    # 3) Coach showcase detail lists all visible coached clubs with org/free/join_mode/status/is_member metadata
+    cdet = c.get("/api/community/showcase/coaches/u_coach_b?viewer_uid=u_newcomer", headers=_headers("u_newcomer"))
+    assert cdet.status_code == 200
+    c_clubs = {x["id"]: x for x in cdet.json()["coaching_impact"]["coached_clubs"]}
+    assert {"club_b", "club_pub", "club_locked"}.issubset(set(c_clubs.keys()))
+    assert c_clubs["club_b"]["is_org_club"] is True
+    assert c_clubs["club_b"]["org_name"] == "复旦戈壁大群"
+    assert c_clubs["club_b"]["join_mode"] == "invite"
+    assert c_clubs["club_b"]["status"] == "active"
+    assert c_clubs["club_b"]["is_member"] is False
+
+    assert c_clubs["club_pub"]["is_org_club"] is False
+    assert c_clubs["club_pub"]["join_mode"] == "free"
+    assert c_clubs["club_pub"]["status"] == "active"
+
+    assert c_clubs["club_locked"]["is_org_club"] is False
+    assert c_clubs["club_locked"]["status"] == "locked"
+
+

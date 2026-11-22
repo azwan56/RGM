@@ -7,6 +7,7 @@ Executes:
 """
 
 import logging
+import random
 import threading
 import time
 from datetime import datetime, timezone
@@ -84,6 +85,11 @@ def sync_all_connected_users():
             logger.info(f"[scheduler] All {len(all_users)} connected user(s) synced within last 10m; skipping cycle.")
             return
 
+        # Fair round-robin ordering: sync oldest-synced users first
+        pending_users.sort(
+            key=lambda u: str(u.get("garmin_last_sync_at") or u.get("coros_last_sync_at") or "")
+        )
+
         logger.info(
             f"[scheduler] ⏳ Starting automatic polling sync for {len(pending_users)}/{len(all_users)} device user(s)..."
         )
@@ -97,13 +103,17 @@ def sync_all_connected_users():
                 if res.get("success"):
                     logger.info(f"[scheduler] ✅ User {uid} auto-sync success: {res.get('synced_activities', 0)} activities synced.")
                 else:
-                    logger.warning(f"[scheduler] ⚠️ User {uid} auto-sync notice: {res.get('error')}")
+                    err_text = str(res.get("error") or "")
+                    logger.warning(f"[scheduler] ⚠️ User {uid} auto-sync notice: {err_text}")
+                    if "429" in err_text or "限流" in err_text or "too many" in err_text.lower():
+                        logger.warning("[scheduler] 🛑 Upstream HTTP 429 rate-limit detected; aborting remainder of this batch to protect server IP.")
+                        break
             except Exception as e:
                 logger.error(f"[scheduler] ❌ Failed to auto-sync user {uid}: {e}")
-            
-            # Gentle stagger between users to respect Garmin/COROS rate limits without blocking the cycle
+
+            # Randomized stagger jitter between users to avoid robotic cadence fingerprints
             if idx < len(pending_users) - 1:
-                time.sleep(1.5)
+                time.sleep(random.uniform(1.8, 4.2))
 
         logger.info("[scheduler] 🎉 Automatic polling sync cycle completed.")
     except Exception as e:
@@ -158,3 +168,13 @@ def start_scheduler():
     if not scheduler.running:
         scheduler.start()
     logger.info("[scheduler] Background scheduler started: Unified watch sync active (05:00-22:45 q15m + 01:00/03:00 overnight).")
+
+
+def stop_scheduler():
+    """Gracefully shuts down APScheduler during FastAPI lifespan teardown."""
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("[scheduler] Background scheduler stopped cleanly.")
+    except Exception as e:
+        logger.warning(f"[scheduler] Error during scheduler shutdown: {e}")

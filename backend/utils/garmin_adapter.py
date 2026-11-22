@@ -5,6 +5,8 @@ Includes Token Persistence to avoid Garmin SSO rate limits (429).
 """
 
 import os
+import json
+import time
 import logging
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -441,15 +443,17 @@ def remove_cached_garmin_tokens(email: Optional[str]) -> int:
         return 0
     for region_tag in ("cn", "global"):
         tp = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{region_tag}.json")
-        if os.path.exists(tp):
-            try:
-                if os.path.isdir(tp):
-                    shutil.rmtree(tp, ignore_errors=True)
-                else:
-                    os.remove(tp)
-                removed += 1
-            except Exception as e:
-                logger.warning(f"[garmin] Failed removing cached token {tp}: {e}")
+        blocked_tp = f"{tp}.blocked.json"
+        for cand in (tp, blocked_tp):
+            if os.path.exists(cand):
+                try:
+                    if os.path.isdir(cand):
+                        shutil.rmtree(cand, ignore_errors=True)
+                    else:
+                        os.remove(cand)
+                    removed += 1
+                except Exception as e:
+                    logger.warning(f"[garmin] Failed removing cached token {cand}: {e}")
     return removed
 
 try:
@@ -481,11 +485,79 @@ class GarminAdapter:
         self.last_error: Optional[str] = None
         self.client: Optional[Garmin] = None
         self.needs_mfa: bool = False
+        self.auth_blocked: bool = False
+        self._login_failed: bool = False
 
         os.makedirs(TOKEN_DIR, mode=0o700, exist_ok=True)
         _secure_chmod_path(TOKEN_DIR)
         safe_email = self.email.replace("@", "_at_").replace(".", "_")
         self.token_path = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{'cn' if self.is_cn else 'global'}.json")
+        self.auth_blocked_path = f"{self.token_path}.blocked.json"
+
+    def _load_auth_blocked(self) -> Optional[Dict[str, Any]]:
+        if not os.path.exists(self.auth_blocked_path):
+            return None
+        try:
+            with open(self.auth_blocked_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            reason = data.get("reason") or ""
+            blocked_at = float(data.get("blocked_at") or 0.0)
+            if reason in ("needs_mfa", "bad_credentials", "phone_verification"):
+                return data
+            if reason in ("rate_limit", "locked") and (time.time() - blocked_at < 6 * 3600):
+                return data
+            os.remove(self.auth_blocked_path)
+        except Exception:
+            pass
+        return None
+
+    def _save_auth_blocked(self, reason: str, error_msg: str) -> None:
+        try:
+            tmp_path = f"{self.auth_blocked_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "reason": reason,
+                        "error": error_msg,
+                        "blocked_at": time.time(),
+                        "domain": self.domain,
+                    },
+                    f,
+                )
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, self.auth_blocked_path)
+        except Exception as e:
+            logger.warning(f"[garmin] Failed saving auth blocked state: {e}")
+
+    def _clear_auth_blocked(self) -> None:
+        self.auth_blocked = False
+        self._login_failed = False
+        for suffix in ("cn", "global"):
+            safe_email = self.email.replace("@", "_at_").replace(".", "_")
+            bp = os.path.join(TOKEN_DIR, f"tokens_{safe_email}_{suffix}.json.blocked.json")
+            if os.path.exists(bp):
+                try:
+                    os.remove(bp)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _classify_block_reason(err_str: str) -> Optional[str]:
+        low = (err_str or "").lower()
+        if "429" in low or "rate limit" in low:
+            return "rate_limit"
+        if "locked" in low or "account_locked" in low:
+            return "locked"
+        if (
+            "phone_registration_required" in low
+            or "phone_verification_required" in low
+            or "update phone number" in low
+            or "cn_verification_phone_number_needed" in low
+        ):
+            return "phone_verification"
+        if any(k in low for k in ("401", "403", "unauthorized", "invalid username or password", "social profile", "reset_password", "password_change_required")):
+            return "bad_credentials"
+        return None
 
     @staticmethod
     def _format_error(err: str, chosen_domain: str) -> str:
@@ -527,10 +599,22 @@ class GarminAdapter:
         return err
 
     def login(self, use_token: bool = True) -> bool:
-        """Logs into Garmin Connect with MFA awareness, automatic region fallback & OAuth token caching."""
+        """Logs into Garmin Connect with MFA awareness, persistent circuit-breaker & OAuth token caching."""
         if not HAS_GARMINCONNECT:
             self.last_error = "garminconnect 依赖未安装"
+            self._login_failed = True
             return False
+
+        if use_token:
+            blocked = self._load_auth_blocked()
+            if blocked:
+                self.auth_blocked = True
+                self._login_failed = True
+                self.needs_mfa = (blocked.get("reason") == "needs_mfa")
+                self.last_error = blocked.get("error") or "佳明账号授权受限，请前往【我的 → 手表连接】重新授权"
+                return False
+        else:
+            self._clear_auth_blocked()
 
         # Attempt 1: with user's selected domain & token persistence
         try:
@@ -541,7 +625,10 @@ class GarminAdapter:
             if mfa_status == "needs_mfa":
                 logger.info(f"[garmin] MFA Required for {self.email} on is_cn={self.is_cn}")
                 self.needs_mfa = True
+                self.auth_blocked = True
+                self._login_failed = True
                 self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                self._save_auth_blocked("needs_mfa", self.last_error)
                 return False
 
             # Persist tokens to disk on success
@@ -556,6 +643,7 @@ class GarminAdapter:
             logger.info(f"[garmin] Login successful for {self.email} on is_cn={self.is_cn}")
             self.last_error = None
             self.needs_mfa = False
+            self._clear_auth_blocked()
             return True
         except Exception as e1:
             err1 = str(e1)
@@ -563,7 +651,10 @@ class GarminAdapter:
 
             if "mfa" in err1.lower():
                 self.needs_mfa = True
+                self.auth_blocked = True
+                self._login_failed = True
                 self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                self._save_auth_blocked("needs_mfa", self.last_error)
                 return False
 
             # If cached token was used and failed (e.g. expired, "Failed to retrieve social profile", 401),
@@ -584,6 +675,11 @@ class GarminAdapter:
             is_cred_error = any(k in err1.lower() for k in ("401", "unauthorized", "invalid username or password", "social profile"))
             if not is_cred_error:
                 self.last_error = self._format_error(err1, self.domain)
+                self._login_failed = True
+                reason = self._classify_block_reason(err1)
+                if reason:
+                    self.auth_blocked = True
+                    self._save_auth_blocked(reason, self.last_error)
                 return False
 
             # Attempt 2: Try alternate region fallback
@@ -602,8 +698,12 @@ class GarminAdapter:
                     self.is_cn = alt_is_cn
                     self.domain = alt_domain
                     self.token_path = alt_token_path
+                    self.auth_blocked_path = f"{alt_token_path}.blocked.json"
                     self.needs_mfa = True
+                    self.auth_blocked = True
+                    self._login_failed = True
                     self.last_error = "佳明官方已向您的注册邮箱或手机发送了 6 位安全验证码，请输入验证码完成绑定。"
+                    self._save_auth_blocked("needs_mfa", self.last_error)
                     return False
 
                 if hasattr(alt_client, "client") and hasattr(alt_client.client, "dump"):
@@ -619,8 +719,10 @@ class GarminAdapter:
                 self.is_cn = alt_is_cn
                 self.domain = alt_domain
                 self.token_path = alt_token_path
+                self.auth_blocked_path = f"{alt_token_path}.blocked.json"
                 self.last_error = None
                 self.needs_mfa = False
+                self._clear_auth_blocked()
                 return True
             except Exception as e2:
                 err2 = str(e2)
@@ -628,6 +730,11 @@ class GarminAdapter:
                 self.client = None
                 # Prefer primary region's error context
                 self.last_error = self._format_error(err1, self.domain)
+                self._login_failed = True
+                reason = self._classify_block_reason(err1) or self._classify_block_reason(err2)
+                if reason:
+                    self.auth_blocked = True
+                    self._save_auth_blocked(reason, self.last_error)
                 return False
 
     def complete_mfa(self, mfa_code: str) -> bool:
@@ -650,6 +757,7 @@ class GarminAdapter:
                     logger.warning(f"[garmin] Failed to dump tokens: {de}")
             self.last_error = None
             self.needs_mfa = False
+            self._clear_auth_blocked()
             return True
         except Exception as e:
             err = str(e)
@@ -661,9 +769,10 @@ class GarminAdapter:
         """
         Fetches user profile details from Garmin, including avatar URL, display name, full name, gender, height, weight.
         """
-        if not self.client:
-            if not self.login():
-                return {}
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return {}
+        if not self.client and not self.login():
+            return {}
 
         info: Dict[str, Any] = {
             "avatar_url": None,
@@ -765,9 +874,10 @@ class GarminAdapter:
         """
         Fetches Personal Records (5K, 10K, Half Marathon, Marathon) in seconds from Garmin.
         """
-        if not self.client:
-            if not self.login():
-                return {}
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return {}
+        if not self.client and not self.login():
+            return {}
 
         prs: Dict[str, Optional[int]] = {
             "five_k_pb": None,
@@ -793,12 +903,6 @@ class GarminAdapter:
                         prs["ten_k_pb"] = val_s
                     elif t_id in (2, 3) and 600 <= val_s <= 3600: # 5K (5公里)
                         prs["five_k_pb"] = val_s
-
-            # Fallback 5K calculation if 10K exists but 5K PR wasn't explicitly logged
-            if not prs["five_k_pb"] and prs["ten_k_pb"]:
-                prs["five_k_pb"] = int(round(prs["ten_k_pb"] * 0.48)) # ~19:24
-            elif not prs["five_k_pb"]:
-                prs["five_k_pb"] = 1140 # 19:00
         except Exception as e:
             logger.warning(f"[garmin] get_personal_record error: {e}")
 
@@ -806,9 +910,10 @@ class GarminAdapter:
 
     def fetch_recent_activities(self, limit: int = 30) -> List[Dict[str, Any]]:
         """Fetches latest activities from Garmin and normalizes them into RGM schema."""
-        if not self.client:
-            if not self.login():
-                return []
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return []
+        if not self.client and not self.login():
+            return []
 
         try:
             raw_acts = self.client.get_activities(0, limit)
@@ -825,9 +930,10 @@ class GarminAdapter:
 
     def fetch_activities_by_date(self, start_date: str = "2026-01-01", end_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetches all activities between start_date and end_date from Garmin and normalizes them."""
-        if not self.client:
-            if not self.login():
-                return []
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return []
+        if not self.client and not self.login():
+            return []
 
         try:
             target_end = end_date or date.today().isoformat()
@@ -858,7 +964,7 @@ class GarminAdapter:
         type_map = {
             "running": "Run",
             "trail_running": "TrailRun",
-            "treadmill_running": "Run",
+            "treadmill_running": "treadmill_running",
             "track_running": "Run",
             "obstacle_run": "Run",
             "street_running": "Run",
@@ -913,7 +1019,11 @@ class GarminAdapter:
             elif "桨板" in act_name_raw:
                 mapped_type = "Paddleboard"
 
-        default_name = "Garmin 跑步" if mapped_type == "Run" else f"Garmin {mapped_type}"
+        default_name = (
+            "Garmin 室内跑步"
+            if mapped_type == "treadmill_running"
+            else ("Garmin 跑步" if mapped_type == "Run" else f"Garmin {mapped_type}")
+        )
 
         distance_m = float(act.get("distance", 0.0))
         duration_s = int(act.get("duration", 0))
@@ -973,9 +1083,10 @@ class GarminAdapter:
 
     def fetch_daily_health_metrics(self, target_date: Optional[str] = None) -> Dict[str, Any]:
         """Fetches daily health metrics (HRV, Sleep, Resting HR, Body Battery, VO2 Max)."""
-        if not self.client:
-            if not self.login():
-                return {}
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return {}
+        if not self.client and not self.login():
+            return {}
 
         date_str = target_date or date.today().isoformat()
         metrics: Dict[str, Any] = {
@@ -1176,9 +1287,10 @@ class GarminAdapter:
         Transforms WGS-84 coordinates to GCJ-02 (China standard) and downsamples points for smooth rendering.
         """
         clean_id = str(activity_id).replace("garmin_", "").strip()
-        if not self.client:
-            if not self.login():
-                return None
+        if self._login_failed or self.auth_blocked or self.needs_mfa:
+            return None
+        if not self.client and not self.login():
+            return None
 
         try:
             logger.info(f"[garmin] Fetching activity details & splits for {clean_id}...")

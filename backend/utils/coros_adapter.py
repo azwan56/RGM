@@ -87,6 +87,7 @@ class CorosAdapter:
         self.avatar_url: Optional[str] = None
         self._analyse_cache: Optional[Dict[str, Any]] = None
         self._analyse_cache_time: float = 0
+        self._analyse_failed_at: float = 0
         self._sleep_cache: Dict[str, Dict[str, Any]] = {}
         self._login_failed: bool = False
         self._mobile_login_failed: bool = False
@@ -97,7 +98,7 @@ class CorosAdapter:
         self.app_key: Optional[str] = None
         self.two_fa_account: Optional[str] = None
         self.account_type_2fa: int = 1
-        self.region_id: int = 2
+        self.region_id: int = 2 if self.is_cn else (3 if self.is_eu else 1)
         self.cookies: Dict[str, str] = {}
         self.token_saved_at: float = 0.0
 
@@ -112,6 +113,69 @@ class CorosAdapter:
         self.mobile_token_path = os.path.join(TOKEN_DIR, f"tokens_coros_mobile_{safe_acc}_{region_str}.json")
         self._load_cached_token()
         self._load_cached_mobile_token()
+
+    def _infer_region_id_from_cookies(self) -> Optional[int]:
+        """Infers COROS regionId (1=Global, 2=China, 3=EU) from Remember-Me cookies (acct_ext_X / acct_uid_X)."""
+        for k in (self.cookies or {}).keys():
+            ks = str(k)
+            if ks in ("acct_ext_1", "acct_uid_1"):
+                return 1
+            if ks in ("acct_ext_2", "acct_uid_2"):
+                return 2
+            if ks in ("acct_ext_3", "acct_uid_3"):
+                return 3
+        return None
+
+    def _apply_region(self, explicit_region_id: Any = None, migrate_cache: bool = False) -> bool:
+        """
+        Aligns domain/base_url/region_id/token_path with COROS's authoritative regionId
+        (from login/2FA response data.regionId or acct_ext_{1,2,3} cookies).
+        Prevents cross-region 1019 loops when a Global/EU account logs in via teamcnapi.coros.com.
+        Returns True if the region changed.
+        """
+        target_rid: Optional[int] = None
+        try:
+            if explicit_region_id is not None and int(explicit_region_id) in (1, 2, 3):
+                target_rid = int(explicit_region_id)
+        except Exception:
+            target_rid = None
+        if target_rid is None:
+            target_rid = self._infer_region_id_from_cookies()
+        if target_rid is None:
+            return False
+
+        region_map = {
+            1: ("teamapi.coros.com", "https://teamapi.coros.com", "https://api.coros.com", "global", False, False),
+            2: ("teamcnapi.coros.com", "https://teamcnapi.coros.com", "https://apicn.coros.com", "cn", True, False),
+            3: ("teameuapi.coros.com", "https://teameuapi.coros.com", "https://apieu.coros.com", "eu", False, True),
+        }
+        new_dom, new_base, new_mob, new_rstr, new_cn, new_eu = region_map[target_rid]
+        changed = (new_base != self.base_url) or (target_rid != self.region_id)
+        if not changed:
+            return False
+
+        old_dom = self.domain
+        old_token_path = self.token_path
+        self.domain = new_dom
+        self.base_url = new_base
+        self.mobile_base_url = new_mob
+        self.is_cn = new_cn
+        self.is_eu = new_eu
+        self.region_id = target_rid
+        safe_acc = self.account.replace("@", "_at_").replace(".", "_").replace("+", "_")
+        self.token_path = os.path.join(TOKEN_DIR, f"tokens_coros_{safe_acc}_{new_rstr}.json")
+        self.mobile_token_path = os.path.join(TOKEN_DIR, f"tokens_coros_mobile_{safe_acc}_{new_rstr}.json")
+        logger.info(
+            f"[coros] Auto-corrected region for {self.account}: {old_dom} -> {new_dom} (regionId={target_rid})"
+        )
+        if migrate_cache and self.access_token:
+            self._save_cached_token()
+            if old_token_path != self.token_path and os.path.exists(old_token_path):
+                try:
+                    os.remove(old_token_path)
+                except Exception:
+                    pass
+        return True
 
     @staticmethod
     def get_cached_auth_state(account: str, domain: str = "teamcnapi.coros.com") -> Dict[str, Any]:
@@ -212,6 +276,8 @@ class CorosAdapter:
                     self.user_id = data.get("user_id")
                     self.nick_name = data.get("nick_name")
                     self.avatar_url = data.get("avatar_url")
+                    # Auto-align endpoint if cached cookies belong to a different COROS region (e.g. acct_ext_1 = Global)
+                    self._apply_region(explicit_region_id=data.get("region_id"), migrate_cache=True)
                     return True
 
                 blocked_reason = data.get("auth_blocked_reason")
@@ -244,6 +310,7 @@ class CorosAdapter:
                     "user_id": self.user_id,
                     "nick_name": self.nick_name,
                     "avatar_url": self.avatar_url,
+                    "region_id": self.region_id,
                     "cookies": self.cookies,
                     "saved_at": self.token_saved_at
                 }, f)
@@ -254,11 +321,12 @@ class CorosAdapter:
 
     def _save_auth_blocked(self, reason: str, error_msg: str):
         """
-        Persists auth failure / 2FA requirement to disk so background sync jobs do not
+        Persists auth failure / 2FA requirement to disk atomically so background sync jobs do not
         repeatedly attempt login or trigger 2FA SMS every 30 minutes.
         """
         try:
-            with open(self.token_path, "w", encoding="utf-8") as f:
+            tmp_path = f"{self.token_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "access_token": None,
                     "user_id": self.user_id,
@@ -270,6 +338,8 @@ class CorosAdapter:
                     "auth_blocked_at": time.time(),
                     "saved_at": time.time()
                 }, f)
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, self.token_path)
         except Exception as e:
             logger.warning(f"[coros] Failed to save auth blocked state: {e}")
 
@@ -445,6 +515,7 @@ class CorosAdapter:
             self.user_id = str(data.get("userId") or "")
             self.needs_2fa = False
             self._capture_response_cookies(resp)
+            self._apply_region(explicit_region_id=data.get("regionId"))
 
             if not self.access_token:
                 self.last_error = "验证通过但未能获取到访问凭证 (accessToken)"
@@ -588,6 +659,7 @@ class CorosAdapter:
             self.user_id = str(data.get("userId") or "")
             self.nick_name = data.get("nickName")
             self.avatar_url = data.get("headPic")
+            self._apply_region(explicit_region_id=data.get("regionId"))
 
             if not self.access_token:
                 self.last_error = "登录成功但未能解析到访问凭证 (accessToken)"
@@ -629,11 +701,15 @@ class CorosAdapter:
 
     def _get_analyse_data(self) -> Optional[Dict[str, Any]]:
         """Queries or returns cached EvoLab analyse data."""
-        if not self.access_token and not self.login(trigger_2fa_sms=False):
-            return None
         now = time.time()
         if self._analyse_cache and (now - self._analyse_cache_time < 300):
             return self._analyse_cache
+        # Circuit-breaker: avoid hammering /analyse/query 30x in a daily loop if it just failed
+        if self._analyse_failed_at and (now - self._analyse_failed_at < 60):
+            return None
+        if not self.access_token and not self.login(trigger_2fa_sms=False):
+            self._analyse_failed_at = now
+            return None
         try:
             url = f"{self.base_url}/analyse/query?userId={self.user_id}"
             resp = requests.get(url, headers=self._get_headers(), timeout=12)
@@ -649,11 +725,16 @@ class CorosAdapter:
                 if str(res_json.get("result")) == "0000":
                     self._analyse_cache = res_json.get("data") or {}
                     self._analyse_cache_time = now
+                    self._analyse_failed_at = 0
                     return self._analyse_cache
                 else:
                     logger.warning(f"[coros] /analyse/query non-0000 result: {res_json}")
+                    self._analyse_failed_at = now
+            else:
+                self._analyse_failed_at = now
         except Exception as e:
             logger.warning(f"[coros] _get_analyse_data error: {e}")
+            self._analyse_failed_at = now
         return None
 
     def fetch_user_profile_info(self) -> Dict[str, Any]:
@@ -887,7 +968,7 @@ class CorosAdapter:
         sport_type_code = act.get("sportType")
         type_map = {
             100: "Run",
-            101: "Run",
+            101: "treadmill_running",
             102: "Run",
             103: "Run",
             200: "Ride",
@@ -921,7 +1002,11 @@ class CorosAdapter:
             else:
                 mapped_type = "Workout"
 
-        default_name = "COROS 跑步" if mapped_type == "Run" else f"COROS {mapped_type}"
+        default_name = (
+            "COROS 室内跑步"
+            if mapped_type == "treadmill_running"
+            else ("COROS 跑步" if mapped_type == "Run" else f"COROS {mapped_type}")
+        )
 
         distance_m = float(act.get("distance", 0.0))
         # Total elapsed time (including pauses / rest intervals) in seconds

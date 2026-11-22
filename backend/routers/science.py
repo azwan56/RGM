@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, date, timedelta
 from db import supabase_admin
 from utils.local_store import LocalStore
+from utils.security import is_strict_auth_mode
 from utils.metrics_domain import MetricsDomainService, get_tsb_badge_info
 from utils.running_metrics import (
     calculate_vdot,
@@ -53,8 +54,8 @@ def get_science_metrics(
                 or (getattr(getattr(request, "state", None), "user_id", None) if request else None)
             )
         )
-        if eff_viewer:
-            canonical_viewer = LocalStore.resolve_user_id(eff_viewer)
+        canonical_viewer = LocalStore.resolve_user_id(eff_viewer) if eff_viewer else None
+        if canonical_viewer:
             if canonical_viewer != canonical_uid:
                 if not LocalStore.can_view_specific_workout_records(canonical_viewer, canonical_uid):
                     basic_st = LocalStore.get_runner_basic_status(canonical_uid, viewer_uid=canonical_viewer)
@@ -87,6 +88,8 @@ def get_science_metrics(
                         "canova_matrix": None,
                         "taper_simulation": None,
                         "ctl_atl_tsb_history": [],
+                        "load_series": [],
+                        "recent_activities": [],
                     }
                 profile_chk = LocalStore.get_profile(canonical_uid) or {}
                 if bool(profile_chk.get("hide_biometrics")) and not LocalStore.can_view_confidential_runner_data(canonical_viewer, canonical_uid):
@@ -94,6 +97,8 @@ def get_science_metrics(
                         status_code=403,
                         detail="该队员已将 HRV 与生理恢复数据设为保密（仅对本人、认证教练和 1对1 师傅开放）"
                     )
+        elif is_strict_auth_mode():
+            raise HTTPException(status_code=401, detail="请先登录后查看生理指标")
 
         profile = LocalStore.get_profile(canonical_uid) or {}
         student_profile = {
@@ -242,19 +247,28 @@ def get_health_trend(
             profile_chk = LocalStore.get_profile(canonical_uid) or {}
             if bool(profile_chk.get("hide_biometrics")) and not LocalStore.can_view_confidential_runner_data(canonical_viewer, canonical_uid):
                 return {"trend": [], "is_biometrics_hidden": True}
+    elif is_strict_auth_mode():
+        return {"trend": [], "is_biometrics_hidden": True}
     trend = LocalStore.get_health_trend_30d(canonical_uid)
     return {"trend": trend}
 
 
 @router.post("/activities/{activity_id}/exclude-mode")
-def update_activity_exclude_mode(activity_id: str, req: ActivityExcludeModeRequest):
+def update_activity_exclude_mode(activity_id: str, req: ActivityExcludeModeRequest, request: Request = None):
     """
     Sets exclude_mode on a running activity:
     - 'normal': 正常计入跑量、负荷与等效 VDOT
     - 'ignore_vdot': 陪跑/慢摇模式（计入跑量，不计入等效 VDOT）
     - 'excluded': 忽略此记录（多表重复或心率异常，不计入跑量、榜单与负荷）
     """
-    effective_uid = (req.user_id or req.uid or "").strip()
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    token_is_sa = bool(getattr(getattr(request, "state", None), "is_super_admin", False)) if request else False
+    effective_uid = (req.user_id or req.uid or token_uid or "").strip()
+    if is_strict_auth_mode() and not token_uid and not token_is_sa:
+        raise HTTPException(status_code=401, detail="请先登录后调整记录统计口径")
+    if token_uid and not token_is_sa and not LocalStore.is_super_admin(token_uid):
+        if effective_uid and LocalStore.resolve_user_id(token_uid) != LocalStore.resolve_user_id(effective_uid):
+            raise HTTPException(status_code=403, detail="安全拦截：无权修改他人运动记录口径")
     if not effective_uid:
         raise HTTPException(status_code=422, detail="user_id is required")
     res = LocalStore.set_activity_exclude_mode(effective_uid, activity_id, req.exclude_mode)
@@ -336,7 +350,7 @@ def get_runner_pacer_evaluation(
     race_date: Optional[str] = Query(None, description="比赛日期 YYYY-MM-DD"),
     viewer_uid: Optional[str] = Query(None, description="跨视角查看人 UID"),
     club_id: Optional[str] = Query(None, description="所属跑团 ID（用于隐私鉴权）"),
-    allow_web_search: bool = Query(True, description="冷门赛事是否允许百炼联网检索规程"),
+    allow_web_search: bool = Query(False, description="冷门赛事是否允许百炼联网检索规程"),
 ):
     """
     Evaluates a runner's suitability as an Official Marathon / Road Race Pacer across 6 dimensions,

@@ -309,3 +309,51 @@ def test_coros_2fa_user_silent_token_refresh_prevents_disconnection(monkeypatch)
     assert adapter.cookies.get("acct_ext_2") == "encrypted_remember_me_cookie_v2"
     assert adapter.needs_2fa is False
 
+
+def test_coros_cross_region_cookie_autocorrect_and_analyse_circuit_breaker(monkeypatch, tmp_path):
+    """
+    Verifies that when a Global (regionId=1, acct_ext_1) COROS account was initially bound under
+    teamcnapi.coros.com, CorosAdapter automatically corrects domain/base_url to teamapi.coros.com,
+    migrates the token cache to *_global.json, and circuit-breaks repeated /analyse/query failures.
+    """
+    import json
+    import utils.coros_adapter as ca
+
+    monkeypatch.setattr(ca, "TOKEN_DIR", str(tmp_path))
+    cn_cache = tmp_path / "tokens_coros_global_runner_at_163_com_cn.json"
+    cn_cache.write_text(json.dumps({
+        "access_token": "valid_global_tok_123",
+        "user_id": "474366141867769856",
+        "cookies": {"acct_uid_1": "474366141867769856", "acct_ext_1": "ext_cookie_1"},
+        "saved_at": 1795140510.0,
+    }), encoding="utf-8")
+
+    adapter = ca.CorosAdapter("global_runner@163.com", "SecretPass", "teamcnapi.coros.com")
+    assert adapter.domain == "teamapi.coros.com"
+    assert adapter.base_url == "https://teamapi.coros.com"
+    assert adapter.region_id == 1
+    assert adapter.is_cn is False
+    assert (tmp_path / "tokens_coros_global_runner_at_163_com_global.json").exists()
+    assert not cn_cache.exists()
+
+    # Verify /analyse/query failure circuit-breaker prevents 30x hammering in daily loop
+    analyse_calls = 0
+
+    def mock_get(url, *args, **kwargs):
+        nonlocal analyse_calls
+        if "/analyse/query" in url:
+            analyse_calls += 1
+            return MagicMock(status_code=200, json=lambda: {"result": "1019", "message": "Access token is invalid"})
+        return MagicMock(status_code=200, json=lambda: {"result": "0000"})
+
+    def mock_post(url, *args, **kwargs):
+        return MagicMock(status_code=200, json=lambda: {"result": "1019", "message": "Access token is invalid"})
+
+    monkeypatch.setattr("requests.get", mock_get)
+    monkeypatch.setattr("requests.post", mock_post)
+
+    for _ in range(10):
+        assert adapter._get_analyse_data() is None
+    assert analyse_calls == 1
+
+

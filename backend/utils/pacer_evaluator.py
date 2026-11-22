@@ -28,6 +28,8 @@ import logging
 import math
 import re
 import statistics
+import threading
+import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -2266,6 +2268,19 @@ def evaluate_club_pacer_candidates(
     }
 
 
+_PACER_AI_CACHE: Dict[tuple, tuple] = {}
+_PACER_AI_CACHE_LOCK = threading.Lock()
+_PACER_AI_CACHE_TTL_SECONDS = 3600
+
+
+def _normalize_pacer_plan_text(val: Any) -> str:
+    if isinstance(val, list):
+        return "\n".join(str(item).strip() for item in val if str(item).strip())
+    if isinstance(val, dict):
+        return "\n".join(f"{k}: {v}" for k, v in val.items() if v is not None)
+    return str(val or "").strip()
+
+
 def generate_pacer_ai_prescription(
     eval_result: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -2280,6 +2295,17 @@ def generate_pacer_ai_prescription(
     cred = eval_result["pacer_credentials_summary"]
     m6 = eval_result.get("monthly_mileage_6m") or []
     total_6m_km = round(sum(float(x.get("km") or 0.0) for x in m6), 1)
+
+    cache_key = (
+        str(runner.get("user_id") or runner.get("id") or runner.get("display_name") or ""),
+        str(calib.get("event_name") or ""),
+        str(sel.get("group_label") or ""),
+    )
+    now_mono = time.monotonic()
+    with _PACER_AI_CACHE_LOCK:
+        cached_entry = _PACER_AI_CACHE.get(cache_key)
+        if cached_entry and (now_mono - cached_entry[0]) < _PACER_AI_CACHE_TTL_SECONDS:
+            return dict(cached_entry[1])
 
     fallback_plan = (
         f"【第1周 · 目标配速体感标定】周中完成 12km @ {sel['target_pace_str']} 定速跑（关闭每公里语音，每3km核对一次误差）；周末 20km 稳态有氧。\n"
@@ -2316,26 +2342,36 @@ def generate_pacer_ai_prescription(
     )
 
     try:
+        from config import settings
         from utils.llm import llm_client
         raw = llm_client.chat_completion(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            model=getattr(settings, "LLM_MODEL_WORKHORSE", "qwen-plus"),
             temperature=0.35,
             max_tokens=700,
+            disable_thinking=True,
         )
         clean = str(raw or "").strip()
         if "{" in clean and "}" in clean:
             clean = clean[clean.find("{") : clean.rfind("}") + 1]
             parsed = json.loads(clean)
-            if parsed.get("four_week_plan") and parsed.get("application_statement"):
-                return {
+            plan_txt = _normalize_pacer_plan_text(parsed.get("four_week_plan"))
+            app_txt = _normalize_pacer_plan_text(parsed.get("application_statement"))
+            if plan_txt and app_txt:
+                res_obj = {
                     "success": True,
                     "source": "ai",
-                    "four_week_plan": str(parsed["four_week_plan"]).strip(),
-                    "application_statement": str(parsed["application_statement"]).strip(),
+                    "four_week_plan": plan_txt,
+                    "application_statement": app_txt,
                 }
+                with _PACER_AI_CACHE_LOCK:
+                    if len(_PACER_AI_CACHE) >= 128:
+                        _PACER_AI_CACHE.pop(next(iter(_PACER_AI_CACHE)), None)
+                    _PACER_AI_CACHE[cache_key] = (now_mono, res_obj)
+                return res_obj
     except Exception as e:
         logger.warning(f"[pacer_ai] Falling back to deterministic template: {e}")
 

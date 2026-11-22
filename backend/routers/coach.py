@@ -7,6 +7,7 @@ from datetime import datetime, date, timedelta
 from db import supabase_admin
 from utils.llm import llm_client
 from utils.local_store import LocalStore, DB_PATH, sqlite3
+from utils.security import validate_uploaded_image_bytes, enforce_rate_limit, get_client_ip, is_strict_auth_mode, MAX_IMAGE_UPLOAD_BYTES
 from utils.running_metrics import (
     get_race_specific_zones,
     get_age_from_dob,
@@ -825,7 +826,12 @@ CANOVA_CHAT_SYSTEM_PROMPT = """你是一位以意大利传奇耐力训练大师 
 
 def _get_current_llm_model_display() -> tuple[str, str]:
     """Returns (raw_model_id, human_readable_model_display)."""
-    raw_model = (getattr(llm_client, "model", None) or "qwen-max").strip()
+    from config import settings
+    raw_model = (
+        getattr(llm_client, "model", None)
+        or getattr(settings, "LLM_MODEL_WORKHORSE", "qwen-plus")
+        or "qwen-plus"
+    ).strip()
     low = raw_model.lower()
     if "qwen-max" in low:
         return raw_model, f"阿里云通义千问旗舰大模型 Qwen-Max ({raw_model})"
@@ -841,16 +847,25 @@ def _get_current_llm_model_display() -> tuple[str, str]:
 def _extract_user_question_and_context(raw_message: str) -> tuple[str, str]:
     """
     Separates optional leading '[跑者实时生理与WHOOP状态：...]' prefix injected by the iOS client
-    from the athlete's actual question text so keyword/intent detection only inspects the question.
+    from the athlete's actual question text and sanitizes spoofed bracketed control tags.
     """
     msg = (raw_message or "").strip()
+    prefix = ""
+    question = msg
     if msg.startswith("[") and "]" in msg:
         idx = msg.find("]")
-        prefix = msg[1:idx].strip()
-        question = msg[idx + 1:].strip()
-        if question:
-            return question, prefix
-    return msg, ""
+        cand_prefix = msg[1:idx].strip()
+        cand_question = msg[idx + 1:].strip()
+        if cand_question and cand_prefix.startswith("跑者实时生理"):
+            prefix = cand_prefix
+            question = cand_question
+    question = re.sub(
+        r"\[[^\]]*(?:SYSTEM|TELEMETRY|ADMIN|OVERRIDE|CONTEXT|PROMPT)[^\]]*\]",
+        "",
+        question,
+        flags=re.I,
+    ).strip()
+    return question or msg, prefix
 
 
 @router.post("/chat")
@@ -1054,7 +1069,14 @@ def coach_chat_endpoint(req: CoachChatRequest):
                 if role in ("user", "assistant") and content:
                     messages.append({"role": role, "content": str(content)[:600]})
         messages.append({"role": "user", "content": prompt})
-        res = llm_client.chat_completion(messages=messages, temperature=0.6, max_tokens=650)
+        from config import settings
+        res = llm_client.chat_completion(
+            messages=messages,
+            model=settings.LLM_MODEL_WORKHORSE,
+            temperature=0.6,
+            max_tokens=650,
+            disable_thinking=True,
+        )
         if res and len(res.strip()) > 10 and not res.startswith("【Canova教练提示】") and not res.startswith("AI 分析生成失败"):
             cleaned_res = res.strip()
             if cleaned_res.startswith("{") and "summary" in cleaned_res:
@@ -1611,14 +1633,25 @@ Canova 针对该赛事类型的专项训练区间:
     ]
 
     analysis_data = None
+    used_llm_diagnosis = False
     try:
-        raw_output = llm_client.chat_completion(messages=messages, temperature=0.7)
+        from config import settings
+        raw_output = llm_client.chat_completion(
+            messages=messages,
+            model=settings.LLM_MODEL_REASONING,
+            temperature=0.5,
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+        )
         clean_json = raw_output.strip()
         if "```json" in clean_json:
             clean_json = clean_json.split("```json")[1].split("```")[0].strip()
         elif "```" in clean_json:
             clean_json = clean_json.split("```")[1].split("```")[0].strip()
-        analysis_data = json.loads(clean_json)
+        parsed_diag = json.loads(clean_json)
+        if isinstance(parsed_diag, dict) and parsed_diag:
+            analysis_data = parsed_diag
+            used_llm_diagnosis = True
     except Exception as e:
         logger.warning(f"[coach] LLM parse fallback: {e}")
         # Intelligent fallback matching runner tier, race_category & TSB
@@ -1723,22 +1756,28 @@ Canova 针对该赛事类型的专项训练区间:
         analysis_data["multi_race_strategy"] = fallback_strat
     else:
         # Attach id and days_left from multi_race_analysis if missing
-        advice_list = raw_strategy.get("race_timeline_advice") or []
-        races_map = {r["name"]: r for r in multi_race_analysis.get("races", [])}
-        for adv in advice_list:
-            adv_name = adv.get("race_name", "")
-            matched_r = races_map.get(adv_name)
-            if not matched_r:
-                for rn, r_obj in races_map.items():
-                    if adv_name in rn or rn in adv_name:
-                        matched_r = r_obj
-                        break
-            if matched_r:
-                adv["id"] = matched_r.get("id") or matched_r["name"]
-                if "days_left" not in adv:
-                    adv["days_left"] = matched_r.get("days_left", 0)
-            else:
-                adv["id"] = adv_name
+        raw_advice_list = raw_strategy.get("race_timeline_advice") or []
+        advice_list = [adv for adv in raw_advice_list if isinstance(adv, dict)]
+        if not advice_list:
+            fallback_strat = generate_fallback_multi_race_strategy(multi_race_analysis, target_race, race_category)
+            raw_strategy["race_timeline_advice"] = fallback_strat.get("race_timeline_advice", [])
+        else:
+            races_map = {r["name"]: r for r in multi_race_analysis.get("races", [])}
+            for adv in advice_list:
+                adv_name = adv.get("race_name", "")
+                matched_r = races_map.get(adv_name)
+                if not matched_r:
+                    for rn, r_obj in races_map.items():
+                        if adv_name in rn or rn in adv_name:
+                            matched_r = r_obj
+                            break
+                if matched_r:
+                    adv["id"] = matched_r.get("id") or matched_r["name"]
+                    if "days_left" not in adv:
+                        adv["days_left"] = matched_r.get("days_left", 0)
+                else:
+                    adv["id"] = adv_name
+            raw_strategy["race_timeline_advice"] = advice_list
 
         analysis_data["multi_race_strategy"] = raw_strategy
 
@@ -1783,8 +1822,8 @@ Canova 针对该赛事类型的专项训练区间:
         if warn_msg and "夜间" not in cur_rec_adv:
             analysis_data["recovery_advice"] = f"{warn_msg}\n\n{cur_rec_adv}".strip()
 
-    # Save to local store
-    if analysis_data:
+    # Save to local store only when LLM succeeded or no prior report exists
+    if analysis_data and (used_llm_diagnosis or not LocalStore.get_coach_report(eff_uid)):
         LocalStore.save_coach_report(eff_uid, analysis_data)
 
     return analysis_data
@@ -3086,48 +3125,71 @@ def generate_scientific_training_plan(req: GenerateTrainingPlanRequest):
 请根据以上跑者的真实生理承受力、历史表现、自定目标与既定赛历，为跑者生成包含第 1 周到第 {weeks_count} 周的完整周度/日度训练课表。直接输出标准 JSON。
 """
 
-    messages = [
-        {"role": "system", "content": CANOVA_PLAN_SYSTEM_PROMPT},
-        {"role": "user", "content": user_context}
-    ]
+    # Always generate complete deterministic schedule so multi-week plans never truncate JSON
+    schedule_data = generate_fallback_training_plan(
+        athlete_name=runner_name,
+        goal_type=goal_type,
+        target_race_name=target_race_name,
+        target_time_str=target_time_str,
+        race_category=race_category,
+        maintenance_focus=maintenance_focus,
+        weeks_count=weeks_count,
+        days_per_week=days_per_week,
+        start_monday=start_monday,
+        vdot=vo2max,
+        pb_marathon_sec=marathon_pb,
+        max_long_run_18m_km=history_18m.get("max_single_distance_km") or 25.0,
+        age=age,
+        scheduled_races=active_scheduled_races,
+        user_weekly_target=user_weekly_target
+    )
 
-    schedule_data = None
-    if not req.use_fast_engine:
+    if not req.use_fast_engine and llm_client._get_client() is not None:
         try:
-            raw_output = llm_client.chat_completion(messages=messages, temperature=0.7)
+            from config import settings
+            overlay_prompt = (
+                f"{user_context}\n\n"
+                "请只输出紧凑的周度指导覆盖 JSON（禁止展开每日明细，避免截断），格式如下：\n"
+                '{"plan_summary":"一句总策略","coach_advice":"一句恢复与执行叮嘱",'
+                '"weeks_overlay":[{"week_number":1,"theme":"第1周主题","key_focus":"本周关键重点"}]}'
+            )
+            raw_output = llm_client.chat_completion(
+                messages=[
+                    {"role": "system", "content": "你是 Renato Canova 马拉松与越野跑科学教练，只输出合法 JSON 对象。"},
+                    {"role": "user", "content": overlay_prompt},
+                ],
+                model=settings.LLM_MODEL_WORKHORSE,
+                temperature=0.4,
+                max_tokens=1400,
+                response_format={"type": "json_object"},
+                disable_thinking=True,
+            )
             clean_json = raw_output.strip()
             if "```json" in clean_json:
                 clean_json = clean_json.split("```json")[1].split("```")[0].strip()
             elif "```" in clean_json:
                 clean_json = clean_json.split("```")[1].split("```")[0].strip()
-            schedule_data = json.loads(clean_json)
-            
-            # Verify structure integrity
-            if not schedule_data.get("weeks") or len(schedule_data.get("weeks")) == 0:
-                schedule_data = None
+            overlay = json.loads(clean_json)
+            if isinstance(overlay, dict):
+                if overlay.get("plan_summary"):
+                    schedule_data["plan_summary"] = str(overlay["plan_summary"]).strip()
+                if overlay.get("coach_advice"):
+                    schedule_data["coach_advice"] = str(overlay["coach_advice"]).strip()
+                wo_map = {
+                    int(item["week_number"]): item
+                    for item in (overlay.get("weeks_overlay") or [])
+                    if isinstance(item, dict) and str(item.get("week_number") or "").isdigit()
+                }
+                for wk in schedule_data.get("weeks") or []:
+                    w_num = int(wk.get("week_number") or 0)
+                    ov = wo_map.get(w_num)
+                    if ov:
+                        if ov.get("theme"):
+                            wk["theme"] = str(ov["theme"]).strip()
+                        if ov.get("key_focus"):
+                            wk["key_focus"] = str(ov["key_focus"]).strip()
         except Exception as e:
-            logger.warning(f"[coach_plan] LLM generation error/fallback: {e}")
-            schedule_data = None
-
-    if not schedule_data:
-        # Generate robust, realistic Canova schedule dynamically
-        schedule_data = generate_fallback_training_plan(
-            athlete_name=runner_name,
-            goal_type=goal_type,
-            target_race_name=target_race_name,
-            target_time_str=target_time_str,
-            race_category=race_category,
-            maintenance_focus=maintenance_focus,
-            weeks_count=weeks_count,
-            days_per_week=days_per_week,
-            start_monday=start_monday,
-            vdot=vo2max,
-            pb_marathon_sec=marathon_pb,
-            max_long_run_18m_km=history_18m.get("max_single_distance_km") or 25.0,
-            age=age,
-            scheduled_races=active_scheduled_races,
-            user_weekly_target=user_weekly_target
-        )
+            logger.warning(f"[coach_plan] Compact LLM overlay skipped: {e}")
 
     # Deterministic safety-net integration for any active scheduled races
     if active_scheduled_races and schedule_data and schedule_data.get("weeks"):
@@ -3910,6 +3972,7 @@ def club_batch_generate_plans_endpoint(req: ClubBatchGeneratePlansRequest):
     only_without = True if req.only_without_plan is None else bool(req.only_without_plan)
     generated_plans = []
 
+    eligible_members = []
     for m in members:
         uid = m["user_id"]
         if target_uids is not None and uid not in target_uids:
@@ -3920,7 +3983,13 @@ def club_batch_generate_plans_endpoint(req: ClubBatchGeneratePlansRequest):
             existing_draft = LocalStore.get_user_draft_training_plan(uid, reconcile=False)
             if existing_active or existing_draft:
                 continue
+        eligible_members.append(m)
 
+    # Cap large club batch requests to fast deterministic engine to avoid N serial LLM timeouts
+    effective_fast = True if len(eligible_members) > 5 else (True if req.use_fast_engine is None else bool(req.use_fast_engine))
+
+    for m in eligible_members:
+        uid = m["user_id"]
         try:
             gen_res = generate_scientific_training_plan(GenerateTrainingPlanRequest(
                 athlete_uid=uid,
@@ -3929,7 +3998,7 @@ def club_batch_generate_plans_endpoint(req: ClubBatchGeneratePlansRequest):
                 days_per_week=req.days_per_week or 4,
                 operator_uid=req.operator_uid,
                 as_draft=True if req.as_draft is None else req.as_draft,
-                use_fast_engine=True if req.use_fast_engine is None else req.use_fast_engine
+                use_fast_engine=effective_fast
             ))
             if gen_res.get("plan"):
                 generated_plans.append({
@@ -4026,18 +4095,20 @@ def update_plan_workout_item(plan_id: str, req: UpdateWorkoutRequest):
                         existing_photos.append(raw_b64)
                     continue
                 b64_str = raw_b64.split(",", 1)[1] if "," in raw_b64 else raw_b64
+                if len(b64_str) > (MAX_IMAGE_UPLOAD_BYTES * 4 // 3) + 4096:
+                    continue
                 try:
                     img_bytes = base64.b64decode(b64_str)
-                    if len(img_bytes) > 100:
-                        fname = f"workout_{safe_uid}_w{req.week_index}_d{req.day_index}_{ts_ms}_{idx}.jpg"
-                        fpath = os.path.join(photo_dir, fname)
-                        with open(fpath, "wb") as f:
-                            f.write(img_bytes)
-                        pub_url = f"https://rgm.vanpower.net/api/race-photos/{fname}"
-                        if pub_url not in existing_photos:
-                            existing_photos.append(pub_url)
+                    ext = validate_uploaded_image_bytes(img_bytes, "workout.jpg")
+                    fname = f"workout_{safe_uid}_w{req.week_index}_d{req.day_index}_{ts_ms}_{idx}{ext}"
+                    fpath = os.path.join(photo_dir, fname)
+                    with open(fpath, "wb") as f:
+                        f.write(img_bytes)
+                    pub_url = f"https://rgm.vanpower.net/api/race-photos/{fname}"
+                    if pub_url not in existing_photos:
+                        existing_photos.append(pub_url)
                 except Exception as pe:
-                    logger.warning(f"Failed to decode workout photo base64: {pe}")
+                    logger.warning(f"Failed to validate/save workout photo base64: {pe}")
 
         existing_photos = existing_photos[:6]
         workout_update["workout_photos"] = existing_photos

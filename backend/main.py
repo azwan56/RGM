@@ -9,40 +9,74 @@ if hasattr(time, "tzset"):
     except Exception:
         pass
 
-from fastapi import FastAPI
+from datetime import datetime
+from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from config import settings
 from middleware.auth import SupabaseAuthMiddleware
+from utils.local_store import db_connect
 
-from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization, notifications, community
-from scheduler.tasks import start_scheduler
+from routers import auth, sync, coach, profile, science, team, miniapp, admin, organization, notifications, community, assistant
+from scheduler.tasks import start_scheduler, stop_scheduler
+
+_DEFAULT_SVG_ASSETS = {
+    "default-avatar.svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none"><defs><linearGradient id="avGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FC4C02"/><stop offset="100%" stop-color="#FF8A00"/></linearGradient></defs><rect width="128" height="128" rx="64" fill="url(#avGrad)"/><circle cx="64" cy="46" r="20" fill="#FFFFFF" fill-opacity="0.94"/><path d="M26 106c5-20 20-31 38-31s33 11 38 31" fill="#FFFFFF" fill-opacity="0.94"/></svg>',
+    "default-club.svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none"><defs><linearGradient id="clGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#0F172A"/><stop offset="100%" stop-color="#FC4C02"/></linearGradient></defs><rect width="128" height="128" rx="28" fill="url(#clGrad)"/><path d="M32 82l18-28 14 14 20-26 12 40H32z" fill="#FFFFFF" fill-opacity="0.92"/><circle cx="88" cy="34" r="9" fill="#FACC15"/></svg>',
+    "default-banner.svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 320" fill="none"><defs><linearGradient id="bnGrad" x1="0" y1="0" x2="800" y2="320" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#0F172A"/><stop offset="55%" stop-color="#1E293B"/><stop offset="100%" stop-color="#FC4C02"/></linearGradient></defs><rect width="800" height="320" fill="url(#bnGrad)"/><path d="M0 250Q180 180 340 220T680 150L800 110V320H0Z" fill="#FFFFFF" fill-opacity="0.08"/><path d="M0 285Q240 225 460 255T800 185V320H0Z" fill="#FC4C02" fill-opacity="0.22"/></svg>',
+    "default-run.svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 360" fill="none"><defs><linearGradient id="rnGrad" x1="0" y1="0" x2="600" y2="360" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#111827"/><stop offset="100%" stop-color="#EA580C"/></linearGradient></defs><rect width="600" height="360" fill="url(#rnGrad)"/><path d="M40 265C150 185 240 230 330 160C410 95 495 125 560 75" stroke="#FFFFFF" stroke-opacity="0.7" stroke-width="5" stroke-linecap="round"/></svg>',
+}
+
+
+def _ensure_default_static_assets() -> None:
+    target_dir = os.path.join(os.path.dirname(__file__), "data", "avatars")
+    os.makedirs(target_dir, exist_ok=True)
+    for fname, svg in _DEFAULT_SVG_ASSETS.items():
+        fpath = os.path.join(target_dir, fname)
+        if not os.path.exists(fpath):
+            try:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(svg)
+            except OSError:
+                pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    _ensure_default_static_assets()
     try:
         start_scheduler()
     except Exception as e:
         print(f"[startup] Scheduler start failed: {e}")
     yield
     # Shutdown
+    stop_scheduler()
 
+_is_prod = settings.ENVIRONMENT.lower() == "production"
 app = FastAPI(
     title="万跑跑团助手 API",
     description="基于阿里云 + 多品牌手表直连 + 微信小程序与 Web 一体化的万跑跑团助手与 Canova 科学教练系统",
     version="2.0.0-cn",
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None,
+    openapi_url=None if _is_prod else "/openapi.json",
     lifespan=lifespan
 )
 
 # 1. Supabase Auth Middleware
 app.add_middleware(SupabaseAuthMiddleware)
 
-# 2. CORS Middleware
+# 2. CORS Middleware (strict origin allowlist in production)
+_cors_origins = (
+    [o.strip() for o in (settings.CORS_ORIGINS or "").split(",") if o.strip()]
+    if _is_prod
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,25 +111,25 @@ app.include_router(miniapp.router,  prefix="/api/miniapp",  tags=["微信小程�
 app.include_router(admin.router,    prefix="/api/admin",    tags=["平台超级管理员"])
 app.include_router(notifications.router, prefix="/api",     tags=["系统通知与消息推送"])
 app.include_router(community.router, prefix="/api/community", tags=["社区脉冲·寻搭子·宣传展厅·靶向纳新"])
+app.include_router(assistant.router, prefix="/api/assistant", tags=["AI操作助手与语音引导"])
 
-from fastapi import Header
 from typing import Optional
 
 @app.post("/api/garmin/connect", tags=["认证与佳明直连"])
-def api_garmin_connect_alias(request: auth.GarminBindRequest, background_tasks: auth.BackgroundTasks):
-    return auth.bind_garmin(request, background_tasks)
+def api_garmin_connect_alias(request: auth.GarminBindRequest, background_tasks: auth.BackgroundTasks, http_req: Request):
+    return auth.bind_garmin(request, background_tasks, http_req)
 
 @app.post("/api/garmin/disconnect", tags=["认证与佳明直连"])
-def api_garmin_disconnect_alias(request: auth.GarminUnbindRequest, authorization: Optional[str] = Header(None)):
-    return auth.unbind_garmin(request, authorization)
+def api_garmin_disconnect_alias(request: auth.GarminUnbindRequest, authorization: Optional[str] = Header(None), http_req: Request = None):
+    return auth.unbind_garmin(request, authorization, http_req)
 
 @app.post("/api/coros/connect", tags=["认证与高驰直连"])
-def api_coros_connect_alias(request: auth.CorosBindRequest, background_tasks: auth.BackgroundTasks):
-    return auth.bind_coros(request, background_tasks)
+def api_coros_connect_alias(request: auth.CorosBindRequest, background_tasks: auth.BackgroundTasks, http_req: Request):
+    return auth.bind_coros(request, background_tasks, http_req)
 
 @app.post("/api/coros/disconnect", tags=["认证与高驰直连"])
-def api_coros_disconnect_alias(request: auth.CorosUnbindRequest, authorization: Optional[str] = Header(None)):
-    return auth.unbind_coros(request, authorization)
+def api_coros_disconnect_alias(request: auth.CorosUnbindRequest, authorization: Optional[str] = Header(None), http_req: Request = None):
+    return auth.unbind_coros(request, authorization, http_req)
 
 @app.get("/")
 def read_root():
@@ -110,7 +144,17 @@ def read_root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "timestamp": "2026-08-16T08:50:00+08:00"}
+    db_ok = True
+    try:
+        with db_connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": "ok" if db_ok else "error",
+        "timestamp": datetime.now().astimezone().isoformat(),
+    }
 
 from fastapi.responses import HTMLResponse
 
@@ -148,13 +192,13 @@ def get_privacy_policy():
         <p>我们收集的数据仅用于实现本应用的核心功能，包括跑团跑量统计、Canova AI 训练指导复盘、团队排行榜与赛事报名，绝不会将您的个人数据出售给任何第三方，亦不用于跨平台广告追踪。</p>
 
         <h2>3. 数据的存储与安全</h2>
-        <p>我们采用业界标准的高强度加密措施（包括传输层 SSL/TLS 加密与存储层加密），保障您的数据安全。您可以随时在应用内联系管理员申请注销账号并永久清除全部个人数据。</p>
+        <p>我们采用业界标准的高强度加密措施（包括传输层 SSL/TLS 加密与存储层加密），保障您的数据安全。您可随时在个人中心自助注销账号并永久删除全部个人隐私数据与运动轨迹，或发送邮件至客服协助处理。</p>
 
         <h2>4. 联系我们</h2>
         <p>如对本隐私政策有任何疑问或反馈，请通过应用内客服或发送邮件至：support@vanpower.net 联系我们。</p>
 
         <div class="footer">
-            &copy; 2026 万跑跑团助手. All rights reserved.
+            © 2026 万跑科技（上海）有限公司. · <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" style="color:#64748b;">[沪ICP备2026018807]</a>
         </div>
     </div>
 </body>
@@ -226,7 +270,7 @@ def get_scientific_citations():
         </div>
 
         <div class="footer">
-            &copy; 2026 万跑跑团助手. All rights reserved.
+            © 2026 万跑科技（上海）有限公司. · <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">[沪ICP备2026018807]</a>
         </div>
     </div>
 </body>

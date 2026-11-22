@@ -11,7 +11,7 @@ from datetime import datetime, date
 from config import settings
 from db import supabase_admin
 from utils.local_store import LocalStore
-from utils.security import is_safe_external_url, validate_uploaded_image_bytes
+from utils.security import is_safe_external_url, safe_fetch_external_bytes, validate_uploaded_image_bytes, is_strict_auth_mode
 
 logger = logging.getLogger("router_team")
 router = APIRouter()
@@ -321,6 +321,9 @@ def create_club(req: CreateClubRequest):
     join_mode = req.join_mode if req.join_mode in ("free", "invite") else "free"
     city = (req.city or "上海").strip() or "上海"
     description = (req.description or "").strip() or f"欢迎加入{club_name}，一起科学训练、无伤畅跑！"
+    from utils.wechat import wechat_client
+    owner_prof = LocalStore.get_profile(owner_id) or {}
+    wechat_client.ensure_ugc_text_safe(f"{club_name}\n{description}", openid=owner_prof.get("wechat_openid"), scene=2)
 
     target_org_id = None
     org_name = None
@@ -589,6 +592,8 @@ def get_club_invite_info(
         env_version="release",
     )
 
+    card_summary = LocalStore.get_club_invite_card_summary(club["id"], viewer_uid=user_id)
+
     return {
         "club": {
             "id": club["id"],
@@ -600,7 +605,9 @@ def get_club_invite_info(
             "member_count": len(members),
             "org_id": org_id,
             "org_name": org_name,
+            **card_summary,
         },
+        "showcase_summary": card_summary,
         "inviter_uid": inviter_uid or "",
         "inviter_name": inviter_name,
         "is_club_member": is_club_member,
@@ -661,6 +668,11 @@ def get_club_share_info(
         env_version=env_version or "release",
     )
 
+    card_summary = LocalStore.get_club_invite_card_summary(club["id"], viewer_uid=user_id)
+    landmarks = card_summary.get("home_landmarks") or []
+    schedule_summary = card_summary.get("schedule_summary") or ""
+    v_stats = card_summary.get("verified_stats") or {}
+
     query_parts = [f"invite_club_id={club['id']}"]
     if invite_code:
         query_parts.append(f"invite_code={invite_code}")
@@ -670,6 +682,8 @@ def get_club_share_info(
 
     inviter_prefix = f"【{inviter_name}】" if inviter_name else "跑友"
     org_line = f"\n🏛️ 所属大群：{org_name}" if org_name else ""
+    landmark_line = f" · 常跑 {'/'.join(landmarks[:2])}" if landmarks else ""
+    schedule_line = f"\n🗓️ 合练排期：{schedule_summary}" if schedule_summary else ""
     code_line = (
         f"\n🔑 专属入团邀请码：{invite_code}"
         if invite_code
@@ -678,7 +692,8 @@ def get_club_share_info(
     share_text = (
         f"🏃‍♂️ {inviter_prefix}诚邀你加入【{club['name']}】跑团！"
         f"{org_line}\n"
-        f"📍 所在城市：{club.get('city') or '上海'}（已有 {len(members)} 位跑友同行）"
+        f"📍 所在城市：{club.get('city') or '上海'}{landmark_line}（已有 {len(members)} 位跑友同行）"
+        f"{schedule_line}"
         f"{code_line}\n"
         f"👉 加入方式：\n"
         f"1️⃣ 微信打开「万跑跑团助手」小程序，在跑团页输入邀请码{f'【{invite_code}】' if invite_code else '一键入团'}；\n"
@@ -702,6 +717,8 @@ def get_club_share_info(
         "qrcode_base64": qr_info["qrcode_base64"],
         "web_invite_url": web_invite_url,
         "share_text": share_text,
+        "showcase_summary": card_summary,
+        **card_summary,
     }
 
 
@@ -1293,6 +1310,11 @@ def create_club_event(club_id: str, req: CreateClubEventRequest):
     if club.get("status") == "paused":
         raise HTTPException(status_code=400, detail="该跑团当前处于暂停状态，暂停发布新活动与消息！")
 
+    from utils.wechat import wechat_client
+    op_prof = LocalStore.get_profile(req.operator_uid) if req.operator_uid else {}
+    ugc_txt = "\n".join(str(x) for x in (req.title, req.location, req.location_detail, req.rules, req.recap_note) if x)
+    wechat_client.ensure_ugc_text_safe(ugc_txt, openid=(op_prof or {}).get("wechat_openid"), scene=2)
+
     event_id = LocalStore.create_club_event(club_id, {
         "title": req.title,
         "event_type": req.event_type or "group_run",
@@ -1417,13 +1439,13 @@ def get_club_event_qrcode_endpoint(club_id: str, event_id: str, env_version: Opt
             cache_name = f"poster_cache_{hashlib.md5(u.encode('utf-8')).hexdigest()[:16]}.jpg"
             cache_p = os.path.join(avatar_dir, cache_name)
             if not os.path.exists(cache_p) or os.path.getsize(cache_p) < 200:
-                try:
-                    r = ext_req.get(u, timeout=6, allow_redirects=False)
-                    if r.status_code == 200 and 200 < len(r.content) <= 10 * 1024 * 1024:
+                img_data = safe_fetch_external_bytes(u, timeout=6.0)
+                if img_data and len(img_data) > 200:
+                    try:
                         with open(cache_p, "wb") as f:
-                            f.write(r.content)
-                except Exception:
-                    pass
+                            f.write(img_data)
+                    except Exception:
+                        pass
             if os.path.exists(cache_p) and os.path.getsize(cache_p) > 200:
                 with open(cache_p, "rb") as f:
                     return base64.b64encode(f.read()).decode("ascii")
@@ -1436,7 +1458,7 @@ def get_club_event_qrcode_endpoint(club_id: str, event_id: str, env_version: Opt
             ev = LocalStore.get_club_event_detail(club_id, event_id)
         logo_b64 = _resolve_img_b64(ev.get("club_logo"))
         raw_cover = str(ev.get("cover_image") or "")
-        if not raw_cover or "images.unsplash.com" in raw_cover:
+        if not raw_cover or raw_cover.startswith("/api/avatars/default-"):
             cover_b64 = logo_b64 or _resolve_img_b64(raw_cover)
         else:
             cover_b64 = _resolve_img_b64(raw_cover) or logo_b64
@@ -1461,6 +1483,11 @@ def update_club_event_endpoint(club_id: str, event_id: str, req: CreateClubEvent
         raise HTTPException(status_code=404, detail="跑团不存在")
     if club.get("status") == "paused":
         raise HTTPException(status_code=400, detail="该跑团当前处于暂停状态，暂停修改活动与消息！")
+
+    from utils.wechat import wechat_client
+    op_prof = LocalStore.get_profile(req.operator_uid) if req.operator_uid else {}
+    ugc_txt = "\n".join(str(x) for x in (req.title, req.location, req.location_detail, req.rules, req.recap_note) if x)
+    wechat_client.ensure_ugc_text_safe(ugc_txt, openid=(op_prof or {}).get("wechat_openid"), scene=2)
 
     LocalStore.update_club_event(club_id, event_id, {
         "title": req.title,
@@ -1608,6 +1635,9 @@ def add_event_comment_endpoint(
     req: AddEventCommentRequest
 ):
     """Posts a comment or post-run reflection to the group run social wall."""
+    from utils.wechat import wechat_client
+    u_prof = LocalStore.get_profile(req.user_id) or {}
+    wechat_client.ensure_ugc_text_safe(req.content, openid=u_prof.get("wechat_openid"), scene=2)
     try:
         return LocalStore.add_event_comment(club_id, event_id, req.user_id, req.content)
     except ValueError as e:
@@ -1697,6 +1727,8 @@ def post_comment_endpoint(activity_id: str, req: PostCommentRequest):
     """Posts a member comment or threaded reply on an activity following AI Coach critique."""
     canonical_uid = LocalStore.resolve_user_id(req.user_id)
     profile = LocalStore.get_profile(canonical_uid) or {}
+    from utils.wechat import wechat_client
+    wechat_client.ensure_ugc_text_safe(req.content, openid=profile.get("wechat_openid"), scene=2)
     
     # Priority: registered display_name > client author_name (excluding raw email prefixes) > fallback
     profile_name = (profile.get("display_name") or "").strip()
@@ -1710,7 +1742,7 @@ def post_comment_endpoint(activity_id: str, req: PostCommentRequest):
         name = profile_name or "跑友"
 
     profile_avatar = profile.get("avatar_url")
-    avatar = profile_avatar or req.author_avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+    avatar = profile_avatar or req.author_avatar or "/api/avatars/default-avatar.svg"
     
     cmt = LocalStore.add_activity_comment(
         activity_id=activity_id,
@@ -1726,9 +1758,16 @@ def post_comment_endpoint(activity_id: str, req: PostCommentRequest):
 
 
 @router.delete("/activities/{activity_id}/comments/{comment_id}")
-def delete_comment_endpoint(activity_id: str, comment_id: str, user_id: Optional[str] = None):
-    """Deletes a member comment."""
-    success = LocalStore.delete_activity_comment(comment_id, user_id)
+def delete_comment_endpoint(activity_id: str, comment_id: str, user_id: Optional[str] = None, request: Request = None):
+    """Deletes a member comment with ownership check."""
+    token_uid = getattr(getattr(request, "state", None), "user_id", None) if request else None
+    eff_uid = token_uid or user_id or (request.headers.get("x-user-id") if request else None)
+    if is_strict_auth_mode() and not eff_uid:
+        raise HTTPException(status_code=401, detail="安全拦截：请先登录后再删除评论")
+    try:
+        success = LocalStore.delete_activity_comment(comment_id, eff_uid)
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
     return {"success": success, "message": "评论已删除"}
 
 
@@ -2187,7 +2226,7 @@ def get_club_pacer_radar_endpoint(
     operator_uid: Optional[str] = Query(None, description="教练/团长 UID"),
     user_id: Optional[str] = Query(None, description="教练/团长 UID 别名"),
     coach_uid: Optional[str] = Query(None, description="教练 UID 别名"),
-    allow_web_search: bool = Query(True, description="冷门赛事是否允许联网检索"),
+    allow_web_search: bool = Query(False, description="冷门赛事是否允许联网检索"),
     request: Request = None,
 ):
     """
