@@ -320,9 +320,52 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
     return () => clearTimeout(t);
   }, [showLeaveClubModal, leaveClubCountdown]);
 
+  const [eventType, setEventType] = useState<"group_run" | "distance_challenge">("group_run");
   const [eventTitle, setEventTitle] = useState("");
-  const [eventTargetKm, setEventTargetKm] = useState(200);
+  const [eventTargetKm, setEventTargetKm] = useState(15);
+  const [eventMeetDate, setEventMeetDate] = useState("");
+  const [eventMeetTime, setEventMeetTime] = useState("06:30");
+  const [eventLocation, setEventLocation] = useState("");
+  const [eventPaceRequirement, setEventPaceRequirement] = useState("");
+  const [eventMaxParticipants, setEventMaxParticipants] = useState(0);
+  const [eventRepeatRule, setEventRepeatRule] = useState<"none" | "weekly">("none");
+  const [eventRepeatWeeks, setEventRepeatWeeks] = useState(4);
+  const [eventStartDate, setEventStartDate] = useState("");
+  const [eventEndDate, setEventEndDate] = useState("");
   const [eventRules, setEventRules] = useState("");
+  const [savingClubEvent, setSavingClubEvent] = useState(false);
+
+  function getDefaultEventDates() {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const todayStr = fmt(now);
+    // Default group run date: upcoming Saturday (or tomorrow if today is Sat)
+    const day = now.getDay();
+    const diffToSat = day === 6 ? 1 : (6 - day + 7) % 7 || 7;
+    const nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToSat);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { todayStr, nextRunStr: fmt(nextRun), monthEndStr: fmt(monthEnd) };
+  }
+
+  function openCreateEventModal(defaultType: "group_run" | "distance_challenge" = "group_run") {
+    const { todayStr, nextRunStr, monthEndStr } = getDefaultEventDates();
+    setEditingEvent(null);
+    setEventType(defaultType);
+    setEventTitle("");
+    setEventTargetKm(defaultType === "group_run" ? 15 : 200);
+    setEventMeetDate(nextRunStr);
+    setEventMeetTime("06:30");
+    setEventLocation("");
+    setEventPaceRequirement("");
+    setEventMaxParticipants(0);
+    setEventRepeatRule("none");
+    setEventRepeatWeeks(4);
+    setEventStartDate(todayStr);
+    setEventEndDate(monthEndStr);
+    setEventRules("");
+    setShowCreateEventModal(true);
+  }
 
 
   const router = useRouter();
@@ -473,7 +516,7 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
             void openClubInviteModal(currentClub);
           } else if (openAct === "create-event") {
             setActiveTab("events");
-            setShowCreateEventModal(true);
+            openCreateEventModal("group_run");
           } else if (openAct === "mentorship") {
             setActiveTab("leaderboard");
             setShowMentorshipBindModal(true);
@@ -2554,16 +2597,44 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
   }
 
   function handleOpenEditEvent(evt: any) {
+    const { todayStr, nextRunStr, monthEndStr } = getDefaultEventDates();
+    const resolvedType: "group_run" | "distance_challenge" =
+      evt.event_type === "distance_challenge"
+        ? "distance_challenge"
+        : evt.event_type === "group_run" || evt.meet_time || evt.location
+        ? "group_run"
+        : "distance_challenge";
+    let mDate = String(evt.start_date || nextRunStr).slice(0, 10);
+    let mTime = "06:30";
+    if (evt.meet_time) {
+      const parts = String(evt.meet_time).trim().split(/\s+/);
+      if (parts[0] && /^\d{4}-\d{2}-\d{2}/.test(parts[0])) {
+        mDate = parts[0].slice(0, 10);
+      }
+      if (parts[1] && /^\d{1,2}:\d{2}/.test(parts[1])) {
+        mTime = parts[1].slice(0, 5);
+      }
+    }
     setEditingEvent(evt);
+    setEventType(resolvedType);
     setEventTitle(evt.title || "");
-    setEventTargetKm(evt.target_km || 200);
+    setEventTargetKm(Number(evt.target_km) || (resolvedType === "group_run" ? 15 : 200));
+    setEventMeetDate(mDate);
+    setEventMeetTime(mTime);
+    setEventLocation(evt.location || "");
+    setEventPaceRequirement(evt.pace_requirement || "");
+    setEventMaxParticipants(Number(evt.max_participants) || 0);
+    setEventRepeatRule(evt.repeat_rule === "weekly" ? "weekly" : "none");
+    setEventRepeatWeeks(Number(evt.repeat_weeks) || 4);
+    setEventStartDate(String(evt.start_date || todayStr).slice(0, 10));
+    setEventEndDate(String(evt.end_date || monthEndStr).slice(0, 10));
     setEventRules(evt.rules || "");
     setShowCreateEventModal(true);
   }
 
   async function handleDeleteEvent(eventId: string) {
     if (!currentClub) return;
-    if (!await askConfirm("确定要删除该跑团挑战赛活动吗？")) return;
+    if (!await askConfirm("确定要删除该跑团活动吗？")) return;
     try {
       await apiClient.delete(`/api/team/${currentClub.id}/events/${eventId}`);
       showToast("活动已成功删除");
@@ -2575,24 +2646,41 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
 
   async function handleCreateOrEditEvent(e: React.FormEvent) {
     e.preventDefault();
-    if (!currentClub || !eventTitle.trim() || !user?.id) return;
+    if (!currentClub || !eventTitle.trim() || !user?.id || savingClubEvent) return;
+    setSavingClubEvent(true);
     try {
-      if (editingEvent) {
-        await apiClient.put(`/api/team/${currentClub.id}/events/${editingEvent.id}`, {
-          operator_uid: user.id,
-          title: eventTitle.trim(),
-          target_km: Number(eventTargetKm),
-          rules: eventRules.trim(),
-        });
-        showToast("挑战赛修改成功！");
+      const payload: Record<string, any> = {
+        operator_uid: user.id,
+        title: eventTitle.trim(),
+        event_type: eventType,
+        target_km: Number(eventTargetKm) || (eventType === "group_run" ? 10 : 200),
+        rules: eventRules.trim(),
+      };
+      if (eventType === "group_run") {
+        const meetTimeCombined = eventMeetDate
+          ? `${eventMeetDate} ${eventMeetTime || "06:30"}`
+          : eventMeetTime || undefined;
+        payload.meet_time = meetTimeCombined;
+        payload.start_date = eventMeetDate || undefined;
+        payload.end_date = eventMeetDate || undefined;
+        payload.location = eventLocation.trim() || undefined;
+        payload.pace_requirement = eventPaceRequirement.trim() || undefined;
+        payload.max_participants = Number(eventMaxParticipants) || 0;
+        payload.repeat_rule = !editingEvent ? eventRepeatRule : editingEvent.repeat_rule || "none";
+        if (!editingEvent && eventRepeatRule === "weekly") {
+          payload.repeat_weeks = Number(eventRepeatWeeks) || 4;
+        }
       } else {
-        await apiClient.post(`/api/team/${currentClub.id}/events`, {
-          operator_uid: user.id,
-          title: eventTitle.trim(),
-          target_km: Number(eventTargetKm),
-          rules: eventRules.trim(),
-        });
-        showToast("活动挑战发布成功！");
+        payload.start_date = eventStartDate || undefined;
+        payload.end_date = eventEndDate || undefined;
+      }
+
+      if (editingEvent) {
+        const res = await apiClient.put(`/api/team/${currentClub.id}/events/${editingEvent.id}`, payload);
+        showToast(res.data?.message || (eventType === "group_run" ? "线下约跑修改成功！" : "挑战赛修改成功！"));
+      } else {
+        const res = await apiClient.post(`/api/team/${currentClub.id}/events`, payload);
+        showToast(res.data?.message || (eventType === "group_run" ? "线下约跑发布成功！" : "跑量挑战赛发布成功！"));
       }
       setShowCreateEventModal(false);
       setEditingEvent(null);
@@ -2601,7 +2689,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
       setActiveTab("events");
       loadClubDetails(currentClub.id);
     } catch (e: any) {
-      showToast("发布或修改失败");
+      showToast(e?.response?.data?.detail || "发布或修改失败", "error");
+    } finally {
+      setSavingClubEvent(false);
     }
   }
 
@@ -4505,16 +4595,10 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                   <span className="text-xs text-[var(--rgm-text-2)]">共 <strong className="text-[var(--rgm-text)]">{members.length}</strong> 位团员</span>
                   {(currentRole === "owner" || user?.is_admin) && (
                     <button
-                      onClick={() => {
-                        setEditingEvent(null);
-                        setEventTitle("");
-                        setEventTargetKm(200);
-                        setEventRules("");
-                        setShowCreateEventModal(true);
-                      }}
-                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-amber-600/20"
+                      onClick={() => openCreateEventModal("group_run")}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-amber-600/20 cursor-pointer"
                     >
-                      + 发起跑团挑战赛
+                      + 发起约跑 / 挑战赛
                     </button>
                   )}
                 </div>
@@ -7157,9 +7241,9 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
               <div>
                 <h2 className="text-lg font-black text-[var(--rgm-text)] flex items-center gap-2">
                   <Award className="w-5 h-5 text-blue-500" />
-                  跑团活动与月度挑战赛
+                  跑团约跑与月度挑战赛
                 </h2>
-                <p className="text-xs text-[var(--rgm-text-muted)] mt-0.5">全团共同参与，用公里数兑换专属荣誉与完赛勋章</p>
+                <p className="text-xs text-[var(--rgm-text-muted)] mt-0.5">支持发起本团线下约跑合练与月度里程挑战赛，全团一键报名与自动统计跑量</p>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -7173,17 +7257,11 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                 )}
                 {(currentRole === "owner" || currentRole === "coach") && (
                   <button
-                    onClick={() => {
-                      setEditingEvent(null);
-                      setEventTitle("");
-                      setEventTargetKm(200);
-                      setEventRules("");
-                      setShowCreateEventModal(true);
-                    }}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-blue-600/20 self-start sm:self-auto"
+                    onClick={() => openCreateEventModal("group_run")}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-blue-600/20 self-start sm:self-auto cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    发起本团挑战 / 活动
+                    发起线下约跑 / 挑战赛
                   </button>
                 )}
               </div>
@@ -7205,9 +7283,13 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                             🏛️ 大群跨跑团联合
                           </span>
                         )}
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400">
                           <Award className="w-3.5 h-3.5" />
-                          {evt.event_type === "group_run" ? "📍 线下联合约跑 / 合练" : "🏆 里程挑战赛"}
+                          {evt.event_type === "group_run"
+                            ? evt.is_org_event
+                              ? "📍 线下联合约跑 / 合练"
+                              : "🏃 线下约跑 / 合练"
+                            : "🏆 里程挑战赛"}
                         </div>
                       </div>
 
@@ -9942,45 +10024,249 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
         </div>
       )}
 
-      {/* Create / Edit Event Modal */}
+      {/* Create / Edit Event Modal (supports BOTH 线下约跑 group_run & 跑量挑战赛 distance_challenge) */}
       {showCreateEventModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#151518] border border-white/10 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-black text-white">
-              {editingEvent ? "编辑跑团挑战赛" : "发起跑团月度挑战赛"}
-            </h3>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+          onClick={() => {
+            setShowCreateEventModal(false);
+            setEditingEvent(null);
+          }}
+        >
+          <div
+            className="bg-[var(--rgm-card)] border border-[var(--rgm-border)] rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-lg font-black text-[var(--rgm-text)]">
+                {editingEvent
+                  ? eventType === "group_run"
+                    ? "编辑线下约跑"
+                    : "编辑跑量挑战赛"
+                  : eventType === "group_run"
+                  ? "🏃 发起本团线下约跑"
+                  : "🏆 发起本团跑量挑战赛"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateEventModal(false);
+                  setEditingEvent(null);
+                }}
+                className="p-1.5 rounded-xl text-[var(--rgm-text-muted)] hover:text-[var(--rgm-text)] hover:bg-[var(--rgm-card-2)] transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Event Type Switcher: 线下约跑 (default) vs 跑量挑战赛 */}
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-[var(--rgm-card-2)] border border-[var(--rgm-border)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setEventType("group_run");
+                  if (!editingEvent && eventTargetKm === 200) setEventTargetKm(15);
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-black transition cursor-pointer ${
+                  eventType === "group_run"
+                    ? "bg-[#FC4C02] text-white shadow-md shadow-[#FC4C02]/20"
+                    : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
+                }`}
+              >
+                🏃 线下约跑 / 合练
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEventType("distance_challenge");
+                  if (!editingEvent && eventTargetKm <= 42) setEventTargetKm(200);
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-black transition cursor-pointer ${
+                  eventType === "distance_challenge"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                    : "text-[var(--rgm-text-2)] hover:text-[var(--rgm-text)]"
+                }`}
+              >
+                🏆 跑量挑战赛
+              </button>
+            </div>
+
             <form onSubmit={handleCreateOrEditEvent} className="space-y-3">
               <div>
-                <label className="text-xs text-zinc-400 block mb-1">挑战赛标题</label>
+                <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">
+                  {eventType === "group_run" ? "约跑标题 *" : "挑战赛标题 *"}
+                </label>
                 <input
                   type="text"
                   required
                   value={eventTitle}
                   onChange={(e) => setEventTitle(e.target.value)}
-                  placeholder="例如: 9月 200km 破风进阶挑战"
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                  placeholder={
+                    eventType === "group_run"
+                      ? "例如: 周六世纪公园 15km 轻松有氧 LSD"
+                      : "例如: 11月 200km 破风进阶挑战"
+                  }
+                  className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-4 py-2.5 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
                 />
               </div>
+
+              {eventType === "group_run" ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">集合日期 *</label>
+                      <input
+                        type="date"
+                        required
+                        value={eventMeetDate}
+                        onChange={(e) => setEventMeetDate(e.target.value)}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">集合时间 *</label>
+                      <input
+                        type="time"
+                        required
+                        value={eventMeetTime}
+                        onChange={(e) => setEventMeetTime(e.target.value)}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">集合地点 *</label>
+                    <input
+                      type="text"
+                      required
+                      value={eventLocation}
+                      onChange={(e) => setEventLocation(e.target.value)}
+                      placeholder="例如: 世纪公园 7 号门 / 徐汇滨江跑者驿站"
+                      className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-4 py-2.5 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">预计跑量 (km)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        step="0.5"
+                        required
+                        value={eventTargetKm}
+                        onChange={(e) => setEventTargetKm(Number(e.target.value))}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">配速分组（选填）</label>
+                      <input
+                        type="text"
+                        value={eventPaceRequirement}
+                        onChange={(e) => setEventPaceRequirement(e.target.value)}
+                        placeholder="如 A组430 / B组515 / 慢跑600"
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">人数上限（0为不限）</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={500}
+                        value={eventMaxParticipants}
+                        onChange={(e) => setEventMaxParticipants(Number(e.target.value) || 0)}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-[#FC4C02]"
+                      />
+                    </div>
+                    {!editingEvent && (
+                      <div>
+                        <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">约跑频次</label>
+                        <div className="flex gap-1.5">
+                          <select
+                            value={eventRepeatRule}
+                            onChange={(e) => setEventRepeatRule(e.target.value as "none" | "weekly")}
+                            className="flex-1 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3 py-2.5 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
+                          >
+                            <option value="none">单次约跑</option>
+                            <option value="weekly">每周固定例跑</option>
+                          </select>
+                          {eventRepeatRule === "weekly" && (
+                            <select
+                              value={eventRepeatWeeks}
+                              onChange={(e) => setEventRepeatWeeks(Number(e.target.value))}
+                              className="w-20 bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-2 py-2.5 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
+                            >
+                              <option value={2}>2周</option>
+                              <option value={4}>4周</option>
+                              <option value={8}>8周</option>
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">目标跑量 (km) *</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={2000}
+                      required
+                      value={eventTargetKm}
+                      onChange={(e) => setEventTargetKm(Number(e.target.value))}
+                      className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-4 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">开始日期</label>
+                      <input
+                        type="date"
+                        value={eventStartDate}
+                        onChange={(e) => setEventStartDate(e.target.value)}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">结束日期</label>
+                      <input
+                        type="date"
+                        value={eventEndDate}
+                        onChange={(e) => setEventEndDate(e.target.value)}
+                        className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-3.5 py-2.5 text-xs text-[var(--rgm-text)] font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div>
-                <label className="text-xs text-zinc-400 block mb-1">目标跑量 (km)</label>
-                <input
-                  type="number"
-                  required
-                  value={eventTargetKm}
-                  onChange={(e) => setEventTargetKm(Number(e.target.value))}
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1">挑战规则说明</label>
+                <label className="text-xs font-bold text-[var(--rgm-text-2)] block mb-1">
+                  {eventType === "group_run" ? "路线、补给与注意事项" : "挑战规则说明"}
+                </label>
                 <textarea
                   rows={3}
                   value={eventRules}
                   onChange={(e) => setEventRules(e.target.value)}
-                  placeholder="完赛即可获得专属完赛电子勋章与跑团定制奖章..."
-                  className="w-full bg-[#1c1c20] border border-white/10 rounded-2xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  placeholder={
+                    eventType === "group_run"
+                      ? "例如: 绕世纪公园 3 圈，跑后拉伸合影，自带补给或门岗存包..."
+                      : "完赛即可获得专属完赛电子勋章与跑团定制奖章..."
+                  }
+                  className="w-full bg-[var(--rgm-card-2)] border border-[var(--rgm-border)] rounded-2xl px-4 py-2 text-xs text-[var(--rgm-text)] focus:outline-none focus:border-[#FC4C02]"
                 />
               </div>
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -9988,15 +10274,26 @@ export default function TeamView({ coachWorkbenchMode = false }: { coachWorkbenc
                     setShowCreateEventModal(false);
                     setEditingEvent(null);
                   }}
-                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl text-xs font-bold transition"
+                  className="flex-1 py-3 bg-[var(--rgm-card-2)] hover:opacity-85 border border-[var(--rgm-border)] text-[var(--rgm-text)] rounded-2xl text-xs font-bold transition cursor-pointer"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-blue-600/20"
+                  disabled={savingClubEvent}
+                  className={`flex-1 py-3 text-white rounded-2xl text-xs font-black transition shadow-lg cursor-pointer disabled:opacity-50 ${
+                    eventType === "group_run"
+                      ? "bg-[#FC4C02] hover:bg-orange-500 shadow-[#FC4C02]/25"
+                      : "bg-blue-600 hover:bg-blue-500 shadow-blue-600/20"
+                  }`}
                 >
-                  {editingEvent ? "保存修改" : "立即发布"}
+                  {savingClubEvent
+                    ? "发布中..."
+                    : editingEvent
+                    ? "保存修改"
+                    : eventType === "group_run"
+                    ? "立即发布线下约跑"
+                    : "立即发布跑量挑战"}
                 </button>
               </div>
             </form>

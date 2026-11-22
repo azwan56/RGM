@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 import os
 import json
@@ -128,44 +128,127 @@ class SetClubStatusOwnerRequest(BaseModel):
     status: str # 'active', 'paused', 'locked'
 
 
-# Built-in fast GCJ-02 landmark index for instant lookup + gate precision
+# Built-in fast GCJ-02 landmark index for instant lookup + gate/trailhead precision
 _KNOWN_LANDMARKS_GCJ02 = [
-    {"name": "闵行文化公园", "address": "上海市闵行区吴中路2019号闵行文化公园", "latitude": 31.1634, "longitude": 121.3609},
-    {"name": "闵行文化公园1号门", "address": "上海市闵行区吴中路2019号闵行文化公园1号门(北门)", "latitude": 31.1682, "longitude": 121.3586},
-    {"name": "闵行文化公园2号门", "address": "上海市闵行区漕宝路2001号闵行文化公园2号门(南门)", "latitude": 31.1578, "longitude": 121.3595},
-    {"name": "闵行文化公园3号门", "address": "上海市闵行区新镇路闵行文化公园3号门(西门)", "latitude": 31.1625, "longitude": 121.3538},
-    {"name": "闵行体育公园", "address": "上海市闵行区新镇路456号闵行体育公园", "latitude": 31.1429, "longitude": 121.3708},
-    {"name": "世纪公园", "address": "上海市浦东新区锦绣路1001号世纪公园", "latitude": 31.2166, "longitude": 121.5529},
-    {"name": "世纪公园7号门", "address": "上海市浦东新区锦绣路701号世纪公园7号门跑步驿站", "latitude": 31.2165, "longitude": 121.5518},
-    {"name": "世纪公园1号门", "address": "上海市浦东新区锦绣路1001号世纪公园1号门", "latitude": 31.2241, "longitude": 121.5403},
-    {"name": "徐汇滨江", "address": "上海市徐汇区龙腾大道瑞宁路徐汇滨江跑步驿站", "latitude": 31.1892, "longitude": 121.4619},
-    {"name": "卢湾体育场", "address": "上海市黄浦区肇嘉浜路128号卢湾体育场", "latitude": 31.2094, "longitude": 121.4646},
-    {"name": "源深体育中心", "address": "上海市浦东新区源深路655号源深体育中心田径场", "latitude": 31.2335, "longitude": 121.5396},
-    {"name": "半马苏河公园苗江路", "address": "上海市黄浦区苗江路望达路绿地", "latitude": 31.2016, "longitude": 121.4932},
-    {"name": "大宁公园", "address": "上海市静安区广中西路288号大宁灵石公园", "latitude": 31.2752, "longitude": 121.4393},
-    {"name": "大宁灵石公园", "address": "上海市静安区广中西路288号大宁灵石公园", "latitude": 31.2752, "longitude": 121.4393},
-    {"name": "共青森林公园", "address": "上海市杨浦区军工路2000号共青森林公园", "latitude": 31.3187, "longitude": 121.5523},
-    {"name": "顾村公园", "address": "上海市宝山区沪太路4788号顾村公园", "latitude": 31.3444, "longitude": 121.3732},
-    {"name": "中山公园", "address": "上海市长宁区长宁路780号中山公园", "latitude": 31.2188, "longitude": 121.4165},
-    {"name": "佘山国家森林公园", "address": "上海市松江区外青松公路9258号东佘山园", "latitude": 31.0956, "longitude": 121.1965},
-    {"name": "滴水湖", "address": "上海市浦东新区南汇新城镇环湖西一路滴水湖", "latitude": 30.9069, "longitude": 121.9299},
-    {"name": "奥林匹克森林公园", "address": "北京市朝阳区科荟路33号奥林匹克森林公园南门", "latitude": 40.0156, "longitude": 116.3924},
-    {"name": "朝阳公园", "address": "北京市朝阳区朝阳公园南路1号", "latitude": 39.9428, "longitude": 116.4785},
-    {"name": "玄武湖公园", "address": "江苏省南京市玄武区玄武巷1号玄武门", "latitude": 32.0724, "longitude": 118.7979},
-    {"name": "西湖", "address": "浙江省杭州市西湖区龙井路1号杭州西湖风景名胜区", "latitude": 30.2437, "longitude": 120.1479},
-    {"name": "深圳湾公园", "address": "广东省深圳市南山区滨海大道深圳湾公园", "latitude": 22.5216, "longitude": 113.9930},
+    # 上海
+    {"name": "闵行文化公园", "city": "上海", "address": "上海市闵行区吴中路2019号闵行文化公园", "latitude": 31.1634, "longitude": 121.3609},
+    {"name": "闵行文化公园1号门", "city": "上海", "address": "上海市闵行区吴中路2019号闵行文化公园1号门(北门)", "latitude": 31.1682, "longitude": 121.3586},
+    {"name": "闵行文化公园2号门", "city": "上海", "address": "上海市闵行区漕宝路2001号闵行文化公园2号门(南门)", "latitude": 31.1578, "longitude": 121.3595},
+    {"name": "闵行文化公园3号门", "city": "上海", "address": "上海市闵行区新镇路闵行文化公园3号门(西门)", "latitude": 31.1625, "longitude": 121.3538},
+    {"name": "闵行体育公园", "city": "上海", "address": "上海市闵行区新镇路456号闵行体育公园", "latitude": 31.1429, "longitude": 121.3708},
+    {"name": "世纪公园", "city": "上海", "address": "上海市浦东新区锦绣路1001号世纪公园", "latitude": 31.2166, "longitude": 121.5529},
+    {"name": "世纪公园7号门", "city": "上海", "address": "上海市浦东新区锦绣路701号世纪公园7号门跑步驿站", "latitude": 31.2165, "longitude": 121.5518},
+    {"name": "世纪公园1号门", "city": "上海", "address": "上海市浦东新区锦绣路1001号世纪公园1号门", "latitude": 31.2241, "longitude": 121.5403},
+    {"name": "徐汇滨江", "city": "上海", "address": "上海市徐汇区龙腾大道瑞宁路徐汇滨江跑步驿站", "latitude": 31.1892, "longitude": 121.4619},
+    {"name": "卢湾体育场", "city": "上海", "address": "上海市黄浦区肇嘉浜路128号卢湾体育场", "latitude": 31.2094, "longitude": 121.4646},
+    {"name": "源深体育中心", "city": "上海", "address": "上海市浦东新区源深路655号源深体育中心田径场", "latitude": 31.2335, "longitude": 121.5396},
+    {"name": "半马苏河公园苗江路", "city": "上海", "address": "上海市黄浦区苗江路望达路绿地", "latitude": 31.2016, "longitude": 121.4932},
+    {"name": "大宁公园", "city": "上海", "address": "上海市静安区广中西路288号大宁灵石公园", "latitude": 31.2752, "longitude": 121.4393},
+    {"name": "大宁灵石公园", "city": "上海", "address": "上海市静安区广中西路288号大宁灵石公园", "latitude": 31.2752, "longitude": 121.4393},
+    {"name": "共青森林公园", "city": "上海", "address": "上海市杨浦区军工路2000号共青森林公园", "latitude": 31.3187, "longitude": 121.5523},
+    {"name": "顾村公园", "city": "上海", "address": "上海市宝山区沪太路4788号顾村公园", "latitude": 31.3444, "longitude": 121.3732},
+    {"name": "中山公园", "city": "上海", "address": "上海市长宁区长宁路780号中山公园", "latitude": 31.2188, "longitude": 121.4165},
+    {"name": "佘山国家森林公园", "city": "上海", "address": "上海市松江区外青松公路9258号东佘山园", "latitude": 31.0956, "longitude": 121.1965},
+    {"name": "滴水湖", "city": "上海", "address": "上海市浦东新区南汇新城镇环湖西一路滴水湖", "latitude": 30.9069, "longitude": 121.9299},
+    # 苏州（含经典越野拉练山野线）
+    {"name": "苏州米堆山", "city": "苏州", "address": "江苏省苏州市吴中区光福镇米堆山（太湖畔坎上村）", "latitude": 31.2707, "longitude": 120.3903},
+    {"name": "米堆山", "city": "苏州", "address": "江苏省苏州市吴中区光福镇米堆山（太湖畔坎上村）", "latitude": 31.2707, "longitude": 120.3903},
+    {"name": "苏州光福香雪海", "city": "苏州", "address": "江苏省苏州市吴中区光福镇倪巷村香雪海景区", "latitude": 31.2882, "longitude": 120.3715},
+    {"name": "苏州灵岩山", "city": "苏州", "address": "江苏省苏州市吴中区木渎镇灵岩山风景区", "latitude": 31.2624, "longitude": 120.5008},
+    {"name": "灵白线", "city": "苏州", "address": "江苏省苏州市吴中区灵岩山-白马涧越野起点", "latitude": 31.2624, "longitude": 120.5008},
+    {"name": "苏州天平山", "city": "苏州", "address": "江苏省苏州市吴中区灵天路天平山风景名胜区", "latitude": 31.2883, "longitude": 120.5007},
+    {"name": "苏州白马涧", "city": "苏州", "address": "江苏省苏州市虎丘区枫桥街道白马涧龙池景区", "latitude": 31.3036, "longitude": 120.5013},
+    {"name": "苏州穹窿山", "city": "苏州", "address": "江苏省苏州市吴中区藏书镇穹窿山风景区", "latitude": 31.2509, "longitude": 120.4438},
+    {"name": "苏州树山", "city": "苏州", "address": "江苏省苏州市虎丘区通安镇树山生态村", "latitude": 31.3587, "longitude": 120.4505},
+    {"name": "苏州大阳山", "city": "苏州", "address": "江苏省苏州市虎丘区阳山南路大阳山国家森林公园", "latitude": 31.3358, "longitude": 120.4642},
+    {"name": "苏州旺山", "city": "苏州", "address": "江苏省苏州市吴中区越溪街道旺山景区", "latitude": 31.2083, "longitude": 120.5523},
+    {"name": "苏州渔洋山", "city": "苏州", "address": "江苏省苏州市吴中区太湖国家旅游度假区渔洋山", "latitude": 31.2218, "longitude": 120.3799},
+    {"name": "金鸡湖", "city": "苏州", "address": "江苏省苏州市工业园区金鸡湖景区", "latitude": 31.3116, "longitude": 120.6947},
+    {"name": "独墅湖", "city": "苏州", "address": "江苏省苏州市工业园区独墅湖月光码头/白鹭园", "latitude": 31.2708, "longitude": 120.7336},
+    # 杭州 / 南京 / 莫干山 / 北京 / 深圳 / 广州
+    {"name": "西湖", "city": "杭州", "address": "浙江省杭州市西湖区龙井路1号杭州西湖风景名胜区", "latitude": 30.2437, "longitude": 120.1479},
+    {"name": "杭州宝石山", "city": "杭州", "address": "浙江省杭州市西湖区北山街宝石山风景区", "latitude": 30.2646, "longitude": 120.1449},
+    {"name": "杭州九溪", "city": "杭州", "address": "浙江省杭州市西湖区九溪十八涧/九溪烟树", "latitude": 30.1932, "longitude": 120.1205},
+    {"name": "杭州五云山", "city": "杭州", "address": "浙江省杭州市西湖区九溪五云山", "latitude": 30.1972, "longitude": 120.1048},
+    {"name": "西溪湿地", "city": "杭州", "address": "浙江省杭州市西湖区天目山路518号西溪国家湿地公园", "latitude": 30.2673, "longitude": 120.0642},
+    {"name": "莫干山", "city": "湖州", "address": "浙江省湖州市德清县莫干山风景名胜区", "latitude": 30.6168, "longitude": 119.8602},
+    {"name": "玄武湖公园", "city": "南京", "address": "江苏省南京市玄武区玄武巷1号玄武门", "latitude": 32.0724, "longitude": 118.7979},
+    {"name": "南京紫金山", "city": "南京", "address": "江苏省南京市玄武区钟山风景名胜区紫金山", "latitude": 32.0715, "longitude": 118.8551},
+    {"name": "南京老山", "city": "南京", "address": "江苏省南京市浦口区老山国家森林公园", "latitude": 32.1045, "longitude": 118.6138},
+    {"name": "奥林匹克森林公园", "city": "北京", "address": "北京市朝阳区科荟路33号奥林匹克森林公园南门", "latitude": 40.0156, "longitude": 116.3924},
+    {"name": "朝阳公园", "city": "北京", "address": "北京市朝阳区朝阳公园南路1号", "latitude": 39.9428, "longitude": 116.4785},
+    {"name": "北京香山", "city": "北京", "address": "北京市海淀区买卖街40号香山公园", "latitude": 39.9918, "longitude": 116.1889},
+    {"name": "深圳湾公园", "city": "深圳", "address": "广东省深圳市南山区滨海大道深圳湾公园", "latitude": 22.5216, "longitude": 113.9930},
+    {"name": "深圳梧桐山", "city": "深圳", "address": "广东省深圳市罗湖区梧桐山风景区", "latitude": 22.5784, "longitude": 114.2121},
+    {"name": "深圳塘朗山", "city": "深圳", "address": "广东省深圳市南山区塘朗山郊野公园", "latitude": 22.5742, "longitude": 113.9915},
+    {"name": "广州白云山", "city": "广州", "address": "广东省广州市白云区广园中路801号白云山风景名胜区", "latitude": 23.1856, "longitude": 113.2977},
 ]
+
+# Major Chinese city centers (GCJ-02) for city-prefix detection, Photon proximity bias & fallback
+_CITY_CENTERS_GCJ02: Dict[str, Tuple[float, float]] = {
+    "上海": (31.2304, 121.4737),
+    "苏州": (31.2990, 120.5853),
+    "杭州": (30.2741, 120.1551),
+    "南京": (32.0603, 118.7969),
+    "无锡": (31.4912, 120.3119),
+    "常州": (31.8107, 119.9741),
+    "宁波": (29.8683, 121.5440),
+    "嘉兴": (30.7468, 120.7555),
+    "湖州": (30.8943, 120.0868),
+    "绍兴": (30.0298, 120.5802),
+    "温州": (27.9938, 120.6994),
+    "昆山": (31.3856, 120.9807),
+    "常熟": (31.6537, 120.7525),
+    "张家港": (31.8754, 120.5554),
+    "太仓": (31.4590, 121.1297),
+    "南通": (31.9802, 120.8943),
+    "扬州": (32.3942, 119.4129),
+    "镇江": (32.1878, 119.4258),
+    "徐州": (34.2044, 117.2858),
+    "北京": (39.9042, 116.4074),
+    "深圳": (22.5431, 114.0579),
+    "广州": (23.1291, 113.2644),
+    "珠海": (22.2707, 113.5767),
+    "佛山": (23.0215, 113.1214),
+    "东莞": (23.0207, 113.7518),
+    "成都": (30.5728, 104.0668),
+    "重庆": (29.5630, 106.5516),
+    "武汉": (30.5928, 114.3055),
+    "西安": (34.3416, 108.9398),
+    "厦门": (24.4798, 118.0894),
+    "福州": (26.0745, 119.2965),
+    "天津": (39.0842, 117.2009),
+    "青岛": (36.0671, 120.3826),
+    "济南": (36.6512, 117.1201),
+    "郑州": (34.7466, 113.6253),
+    "长沙": (28.2282, 112.9388),
+    "合肥": (31.8206, 117.2272),
+    "昆明": (24.8801, 102.8329),
+    "大连": (38.9140, 121.6147),
+    "沈阳": (41.8057, 123.4315),
+    "哈尔滨": (45.8038, 126.5350),
+    "太湖": (31.2218, 120.3799),
+}
+
+
+def _approx_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    import math
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return 6371.0 * 2 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
 
 
 @router.get("/geocode")
 def geocode_venue_endpoint(
-    q: str = Query(..., description="地点名称或地址关键词，如：闵行文化公园"),
+    q: str = Query(..., description="地点名称或地址关键词，如：闵行文化公园 / 苏州米堆山"),
     city: Optional[str] = Query("上海", description="优先城市")
 ):
     """
     Resolves a user-entered location name into GCJ-02 (WeChat/Tencent Map) coordinates
     so the miniapp can pop up an interactive map centered at that location for exact pin placement.
     """
+    import os
     import re
     import requests as ext_req
     from utils.geo_utils import wgs84_to_gcj02
@@ -177,61 +260,145 @@ def geocode_venue_endpoint(
     results: List[Dict[str, Any]] = []
     seen_coords = set()
 
-    def _add_item(name: str, address: str, lat: float, lng: float):
+    def _add_item(name: str, address: str, lat: float, lng: float, is_city_fallback: bool = False):
         key = (round(lat, 4), round(lng, 4))
         if key in seen_coords:
             return
         seen_coords.add(key)
-        results.append({
+        item_dict: Dict[str, Any] = {
             "name": name,
             "address": address,
             "latitude": round(lat, 6),
             "longitude": round(lng, 6),
-        })
+        }
+        if is_city_fallback:
+            item_dict["is_city_fallback"] = True
+        results.append(item_dict)
 
-    # 1. Match built-in known landmarks first
-    base_q = re.sub(r"([0-9一二三四五六七八九十]+号门|[东南西北正]门|跑步驿站|田径场|跑道)$", "", raw_q).strip()
-    for item in _KNOWN_LANDMARKS_GCJ02:
-        if raw_q in item["name"] or item["name"] in raw_q or (base_q and len(base_q) >= 2 and base_q in item["name"]):
-            # If user entered a specific gate suffix on a general landmark, preserve user's title on first match
-            display_name = raw_q if (raw_q != item["name"] and item["name"] in raw_q and len(results) == 0) else item["name"]
-            _add_item(display_name, item["address"], item["latitude"], item["longitude"])
-
-    # 2. Live geocoding via Photon (OpenStreetMap) + WGS84 -> GCJ02 conversion
-    search_queries = [raw_q]
-    if base_q and base_q != raw_q and len(base_q) >= 2:
-        search_queries.append(base_q)
-
-    for sq in search_queries:
-        if len(results) >= 6:
+    # Detect explicit city prefix (e.g. "苏州米堆山" -> detected_city="苏州", place_part="米堆山")
+    detected_city = ""
+    place_part = raw_q
+    for cname in sorted(_CITY_CENTERS_GCJ02.keys(), key=len, reverse=True):
+        if raw_q.startswith(cname + "市"):
+            detected_city = cname
+            place_part = raw_q[len(cname) + 1:].strip()
             break
+        if raw_q.startswith(cname):
+            detected_city = cname
+            place_part = raw_q[len(cname):].strip()
+            break
+
+    city_str = city.strip().rstrip("市") if isinstance(city, str) else ""
+    eff_city = detected_city or city_str or "上海"
+    bias_lat, bias_lng = _CITY_CENTERS_GCJ02.get(eff_city, (31.2304, 121.4737))
+    base_q = re.sub(r"([0-9一二三四五六七八九十]+号门|[东南西北正]门|跑步驿站|田径场|跑道|停车场|入口|农家乐)$", "", place_part or raw_q).strip()
+
+    # 0. Optional AMap / Tencent WebService API if configured in server env (best nationwide Chinese POI coverage)
+    amap_key = (os.getenv("AMAP_WEB_KEY") or os.getenv("AMAP_KEY") or "").strip()
+    if amap_key:
         try:
-            resp = ext_req.get(
-                "https://photon.komoot.io/api/",
-                params={"q": sq, "lat": 31.2304, "lon": 121.4737, "limit": 5},
-                headers={"User-Agent": "Mozilla/5.0 (RGM-MiniApp/1.0)"},
+            aresp = ext_req.get(
+                "https://restapi.amap.com/v3/place/text",
+                params={"key": amap_key, "keywords": raw_q, "city": detected_city or "", "offset": 6},
                 timeout=3.5,
             )
-            if resp.status_code == 200:
-                feats = resp.json().get("features") or []
-                for f in feats:
-                    coords = (f.get("geometry") or {}).get("coordinates") or []
-                    if len(coords) >= 2:
-                        wgs_lng, wgs_lat = float(coords[0]), float(coords[1])
-                        gcj_lat, gcj_lng = wgs84_to_gcj02(wgs_lat, wgs_lng)
-                        props = f.get("properties") or {}
-                        pname = (props.get("name") or sq).strip()
-                        addr_parts = [
-                            props.get("state") or "",
-                            props.get("city") or "",
-                            props.get("district") or "",
-                            props.get("street") or "",
-                            pname,
-                        ]
-                        addr_str = "".join(dict.fromkeys([p for p in addr_parts if p]))
-                        _add_item(pname, addr_str or pname, gcj_lat, gcj_lng)
+            if aresp.status_code == 200:
+                for poi in (aresp.json().get("pois") or [])[:6]:
+                    loc = str(poi.get("location") or "").split(",")
+                    if len(loc) == 2:
+                        plng, plat = float(loc[0]), float(loc[1])
+                        pname = str(poi.get("name") or raw_q).strip()
+                        paddr = "".join(filter(None, [poi.get("pname"), poi.get("cityname"), poi.get("adname"), poi.get("address") if isinstance(poi.get("address"), str) else ""]))
+                        _add_item(pname, paddr or pname, plat, plng)
         except Exception as e:
-            logger.warning(f"Geocode query '{sq}' failed: {e}")
+            logger.warning(f"AMap geocode '{raw_q}' failed: {e}")
+
+    tencent_key = (os.getenv("TENCENT_MAP_KEY") or "").strip()
+    if tencent_key and len(results) < 3:
+        try:
+            tparams: Dict[str, Any] = {"key": tencent_key, "keyword": raw_q, "page_size": 6}
+            if detected_city:
+                tparams["region"] = detected_city
+            tresp = ext_req.get("https://apis.map.qq.com/ws/place/v1/suggestion", params=tparams, timeout=3.5)
+            if tresp.status_code == 200:
+                for poi in (tresp.json().get("data") or [])[:6]:
+                    loc = poi.get("location") or {}
+                    if loc.get("lat") and loc.get("lng"):
+                        _add_item(str(poi.get("title") or raw_q), str(poi.get("address") or poi.get("title") or ""), float(loc["lat"]), float(loc["lng"]))
+        except Exception as e:
+            logger.warning(f"Tencent geocode '{raw_q}' failed: {e}")
+
+    # 1. Match built-in known landmarks (respecting explicit city prefix if provided)
+    for item in _KNOWN_LANDMARKS_GCJ02:
+        item_city = item.get("city") or ""
+        if detected_city and item_city and item_city != detected_city:
+            continue
+        iname = item["name"]
+        matched = (
+            raw_q in iname
+            or iname in raw_q
+            or (place_part and len(place_part) >= 2 and (place_part in iname or iname in place_part))
+            or (base_q and len(base_q) >= 2 and (base_q in iname or iname in base_q))
+        )
+        if matched:
+            display_name = raw_q if (raw_q != iname and iname in raw_q and len(results) == 0) else iname
+            _add_item(display_name, item["address"], item["latitude"], item["longitude"])
+
+    # 2. Live geocoding via Photon (OpenStreetMap) + WGS84 -> GCJ02 conversion (only when no built-in/API match yet)
+    if not results:
+        search_queries: List[str] = []
+        for cand_q in [
+            f"{detected_city} {place_part}".strip() if (detected_city and place_part) else raw_q,
+            place_part if (detected_city and place_part and len(place_part) >= 2) else "",
+            base_q if (base_q and len(base_q) >= 2 and base_q != raw_q) else "",
+        ]:
+            if cand_q and cand_q not in search_queries:
+                search_queries.append(cand_q)
+
+        for sq in search_queries[:2]:
+            if results:
+                break
+            try:
+                resp = ext_req.get(
+                    "https://photon.komoot.io/api/",
+                    params={"q": sq, "lat": bias_lat, "lon": bias_lng, "limit": 6},
+                    headers={"User-Agent": "Mozilla/5.0 (RGM-MiniApp/1.0)"},
+                    timeout=2.2,
+                )
+                if resp.status_code == 200:
+                    feats = resp.json().get("features") or []
+                    for f in feats:
+                        coords = (f.get("geometry") or {}).get("coordinates") or []
+                        if len(coords) >= 2:
+                            wgs_lng, wgs_lat = float(coords[0]), float(coords[1])
+                            gcj_lat, gcj_lng = wgs84_to_gcj02(wgs_lat, wgs_lng)
+                            # Guard against cross-country false matches when user explicitly specified a city
+                            if detected_city and _approx_km(bias_lat, bias_lng, gcj_lat, gcj_lng) > 130.0:
+                                continue
+                            props = f.get("properties") or {}
+                            pname = (props.get("name") or sq).strip()
+                            addr_parts = [
+                                props.get("state") or "",
+                                props.get("city") or "",
+                                props.get("district") or "",
+                                props.get("street") or "",
+                                pname,
+                            ]
+                            addr_str = "".join(dict.fromkeys([p for p in addr_parts if p]))
+                            _add_item(pname, addr_str or pname, gcj_lat, gcj_lng)
+            except Exception as e:
+                logger.warning(f"Geocode query '{sq}' failed: {e}")
+
+    # 3. City-level fallback: if specific micro-POI wasn't found, still move map to the user's target city!
+    if not results and detected_city and detected_city in _CITY_CENTERS_GCJ02:
+        clat, clng = _CITY_CENTERS_GCJ02[detected_city]
+        _add_item(
+            f"{detected_city}（点击/拖动地图微调或点微信全屏选点）",
+            f"{detected_city}市参考中心",
+            clat,
+            clng,
+            is_city_fallback=True,
+        )
 
     return {"results": results[:6]}
 
